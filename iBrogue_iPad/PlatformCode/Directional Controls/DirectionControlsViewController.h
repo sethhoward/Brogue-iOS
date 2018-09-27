@@ -11,7 +11,8 @@
 // TODO: rewrite in swift so it's not so shitty
 
 typedef NS_ENUM(NSInteger, ControlDirection) {
-    ControlDirectionUp = 1,
+    ControlDirectionCatchAll = 0,
+    ControlDirectionUp,
     ControlDirectionRight,
     ControlDirectionDown,
     ControlDirectionLeft,

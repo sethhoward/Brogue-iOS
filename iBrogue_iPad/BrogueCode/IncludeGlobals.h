@@ -29,7 +29,7 @@ extern short terrainRandomValues[DCOLS][DROWS][8];
 extern short **safetyMap;										// used to help monsters flee
 extern short **allySafetyMap;
 extern short **chokeMap;
-extern int KEYBOARD_LABELS;
+//extern int KEYBOARD_LABELS;
 
 extern const short nbDirs[8][2];
 extern const short cDirs[8][2];

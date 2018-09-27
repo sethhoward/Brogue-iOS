@@ -119,7 +119,7 @@ void nextKeyOrMouseEvent(rogueEvent *returnEvent, __unused boolean textInput, bo
     for(;;) {
         // we should be ok to block here. We don't seem to call pauseForMilli and this at the same time
         // 60Hz
-       // [NSThread sleepForTimeInterval:0.016667];
+        [NSThread sleepForTimeInterval:0.016667];
         
         if (colorsDance) {
             shuffleTerrainColors(3, true);

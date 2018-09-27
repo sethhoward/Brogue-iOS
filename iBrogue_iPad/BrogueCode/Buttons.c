@@ -29,7 +29,7 @@
 // Draws the smooth gradient that appears on a button when you hover over or depress it.
 // Returns the percentage by which the current tile should be averaged toward a hilite color.
 short smoothHiliteGradient(const short currentXValue, const short maxXValue) {
-    return (short) (100 * sin(PI * currentXValue / (maxXValue)));
+    return (short) (100 * sin(3.14159265 * currentXValue / (maxXValue)));
 }
 
 // Draws the button to the screen, or to a display buffer if one is given.

@@ -10,6 +10,8 @@
 		C5105B1616EE90A400E09905 /* GameSettings.m in Sources */ = {isa = PBXBuildFile; fileRef = C5105B1516EE90A300E09905 /* GameSettings.m */; };
 		C5213CD21B7533AE00E97A27 /* Arial Unicode.ttf in Resources */ = {isa = PBXBuildFile; fileRef = C5213CD11B75308E00E97A27 /* Arial Unicode.ttf */; };
 		C5213CD41B75445F00E97A27 /* StoreKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = C5213CD31B75445F00E97A27 /* StoreKit.framework */; };
+		C52686AB215C0B5D00033E3F /* PowerTables.c in Sources */ = {isa = PBXBuildFile; fileRef = C52686AA215C0B5D00033E3F /* PowerTables.c */; };
+		C52686AD215C0B8700033E3F /* Sqrt.c in Sources */ = {isa = PBXBuildFile; fileRef = C52686AC215C0B8700033E3F /* Sqrt.c */; };
 		C52B092216E5848500675CC7 /* GameCenterIOS4.m in Sources */ = {isa = PBXBuildFile; fileRef = C52B091B16E5848500675CC7 /* GameCenterIOS4.m */; settings = {COMPILER_FLAGS = "-fno-objc-arc"; }; };
 		C52B092316E5848500675CC7 /* GameCenterManager.m in Sources */ = {isa = PBXBuildFile; fileRef = C52B091D16E5848500675CC7 /* GameCenterManager.m */; settings = {COMPILER_FLAGS = "-fno-objc-arc"; }; };
 		C52B092516E5848500675CC7 /* UIViewController+UIViewController_GCLeaderBoardView.m in Sources */ = {isa = PBXBuildFile; fileRef = C52B092116E5848500675CC7 /* UIViewController+UIViewController_GCLeaderBoardView.m */; settings = {COMPILER_FLAGS = "-fno-objc-arc"; }; };
@@ -77,6 +79,10 @@
 		C5105B1516EE90A300E09905 /* GameSettings.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = GameSettings.m; sourceTree = "<group>"; };
 		C5213CD11B75308E00E97A27 /* Arial Unicode.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Arial Unicode.ttf"; sourceTree = "<group>"; };
 		C5213CD31B75445F00E97A27 /* StoreKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = StoreKit.framework; path = System/Library/Frameworks/StoreKit.framework; sourceTree = SDKROOT; };
+		C52686A6215C0A9800033E3F /* libc++.tbd */ = {isa = PBXFileReference; lastKnownFileType = "sourcecode.text-based-dylib-definition"; name = "libc++.tbd"; path = "usr/lib/libc++.tbd"; sourceTree = SDKROOT; };
+		C52686A8215C0AA800033E3F /* libc++.1.tbd */ = {isa = PBXFileReference; lastKnownFileType = "sourcecode.text-based-dylib-definition"; name = "libc++.1.tbd"; path = "usr/lib/libc++.1.tbd"; sourceTree = SDKROOT; };
+		C52686AA215C0B5D00033E3F /* PowerTables.c */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.c; path = PowerTables.c; sourceTree = "<group>"; };
+		C52686AC215C0B8700033E3F /* Sqrt.c */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.c; path = Sqrt.c; sourceTree = "<group>"; };
 		C52B091A16E5848500675CC7 /* GameCenterIOS4.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = GameCenterIOS4.h; sourceTree = "<group>"; };
 		C52B091B16E5848500675CC7 /* GameCenterIOS4.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = GameCenterIOS4.m; sourceTree = "<group>"; };
 		C52B091C16E5848500675CC7 /* GameCenterManager.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = GameCenterManager.h; sourceTree = "<group>"; };
@@ -215,6 +221,8 @@
 		C57A962716D7EAD500C233F1 /* Frameworks */ = {
 			isa = PBXGroup;
 			children = (
+				C52686A8215C0AA800033E3F /* libc++.1.tbd */,
+				C52686A6215C0A9800033E3F /* libc++.tbd */,
 				C5213CD31B75445F00E97A27 /* StoreKit.framework */,
 				C57A962816D7EAD500C233F1 /* UIKit.framework */,
 				C57A962A16D7EAD500C233F1 /* Foundation.framework */,
@@ -288,7 +296,9 @@
 				C57A965D16D7EB5500C233F1 /* Light.c */,
 				C57A965E16D7EB5500C233F1 /* MainMenu.c */,
 				C57A965F16D7EB5500C233F1 /* Monsters.c */,
+				C52686AC215C0B8700033E3F /* Sqrt.c */,
 				C57A966016D7EB5500C233F1 /* Movement.c */,
+				C52686AA215C0B5D00033E3F /* PowerTables.c */,
 				C57A966116D7EB5500C233F1 /* Random.c */,
 				C57A966216D7EB5500C233F1 /* Recordings.c */,
 				C57A966316D7EB5500C233F1 /* Rogue.h */,
@@ -360,12 +370,12 @@
 		C57A961D16D7EAD500C233F1 /* Project object */ = {
 			isa = PBXProject;
 			attributes = {
-				LastUpgradeCheck = 0830;
+				LastUpgradeCheck = 1000;
 				ORGANIZATIONNAME = "Seth howard";
 				TargetAttributes = {
 					C57A962416D7EAD500C233F1 = {
 						DevelopmentTeam = KKMWNTN39N;
-						LastSwiftMigration = 0830;
+						LastSwiftMigration = 1000;
 						ProvisioningStyle = Automatic;
 						SystemCapabilities = {
 							com.apple.InAppPurchase = {
@@ -436,10 +446,12 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				C52686AB215C0B5D00033E3F /* PowerTables.c in Sources */,
 				C57A963516D7EAD500C233F1 /* main.m in Sources */,
 				C57A963916D7EAD500C233F1 /* AppDelegate.m in Sources */,
 				ECBE68A91EC0D4C600E9F366 /* Cell.swift in Sources */,
 				C57A965116D7EB4C00C233F1 /* RogueDriver.mm in Sources */,
+				C52686AD215C0B8700033E3F /* Sqrt.c in Sources */,
 				C57A966516D7EB5500C233F1 /* Architect.c in Sources */,
 				C532C8A61971AB8800695956 /* DirectionControlsViewController.m in Sources */,
 				C57A966616D7EB5500C233F1 /* Buttons.c in Sources */,
@@ -488,12 +500,20 @@
 				CLANG_CXX_LANGUAGE_STANDARD = "gnu++0x";
 				CLANG_CXX_LIBRARY = "libc++";
 				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
 				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
 				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
 				CLANG_WARN_EMPTY_BODY = YES;
 				CLANG_WARN_ENUM_CONVERSION = YES;
 				CLANG_WARN_INFINITE_RECURSION = YES;
 				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
 				CLANG_WARN_SUSPICIOUS_MOVE = YES;
 				CLANG_WARN_UNREACHABLE_CODE = YES;
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
@@ -530,12 +550,20 @@
 				CLANG_CXX_LANGUAGE_STANDARD = "gnu++0x";
 				CLANG_CXX_LIBRARY = "libc++";
 				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
 				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
 				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
 				CLANG_WARN_EMPTY_BODY = YES;
 				CLANG_WARN_ENUM_CONVERSION = YES;
 				CLANG_WARN_INFINITE_RECURSION = YES;
 				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
 				CLANG_WARN_SUSPICIOUS_MOVE = YES;
 				CLANG_WARN_UNREACHABLE_CODE = YES;
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
@@ -574,7 +602,7 @@
 				"CODE_SIGN_IDENTITY[sdk=iphoneos*]" = "iPhone Developer";
 				CURRENT_PROJECT_VERSION = 14;
 				DEVELOPMENT_TEAM = KKMWNTN39N;
-				GCC_C_LANGUAGE_STANDARD = gnu99;
+				GCC_C_LANGUAGE_STANDARD = "compiler-default";
 				GCC_PRECOMPILE_PREFIX_HEADER = YES;
 				GCC_PREFIX_HEADER = "iBrogue_iPad/iBrogue_iPad-Prefix.pch";
 				INFOPLIST_FILE = "iBrogue_iPad/iBrogue_iPad-Info.plist";
@@ -588,7 +616,8 @@
 				PROVISIONING_PROFILE_SPECIFIER = "";
 				SWIFT_OBJC_BRIDGING_HEADER = "iBrogue_iPad/PlatformCode/iBrogue_iPad-Bridging-Header.h";
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
-				SWIFT_VERSION = 3.0;
+				SWIFT_SWIFT3_OBJC_INFERENCE = On;
+				SWIFT_VERSION = 4.2;
 				TARGETED_DEVICE_FAMILY = 2;
 				WRAPPER_EXTENSION = app;
 			};
@@ -608,7 +637,7 @@
 				"CODE_SIGN_IDENTITY[sdk=iphoneos*]" = "iPhone Developer";
 				CURRENT_PROJECT_VERSION = 14;
 				DEVELOPMENT_TEAM = KKMWNTN39N;
-				GCC_C_LANGUAGE_STANDARD = gnu99;
+				GCC_C_LANGUAGE_STANDARD = "compiler-default";
 				GCC_PRECOMPILE_PREFIX_HEADER = YES;
 				GCC_PREFIX_HEADER = "iBrogue_iPad/iBrogue_iPad-Prefix.pch";
 				INFOPLIST_FILE = "iBrogue_iPad/iBrogue_iPad-Info.plist";
@@ -620,7 +649,8 @@
 				PROVISIONING_PROFILE = "";
 				PROVISIONING_PROFILE_SPECIFIER = "";
 				SWIFT_OBJC_BRIDGING_HEADER = "iBrogue_iPad/PlatformCode/iBrogue_iPad-Bridging-Header.h";
-				SWIFT_VERSION = 3.0;
+				SWIFT_SWIFT3_OBJC_INFERENCE = On;
+				SWIFT_VERSION = 4.2;
 				TARGETED_DEVICE_FAMILY = 2;
 				WRAPPER_EXTENSION = app;
 			};

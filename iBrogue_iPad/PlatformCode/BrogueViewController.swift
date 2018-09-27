@@ -1,4 +1,4 @@
-//
+ //
 //  BrogueViewController.swift
 //  iBrogue_iPad
 //
@@ -50,10 +50,10 @@ extension String {
 // MARK: - UIBrogueTouchEvent
 
 final class UIBrogueTouchEvent: NSObject, NSCopying {
-    let phase: UITouchPhase
+    let phase: UITouch.Phase
     let location: CGPoint
     
-    required init(phase: UITouchPhase, location: CGPoint) {
+    required init(phase: UITouch.Phase, location: CGPoint) {
         self.phase = phase
         self.location = location
     }
@@ -82,7 +82,7 @@ extension BrogueGameEvent {
     
     func handleDirectionControlDisplay(_ directionsViewController: DirectionControlsViewController?) {
         switch self {
-        case .waitingForConfirmation, .actionMenuOpen, .openedInventory, .showTitle, .openGameFinished, .playRecording, .showHighScores, .playBackPanic:
+        case .waitingForConfirmation, .actionMenuOpen, .openedInventory, .showTitle, .openGameFinished, .playRecording, .showHighScores, .playBackPanic, .messagePlayerHasDied, .playerHasDiedMessageAcknowledged, .keyBoardInputRequired:
             directionsViewController?.view.isHidden = true
         default:
             directionsViewController?.view.isHidden = false
@@ -165,7 +165,7 @@ final class BrogueViewController: UIViewController {
         rogueMain()
     }
     
-    override func motionBegan(_ motion: UIEventSubtype, with event: UIEvent?) {
+    override func motionBegan(_ motion: UIEvent.EventSubtype, with event: UIEvent?) {
         addKeyEvent(event: kESC_Key)
     }
     
@@ -368,6 +368,8 @@ extension BrogueViewController {
                 key = kDOWNRIGHT_key
             case .downLeft:
                 key = kDOWNLEFT_key
+            case .catchAll:
+                return
             }
             
             addKeyEvent(event: key.ascii)
@@ -433,11 +435,11 @@ private let keys: [UIKeyCommand]? = {
     var keys = (alpha.map {
         UIKeyCommand(input: $0, modifierFlags: [], action: #selector(BrogueViewController.executeKeyCommand))
     })
-    keys.append(UIKeyCommand(input: UIKeyInputUpArrow, modifierFlags: [], action: #selector(BrogueViewController.executeKeyCommand)))
-    keys.append(UIKeyCommand(input: UIKeyInputDownArrow, modifierFlags: [], action: #selector(BrogueViewController.executeKeyCommand)))
-    keys.append(UIKeyCommand(input: UIKeyInputLeftArrow, modifierFlags: [], action: #selector(BrogueViewController.executeKeyCommand)))
-    keys.append(UIKeyCommand(input: UIKeyInputRightArrow, modifierFlags: [], action: #selector(BrogueViewController.executeKeyCommand)))
-    keys.append(UIKeyCommand(input: UIKeyInputEscape, modifierFlags: [], action: #selector(BrogueViewController.executeKeyCommand)))
+    keys.append(UIKeyCommand(input: UIKeyCommand.inputUpArrow, modifierFlags: [], action: #selector(BrogueViewController.executeKeyCommand)))
+    keys.append(UIKeyCommand(input: UIKeyCommand.inputDownArrow, modifierFlags: [], action: #selector(BrogueViewController.executeKeyCommand)))
+    keys.append(UIKeyCommand(input: UIKeyCommand.inputLeftArrow, modifierFlags: [], action: #selector(BrogueViewController.executeKeyCommand)))
+    keys.append(UIKeyCommand(input: UIKeyCommand.inputRightArrow, modifierFlags: [], action: #selector(BrogueViewController.executeKeyCommand)))
+    keys.append(UIKeyCommand(input: UIKeyCommand.inputEscape, modifierFlags: [], action: #selector(BrogueViewController.executeKeyCommand)))
     /* + (alpha.map {
      UIKeyCommand(input: $0, modifierFlags: [.shift], action: #selector(BrogueViewController.executeKeyCommand))
      })
@@ -454,7 +456,9 @@ extension BrogueViewController {
     }
     
     @objc fileprivate func executeKeyCommand(keyCommand: UIKeyCommand) {
-        addKeyEvent(event: keyCommand.input.ascii)
+        if let key = keyCommand.input?.ascii {
+            addKeyEvent(event: key)
+        }
     }
 }
 
@@ -484,7 +488,7 @@ final class SKMagView: SKView {
         
         let styleWindow: () -> Void = {
             self.frame = CGRect(x: 0, y: 0, width: self.size.width, height: self.size.height)
-            self.layer.borderColor = UIColor(colorLiteralRed: 1, green: 1, blue: 1, alpha: 0.4).cgColor
+            self.layer.borderColor = UIColor(red: 1, green: 1, blue: 1, alpha: 0.4).cgColor
             self.layer.borderWidth = 3
             self.layer.cornerRadius = self.frame.size.width / 2
             self.layer.masksToBounds = true
