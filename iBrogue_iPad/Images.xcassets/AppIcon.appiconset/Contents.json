@@ -53,6 +53,12 @@
       "scale" : "2x"
     },
     {
+      "size" : "1024x1024",
+      "idiom" : "ios-marketing",
+      "filename" : "Brogue Icon.png",
+      "scale" : "1x"
+    },
+    {
       "idiom" : "car",
       "size" : "60x60",
       "scale" : "2x"

@@ -38,7 +38,7 @@ extension CGSize {
 
 // To see Swift classes from ObjC they MUST be prefaced with @objc and be public/open
 @objc public class RogueScene: SKScene {
-    fileprivate let grid: CGSize
+    fileprivate let gridSize: CGSize
     fileprivate let cellSize: CGSize
     
     fileprivate var fgTextures = [SKTexture]()
@@ -57,9 +57,14 @@ extension CGSize {
     }()
     
     public init(size: CGSize, rows: Int, cols: Int) {
-        grid = CGSize(rows: rows, cols: cols)
+        gridSize = CGSize(rows: rows, cols: cols)
         cellSize = CGSize(width: CGFloat(size.width) / CGFloat(cols), height: CGFloat(size.height) / CGFloat(rows))
         super.init(size: size)
+        
+        if #available(iOS 10.0, *) {}
+        else {
+            sceneDidLoad()
+        }
     }
     
     required public init?(coder aDecoder: NSCoder) {
@@ -78,10 +83,10 @@ extension RogueScene {
     }
     
     override public func sceneDidLoad() {
-        for x in 0...grid.cols {
+        for x in 0...gridSize.cols {
             var row = [Cell]()
-            for y in 0...grid.rows {
-                let newCell = Cell(x: CGFloat(x) * cellSize.width, y: CGFloat(grid.rows - y - 1) * cellSize.height, size: CGSize(width: cellSize.width, height: cellSize.height))
+            for y in 0...gridSize.rows {
+                let newCell = Cell(x: CGFloat(x) * cellSize.width, y: CGFloat(gridSize.rows - y - 1) * cellSize.height, size: CGSize(width: cellSize.width, height: cellSize.height))
                 row.append(newCell)
             }
             cells.append(row)

@@ -49,9 +49,9 @@ extension String {
 
 // MARK: - UIBrogueTouchEvent
 
-final class UIBrogueTouchEvent: NSObject, NSCopying {
-    let phase: UITouch.Phase
-    let location: CGPoint
+@objc class UIBrogueTouchEvent: NSObject, NSCopying {
+    @objc let phase: UITouch.Phase
+    @objc let location: CGPoint
     
     required init(phase: UITouch.Phase, location: CGPoint) {
         self.phase = phase
@@ -111,8 +111,8 @@ final class BrogueViewController: UIViewController {
     @IBOutlet fileprivate weak var leaderBoardButton: UIButton!
     @IBOutlet fileprivate weak var seedButton: UIButton!
    
-    var seedKeyDown = false
-    var lastBrogueGameEvent: BrogueGameEvent = .showTitle {
+    @objc var seedKeyDown = false
+    @objc var lastBrogueGameEvent: BrogueGameEvent = .showTitle {
         didSet {
             DispatchQueue.main.async {
                 switch self.lastBrogueGameEvent {
@@ -152,6 +152,8 @@ final class BrogueViewController: UIViewController {
         magView.viewToMagnify = skViewPort
         magView.hideMagnifier()
         inputTextField.delegate = self
+        
+        GameCenterManager.sharedInstance()?.authenticateLocalUser()
     }
     
     override func prepare(for segue: UIStoryboardSegue, sender: Any?) {
@@ -287,7 +289,7 @@ extension BrogueViewController {
         }
     }
     
-    func dequeTouchEvent() -> UIBrogueTouchEvent? {
+    @objc func dequeTouchEvent() -> UIBrogueTouchEvent? {
         var event: UIBrogueTouchEvent?
         
         synchronized(touchEvents) {
@@ -300,7 +302,7 @@ extension BrogueViewController {
         return event
     }
     
-    func hasTouchEvent() -> Bool {
+    @objc func hasTouchEvent() -> Bool {
         return !touchEvents.isEmpty
     }
 }
@@ -383,7 +385,7 @@ extension BrogueViewController {
     }
     
     // cannot be optional for backward compat
-    func dequeKeyEvent() -> UInt8 {
+    @objc func dequeKeyEvent() -> UInt8 {
         var event: UInt8!
         
         synchronized(keyEvents) {
@@ -397,6 +399,7 @@ extension BrogueViewController {
         return event
     }
     
+    @objc(hasKeyEvent)
     func hasKeyEvent() -> Bool {
         return !keyEvents.isEmpty
     }

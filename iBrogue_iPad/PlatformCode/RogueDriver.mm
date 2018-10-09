@@ -154,8 +154,8 @@ void nextKeyOrMouseEvent(rogueEvent *returnEvent, __unused boolean textInput, bo
                         break;
                 }
                 
-                x = COLS * touch.location.x / width;
-                y = ROWS * touch.location.y / height;
+                x = COLS * float(touch.location.x) / width;
+                y = ROWS * float(touch.location.y) / height;
                 
                 returnEvent->param1 = x;
                 returnEvent->param2 = y;
