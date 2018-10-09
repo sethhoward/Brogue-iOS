@@ -79,15 +79,6 @@ extension BrogueGameEvent {
             return false
         }
     }
-    
-    func handleDirectionControlDisplay(_ directionsViewController: DirectionControlsViewController?) {
-        switch self {
-        case .waitingForConfirmation, .actionMenuOpen, .openedInventory, .showTitle, .openGameFinished, .playRecording, .showHighScores, .playBackPanic, .messagePlayerHasDied, .playerHasDiedMessageAcknowledged, .keyBoardInputRequired:
-            directionsViewController?.view.isHidden = true
-        default:
-            directionsViewController?.view.isHidden = false
-        }
-    }
 }
 
 // MARK: - BrogueViewController
@@ -98,6 +89,7 @@ final class BrogueViewController: UIViewController {
     @objc fileprivate var directionsViewController: DirectionControlsViewController?
     fileprivate var keyEvents = [UInt8]()
     fileprivate var magnifierTimer: Timer?
+    fileprivate var inputRequestString: String?
     
     @IBOutlet var skViewPort: SKViewPort!
     @IBOutlet fileprivate weak var magView: SKMagView!
@@ -111,6 +103,7 @@ final class BrogueViewController: UIViewController {
     @IBOutlet fileprivate weak var leaderBoardButton: UIButton!
     @IBOutlet fileprivate weak var seedButton: UIButton!
    
+    @IBOutlet weak var dContainerView: UIView!
     @objc var seedKeyDown = false
     @objc var lastBrogueGameEvent: BrogueGameEvent = .showTitle {
         didSet {
@@ -135,7 +128,15 @@ final class BrogueViewController: UIViewController {
                 default: ()
                 }
                 
-                self.lastBrogueGameEvent.handleDirectionControlDisplay(self.directionsViewController)
+                // Hide/Show the directions.
+                switch self.lastBrogueGameEvent {
+                case .waitingForConfirmation, .actionMenuOpen, .openedInventory, .showTitle, .openGameFinished, .playRecording, .showHighScores, .playBackPanic, .messagePlayerHasDied, .playerHasDiedMessageAcknowledged, .keyBoardInputRequired, .beginOpenGame:
+                    self.dContainerView.isHidden = true
+                    self.dContainerView.isUserInteractionEnabled = false
+                default:
+                    self.dContainerView.isHidden = false
+                    self.dContainerView.isUserInteractionEnabled = true
+                }
             }
         }
     }
@@ -153,7 +154,23 @@ final class BrogueViewController: UIViewController {
         magView.hideMagnifier()
         inputTextField.delegate = self
         
+        let panGesture = UIPanGestureRecognizer(target: self, action: #selector(draggedView(_:)))
+        panGesture.minimumNumberOfTouches = 2
+        dContainerView.addGestureRecognizer(panGesture)
+        
         GameCenterManager.sharedInstance()?.authenticateLocalUser()
+    }
+    
+    @objc func handleDirectionTouch(_ sender: UIPanGestureRecognizer) {
+        directionsViewController?.cancel()
+    }
+    
+    @objc func draggedView(_ sender: UIPanGestureRecognizer) {
+
+        directionsViewController?.cancel()
+        let translation = sender.translation(in: view)
+        dContainerView.center = CGPoint(x: dContainerView.center.x + translation.x, y: dContainerView.center.y + translation.y)
+        sender.setTranslation(CGPoint.zero, in: view)
     }
     
     override func prepare(for segue: UIStoryboardSegue, sender: Any?) {
@@ -166,11 +183,9 @@ final class BrogueViewController: UIViewController {
     @objc private func playBrogue() {
         rogueMain()
     }
-    
-    override func motionBegan(_ motion: UIEvent.EventSubtype, with event: UIEvent?) {
-        addKeyEvent(event: kESC_Key)
-    }
-    
+}
+ 
+extension BrogueViewController {
     @IBAction func escButtonPressed(_ sender: Any) {
         addKeyEvent(event: kESC_Key)
         inputTextField.resignFirstResponder()
@@ -198,8 +213,14 @@ final class BrogueViewController: UIViewController {
 }
 
 extension BrogueViewController {
+    override func motionBegan(_ motion: UIEvent.EventSubtype, with event: UIEvent?) {
+        addKeyEvent(event: kESC_Key)
+    }
+    
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
         super.touchesBegan(touches, with: event)
+        
+        guard dContainerView.hitTest(touches.first!.location(in: dContainerView), with: event) == nil else { return }
         
         for touch in touches {
             let location = touch.location(in: view)
@@ -221,6 +242,8 @@ extension BrogueViewController {
     override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent?) {
         super.touchesMoved(touches, with: event)
         
+        guard dContainerView.hitTest(touches.first!.location(in: dContainerView), with: event) == nil else { return }
+        
         if let touch = touches.first {
             let location = touch.location(in: view)
             let brogueEvent = UIBrogueTouchEvent(phase: touch.phase, location: location)
@@ -232,6 +255,8 @@ extension BrogueViewController {
     
     override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
         super.touchesEnded(touches, with: event)
+        
+        guard dContainerView.hitTest(touches.first!.location(in: dContainerView), with: event) == nil else { return }
         
         if let touch = touches.first {
             let location = touch.location(in: view)
@@ -399,13 +424,19 @@ extension BrogueViewController {
         return event
     }
     
-    @objc(hasKeyEvent)
-    func hasKeyEvent() -> Bool {
+    @objc func hasKeyEvent() -> Bool {
         return !keyEvents.isEmpty
     }
 }
 
 extension BrogueViewController: UITextFieldDelegate {
+    @objc func requestTextInput(for string: String) {
+        inputRequestString = string
+        DispatchQueue.main.async {
+            self.inputTextField.becomeFirstResponder()
+        }
+    }
+    
     func textFieldShouldReturn(_ textField: UITextField) -> Bool {
         inputTextField.resignFirstResponder()
         addKeyEvent(event: "\n".ascii)
@@ -414,7 +445,7 @@ extension BrogueViewController: UITextFieldDelegate {
     }
     
     func textFieldDidBeginEditing(_ textField: UITextField) {
-        inputTextField.text = "Recording"
+        inputTextField.text = inputRequestString ?? ""
         escButton.isHidden = false
     }
     

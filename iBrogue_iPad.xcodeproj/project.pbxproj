@@ -17,7 +17,6 @@
 		C52B092516E5848500675CC7 /* UIViewController+UIViewController_GCLeaderBoardView.m in Sources */ = {isa = PBXBuildFile; fileRef = C52B092116E5848500675CC7 /* UIViewController+UIViewController_GCLeaderBoardView.m */; settings = {COMPILER_FLAGS = "-fno-objc-arc"; }; };
 		C52B092716E5853900675CC7 /* GameKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = C52B092616E5853900675CC7 /* GameKit.framework */; };
 		C532C8A61971AB8800695956 /* DirectionControlsViewController.m in Sources */ = {isa = PBXBuildFile; fileRef = C532C8A41971AB8800695956 /* DirectionControlsViewController.m */; };
-		C532C8A71971AB8800695956 /* DirectionControlsViewController.xib in Resources */ = {isa = PBXBuildFile; fileRef = C532C8A51971AB8800695956 /* DirectionControlsViewController.xib */; };
 		C57A962916D7EAD500C233F1 /* UIKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = C57A962816D7EAD500C233F1 /* UIKit.framework */; };
 		C57A962B16D7EAD500C233F1 /* Foundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = C57A962A16D7EAD500C233F1 /* Foundation.framework */; };
 		C57A962D16D7EAD500C233F1 /* CoreGraphics.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = C57A962C16D7EAD500C233F1 /* CoreGraphics.framework */; };
@@ -93,7 +92,6 @@
 		C52B092616E5853900675CC7 /* GameKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = GameKit.framework; path = System/Library/Frameworks/GameKit.framework; sourceTree = SDKROOT; };
 		C532C8A31971AB8800695956 /* DirectionControlsViewController.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = DirectionControlsViewController.h; sourceTree = "<group>"; };
 		C532C8A41971AB8800695956 /* DirectionControlsViewController.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = DirectionControlsViewController.m; sourceTree = "<group>"; };
-		C532C8A51971AB8800695956 /* DirectionControlsViewController.xib */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = file.xib; path = DirectionControlsViewController.xib; sourceTree = "<group>"; };
 		C57A962516D7EAD500C233F1 /* Brogue.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Brogue.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		C57A962816D7EAD500C233F1 /* UIKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = UIKit.framework; path = System/Library/Frameworks/UIKit.framework; sourceTree = SDKROOT; };
 		C57A962A16D7EAD500C233F1 /* Foundation.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Foundation.framework; path = System/Library/Frameworks/Foundation.framework; sourceTree = SDKROOT; };
@@ -339,7 +337,6 @@
 			children = (
 				C532C8A31971AB8800695956 /* DirectionControlsViewController.h */,
 				C532C8A41971AB8800695956 /* DirectionControlsViewController.m */,
-				C532C8A51971AB8800695956 /* DirectionControlsViewController.xib */,
 			);
 			path = "Directional Controls";
 			sourceTree = "<group>";
@@ -428,7 +425,6 @@
 				C5958C75174AFFBB00519AD9 /* brogue_seed@2x.png in Resources */,
 				C5B7FF1B1D8D933D00F04098 /* Main.storyboard in Resources */,
 				C5958C76174AFFBB00519AD9 /* brogue_showinventory_button.png in Resources */,
-				C532C8A71971AB8800695956 /* DirectionControlsViewController.xib in Resources */,
 				C5958C77174AFFBB00519AD9 /* brogue_showinventory_button@2x.png in Resources */,
 				C5FFC5DF17B9A9DB007A05F3 /* Default-Landscape~ipad.png in Resources */,
 				C5958C78174AFFBB00519AD9 /* brogue_sproutedseed.png in Resources */,

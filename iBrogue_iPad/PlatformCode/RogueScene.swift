@@ -52,7 +52,7 @@ extension CGSize {
         let char: NSString = "M" // Good letter to do the base calculations from
         let calcBounds: CGRect = char.boundingRect(with: CGSize(width: 0, height: 0),
                                                    options: [.usesDeviceMetrics, .usesFontLeading],
-                                                   attributes: convertToOptionalNSAttributedStringKeyDictionary([convertFromNSAttributedStringKey(NSAttributedString.Key.font): UIFont(name: "Arial Unicode MS", size: 120)!]), context: nil)
+                                                   attributes: convertToOptionalNSAttributedStringKeyDictionary([convertFromNSAttributedStringKey(NSAttributedString.Key.font): UIFont(name: "ArialUnicodeMS", size: 120)!]), context: nil)
         return min(self.cellSize.width / calcBounds.width, self.cellSize.height / calcBounds.height)
     }()
     
@@ -119,13 +119,12 @@ fileprivate extension RogueScene {
             case ring
             case foliage
             case amulet
+            case weapon
             case glyph
             
             var fontName: String {
                 switch self {
-                case .ring:
-                    return "Symbol"
-                case .foliage:
+                case .foliage, .ring, .weapon:
                     return "ArialUnicodeMS"
                 default:
                     return "Monaco"
@@ -134,9 +133,10 @@ fileprivate extension RogueScene {
             
             var scaleFactor: CGFloat {
                 switch self {
-                case .scroll:
-                    return 1.2
-                case .foliage:
+                case .scroll, .weapon, .ring:
+                    return 1.3
+                
+                case .foliage, .charm:
                     return 1.1
                 default:
                     return 1
@@ -171,6 +171,8 @@ fileprivate extension RogueScene {
                     self = .ring
                 case "\(UnicodeScalar(UInt32(AMULET_CHAR))!)":
                     self = .amulet
+                case "\(UnicodeScalar(UInt32(WEAPON_CHAR))!)":
+                    self = .weapon
                 default:
                     self = .glyph
                 }

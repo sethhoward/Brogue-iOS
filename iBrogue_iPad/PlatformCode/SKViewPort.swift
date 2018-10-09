@@ -43,7 +43,7 @@ class SKViewPort: SKView {
         presentScene(rogueScene)
     }
     
-    public func setCell(x: Int, y: Int, code: UInt32, bgColor: CGColor, fgColor: CGColor) {
+    @objc public func setCell(x: Int, y: Int, code: UInt32, bgColor: CGColor, fgColor: CGColor) {
         rogueScene.setCell(x: x, y: y, code: code, bgColor: bgColor, fgColor: fgColor)
     }
 }

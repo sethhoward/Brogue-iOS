@@ -170,6 +170,10 @@ void nextKeyOrMouseEvent(rogueEvent *returnEvent, __unused boolean textInput, bo
 
 #pragma mark - bridge
 
+void requestKeyboardInput(char *string) {
+    [brogueViewController requestTextInputFor:[NSString stringWithUTF8String:string]];
+}
+
 void setBrogueGameEvent(CBrogueGameEvent brogueGameEvent) {
     brogueViewController.lastBrogueGameEvent = (BrogueGameEvent)brogueGameEvent;
 }

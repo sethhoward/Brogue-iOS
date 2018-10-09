@@ -9,140 +9,6 @@
         <capability name="documents saved in the Xcode 8 format" minToolsVersion="8.0"/>
     </dependencies>
     <scenes>
-        <!--View Controller-->
-        <scene sceneID="7Nv-tK-HBW">
-            <objects>
-                <viewController id="Ait-CV-2Oi" customClass="ViewController" sceneMemberID="viewController">
-                    <layoutGuides>
-                        <viewControllerLayoutGuide type="top" id="fWz-TN-j3t"/>
-                        <viewControllerLayoutGuide type="bottom" id="CQy-1S-p2J"/>
-                    </layoutGuides>
-                    <view key="view" contentMode="scaleToFill" id="kdj-Z3-z5a">
-                        <rect key="frame" x="0.0" y="0.0" width="1366" height="1024"/>
-                        <autoresizingMask key="autoresizingMask" widthSizable="YES" heightSizable="YES"/>
-                        <subviews>
-                            <textField opaque="NO" clipsSubviews="YES" contentMode="scaleToFill" fixedFrame="YES" contentHorizontalAlignment="left" contentVerticalAlignment="center" borderStyle="roundedRect" minimumFontSize="17" translatesAutoresizingMaskIntoConstraints="NO" id="4Ik-gc-Wju">
-                                <rect key="frame" x="634" y="497" width="97" height="30"/>
-                                <autoresizingMask key="autoresizingMask" flexibleMaxX="YES" flexibleMaxY="YES"/>
-                                <fontDescription key="fontDescription" type="system" pointSize="14"/>
-                                <textInputTraits key="textInputTraits"/>
-                                <connections>
-                                    <outlet property="delegate" destination="Ait-CV-2Oi" id="vKd-x1-Acz"/>
-                                </connections>
-                            </textField>
-                            <view opaque="NO" contentMode="scaleToFill" translatesAutoresizingMaskIntoConstraints="NO" id="7EN-Bf-6DC" customClass="SKViewPort">
-                                <rect key="frame" x="0.0" y="20" width="1366" height="1004"/>
-                                <subviews>
-                                    <view opaque="NO" contentMode="scaleToFill" translatesAutoresizingMaskIntoConstraints="NO" id="AjU-U7-BZU">
-                                        <rect key="frame" x="-4" y="501" width="794" height="483"/>
-                                        <subviews>
-                                            <button opaque="NO" contentMode="scaleToFill" contentHorizontalAlignment="center" contentVerticalAlignment="center" lineBreakMode="middleTruncation" translatesAutoresizingMaskIntoConstraints="NO" id="Mk6-f3-PfO">
-                                                <rect key="frame" x="26" y="399" width="81" height="84"/>
-                                                <fontDescription key="fontDescription" type="boldSystem" pointSize="15"/>
-                                                <state key="normal" image="gamecenterlogo_brogue.png">
-                                                    <color key="titleColor" red="0.19607843459999999" green="0.30980393290000002" blue="0.52156865600000002" alpha="1" colorSpace="custom" customColorSpace="sRGB"/>
-                                                    <color key="titleShadowColor" red="0.5" green="0.5" blue="0.5" alpha="1" colorSpace="custom" customColorSpace="sRGB"/>
-                                                </state>
-                                                <state key="highlighted">
-                                                    <color key="titleColor" red="1" green="1" blue="1" alpha="1" colorSpace="custom" customColorSpace="sRGB"/>
-                                                </state>
-                                                <connections>
-                                                    <action selector="showLeaderBoardButtonPressed:" destination="Ait-CV-2Oi" eventType="touchUpInside" id="FYE-lD-dZg"/>
-                                                </connections>
-                                            </button>
-                                            <button opaque="NO" contentMode="scaleToFill" misplaced="YES" contentHorizontalAlignment="center" contentVerticalAlignment="center" lineBreakMode="middleTruncation" translatesAutoresizingMaskIntoConstraints="NO" id="5aW-lD-46u">
-                                                <rect key="frame" x="141" y="399" width="96" height="84"/>
-                                                <fontDescription key="fontDescription" type="boldSystem" pointSize="15"/>
-                                                <state key="normal" image="brogue_seed.png">
-                                                    <color key="titleColor" red="0.19607843459999999" green="0.30980393290000002" blue="0.52156865600000002" alpha="1" colorSpace="custom" customColorSpace="sRGB"/>
-                                                    <color key="titleShadowColor" red="0.5" green="0.5" blue="0.5" alpha="1" colorSpace="custom" customColorSpace="sRGB"/>
-                                                </state>
-                                                <state key="highlighted">
-                                                    <color key="titleColor" red="1" green="1" blue="1" alpha="1" colorSpace="custom" customColorSpace="sRGB"/>
-                                                </state>
-                                                <connections>
-                                                    <action selector="seedKeyPressed:" destination="Ait-CV-2Oi" eventType="touchUpInside" id="agc-8r-r2D"/>
-                                                </connections>
-                                            </button>
-                                        </subviews>
-                                        <color key="backgroundColor" red="1" green="1" blue="1" alpha="0.0" colorSpace="custom" customColorSpace="sRGB"/>
-                                        <constraints>
-                                            <constraint firstItem="Mk6-f3-PfO" firstAttribute="leading" secondItem="AjU-U7-BZU" secondAttribute="leading" constant="26" id="jqE-Zo-6WV"/>
-                                            <constraint firstAttribute="bottom" secondItem="Mk6-f3-PfO" secondAttribute="bottom" id="nys-UT-55v"/>
-                                            <constraint firstAttribute="bottom" secondItem="5aW-lD-46u" secondAttribute="bottom" id="qLL-5f-C2R"/>
-                                            <constraint firstItem="5aW-lD-46u" firstAttribute="leading" secondItem="Mk6-f3-PfO" secondAttribute="trailing" constant="34" id="zN3-ZB-Gct"/>
-                                        </constraints>
-                                    </view>
-                                    <button hidden="YES" opaque="NO" contentMode="scaleToFill" contentHorizontalAlignment="center" contentVerticalAlignment="center" lineBreakMode="middleTruncation" translatesAutoresizingMaskIntoConstraints="NO" id="cjr-if-tXB">
-                                        <rect key="frame" x="210" y="76" width="253" height="44"/>
-                                        <constraints>
-                                            <constraint firstAttribute="height" constant="44" id="K1k-Q6-rPf"/>
-                                            <constraint firstAttribute="width" constant="253" id="zag-3R-gdn"/>
-                                        </constraints>
-                                        <fontDescription key="fontDescription" type="boldSystem" pointSize="15"/>
-                                        <state key="normal" image="brogue_showinventory_button.png">
-                                            <color key="titleColor" red="0.19607843459999999" green="0.30980393290000002" blue="0.52156865600000002" alpha="1" colorSpace="custom" customColorSpace="sRGB"/>
-                                            <color key="titleShadowColor" red="0.5" green="0.5" blue="0.5" alpha="1" colorSpace="custom" customColorSpace="sRGB"/>
-                                        </state>
-                                        <state key="highlighted">
-                                            <color key="titleColor" red="1" green="1" blue="1" alpha="1" colorSpace="custom" customColorSpace="sRGB"/>
-                                        </state>
-                                        <connections>
-                                            <action selector="showInventoryButtonPressed:" destination="Ait-CV-2Oi" eventType="touchUpInside" id="IxY-QJ-eBt"/>
-                                        </connections>
-                                    </button>
-                                    <button hidden="YES" opaque="NO" contentMode="scaleToFill" contentHorizontalAlignment="center" contentVerticalAlignment="center" lineBreakMode="middleTruncation" translatesAutoresizingMaskIntoConstraints="NO" id="UAZ-FF-wCU">
-                                        <rect key="frame" x="20" y="8" width="151" height="31"/>
-                                        <constraints>
-                                            <constraint firstAttribute="height" constant="31" id="T2A-Qx-nr4"/>
-                                            <constraint firstAttribute="width" constant="151" id="iM9-TS-TyX"/>
-                                        </constraints>
-                                        <fontDescription key="fontDescription" type="boldSystem" pointSize="15"/>
-                                        <state key="normal" image="brogue_escapebutton.png">
-                                            <color key="titleColor" red="1" green="1" blue="1" alpha="1" colorSpace="custom" customColorSpace="sRGB"/>
-                                            <color key="titleShadowColor" red="0.5" green="0.5" blue="0.5" alpha="1" colorSpace="custom" customColorSpace="sRGB"/>
-                                        </state>
-                                        <state key="highlighted">
-                                            <color key="titleColor" red="1" green="1" blue="1" alpha="1" colorSpace="custom" customColorSpace="sRGB"/>
-                                        </state>
-                                        <connections>
-                                            <action selector="escButtonPressed:" destination="Ait-CV-2Oi" eventType="touchUpInside" id="LB9-uY-uI1"/>
-                                        </connections>
-                                    </button>
-                                </subviews>
-                                <color key="backgroundColor" red="0.0" green="0.0" blue="0.0" alpha="1" colorSpace="custom" customColorSpace="sRGB"/>
-                                <constraints>
-                                    <constraint firstAttribute="bottom" secondItem="AjU-U7-BZU" secondAttribute="bottom" constant="20" id="6l1-Hp-Rb0"/>
-                                    <constraint firstItem="AjU-U7-BZU" firstAttribute="leading" secondItem="7EN-Bf-6DC" secondAttribute="leading" constant="-4" id="C4V-O8-ihn"/>
-                                    <constraint firstItem="cjr-if-tXB" firstAttribute="top" secondItem="7EN-Bf-6DC" secondAttribute="top" constant="76" id="QMZ-62-6K8"/>
-                                    <constraint firstItem="UAZ-FF-wCU" firstAttribute="top" secondItem="7EN-Bf-6DC" secondAttribute="top" constant="8" id="Zl4-sD-Uc1"/>
-                                    <constraint firstItem="UAZ-FF-wCU" firstAttribute="leading" secondItem="7EN-Bf-6DC" secondAttribute="leading" constant="20" id="qNY-bC-FOx"/>
-                                    <constraint firstItem="AjU-U7-BZU" firstAttribute="top" secondItem="7EN-Bf-6DC" secondAttribute="top" constant="501" id="rLn-dn-TbA"/>
-                                    <constraint firstItem="cjr-if-tXB" firstAttribute="leading" secondItem="7EN-Bf-6DC" secondAttribute="leading" constant="210" id="uB8-3O-tJI"/>
-                                    <constraint firstAttribute="trailing" secondItem="AjU-U7-BZU" secondAttribute="trailing" constant="576" id="uNy-tK-Clp"/>
-                                </constraints>
-                            </view>
-                        </subviews>
-                        <color key="backgroundColor" white="1" alpha="1" colorSpace="calibratedWhite"/>
-                        <constraints>
-                            <constraint firstItem="CQy-1S-p2J" firstAttribute="top" secondItem="7EN-Bf-6DC" secondAttribute="bottom" id="2by-b9-hmv"/>
-                            <constraint firstItem="7EN-Bf-6DC" firstAttribute="top" secondItem="fWz-TN-j3t" secondAttribute="bottom" id="MiE-My-IhO"/>
-                            <constraint firstAttribute="trailing" secondItem="7EN-Bf-6DC" secondAttribute="trailing" id="udA-4b-Km6"/>
-                            <constraint firstItem="7EN-Bf-6DC" firstAttribute="leading" secondItem="kdj-Z3-z5a" secondAttribute="leading" id="x6B-b5-L5k"/>
-                        </constraints>
-                    </view>
-                    <connections>
-                        <outlet property="aTextField" destination="4Ik-gc-Wju" id="enC-XW-nXE"/>
-                        <outlet property="escButton" destination="UAZ-FF-wCU" id="zlz-3R-frq"/>
-                        <outlet property="secondaryDisplay" destination="7EN-Bf-6DC" id="q2q-5P-rIE"/>
-                        <outlet property="showInventoryButton" destination="cjr-if-tXB" id="4EG-cg-X7g"/>
-                        <outlet property="titleButtonView" destination="AjU-U7-BZU" id="Mmg-BY-jfE"/>
-                    </connections>
-                </viewController>
-                <placeholder placeholderIdentifier="IBFirstResponder" id="NbC-ff-bJn" userLabel="First Responder" sceneMemberID="firstResponder"/>
-            </objects>
-            <point key="canvasLocation" x="-144.07027818448023" y="368.5546875"/>
-        </scene>
         <!--Brogue View Controller-->
         <scene sceneID="Ify-A2-7Hi">
             <objects>
@@ -169,10 +35,10 @@
                                 <color key="backgroundColor" white="1" alpha="1" colorSpace="calibratedWhite"/>
                             </view>
                             <containerView opaque="NO" contentMode="scaleToFill" translatesAutoresizingMaskIntoConstraints="NO" id="kDi-vu-rSS">
-                                <rect key="frame" x="10" y="794" width="200" height="200"/>
+                                <rect key="frame" x="10" y="734" width="200" height="260"/>
                                 <constraints>
                                     <constraint firstAttribute="width" constant="200" id="6CN-Pv-4v3"/>
-                                    <constraint firstAttribute="height" constant="200" id="C44-Qh-DfA"/>
+                                    <constraint firstAttribute="height" constant="260" id="C44-Qh-DfA"/>
                                 </constraints>
                                 <connections>
                                     <segue destination="rXF-ml-eLX" kind="embed" id="kbc-yv-Gy8"/>
@@ -264,6 +130,7 @@
                         </constraints>
                     </view>
                     <connections>
+                        <outlet property="dContainerView" destination="kDi-vu-rSS" id="IyI-SU-V80"/>
                         <outlet property="escButton" destination="do5-dF-Tp3" id="10M-3j-wA3"/>
                         <outlet property="inputTextField" destination="yKE-1T-uLw" id="rjq-EL-Vn9"/>
                         <outlet property="leaderBoardButton" destination="zFH-WA-Xgf" id="SA7-P2-uPO"/>
@@ -286,7 +153,7 @@
                         <viewControllerLayoutGuide type="bottom" id="453-1F-usv"/>
                     </layoutGuides>
                     <view key="view" clearsContextBeforeDrawing="NO" contentMode="scaleToFill" id="kEO-cl-UhR">
-                        <rect key="frame" x="0.0" y="0.0" width="200" height="200"/>
+                        <rect key="frame" x="0.0" y="0.0" width="200" height="220"/>
                         <autoresizingMask key="autoresizingMask" flexibleMaxX="YES" flexibleMaxY="YES"/>
                         <subviews>
                             <view opaque="NO" alpha="0.60000002384185791" contentMode="scaleToFill" fixedFrame="YES" translatesAutoresizingMaskIntoConstraints="NO" id="Dc8-6y-7Pb">
@@ -451,32 +318,32 @@
                                 </subviews>
                                 <color key="backgroundColor" red="1" green="1" blue="1" alpha="0.0" colorSpace="custom" customColorSpace="sRGB"/>
                             </view>
+                            <view contentMode="scaleToFill" fixedFrame="YES" translatesAutoresizingMaskIntoConstraints="NO" id="DjS-Gt-Udj">
+                                <rect key="frame" x="0.0" y="203" width="200" height="19"/>
+                                <autoresizingMask key="autoresizingMask" flexibleMaxX="YES" flexibleMaxY="YES"/>
+                                <subviews>
+                                    <label opaque="NO" userInteractionEnabled="NO" contentMode="left" horizontalHuggingPriority="251" verticalHuggingPriority="251" fixedFrame="YES" text="Two Fingers to Drag" textAlignment="natural" lineBreakMode="tailTruncation" baselineAdjustment="alignBaselines" adjustsFontSizeToFit="NO" translatesAutoresizingMaskIntoConstraints="NO" id="LyC-Bm-3ga">
+                                        <rect key="frame" x="23" y="-3" width="154" height="21"/>
+                                        <autoresizingMask key="autoresizingMask" flexibleMaxX="YES" flexibleMaxY="YES"/>
+                                        <fontDescription key="fontDescription" type="system" pointSize="17"/>
+                                        <nil key="textColor"/>
+                                        <nil key="highlightedColor"/>
+                                    </label>
+                                </subviews>
+                                <color key="backgroundColor" white="0.66666666666666663" alpha="1" colorSpace="custom" customColorSpace="genericGamma22GrayColorSpace"/>
+                            </view>
                         </subviews>
                         <color key="backgroundColor" red="1" green="1" blue="1" alpha="0.0" colorSpace="custom" customColorSpace="sRGB"/>
                     </view>
                     <freeformSimulatedSizeMetrics key="simulatedDestinationMetrics"/>
-                    <size key="freeformSize" width="200" height="200"/>
+                    <size key="freeformSize" width="200" height="220"/>
+                    <connections>
+                        <outlet property="dragAreaView" destination="DjS-Gt-Udj" id="8MW-nr-dbT"/>
+                    </connections>
                 </viewController>
                 <placeholder placeholderIdentifier="IBFirstResponder" id="K6w-19-yag" userLabel="First Responder" sceneMemberID="firstResponder"/>
             </objects>
-            <point key="canvasLocation" x="-430" y="1240"/>
-        </scene>
-        <!--View Controller-->
-        <scene sceneID="6cA-Jk-dpf">
-            <objects>
-                <viewController id="Ybz-3f-6tl" sceneMemberID="viewController">
-                    <layoutGuides>
-                        <viewControllerLayoutGuide type="top" id="Zha-P1-BXg"/>
-                        <viewControllerLayoutGuide type="bottom" id="dVL-bN-VSb"/>
-                    </layoutGuides>
-                    <view key="view" contentMode="scaleToFill" id="Aq9-im-4bT">
-                        <rect key="frame" x="0.0" y="0.0" width="1366" height="1024"/>
-                        <autoresizingMask key="autoresizingMask" widthSizable="YES" heightSizable="YES"/>
-                        <color key="backgroundColor" white="1" alpha="1" colorSpace="calibratedWhite"/>
-                    </view>
-                </viewController>
-                <placeholder placeholderIdentifier="IBFirstResponder" id="D6w-03-cmU" userLabel="First Responder" sceneMemberID="firstResponder"/>
-            </objects>
+            <point key="canvasLocation" x="-430.01464128843332" y="1239.84375"/>
         </scene>
     </scenes>
     <resources>

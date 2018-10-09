@@ -5756,9 +5756,15 @@ void throwCommand(item *theItem) {
         }
     }
     
-    sprintf(buf, "Throw %s %s where? (<hjklyubn>, mouse, or <tab>)",
-            (theItem->quantity > 1 ? "a" : "your"),
-            theName);
+    if(KEYBOARD_LABELS) {
+        sprintf(buf, "Throw %s %s where? (<hjklyubn>, mouse, or <tab>)",
+                (theItem->quantity > 1 ? "a" : "your"),
+                theName);
+    } else {
+        sprintf(buf, "Throw %s %s where?",
+                (theItem->quantity > 1 ? "a" : "your"),
+                theName);
+    }
     temporaryMessage(buf, false);
     maxDistance = (12 + 2 * max(rogue.strength - player.weaknessAmount - 12, 2));
     autoTarget = (theItem->category & (WEAPON | POTION)) ? true : false;

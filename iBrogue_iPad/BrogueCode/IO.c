@@ -2669,7 +2669,7 @@ boolean getInputTextString(char *inputText,
         plotCharWithColor((suffix[0] ? suffix[0] : ' '), x + charNum, y, &black, &white);
         
         // SETH: custom function
-        setBrogueGameEvent(CBrogueGameEventKeyBoardInputRequired);
+        requestKeyboardInput(defaultEntry);
         
         keystroke = nextKeyPress(true);
         if (keystroke == DELETE_KEY && charNum > 0) {

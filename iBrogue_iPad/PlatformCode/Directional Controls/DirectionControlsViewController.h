@@ -33,8 +33,7 @@ extern NSString * _Nonnull kDOWNRIGHT_key;
 
 @interface DirectionControlsViewController : UIViewController
 
-- (void)hideWithAnimation:(BOOL)animation;
-- (void)showWithAnimation:(BOOL)animation;
+- (void)cancel;
 
 @property (nonatomic, strong, nullable) UIButton *directionalButton;
 @property (nonatomic, readonly) BOOL areDirectionalControlsHidden;

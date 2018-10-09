@@ -184,7 +184,7 @@ void generateFontFiles() {
             plotCharWithColor(' ', i, j, &white, &white);
         }
     }
-    i = j = 0;
+    j = 0;
     for (k=0; k<256; k++) {
         i = k % 16;
         j = k / 16;
