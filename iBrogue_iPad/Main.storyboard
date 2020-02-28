@@ -1,11 +1,9 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<document type="com.apple.InterfaceBuilder3.CocoaTouch.Storyboard.XIB" version="3.0" toolsVersion="14313.18" targetRuntime="iOS.CocoaTouch" propertyAccessControl="none" useAutolayout="YES" useTraitCollections="YES" colorMatched="YES" initialViewController="Aj1-6Q-hr4">
-    <device id="ipad12_9" orientation="landscape">
-        <adaptation id="fullscreen"/>
-    </device>
+<document type="com.apple.InterfaceBuilder3.CocoaTouch.Storyboard.XIB" version="3.0" toolsVersion="15705" targetRuntime="iOS.CocoaTouch" propertyAccessControl="none" useAutolayout="YES" useTraitCollections="YES" colorMatched="YES" initialViewController="Aj1-6Q-hr4">
+    <device id="ipad12_9" orientation="landscape" layout="fullscreen" appearance="light"/>
     <dependencies>
         <deployment identifier="iOS"/>
-        <plugIn identifier="com.apple.InterfaceBuilder.IBCocoaTouchPlugin" version="14283.14"/>
+        <plugIn identifier="com.apple.InterfaceBuilder.IBCocoaTouchPlugin" version="15706"/>
         <capability name="documents saved in the Xcode 8 format" minToolsVersion="8.0"/>
     </dependencies>
     <scenes>
@@ -22,7 +20,7 @@
                         <autoresizingMask key="autoresizingMask" widthSizable="YES" heightSizable="YES"/>
                         <subviews>
                             <textField opaque="NO" clipsSubviews="YES" contentMode="scaleToFill" contentHorizontalAlignment="left" contentVerticalAlignment="center" borderStyle="roundedRect" minimumFontSize="17" translatesAutoresizingMaskIntoConstraints="NO" id="yKE-1T-uLw">
-                                <rect key="frame" x="362" y="-80" width="25" height="30"/>
+                                <rect key="frame" x="362" y="-100" width="32" height="34"/>
                                 <fontDescription key="fontDescription" type="system" pointSize="14"/>
                                 <textInputTraits key="textInputTraits"/>
                                 <connections>
@@ -45,7 +43,7 @@
                                 </connections>
                             </containerView>
                             <button opaque="NO" contentMode="scaleToFill" contentHorizontalAlignment="center" contentVerticalAlignment="center" lineBreakMode="middleTruncation" translatesAutoresizingMaskIntoConstraints="NO" id="do5-dF-Tp3">
-                                <rect key="frame" x="40" y="20" width="151" height="31"/>
+                                <rect key="frame" x="40" y="0.0" width="151" height="31"/>
                                 <constraints>
                                     <constraint firstAttribute="width" constant="151" id="3tB-oe-csZ"/>
                                     <constraint firstAttribute="height" constant="31" id="Dbj-dh-Hn2"/>
@@ -63,7 +61,7 @@
                                 </connections>
                             </button>
                             <button hidden="YES" opaque="NO" contentMode="scaleToFill" contentHorizontalAlignment="center" contentVerticalAlignment="center" lineBreakMode="middleTruncation" translatesAutoresizingMaskIntoConstraints="NO" id="cV9-D3-n39">
-                                <rect key="frame" x="220" y="80" width="253" height="44"/>
+                                <rect key="frame" x="220" y="60" width="253" height="44"/>
                                 <constraints>
                                     <constraint firstAttribute="height" constant="44" id="8YF-HU-WG3"/>
                                     <constraint firstAttribute="width" constant="253" id="pxc-g8-yFu"/>
@@ -81,7 +79,7 @@
                                 </connections>
                             </button>
                             <button opaque="NO" contentMode="scaleToFill" contentHorizontalAlignment="center" contentVerticalAlignment="center" lineBreakMode="middleTruncation" translatesAutoresizingMaskIntoConstraints="NO" id="zFH-WA-Xgf">
-                                <rect key="frame" x="20" y="910" width="81" height="84"/>
+                                <rect key="frame" x="20" y="825" width="163" height="169"/>
                                 <fontDescription key="fontDescription" type="boldSystem" pointSize="15"/>
                                 <state key="normal" image="gamecenterlogo_brogue.png">
                                     <color key="titleColor" red="0.19607843459999999" green="0.30980393290000002" blue="0.52156865600000002" alpha="1" colorSpace="custom" customColorSpace="sRGB"/>
@@ -95,7 +93,7 @@
                                 </connections>
                             </button>
                             <button opaque="NO" contentMode="scaleToFill" contentHorizontalAlignment="center" contentVerticalAlignment="center" lineBreakMode="middleTruncation" translatesAutoresizingMaskIntoConstraints="NO" id="3ab-lz-7c3">
-                                <rect key="frame" x="121" y="914" width="80" height="80"/>
+                                <rect key="frame" x="203" y="914" width="80" height="80"/>
                                 <constraints>
                                     <constraint firstAttribute="width" constant="80" id="F0E-m9-Kw2"/>
                                     <constraint firstAttribute="height" constant="80" id="WJz-Y9-7qt"/>
@@ -194,6 +192,7 @@
                                                 <connections>
                                                     <action selector="buttonDown:" destination="rXF-ml-eLX" eventType="touchDown" id="XoF-xS-FEV"/>
                                                     <action selector="buttonUp:" destination="rXF-ml-eLX" eventType="touchUpInside" id="3kN-sb-i35"/>
+                                                    <action selector="buttonUp:" destination="rXF-ml-eLX" eventType="touchDragOutside" id="a8m-Pi-VvW"/>
                                                 </connections>
                                             </button>
                                             <button opaque="NO" tag="2" contentMode="scaleToFill" fixedFrame="YES" contentHorizontalAlignment="center" contentVerticalAlignment="center" lineBreakMode="middleTruncation" translatesAutoresizingMaskIntoConstraints="NO" id="RYd-Cy-DpY" userLabel="Right Button">
@@ -210,6 +209,7 @@
                                                 <connections>
                                                     <action selector="buttonDown:" destination="rXF-ml-eLX" eventType="touchDown" id="gBA-K1-h2w"/>
                                                     <action selector="buttonUp:" destination="rXF-ml-eLX" eventType="touchUpInside" id="8Wj-WB-sAG"/>
+                                                    <action selector="buttonUp:" destination="rXF-ml-eLX" eventType="touchDragOutside" id="e62-qo-pZc"/>
                                                 </connections>
                                             </button>
                                             <button opaque="NO" tag="3" contentMode="scaleToFill" fixedFrame="YES" contentHorizontalAlignment="center" contentVerticalAlignment="center" lineBreakMode="middleTruncation" translatesAutoresizingMaskIntoConstraints="NO" id="Evi-No-PAV" userLabel="Down Button">
@@ -226,6 +226,7 @@
                                                 <connections>
                                                     <action selector="buttonDown:" destination="rXF-ml-eLX" eventType="touchDown" id="AgS-Pb-5Cg"/>
                                                     <action selector="buttonUp:" destination="rXF-ml-eLX" eventType="touchUpInside" id="eZF-KH-gG1"/>
+                                                    <action selector="buttonUp:" destination="rXF-ml-eLX" eventType="touchDragOutside" id="hg3-uC-njn"/>
                                                 </connections>
                                             </button>
                                             <button opaque="NO" tag="4" contentMode="scaleToFill" fixedFrame="YES" contentHorizontalAlignment="center" contentVerticalAlignment="center" lineBreakMode="middleTruncation" translatesAutoresizingMaskIntoConstraints="NO" id="Jpj-oF-yPI" userLabel="Left Button">
@@ -241,6 +242,7 @@
                                                 </state>
                                                 <connections>
                                                     <action selector="buttonDown:" destination="rXF-ml-eLX" eventType="touchDown" id="149-vH-FBd"/>
+                                                    <action selector="buttonUp:" destination="rXF-ml-eLX" eventType="touchDragOutside" id="GbI-GV-UKA"/>
                                                     <action selector="buttonUp:" destination="rXF-ml-eLX" eventType="touchUpInside" id="bU5-hd-AfO"/>
                                                 </connections>
                                             </button>
@@ -257,6 +259,7 @@
                                                 </state>
                                                 <connections>
                                                     <action selector="buttonDown:" destination="rXF-ml-eLX" eventType="touchDown" id="Pz5-V9-HXn"/>
+                                                    <action selector="buttonUp:" destination="rXF-ml-eLX" eventType="touchDragOutside" id="rIv-eK-86X"/>
                                                     <action selector="buttonUp:" destination="rXF-ml-eLX" eventType="touchUpInside" id="uVR-yq-kX5"/>
                                                 </connections>
                                             </button>
@@ -274,6 +277,7 @@
                                                 <connections>
                                                     <action selector="buttonDown:" destination="rXF-ml-eLX" eventType="touchDown" id="3lk-AS-W8D"/>
                                                     <action selector="buttonUp:" destination="rXF-ml-eLX" eventType="touchUpInside" id="7az-vr-HEf"/>
+                                                    <action selector="buttonUp:" destination="rXF-ml-eLX" eventType="touchDragOutside" id="Qnl-rh-G1O"/>
                                                 </connections>
                                             </button>
                                             <button opaque="NO" tag="7" contentMode="scaleToFill" fixedFrame="YES" contentHorizontalAlignment="center" contentVerticalAlignment="center" lineBreakMode="middleTruncation" translatesAutoresizingMaskIntoConstraints="NO" id="NlR-nX-jFI" userLabel="Down Right Button">
@@ -289,6 +293,7 @@
                                                 </state>
                                                 <connections>
                                                     <action selector="buttonDown:" destination="rXF-ml-eLX" eventType="touchDown" id="syO-nz-2lo"/>
+                                                    <action selector="buttonUp:" destination="rXF-ml-eLX" eventType="touchDragOutside" id="M1j-vQ-ldd"/>
                                                     <action selector="buttonUp:" destination="rXF-ml-eLX" eventType="touchUpInside" id="t5Q-yc-mMI"/>
                                                 </connections>
                                             </button>
@@ -305,6 +310,7 @@
                                                 </state>
                                                 <connections>
                                                     <action selector="buttonDown:" destination="rXF-ml-eLX" eventType="touchDown" id="Xhh-Oc-KkB"/>
+                                                    <action selector="buttonUp:" destination="rXF-ml-eLX" eventType="touchDragOutside" id="3iH-Yf-CR6"/>
                                                     <action selector="buttonUp:" destination="rXF-ml-eLX" eventType="touchUpInside" id="4zP-4O-23Y"/>
                                                 </connections>
                                             </button>
@@ -347,10 +353,10 @@
         </scene>
     </scenes>
     <resources>
-        <image name="brogue_directionals.png" width="184" height="189"/>
-        <image name="brogue_escapebutton.png" width="576" height="123"/>
-        <image name="brogue_seed.png" width="20" height="43"/>
-        <image name="brogue_showinventory_button.png" width="693" height="123"/>
-        <image name="gamecenterlogo_brogue.png" width="81" height="84"/>
+        <image name="brogue_directionals.png" width="88.319999694824219" height="90.720001220703125"/>
+        <image name="brogue_escapebutton.png" width="276.48001098632812" height="59"/>
+        <image name="brogue_seed.png" width="20" height="43.5"/>
+        <image name="brogue_showinventory_button.png" width="332.6400146484375" height="59"/>
+        <image name="gamecenterlogo_brogue.png" width="81.5" height="84.5"/>
     </resources>
 </document>
