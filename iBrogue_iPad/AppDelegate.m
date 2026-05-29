@@ -19,4 +19,12 @@
     return YES;
 }
 
+- (UISceneConfiguration *)application:(UIApplication *)application
+  configurationForConnectingSceneSession:(UISceneSession *)connectingSceneSession
+                                 options:(UISceneConnectionOptions *)options {
+    // Picked up from Info.plist's UIApplicationSceneManifest.
+    return [[UISceneConfiguration alloc] initWithName:@"Default Configuration"
+                                          sessionRole:connectingSceneSession.role];
+}
+
 @end
