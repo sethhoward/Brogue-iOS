@@ -180,22 +180,29 @@ final class BrogueViewController: UIViewController {
         setupHardwareKeyboardObserver()
     }
 
-    override var canBecomeFirstResponder: Bool { true }
+    // ─────────────────────────────────────────────────────────────────────
+    // System-UI overrides are intentionally absent here. Do NOT add:
+    //
+    //   prefersHomeIndicatorAutoHidden
+    //   preferredScreenEdgesDeferringSystemGestures
+    //   childForHomeIndicatorAutoHidden
+    //   childForScreenEdgesDeferringSystemGestures
+    //   prefersStatusBarHidden
+    //
+    // The window's rootViewController is a UIHostingController(ContentView),
+    // and SwiftUI's `.defersSystemGestures(on: .bottom)` and
+    // `.statusBarHidden(true)` modifiers on ContentView are the sole source
+    // of truth. When this VC declares its own overrides, UIHostingController
+    // consults this child via its childFor… resolution, the child values
+    // collide with the SwiftUI-driven values on the host, and iPadOS stops
+    // honoring gesture deferral entirely (verified by bisection). The
+    // indicator goes back to single-swipe-to-exit.
+    //
+    // See ContentView.swift's header for the full story.
+    // ─────────────────────────────────────────────────────────────────────
 
-    override var prefersHomeIndicatorAutoHidden: Bool { true }
-
-    override var preferredScreenEdgesDeferringSystemGestures: UIRectEdge { .all }
-
-    // Don't let any embedded child VC (e.g. the direction controls) take over and
-    // re-show the home indicator.
-    override var childForHomeIndicatorAutoHidden: UIViewController? { nil }
-
-    override var childForScreenEdgesDeferringSystemGestures: UIViewController? { nil }
-
-    override func viewDidAppear(_ animated: Bool) {
-        super.viewDidAppear(animated)
-        becomeFirstResponder()
-    }
+    override var supportedInterfaceOrientations: UIInterfaceOrientationMask { .landscape }
+    override var shouldAutorotate: Bool { true }
     
     @objc func handleDirectionTouch(_ sender: UIPanGestureRecognizer) {
         directionsViewController?.cancel()
@@ -462,11 +469,11 @@ extension BrogueViewController: UITextFieldDelegate {
         inputRequestString = string
         DispatchQueue.main.async {
             // When a hardware keyboard is attached, skip the software keyboard
-            // entirely — pressesBegan delivers keystrokes to the Brogue queue.
-            // Just expose the Esc button so the user has a touch-friendly cancel.
+            // entirely — pressesBegan delivers keystrokes to the Brogue queue
+            // via the responder chain. Just expose the Esc button so the user
+            // has a touch-friendly cancel.
             if GCKeyboard.coalesced != nil {
                 self.escButton.isHidden = false
-                self.becomeFirstResponder()
             } else {
                 self.inputTextField.becomeFirstResponder()
             }
