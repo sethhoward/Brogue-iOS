@@ -931,7 +931,7 @@ void addXPXPToAlly(short XPXP, creature *monst) {
         if (monst->xpxp > 1500 * 20) {
             rogue.featRecord[FEAT_COMPANION] = true;
             // Seth
-            [[GameCenterManager sharedInstance] submitAchievement:kAchievementCompanion percentComplete:100.];
+            [[GameCenter shared] submitAchievement:kAchievementCompanion percentComplete:100.];
         }
     }
 }

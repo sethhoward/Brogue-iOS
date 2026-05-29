@@ -21,22 +21,40 @@
 import UIKit
 import SpriteKit
 
-class SKViewPort: SKView {  
+class SKViewPort: SKView {
+    /// Points reserved at the bottom of the view so rendered text doesn't overlap
+    /// the iPad home indicator / system gesture strip.
+    /// Read by RogueScene (cell layout), BrogueViewController, and RogueDriver (touch math).
+    @objc public static let homeIndicatorPad: CGFloat = 30
+
+    /// Height of the playable area in points, accounting for whether padding is currently
+    /// applied. Used by touch→cell math in both Swift and Obj-C.
+    @objc public var effectiveHeightPoints: CGFloat {
+        let h = UIScreen.main.bounds.size.height
+        return rogueScene.paddingEnabled ? h - SKViewPort.homeIndicatorPad : h
+    }
+
     var rogueScene: RogueScene!
     var hWindow = UIScreen.main.bounds.size.width
     var vWindow = UIScreen.main.bounds.size.height
-    
+
     required init?(coder aDecoder: NSCoder) {
         let rect = UIScreen.main.bounds
         // go max retina on initial size or scaling of text is ugly
         let scale = UIScreen.main.scale
-        rogueScene = RogueScene(size: CGSize(width: rect.size.width * scale, height: rect.size.height * scale), rows: (34), cols: 100)
+        rogueScene = RogueScene(
+            size: CGSize(width: rect.size.width * scale, height: rect.size.height * scale),
+            rows: 34,
+            cols: 100,
+            bottomPadPixels: SKViewPort.homeIndicatorPad * scale
+        )
         rogueScene.scaleMode = .fill
         super.init(coder: aDecoder)
-        
+
        // showsFPS = true
       //  showsNodeCount = true
         ignoresSiblingOrder = true
+        backgroundColor = .black
     }
     
     override func awakeFromNib() {

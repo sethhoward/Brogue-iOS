@@ -73,9 +73,6 @@
 // set to false to allow multiple loads from the same saved file:
 #define DELETE_SAVE_FILE_AFTER_LOADING    true
 
-// set to false to disable references to keystrokes (e.g. for a tablet port)
-#define KEYBOARD_LABELS false
-
 //#define BROGUE_ASSERTS  false      // introduces several assert()s -- useful to find certain array overruns and other bugs
 //#define AUDIT_RNG             // VERY slow, but sometimes necessary to debug out-of-sync recording errors
 //#define GENERATE_FONT_FILES    // Displays font in grid upon startup, which can be screen-captured into font files for PC.
@@ -87,6 +84,11 @@
 
 #define false                    0
 #define true                    1
+
+// Runtime flag: prompts include keystroke hints when a hardware keyboard is connected.
+// Set from the Swift layer via setKeyboardLabelsEnabled().
+extern boolean KEYBOARD_LABELS;
+void setKeyboardLabelsEnabled(boolean enabled);
 
 #define Fl(N)                    (1 << (N))
 #define FP_BASE 16 // Don't change this without recalculating all of the power tables throughout the code!

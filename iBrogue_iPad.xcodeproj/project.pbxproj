@@ -9,7 +9,6 @@
 /* Begin PBXBuildFile section */
 		C5105B1616EE90A400E09905 /* GameSettings.m in Sources */ = {isa = PBXBuildFile; fileRef = C5105B1516EE90A300E09905 /* GameSettings.m */; };
 		C5213CD21B7533AE00E97A27 /* Arial Unicode.ttf in Resources */ = {isa = PBXBuildFile; fileRef = C5213CD11B75308E00E97A27 /* Arial Unicode.ttf */; };
-		C5213CD41B75445F00E97A27 /* StoreKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = C5213CD31B75445F00E97A27 /* StoreKit.framework */; };
 		C52686AB215C0B5D00033E3F /* PowerTables.c in Sources */ = {isa = PBXBuildFile; fileRef = C52686AA215C0B5D00033E3F /* PowerTables.c */; };
 		C52686AD215C0B8700033E3F /* Sqrt.c in Sources */ = {isa = PBXBuildFile; fileRef = C52686AC215C0B8700033E3F /* Sqrt.c */; };
 		C52B092216E5848500675CC7 /* GameCenterIOS4.m in Sources */ = {isa = PBXBuildFile; fileRef = C52B091B16E5848500675CC7 /* GameCenterIOS4.m */; settings = {COMPILER_FLAGS = "-fno-objc-arc"; }; };
@@ -71,13 +70,13 @@
 		ECBE68A91EC0D4C600E9F366 /* Cell.swift in Sources */ = {isa = PBXBuildFile; fileRef = ECBE68A81EC0D4C600E9F366 /* Cell.swift */; };
 		ECBE68AB1EC0DB1800E9F366 /* SKViewPort.swift in Sources */ = {isa = PBXBuildFile; fileRef = ECBE68AA1EC0DB1800E9F366 /* SKViewPort.swift */; };
 		ECBE68AD1EC0E1C600E9F366 /* BrogueViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = ECBE68AC1EC0E1C600E9F366 /* BrogueViewController.swift */; };
+		ECBE68AE1EC0E1C700E9F366 /* GameCenter.swift in Sources */ = {isa = PBXBuildFile; fileRef = ECBE68AF1EC0E1C700E9F366 /* GameCenter.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
 		C5105B1416EE90A300E09905 /* GameSettings.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = GameSettings.h; sourceTree = "<group>"; };
 		C5105B1516EE90A300E09905 /* GameSettings.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = GameSettings.m; sourceTree = "<group>"; };
 		C5213CD11B75308E00E97A27 /* Arial Unicode.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Arial Unicode.ttf"; sourceTree = "<group>"; };
-		C5213CD31B75445F00E97A27 /* StoreKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = StoreKit.framework; path = System/Library/Frameworks/StoreKit.framework; sourceTree = SDKROOT; };
 		C52686A6215C0A9800033E3F /* libc++.tbd */ = {isa = PBXFileReference; lastKnownFileType = "sourcecode.text-based-dylib-definition"; name = "libc++.tbd"; path = "usr/lib/libc++.tbd"; sourceTree = SDKROOT; };
 		C52686A8215C0AA800033E3F /* libc++.1.tbd */ = {isa = PBXFileReference; lastKnownFileType = "sourcecode.text-based-dylib-definition"; name = "libc++.1.tbd"; path = "usr/lib/libc++.1.tbd"; sourceTree = SDKROOT; };
 		C52686AA215C0B5D00033E3F /* PowerTables.c */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.c; path = PowerTables.c; sourceTree = "<group>"; };
@@ -155,6 +154,8 @@
 		ECBE68A81EC0D4C600E9F366 /* Cell.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = Cell.swift; sourceTree = "<group>"; };
 		ECBE68AA1EC0DB1800E9F366 /* SKViewPort.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = SKViewPort.swift; sourceTree = "<group>"; };
 		ECBE68AC1EC0E1C600E9F366 /* BrogueViewController.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = BrogueViewController.swift; sourceTree = "<group>"; };
+		ECBE68AF1EC0E1C700E9F366 /* GameCenter.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = GameCenter.swift; sourceTree = "<group>"; };
+		ECBE68B01EC0E1C700E9F366 /* iBrogue_iPad.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = iBrogue_iPad.entitlements; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -163,7 +164,6 @@
 			buildActionMask = 2147483647;
 			files = (
 				C52B092716E5853900675CC7 /* GameKit.framework in Frameworks */,
-				C5213CD41B75445F00E97A27 /* StoreKit.framework in Frameworks */,
 				C57A967516DBF1CE00C233F1 /* QuartzCore.framework in Frameworks */,
 				C57A962916D7EAD500C233F1 /* UIKit.framework in Frameworks */,
 				C57A962B16D7EAD500C233F1 /* Foundation.framework in Frameworks */,
@@ -221,7 +221,6 @@
 			children = (
 				C52686A8215C0AA800033E3F /* libc++.1.tbd */,
 				C52686A6215C0A9800033E3F /* libc++.tbd */,
-				C5213CD31B75445F00E97A27 /* StoreKit.framework */,
 				C57A962816D7EAD500C233F1 /* UIKit.framework */,
 				C57A962A16D7EAD500C233F1 /* Foundation.framework */,
 				C57A962C16D7EAD500C233F1 /* CoreGraphics.framework */,
@@ -253,6 +252,7 @@
 				C5213CD11B75308E00E97A27 /* Arial Unicode.ttf */,
 				C59B21C616EA48E0007018DE /* MONACO.TTF */,
 				C57A963016D7EAD500C233F1 /* iBrogue_iPad-Info.plist */,
+				ECBE68B01EC0E1C700E9F366 /* iBrogue_iPad.entitlements */,
 				C57A963116D7EAD500C233F1 /* InfoPlist.strings */,
 				C57A963416D7EAD500C233F1 /* main.m */,
 				C57A963616D7EAD500C233F1 /* iBrogue_iPad-Prefix.pch */,
@@ -274,6 +274,7 @@
 				ECBE68A51EC0D45200E9F366 /* iBrogue_iPad-Bridging-Header.h */,
 				ECBE68AA1EC0DB1800E9F366 /* SKViewPort.swift */,
 				ECBE68AC1EC0E1C600E9F366 /* BrogueViewController.swift */,
+				ECBE68AF1EC0E1C700E9F366 /* GameCenter.swift */,
 			);
 			path = PlatformCode;
 			sourceTree = "<group>";
@@ -454,6 +455,7 @@
 				C57A966616D7EB5500C233F1 /* Buttons.c in Sources */,
 				C57A966716D7EB5500C233F1 /* Combat.c in Sources */,
 				ECBE68AD1EC0E1C600E9F366 /* BrogueViewController.swift in Sources */,
+				ECBE68AE1EC0E1C700E9F366 /* GameCenter.swift in Sources */,
 				C57A966816D7EB5500C233F1 /* Dijkstra.c in Sources */,
 				C57A966916D7EB5500C233F1 /* Globals.c in Sources */,
 				C57A966A16D7EB5500C233F1 /* Grid.c in Sources */,
@@ -533,7 +535,7 @@
 				GCC_WARN_UNINITIALIZED_AUTOS = YES;
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
-				IPHONEOS_DEPLOYMENT_TARGET = 9.0;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
 				ONLY_ACTIVE_ARCH = YES;
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = 2;
@@ -576,7 +578,7 @@
 				GCC_WARN_UNINITIALIZED_AUTOS = YES;
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
-				IPHONEOS_DEPLOYMENT_TARGET = 9.0;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
 				OTHER_CFLAGS = "-DNS_BLOCK_ASSERTIONS=1";
 				SDKROOT = iphoneos;
 				SWIFT_OPTIMIZATION_LEVEL = "-Owholemodule";
@@ -595,6 +597,7 @@
 				CLANG_CXX_LIBRARY = "compiler-default";
 				CLANG_ENABLE_MODULES = YES;
 				CLANG_ENABLE_OBJC_ARC = YES;
+				CODE_SIGN_ENTITLEMENTS = iBrogue_iPad/iBrogue_iPad.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				"CODE_SIGN_IDENTITY[sdk=iphoneos*]" = "iPhone Developer";
 				CURRENT_PROJECT_VERSION = 14;
@@ -603,10 +606,12 @@
 				GCC_PRECOMPILE_PREFIX_HEADER = YES;
 				GCC_PREFIX_HEADER = "iBrogue_iPad/iBrogue_iPad-Prefix.pch";
 				INFOPLIST_FILE = "iBrogue_iPad/iBrogue_iPad-Info.plist";
-				IPHONEOS_DEPLOYMENT_TARGET = 9.3;
+				INFOPLIST_KEY_CFBundleDisplayName = Brogue;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.role-playing-games";
+				IPHONEOS_DEPLOYMENT_TARGET = 18.6;
 				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks";
 				LIBRARY_SEARCH_PATHS = "$(inherited)";
-				MARKETING_VERSION = 1.3.3;
+				MARKETING_VERSION = 1.4.0;
 				PRODUCT_BUNDLE_IDENTIFIER = SethHoward.iBrogue;
 				PRODUCT_NAME = Brogue;
 				PROVISIONING_PROFILE = "";
@@ -631,6 +636,7 @@
 				CLANG_CXX_LIBRARY = "compiler-default";
 				CLANG_ENABLE_MODULES = YES;
 				CLANG_ENABLE_OBJC_ARC = YES;
+				CODE_SIGN_ENTITLEMENTS = iBrogue_iPad/iBrogue_iPad.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Distribution";
 				"CODE_SIGN_IDENTITY[sdk=iphoneos*]" = "iPhone Developer";
 				CURRENT_PROJECT_VERSION = 14;
@@ -639,10 +645,12 @@
 				GCC_PRECOMPILE_PREFIX_HEADER = YES;
 				GCC_PREFIX_HEADER = "iBrogue_iPad/iBrogue_iPad-Prefix.pch";
 				INFOPLIST_FILE = "iBrogue_iPad/iBrogue_iPad-Info.plist";
-				IPHONEOS_DEPLOYMENT_TARGET = 9.3;
+				INFOPLIST_KEY_CFBundleDisplayName = Brogue;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.role-playing-games";
+				IPHONEOS_DEPLOYMENT_TARGET = 18.6;
 				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks";
 				LIBRARY_SEARCH_PATHS = "$(inherited)";
-				MARKETING_VERSION = 1.3.3;
+				MARKETING_VERSION = 1.4.0;
 				PRODUCT_BUNDLE_IDENTIFIER = SethHoward.iBrogue;
 				PRODUCT_NAME = Brogue;
 				PROVISIONING_PROFILE = "";
