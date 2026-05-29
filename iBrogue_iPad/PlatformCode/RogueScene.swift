@@ -39,14 +39,23 @@ extension CGSize {
 // To see Swift classes from ObjC they MUST be prefaced with @objc and be public/open
 @objc public class RogueScene: SKScene {
     fileprivate let gridSize: CGSize
-    fileprivate let cellSize: CGSize
-    
+    fileprivate var cellSize: CGSize
+    /// In scene pixels. Cells are shifted up by this amount so the bottom row
+    /// sits above the home indicator gesture strip when padding is enabled.
+    fileprivate let bottomPad: CGFloat
+    /// When true (default), cells render in [bottomPad, sceneHeight] leaving a black
+    /// strip at the bottom for the home indicator. When false (title screen),
+    /// cells fill the full scene height.
+    @objc public var paddingEnabled: Bool = true {
+        didSet { relayoutCells() }
+    }
+
     fileprivate var fgTextures = [SKTexture]()
     fileprivate var bgTextures = [SKTexture]()
     var cells = [[Cell]]()
     fileprivate var textureMap: [String : SKTexture] = [:]
-    
-    // We don't want small letters scaled to huge proportions, so we only allow letters to stretch 
+
+    // We don't want small letters scaled to huge proportions, so we only allow letters to stretch
     // within a certain range (e.g. size of M +/- 20%)
     fileprivate lazy var maxScaleFactor: CGFloat = {
         let char: NSString = "M" // Good letter to do the base calculations from
@@ -55,16 +64,17 @@ extension CGSize {
                                                    attributes: convertToOptionalNSAttributedStringKeyDictionary([convertFromNSAttributedStringKey(NSAttributedString.Key.font): UIFont(name: "ArialUnicodeMS", size: 120)!]), context: nil)
         return min(self.cellSize.width / calcBounds.width, self.cellSize.height / calcBounds.height)
     }()
-    
-    public init(size: CGSize, rows: Int, cols: Int) {
+
+    public init(size: CGSize, rows: Int, cols: Int, bottomPadPixels: CGFloat = 0) {
         gridSize = CGSize(rows: rows, cols: cols)
-        cellSize = CGSize(width: CGFloat(size.width) / CGFloat(cols), height: CGFloat(size.height) / CGFloat(rows))
+        bottomPad = bottomPadPixels
+        let usableHeight = max(size.height - bottomPadPixels, 0)
+        cellSize = CGSize(
+            width: CGFloat(size.width) / CGFloat(cols),
+            height: usableHeight / CGFloat(rows)
+        )
         super.init(size: size)
-        
-        if #available(iOS 10.0, *) {}
-        else {
-            sceneDidLoad()
-        }
+        backgroundColor = .black
     }
     
     required public init?(coder aDecoder: NSCoder) {
@@ -86,10 +96,34 @@ extension RogueScene {
         for x in 0...gridSize.cols {
             var row = [Cell]()
             for y in 0...gridSize.rows {
-                let newCell = Cell(x: CGFloat(x) * cellSize.width, y: CGFloat(gridSize.rows - y - 1) * cellSize.height, size: CGSize(width: cellSize.width, height: cellSize.height))
+                let newCell = Cell(
+                    x: CGFloat(x) * cellSize.width,
+                    y: bottomPad + CGFloat(gridSize.rows - y - 1) * cellSize.height,
+                    size: CGSize(width: cellSize.width, height: cellSize.height)
+                )
                 row.append(newCell)
             }
             cells.append(row)
+        }
+    }
+
+    private func relayoutCells() {
+        let usableHeight = paddingEnabled ? size.height - bottomPad : size.height
+        let yOffset: CGFloat = paddingEnabled ? bottomPad : 0
+        cellSize = CGSize(
+            width: size.width / CGFloat(gridSize.cols),
+            height: usableHeight / CGFloat(gridSize.rows)
+        )
+        for x in 0..<cells.count {
+            let column = cells[x]
+            for y in 0..<column.count {
+                let cell = column[y]
+                cell.size = cellSize
+                cell.position = CGPoint(
+                    x: CGFloat(x) * cellSize.width,
+                    y: yOffset + CGFloat(gridSize.rows - y - 1) * cellSize.height
+                )
+            }
         }
     }
     

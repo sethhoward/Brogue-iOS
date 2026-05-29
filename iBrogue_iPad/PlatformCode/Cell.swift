@@ -70,7 +70,7 @@ class Cell {
     
     init(x: CGFloat, y: CGFloat, size: CGSize) {
         foreground = SKSpriteNode(color: .clear, size: size)
-        background = SKSpriteNode(color: .white, size: size)
+        background = SKSpriteNode(color: .black, size: size)
         
         // Allow colours to be changed by blending their white components
         foreground.colorBlendFactor = 1

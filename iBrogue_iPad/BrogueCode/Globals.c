@@ -45,7 +45,11 @@ item *floorItems;
 item *packItems;
 item *monsterItemsHopper;
 
-//int KEYBOARD_LABELS = true;
+boolean KEYBOARD_LABELS = false;
+
+void setKeyboardLabelsEnabled(boolean enabled) {
+    KEYBOARD_LABELS = enabled;
+}
 
 char displayedMessage[MESSAGE_LINES][COLS*2];
 boolean messageConfirmed[MESSAGE_LINES];

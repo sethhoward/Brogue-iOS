@@ -30,6 +30,7 @@
 #include "Rogue.h"
 #import "GameCenterManager.h"
 #import <QuartzCore/QuartzCore.h>
+#import "Brogue-Swift.h"
 
 #define kRateScore 3000
 
@@ -114,7 +115,8 @@ boolean pauseForMilliseconds(short milliseconds) {
 void nextKeyOrMouseEvent(rogueEvent *returnEvent, __unused boolean textInput, boolean colorsDance) {
 	short x, y;
     float width = [[UIScreen mainScreen] bounds].size.width;
-    float height = [[UIScreen mainScreen] bounds].size.height;
+    // Match the current cell layout: padded during gameplay, full height on title/menus.
+    float height = skviewPort.effectiveHeightPoints;
     
     for(;;) {
         // we should be ok to block here. We don't seem to call pauseForMilli and this at the same time
@@ -191,7 +193,7 @@ boolean shiftKeyIsDown() {
 }
 
 void submitAchievementForCharString(char *achievementKey) {
-    [[GameCenterManager sharedInstance] submitAchievement:[NSString stringWithUTF8String:achievementKey] percentComplete:100.];
+    [[GameCenter shared] submitAchievement:[NSString stringWithUTF8String:achievementKey] percentComplete:100.];
 }
 
 #pragma mark - OSX->iOS implementation
@@ -341,7 +343,7 @@ boolean saveHighScore(rogueHighScoresEntry theEntry) {
 	}
 
     if (theEntry.score > 0) {
-        [[GameCenterManager sharedInstance] reportScore:theEntry.score forCategory:kBrogueHighScoreLeaderBoard];
+        [[GameCenter shared] reportScore:theEntry.score leaderboardID:kBrogueHighScoreLeaderBoard];
     }
     
 	if (minIndex == -1) { // didn't qualify

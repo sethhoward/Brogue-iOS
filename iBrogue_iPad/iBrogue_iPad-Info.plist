@@ -34,7 +34,7 @@
 		<string>MONACO.TTF</string>
 	</array>
 	<key>UIFileSharingEnabled</key>
-	<true/>
+	<false/>
 	<key>UILaunchStoryboardName</key>
 	<string>ViewController</string>
 	<key>UIMainStoryboardFile</key>

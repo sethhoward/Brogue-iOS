@@ -20,23 +20,31 @@
 
 import UIKit
 import SpriteKit
+import GameController
 
 fileprivate let kESC_Key: UInt8 = 27
-fileprivate let kEnterKey = "\n"
+fileprivate let kReturnKey: UInt8 = 13
+fileprivate let kEnterKey: UInt8 = 10
+fileprivate let kDeleteKey: UInt8 = 127
+fileprivate let kTabKey: UInt8 = 9
 
-private func synchronized<T>(_ lock: Any, _ body: () throws -> T) rethrows -> T {
-    objc_sync_enter(lock)
-    defer { objc_sync_exit(lock) }
+private let eventLock = NSLock()
+
+private func synchronized<T>(_ body: () throws -> T) rethrows -> T {
+    eventLock.lock()
+    defer { eventLock.unlock() }
     return try body()
 }
 
 fileprivate let COLS = 100
 fileprivate let ROWS = 34
 
-fileprivate func getCellCoords(at point: CGPoint) -> CGPoint {
+fileprivate func getCellCoords(at point: CGPoint, viewport: SKViewPort?) -> CGPoint {
+    let screenH = UIScreen.main.bounds.size.height
+    let effectiveHeight = viewport?.effectiveHeightPoints ?? screenH
     let cellx = Int(CGFloat(COLS) * point.x / UIScreen.main.bounds.size.width)
-    let celly = Int(CGFloat(ROWS) * point.y / UIScreen.main.bounds.size.height)
-    
+    let celly = Int(CGFloat(ROWS) * point.y / effectiveHeight)
+
     return CGPoint(x: cellx, y: celly)
 }
 
@@ -137,6 +145,15 @@ final class BrogueViewController: UIViewController {
                     self.dContainerView.isHidden = false
                     self.dContainerView.isUserInteractionEnabled = true
                 }
+
+                // Reserve the home-indicator strip only during gameplay. On the title
+                // and other menu screens, let the grid fill the full screen.
+                switch self.lastBrogueGameEvent {
+                case .showTitle, .openGameFinished, .beginOpenGame, .showHighScores:
+                    self.skViewPort.rogueScene.paddingEnabled = false
+                default:
+                    self.skViewPort.rogueScene.paddingEnabled = true
+                }
             }
         }
     }
@@ -149,16 +166,35 @@ final class BrogueViewController: UIViewController {
         let thread = Thread(target: self, selector: #selector(BrogueViewController.playBrogue), object: nil)
         thread.stackSize = 400 * 8192
         thread.start()
-        
+
         magView.viewToMagnify = skViewPort
         magView.hideMagnifier()
         inputTextField.delegate = self
-        
+
         let panGesture = UIPanGestureRecognizer(target: self, action: #selector(draggedView(_:)))
         panGesture.minimumNumberOfTouches = 2
         dContainerView.addGestureRecognizer(panGesture)
-        
-        GameCenterManager.sharedInstance()?.authenticateLocalUser()
+
+        GameCenter.shared.authenticate(from: self)
+
+        setupHardwareKeyboardObserver()
+    }
+
+    override var canBecomeFirstResponder: Bool { true }
+
+    override var prefersHomeIndicatorAutoHidden: Bool { true }
+
+    override var preferredScreenEdgesDeferringSystemGestures: UIRectEdge { .all }
+
+    // Don't let any embedded child VC (e.g. the direction controls) take over and
+    // re-show the home indicator.
+    override var childForHomeIndicatorAutoHidden: UIViewController? { nil }
+
+    override var childForScreenEdgesDeferringSystemGestures: UIViewController? { nil }
+
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        becomeFirstResponder()
     }
     
     @objc func handleDirectionTouch(_ sender: UIPanGestureRecognizer) {
@@ -189,6 +225,7 @@ extension BrogueViewController {
     @IBAction func escButtonPressed(_ sender: Any) {
         addKeyEvent(event: kESC_Key)
         inputTextField.resignFirstResponder()
+        escButton.isHidden = true
     }
     
     @IBAction func showInventoryButtonPressed(_ sender: Any) {
@@ -196,7 +233,8 @@ extension BrogueViewController {
     }
     
     @IBAction func showLeaderBoardButtonPressed(_ sender: Any) {
-        rgGCshowLeaderBoard(withCategory: kBrogueHighScoreLeaderBoard)
+        NSLog("[GameCenter] leaderboard button pressed")
+        GameCenter.shared.showLeaderboard(id: GameCenter.highScoreLeaderboardID, from: self)
     }
     
     @IBAction func seedButtonPressed(_ sender: Any) {
@@ -279,56 +317,51 @@ extension BrogueViewController {
     }
     
     fileprivate func pointIsInPlayArea(point: CGPoint) -> Bool {
-        let cellCoord = getCellCoords(at: point)
+        let cellCoord = getCellCoords(at: point, viewport: skViewPort)
         if cellCoord.x > 20 && cellCoord.y < 32 && cellCoord.y > 3 {
             return true
         }
-        
+
         return false
     }
-    
+
     private func pointIsInSideBar(point: CGPoint) -> Bool {
-        let cellCoord = getCellCoords(at: point)
+        let cellCoord = getCellCoords(at: point, viewport: skViewPort)
         if cellCoord.x <= 20 {
             return true
         }
-        
+
         return false
     }
     
     private func addTouchEvent(event: UIBrogueTouchEvent) {
         lastTouchLocation = event.location
-        synchronized(touchEvents) {
+        synchronized {
             // only want the last moved event, no point caching them all
-            if let lastEvent = touchEvents.last, lastEvent.phase == .moved && hasTouchEvent() {
+            if let lastEvent = touchEvents.last, lastEvent.phase == .moved, !touchEvents.isEmpty {
                 _ = touchEvents.removeLast()
             }
-            
+
             touchEvents.append(event)
         }
     }
-    
+
     private func clearTouchEvents() {
-        synchronized(touchEvents) {
+        synchronized {
             touchEvents.removeAll()
         }
     }
-    
+
     @objc func dequeTouchEvent() -> UIBrogueTouchEvent? {
-        var event: UIBrogueTouchEvent?
-        
-        synchronized(touchEvents) {
-            if !touchEvents.isEmpty {
-                event = touchEvents.removeFirst()
-                event = event?.copy() as? UIBrogueTouchEvent
-            }
+        synchronized {
+            guard !touchEvents.isEmpty else { return nil }
+            let event = touchEvents.removeFirst()
+            return event.copy() as? UIBrogueTouchEvent
         }
-        
-        return event
     }
-    
+
     @objc func hasTouchEvent() -> Bool {
-        return !touchEvents.isEmpty
+        synchronized { !touchEvents.isEmpty }
     }
 }
 
@@ -404,28 +437,23 @@ extension BrogueViewController {
     }
     
     fileprivate func addKeyEvent(event: UInt8) {
-        synchronized(touchEvents) {
+        synchronized {
             keyEvents.append(event)
         }
     }
-    
+
     // cannot be optional for backward compat
     @objc func dequeKeyEvent() -> UInt8 {
-        var event: UInt8!
-        
-        synchronized(keyEvents) {
-            if !keyEvents.isEmpty {
-                event = keyEvents.removeFirst()
-            } else {
+        synchronized {
+            guard !keyEvents.isEmpty else {
                 fatalError("Deque Key, queue is empty")
             }
+            return keyEvents.removeFirst()
         }
-        
-        return event
     }
-    
+
     @objc func hasKeyEvent() -> Bool {
-        return !keyEvents.isEmpty
+        synchronized { !keyEvents.isEmpty }
     }
 }
 
@@ -433,66 +461,100 @@ extension BrogueViewController: UITextFieldDelegate {
     @objc func requestTextInput(for string: String) {
         inputRequestString = string
         DispatchQueue.main.async {
-            self.inputTextField.becomeFirstResponder()
+            // When a hardware keyboard is attached, skip the software keyboard
+            // entirely — pressesBegan delivers keystrokes to the Brogue queue.
+            // Just expose the Esc button so the user has a touch-friendly cancel.
+            if GCKeyboard.coalesced != nil {
+                self.escButton.isHidden = false
+                self.becomeFirstResponder()
+            } else {
+                self.inputTextField.becomeFirstResponder()
+            }
         }
     }
-    
+
     func textFieldShouldReturn(_ textField: UITextField) -> Bool {
         inputTextField.resignFirstResponder()
-        addKeyEvent(event: "\n".ascii)
+        addKeyEvent(event: kReturnKey)
         escButton.isHidden = true
         return true
     }
-    
+
     func textFieldDidBeginEditing(_ textField: UITextField) {
         inputTextField.text = inputRequestString ?? ""
         escButton.isHidden = false
     }
-    
+
     func textField(_ textField: UITextField, shouldChangeCharactersIn range: NSRange, replacementString string: String) -> Bool {
-        let isBackSpace = strcmp(string.cString(using: .utf8), "\\b")
-        
-        if (isBackSpace == -92) {
-            addKeyEvent(event: 127)
-        } else {
-            addKeyEvent(event: string.ascii)
+        if string.isEmpty {
+            // Backspace
+            addKeyEvent(event: kDeleteKey)
+        } else if let scalar = string.unicodeScalars.first, scalar.isASCII {
+            addKeyEvent(event: UInt8(scalar.value))
         }
-        
         return true
     }
 }
 
-private let keys: [UIKeyCommand]? = {
-    let lower = (UnicodeScalar("a").value...UnicodeScalar("z").value).map{ String(UnicodeScalar($0)!) }
-    let upper = (UnicodeScalar("A").value...UnicodeScalar("Z").value).map{ String(UnicodeScalar($0)!) }
-    let alpha = lower + upper + [">", "<", " ", "\\", "]", "?", "~", "&", "\r", "\t", "."]
-    var keys = (alpha.map {
-        UIKeyCommand(input: $0, modifierFlags: [], action: #selector(BrogueViewController.executeKeyCommand))
-    })
-    keys.append(UIKeyCommand(input: UIKeyCommand.inputUpArrow, modifierFlags: [], action: #selector(BrogueViewController.executeKeyCommand)))
-    keys.append(UIKeyCommand(input: UIKeyCommand.inputDownArrow, modifierFlags: [], action: #selector(BrogueViewController.executeKeyCommand)))
-    keys.append(UIKeyCommand(input: UIKeyCommand.inputLeftArrow, modifierFlags: [], action: #selector(BrogueViewController.executeKeyCommand)))
-    keys.append(UIKeyCommand(input: UIKeyCommand.inputRightArrow, modifierFlags: [], action: #selector(BrogueViewController.executeKeyCommand)))
-    keys.append(UIKeyCommand(input: UIKeyCommand.inputEscape, modifierFlags: [], action: #selector(BrogueViewController.executeKeyCommand)))
-    /* + (alpha.map {
-     UIKeyCommand(input: $0, modifierFlags: [.shift], action: #selector(BrogueViewController.executeKeyCommand))
-     })
-     + ([">", "<", " ", "\\", "]", "?", "~", "&", "\r", "\t", "."].map {
-     UIKeyCommand(input: $0, modifierFlags: [], action: #selector(BrogueViewController.executeKeyCommand)) */
-    //})
-    
-    return keys
-}()
+// MARK: - Hardware keyboard
 
 extension BrogueViewController {
-    override var keyCommands: [UIKeyCommand]? {
-        return keys
+    fileprivate func setupHardwareKeyboardObserver() {
+        let center = NotificationCenter.default
+        center.addObserver(self, selector: #selector(keyboardDidConnect),
+                           name: .GCKeyboardDidConnect, object: nil)
+        center.addObserver(self, selector: #selector(keyboardDidDisconnect),
+                           name: .GCKeyboardDidDisconnect, object: nil)
+        // Set initial state in case a keyboard is already connected at launch.
+        setKeyboardLabelsEnabled(GCKeyboard.coalesced != nil ? 1 : 0)
     }
-    
-    @objc fileprivate func executeKeyCommand(keyCommand: UIKeyCommand) {
-        if let key = keyCommand.input?.ascii {
-            addKeyEvent(event: key)
+
+    @objc private func keyboardDidConnect(_ note: Notification) {
+        setKeyboardLabelsEnabled(1)
+    }
+
+    @objc private func keyboardDidDisconnect(_ note: Notification) {
+        setKeyboardLabelsEnabled(GCKeyboard.coalesced != nil ? 1 : 0)
+    }
+
+    override func pressesBegan(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
+        var handledAny = false
+        for press in presses {
+            if let byte = brogueByte(for: press) {
+                addKeyEvent(event: byte)
+                handledAny = true
+            }
         }
+        if !handledAny {
+            super.pressesBegan(presses, with: event)
+        }
+    }
+
+    /// Maps a UIPress to the byte Brogue's input loop expects.
+    /// Arrow keys map to vi-style hjkl since the event queue is byte-sized.
+    private func brogueByte(for press: UIPress) -> UInt8? {
+        guard let key = press.key else { return nil }
+
+        switch key.keyCode {
+        case .keyboardEscape:            return kESC_Key
+        case .keyboardReturnOrEnter:     return kReturnKey
+        case .keyboardDeleteOrBackspace: return kDeleteKey
+        case .keyboardTab:               return kTabKey
+        case .keyboardUpArrow:           return UInt8(ascii: "K")
+        case .keyboardDownArrow:         return UInt8(ascii: "J")
+        case .keyboardLeftArrow:         return UInt8(ascii: "H")
+        case .keyboardRightArrow:        return UInt8(ascii: "L")
+        case .keyboardSpacebar:          return UInt8(ascii: " ")
+        default:
+            break
+        }
+
+        // Fall back to the printable characters the user actually typed.
+        // `characters` reflects modifiers (shift, etc.) so "k" vs "K" arrives correctly.
+        if let scalar = key.characters.unicodeScalars.first, scalar.isASCII {
+            return UInt8(scalar.value)
+        }
+        return nil
     }
 }
 
@@ -559,7 +621,7 @@ final class SKMagView: SKView {
         guard let viewToMagnify = viewToMagnify else { return [Cell]() }
        
         let magnification: CGFloat = 1.0
-        let currentCellXY = getCellCoords(at: point)
+        let currentCellXY = getCellCoords(at: point, viewport: viewToMagnify)
         let rows = 3 // opposite/flipped
         let cols = 2
         
