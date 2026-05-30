@@ -41,8 +41,12 @@ fileprivate let ROWS = 34
 
 fileprivate func getCellCoords(at point: CGPoint, viewport: SKViewPort?) -> CGPoint {
     let screenH = UIScreen.main.bounds.size.height
+    let screenW = UIScreen.main.bounds.size.width
     let effectiveHeight = viewport?.effectiveHeightPoints ?? screenH
-    let cellx = Int(CGFloat(COLS) * point.x / UIScreen.main.bounds.size.width)
+    let effectiveWidth = viewport?.effectiveWidthPoints ?? screenW
+    let leftInset = viewport?.leftInsetPoints ?? 0
+    let xInPlay = max(point.x - leftInset, 0)
+    let cellx = Int(CGFloat(COLS) * xInPlay / effectiveWidth)
     let celly = Int(CGFloat(ROWS) * point.y / effectiveHeight)
 
     return CGPoint(x: cellx, y: celly)
@@ -174,6 +178,18 @@ final class BrogueViewController: UIViewController {
         let panGesture = UIPanGestureRecognizer(target: self, action: #selector(draggedView(_:)))
         panGesture.minimumNumberOfTouches = 2
         dContainerView.addGestureRecognizer(panGesture)
+        dContainerView.alpha = 0.3
+
+        // Storyboard positions these for iPad. On iPhone (much less screen
+        // real estate, landscape-only) push them tighter into the edges.
+        // Applied once as a transform so auto-layout passes don't fight us,
+        // and so any user-drag gesture on dContainerView (which modifies
+        // .center) keeps working on top.
+        // Tune these constants to taste.
+        if UIDevice.current.userInterfaceIdiom == .phone {
+            dContainerView.transform = CGAffineTransform(translationX: -80, y: 70)
+            escButton.transform = CGAffineTransform(translationX: -80, y: 90)
+        }
 
         GameCenter.shared.authenticate(from: self)
 
@@ -203,6 +219,42 @@ final class BrogueViewController: UIViewController {
 
     override var supportedInterfaceOrientations: UIInterfaceOrientationMask { .landscape }
     override var shouldAutorotate: Bool { true }
+
+    // Plumb iPhone notch / dynamic-island safe-area insets into RogueScene so
+    // the cell grid (and its touch math) avoid the notched zones.
+    //
+    // We read from `view.window?.safeAreaInsets`, not `view.safeAreaInsets`.
+    // SwiftUI's `.ignoresSafeArea()` on the hosting ContentView zeros out the
+    // hosted view's insets but the underlying window still reports the true
+    // device insets. Reading from the window gives us reality.
+    override func viewSafeAreaInsetsDidChange() {
+        super.viewSafeAreaInsetsDidChange()
+        applyNotchInsets()
+    }
+
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        // view.window only becomes non-nil once the view is in the hierarchy.
+        // Run after viewDidAppear so we definitely have it.
+        applyNotchInsets()
+    }
+
+    private func applyNotchInsets() {
+        let insets = view.window?.safeAreaInsets ?? view.safeAreaInsets
+        let scale = UIScreen.main.scale
+
+        // The app is locked to UIInterfaceOrientation.landscapeLeft in
+        // Info.plist. In that orientation the iPhone's notch / dynamic island
+        // sits along the RIGHT edge of the screen. iOS reports symmetric
+        // safe-area insets on both sides (~62pt each, including the bezel
+        // safe area on the non-notch side), but we only want to reserve
+        // space on the actual-notch side; the left side extends edge-to-edge
+        // to maximize the play area.
+        skViewPort.rogueScene.setHorizontalEdgeInsets(
+            leftPixels: SKViewPort.leftEdgePad * scale,
+            rightPixels: insets.right * scale
+        )
+    }
     
     @objc func handleDirectionTouch(_ sender: UIPanGestureRecognizer) {
         directionsViewController?.cancel()
@@ -586,9 +638,14 @@ final class SKMagView: SKView {
     }
     
     required init?(coder aDecoder: NSCoder) {
-        parentNode = SKSpriteNode(color: .cyan, size: size)
+        // parentNode used to default to cyan; that color shows through when the
+        // magnified cells don't fully cover the magView (which can happen now
+        // that cells are smaller due to safe-area insets). Black matches the
+        // game's background so empty areas read as "no content here" instead
+        // of a colored artifact.
+        parentNode = SKSpriteNode(color: .black, size: size)
         super.init(coder: aDecoder)
-        
+
         let styleWindow: () -> Void = {
             self.frame = CGRect(x: 0, y: 0, width: self.size.width, height: self.size.height)
             self.layer.borderColor = UIColor(red: 1, green: 1, blue: 1, alpha: 0.4).cgColor
@@ -597,22 +654,82 @@ final class SKMagView: SKView {
             self.layer.masksToBounds = true
             self.backgroundColor = .black
         }
-        
+
         var scene: SKScene {
             let scene = SKScene(size: self.size)
             scene.scaleMode = .aspectFit
+            scene.backgroundColor = .black // default SKScene bg is gray; we want black
             scene.addChild(self.parentNode)
             return scene
         }
-        
+
         styleWindow()
         presentScene(scene)
     }
     
     func showMagnifier(at point: CGPoint) {
         cells = cellsAtTouch(point: point)
-        center = CGPoint(x: point.x + size.width / 2 - offset.width, y: point.y - size.height / 2 + offset.height)
+        center = positionedCenter(forTouch: point)
         isHidden = false
+    }
+
+    /// The magnifier normally hovers above the touch. Near the top of the
+    /// screen that puts it off-canvas (especially on iPhone in landscape) — in
+    /// that case, slide it to the LEFT of the finger instead of flipping
+    /// below (which would put it directly under the touch). Always clamped to
+    /// the parent's safe area so it never sits under the iPhone notch /
+    /// dynamic island or off the leading edge.
+    private func positionedCenter(forTouch point: CGPoint) -> CGPoint {
+        let radius = size.width / 2
+        let parent = superview
+        let viewBounds = parent?.bounds ?? UIScreen.main.bounds
+        let insets = parent?.safeAreaInsets ?? .zero
+        let bounds = CGRect(
+            x: viewBounds.minX + insets.left,
+            y: viewBounds.minY + insets.top,
+            width: viewBounds.width - insets.left - insets.right,
+            height: viewBounds.height - insets.top - insets.bottom
+        )
+
+        // Default placement: above the touch (offset.height is negative).
+        var c = CGPoint(
+            x: point.x + size.width / 2 - offset.width,
+            y: point.y - size.height / 2 + offset.height
+        )
+
+        // If the default would clip off the top, move the magnifier to the
+        // LEFT of the finger rather than flipping below it (avoids the
+        // magnifier ending up under the user's finger).
+        //
+        // TWEAK ME: `leftFlipPadding` is the gap between the finger and the
+        // magnifier's right edge when the magnifier flips to the left. Bigger
+        // = magnifier sits further left of the finger.
+        if c.y - radius < bounds.minY {
+            let leftFlipPadding: CGFloat = 38
+            c.x = point.x - radius - leftFlipPadding
+            c.y = point.y
+        }
+
+        // Clamp horizontally so it doesn't spill past either side or under
+        // the notch. This is what enforces "can't go out of bounds toward
+        // the left" — if the finger is too close to the leading edge for
+        // the magnifier to fit beside it, we clamp it to the leading inset
+        // (the magnifier will partially overlap the finger, which is
+        // acceptable; staying visible is the priority).
+        if c.x - radius < bounds.minX {
+            c.x = bounds.minX + radius
+        } else if c.x + radius > bounds.maxX {
+            c.x = bounds.maxX - radius
+        }
+
+        // Final vertical clamp.
+        if c.y - radius < bounds.minY {
+            c.y = bounds.minY + radius
+        } else if c.y + radius > bounds.maxY {
+            c.y = bounds.maxY - radius
+        }
+
+        return c
     }
     
     func updateMagnifier(at point: CGPoint) {
@@ -632,7 +749,7 @@ final class SKMagView: SKView {
         let rows = 3 // opposite/flipped
         let cols = 2
         
-        var cells: [[Cell]] = {
+        let cells: [[Cell]] = {
             var cells = [[Cell]]()
             
             for x in -(rows)...rows {
@@ -667,8 +784,17 @@ final class SKMagView: SKView {
         
         var position: CGPoint {
             let screenScale = UIScreen.main.scale
-            let magnificationOffset = magnification + 1
-            
+            // Cells are stored in scene PIXELS but the magView's SKScene is in
+            // POINTS (110 logical units == 110 view points via aspectFit). That
+            // means placing a cell of size W pixels inside the magView's scene
+            // displays it W *points* wide — an effective zoom of `screenScale`.
+            // The pan-tracking factor must match that implicit zoom, otherwise
+            // the centered cell drifts off-center as the touch moves within
+            // a cell. Originally hardcoded to `magnification + 1 == 2`, which
+            // only happened to be correct on devices with @2x scale (iPad).
+            // On @3x devices (iPhone Pro/Max) it was 33% off. Use screenScale.
+            let magnificationOffset = screenScale
+
             // take the touch point and figure out how far off from 0,0 inside the node we are. Magical fudge of magoffset ensure we move smoothly from one cell to the next.
             let xMouseOffset = (point.x - (currentCellXY.x * (viewToMagnify.rogueScene.cells[0][0].size.width / screenScale))) * magnificationOffset
             let yMouseOffset = (point.y - (currentCellXY.y * (viewToMagnify.rogueScene.cells[0][0].size.height / screenScale))) * magnificationOffset

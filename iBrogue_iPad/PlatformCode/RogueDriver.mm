@@ -114,9 +114,11 @@ boolean pauseForMilliseconds(short milliseconds) {
 
 void nextKeyOrMouseEvent(rogueEvent *returnEvent, __unused boolean textInput, boolean colorsDance) {
 	short x, y;
-    float width = [[UIScreen mainScreen] bounds].size.width;
-    // Match the current cell layout: padded during gameplay, full height on title/menus.
+    // Match the current cell layout: bottom strip reserved during gameplay,
+    // and left/right insets reserved for the iPhone notch / dynamic island.
+    float width = skviewPort.effectiveWidthPoints;
     float height = skviewPort.effectiveHeightPoints;
+    float leftInset = skviewPort.leftInsetPoints;
     
     for(;;) {
         // we should be ok to block here. We don't seem to call pauseForMilli and this at the same time
@@ -156,7 +158,8 @@ void nextKeyOrMouseEvent(rogueEvent *returnEvent, __unused boolean textInput, bo
                         break;
                 }
                 
-                x = COLS * float(touch.location.x) / width;
+                float xInPlay = MAX(float(touch.location.x) - leftInset, 0.0f);
+                x = COLS * xInPlay / width;
                 y = ROWS * float(touch.location.y) / height;
                 
                 returnEvent->param1 = x;

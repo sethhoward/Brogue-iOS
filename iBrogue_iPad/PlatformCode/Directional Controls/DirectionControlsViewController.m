@@ -30,9 +30,22 @@ NSString *kDOWNRIGHT_key = @"n";
 
 #pragma mark -
 
+// "Two Fingers to Drag" hint shows on the first N launches then never again.
+static NSString * const kDragHintShownCountKey = @"DirectionControlsDragHintShownCount";
+static NSInteger const kDragHintMaxShows = 3;
+
 - (void)viewDidLoad {
     [super viewDidLoad];
-    [self showDraggableArea];
+
+    NSInteger shown = [[NSUserDefaults standardUserDefaults] integerForKey:kDragHintShownCountKey];
+    if (shown < kDragHintMaxShows) {
+        [self showDraggableArea];
+        [[NSUserDefaults standardUserDefaults] setInteger:shown + 1 forKey:kDragHintShownCountKey];
+    } else {
+        // Hint has been shown enough times. Keep the drag area invisible so
+        // touches still work, but no label/overlay.
+        self.dragAreaView.alpha = 0;
+    }
 }
 
 - (void)showDraggableArea {

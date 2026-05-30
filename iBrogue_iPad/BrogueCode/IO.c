@@ -520,6 +520,10 @@ void recordCurrentCreatureHealths() {
     }
 }
 
+// Set when the on-screen Explore button is tapped, so a single tap auto-explores
+// immediately instead of the desktop two-step (tap once to preview, tap again to go).
+static boolean exploreImmediately = false;
+
 // This is basically the main loop for the game.
 void mainInputLoop() {
     short originLoc[2], pathDestination[2], oldTargetLoc[2],
@@ -705,6 +709,13 @@ void mainInputLoop() {
                     doEvent = true;
                 }
             } else if (state.buttonChosen > -1) {
+                // A single tap on the on-screen Explore button should auto-explore
+                // immediately rather than just previewing the path. Keyboard 'x' (which
+                // arrives as KEYSTROKE) is unaffected.
+                if (theEvent.eventType == MOUSE_UP
+                    && buttons[state.buttonChosen].hotkey[0] == EXPLORE_KEY) {
+                    exploreImmediately = true;
+                }
                 theEvent.eventType = KEYSTROKE;
                 theEvent.param1 = buttons[state.buttonChosen].hotkey[0];
                 theEvent.param2 = 0;
@@ -2249,7 +2260,9 @@ void exploreKey(const boolean controlKey) {
     short **exploreMap;
     enum directions dir;
     boolean tooDark = false;
-    
+    boolean forceExplore = exploreImmediately;  // consume the one-shot
+    exploreImmediately = false;
+
     // fight any adjacent enemies first
     dir = adjacentFightingDir();
     if (dir == NO_DIRECTION) {
@@ -2291,7 +2304,8 @@ void exploreKey(const boolean controlKey) {
         message("It's too dark to explore!", false);
     } else if (x == player.xLoc && y == player.yLoc) {
         message("I see no path for further exploration.", false);
-    } else if (proposeOrConfirmLocation(finalX, finalY, "I see no path for further exploration.")) {
+    } else if (proposeOrConfirmLocation(finalX, finalY, "I see no path for further exploration.")
+               || forceExplore) {
         explore(controlKey ? 1 : 20); // Do the exploring until interrupted.
         hideCursor();
         exploreKey(controlKey);
