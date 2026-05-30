@@ -626,10 +626,20 @@ extension BrogueViewController {
 
 final class SKMagView: SKView {
     var viewToMagnify: SKViewPort?
-    // TODO: magic numbers
+
+    // Half-extents (cells out from the center) of the magnified block.
+    // `xHalf` is the horizontal axis (2*xHalf+1 cells wide), `yHalf` the
+    // vertical (2*yHalf+1 cells tall). The centering math in cellsAtTouch
+    // assumes xHalf == yHalf + 1, so preserve that relationship when tuning.
+    private let xHalf = 4 // 9 cells wide
+    private let yHalf = 3 // 7 cells tall
+
+    // The window diameter/offset are recomputed per-layout in cellsAtTouch from
+    // the live cell size and the half-extents above; these are just initial
+    // values until the first layout runs.
     private var size = CGSize(width: 110, height: 110)
     private var offset = CGSize(width: 55, height: -35)
-    private let parentNode: SKNode
+    private let parentNode: SKSpriteNode
     private var cells: [Cell]? {
         willSet {
             parentNode.removeAllChildren()
@@ -745,14 +755,30 @@ final class SKMagView: SKView {
         isHidden = true
         parentNode.removeAllChildren()
     }
+
+    /// Resize the (circular) magnifier window to `diameter` points, keeping it a
+    /// circle and re-centering the finger offset. The scene and backing sprite
+    /// are kept in sync so the 1px→1pt rendering (and thus the zoom) is
+    /// preserved. Cheap no-op when the diameter hasn't meaningfully changed.
+    private func resizeWindow(toDiameter diameter: CGFloat) {
+        guard diameter > 0, abs(diameter - size.width) > 0.5 else { return }
+        size = CGSize(width: diameter, height: diameter)
+        offset.width = diameter / 2            // keep the magnifier centered over the finger
+        bounds = CGRect(origin: .zero, size: size)
+        layer.cornerRadius = diameter / 2      // masksToBounds is already true → circle
+        scene?.size = size
+        parentNode.size = size
+    }
     
     private func cellsAtTouch(point: CGPoint) -> [Cell] {
         guard let viewToMagnify = viewToMagnify else { return [Cell]() }
        
         let magnification: CGFloat = 1.0
         let currentCellXY = getCellCoords(at: point, viewport: viewToMagnify)
-        let rows = 3 // opposite/flipped
-        let cols = 2
+        // Local aliases for the block half-extents (see xHalf/yHalf). `rows` is
+        // the x-axis, `cols` the y-axis — the names are flipped historically.
+        let rows = xHalf
+        let cols = yHalf
         
         let cells: [[Cell]] = {
             var cells = [[Cell]]()
@@ -779,7 +805,21 @@ final class SKMagView: SKView {
         }()
         
         let cellSize = cells[0][0].size
-        
+
+        // Size the circular window from the live cell size and the half-extents.
+        // cellSize is in scene PIXELS, which the magnifier renders 1:1 as points,
+        // so these products are in view points.
+        //
+        // Size to ONE FEWER cell than is built on each axis (2*n-1, not 2*n+1):
+        // the outer ring of built cells is overflow that keeps the circle fully
+        // covered as the content pans within a cell. Without it the backdrop
+        // shows through at the trailing edge and the touched cell drifts
+        // off-center. Taking the min of the two keeps it a circle with no black
+        // margins on either axis.
+        let visibleWidth = CGFloat(rows * 2 - 1) * cellSize.width
+        let visibleHeight = CGFloat(cols * 2 - 1) * cellSize.height
+        resizeWindow(toDiameter: min(visibleWidth, visibleHeight))
+
         // layout cells
         for x in 0...rows * 2 {
             for y in 0...cols * 2 {
@@ -801,10 +841,16 @@ final class SKMagView: SKView {
             let magnificationOffset = screenScale
 
             // take the touch point and figure out how far off from 0,0 inside the node we are. Magical fudge of magoffset ensure we move smoothly from one cell to the next.
-            let xMouseOffset = (point.x - (currentCellXY.x * (viewToMagnify.rogueScene.cells[0][0].size.width / screenScale))) * magnificationOffset
+            // Subtract the grid's left inset: currentCellXY came from getCellCoords,
+            // which measures from `point.x - leftInset`, so the cell's left edge in
+            // view points is `leftInset + currentCellXY.x * cellPtW`. Omitting it
+            // drifts the content left by leftInset*scale (an empty column on the
+            // right). The y-axis has no matching inset, so it's left as-is.
+            let leftInset = viewToMagnify.leftInsetPoints
+            let xMouseOffset = (point.x - leftInset - (currentCellXY.x * (viewToMagnify.rogueScene.cells[0][0].size.width / screenScale))) * magnificationOffset
             let yMouseOffset = (point.y - (currentCellXY.y * (viewToMagnify.rogueScene.cells[0][0].size.height / screenScale))) * magnificationOffset
             
-            // center cell is 3,2 and should be in the middle of the magnifying glass view. As touches move so does the view need to move to follow.
+            // center cell is at index (rows, cols) and should be in the middle of the magnifying glass view. As touches move so does the view need to move to follow.
             let xFinalOffset = ((CGFloat(rows) * cellSize.width - self.size.width/2) + cellSize.width/2) + xMouseOffset
             let yFinalOffset = ((CGFloat(rows - cols - 1) * cellSize.height - self.size.height / 2) + cellSize.height / 2) - yMouseOffset
             
