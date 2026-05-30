@@ -27,10 +27,11 @@ class SKViewPort: SKView {
     /// Read by RogueScene (cell layout), BrogueViewController, and RogueDriver (touch math).
     @objc public static let homeIndicatorPad: CGFloat = 15
 
-    /// Points reserved at the leading (left) edge during gameplay so the grid is
-    /// nudged in from the physical screen edge. The right edge already respects
-    /// the notch safe area; this shifts the whole grid right by this amount.
-    @objc public static let leftEdgePad: CGFloat = 10
+    /// Points to translate the whole gameplay grid to the right: the leading
+    /// edge is inset by this much, and the trailing (notch) safe-area
+    /// reservation is reduced by the same amount. Equal-and-opposite, so the
+    /// grid keeps its width and simply slides right by this amount.
+    @objc public static let gridRightShift: CGFloat = 15
 
     /// Height of the playable area in points, accounting for whether padding is currently
     /// applied. Used by touch→cell math in both Swift and Obj-C.

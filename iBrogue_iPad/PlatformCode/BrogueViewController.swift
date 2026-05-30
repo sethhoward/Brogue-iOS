@@ -248,11 +248,16 @@ final class BrogueViewController: UIViewController {
         // sits along the RIGHT edge of the screen. iOS reports symmetric
         // safe-area insets on both sides (~62pt each, including the bezel
         // safe area on the non-notch side), but we only want to reserve
-        // space on the actual-notch side; the left side extends edge-to-edge
-        // to maximize the play area.
+        // space on the actual-notch side.
+        //
+        // We then slide the whole grid right by `gridRightShift`: inset the
+        // left edge by that amount and reduce the right (notch) reservation by
+        // the same amount, so the grid keeps its width and pushes that far into
+        // the right safe area.
+        let shift = SKViewPort.gridRightShift
         skViewPort.rogueScene.setHorizontalEdgeInsets(
-            leftPixels: SKViewPort.leftEdgePad * scale,
-            rightPixels: insets.right * scale
+            leftPixels: shift * scale,
+            rightPixels: max(insets.right - shift, 0) * scale
         )
     }
     
