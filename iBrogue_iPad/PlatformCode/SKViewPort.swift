@@ -31,7 +31,7 @@ class SKViewPort: SKView {
     /// edge is inset by this much, and the trailing (notch) safe-area
     /// reservation is reduced by the same amount. Equal-and-opposite, so the
     /// grid keeps its width and simply slides right by this amount.
-    @objc public static let gridRightShift: CGFloat = 15
+    @objc public static let gridRightShift: CGFloat = 16
 
     /// Height of the playable area in points, accounting for whether padding is currently
     /// applied. Used by touch→cell math in both Swift and Obj-C.
