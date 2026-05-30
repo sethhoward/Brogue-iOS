@@ -43,11 +43,25 @@ extension CGSize {
     /// In scene pixels. Cells are shifted up by this amount so the bottom row
     /// sits above the home indicator gesture strip when padding is enabled.
     fileprivate let bottomPad: CGFloat
+    /// In scene pixels. Cells are inset from the left/right scene edges by
+    /// these amounts so they don't render under the iPhone notch / dynamic
+    /// island when the device is in landscape. Driven by safe-area insets.
+    fileprivate(set) var leftPadPixels: CGFloat = 0
+    fileprivate(set) var rightPadPixels: CGFloat = 0
     /// When true (default), cells render in [bottomPad, sceneHeight] leaving a black
     /// strip at the bottom for the home indicator. When false (title screen),
     /// cells fill the full scene height.
     @objc public var paddingEnabled: Bool = true {
         didSet { relayoutCells() }
+    }
+
+    /// Update the horizontal safe-area insets (in scene pixels). Triggers a
+    /// relayout so cells avoid the notched zones.
+    @objc public func setHorizontalEdgeInsets(leftPixels: CGFloat, rightPixels: CGFloat) {
+        guard leftPixels != leftPadPixels || rightPixels != rightPadPixels else { return }
+        leftPadPixels = leftPixels
+        rightPadPixels = rightPixels
+        relayoutCells()
     }
 
     fileprivate var fgTextures = [SKTexture]()
@@ -93,11 +107,17 @@ extension RogueScene {
     }
     
     override public func sceneDidLoad() {
+        let usableHeight = max(size.height - bottomPad, 0)
+        let usableWidth = max(size.width - leftPadPixels - rightPadPixels, 0)
+        cellSize = CGSize(
+            width: usableWidth / CGFloat(gridSize.cols),
+            height: usableHeight / CGFloat(gridSize.rows)
+        )
         for x in 0...gridSize.cols {
             var row = [Cell]()
             for y in 0...gridSize.rows {
                 let newCell = Cell(
-                    x: CGFloat(x) * cellSize.width,
+                    x: leftPadPixels + CGFloat(x) * cellSize.width,
                     y: bottomPad + CGFloat(gridSize.rows - y - 1) * cellSize.height,
                     size: CGSize(width: cellSize.width, height: cellSize.height)
                 )
@@ -108,10 +128,17 @@ extension RogueScene {
     }
 
     private func relayoutCells() {
+        // Both the bottom (home-indicator) pad and the left/right (notch) pads
+        // are only applied during gameplay. On title / menu screens the grid
+        // fills the full scene.
+        let effectiveLeft: CGFloat = paddingEnabled ? leftPadPixels : 0
+        let effectiveRight: CGFloat = paddingEnabled ? rightPadPixels : 0
         let usableHeight = paddingEnabled ? size.height - bottomPad : size.height
+        let usableWidth = max(size.width - effectiveLeft - effectiveRight, 0)
         let yOffset: CGFloat = paddingEnabled ? bottomPad : 0
+        let xOffset: CGFloat = effectiveLeft
         cellSize = CGSize(
-            width: size.width / CGFloat(gridSize.cols),
+            width: usableWidth / CGFloat(gridSize.cols),
             height: usableHeight / CGFloat(gridSize.rows)
         )
         for x in 0..<cells.count {
@@ -120,7 +147,7 @@ extension RogueScene {
                 let cell = column[y]
                 cell.size = cellSize
                 cell.position = CGPoint(
-                    x: CGFloat(x) * cellSize.width,
+                    x: xOffset + CGFloat(x) * cellSize.width,
                     y: yOffset + CGFloat(gridSize.rows - y - 1) * cellSize.height
                 )
             }

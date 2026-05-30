@@ -25,13 +25,40 @@ class SKViewPort: SKView {
     /// Points reserved at the bottom of the view so rendered text doesn't overlap
     /// the iPad home indicator / system gesture strip.
     /// Read by RogueScene (cell layout), BrogueViewController, and RogueDriver (touch math).
-    @objc public static let homeIndicatorPad: CGFloat = 30
+    @objc public static let homeIndicatorPad: CGFloat = 15
+
+    /// Points reserved at the leading (left) edge during gameplay so the grid is
+    /// nudged in from the physical screen edge. The right edge already respects
+    /// the notch safe area; this shifts the whole grid right by this amount.
+    @objc public static let leftEdgePad: CGFloat = 10
 
     /// Height of the playable area in points, accounting for whether padding is currently
     /// applied. Used by touch→cell math in both Swift and Obj-C.
     @objc public var effectiveHeightPoints: CGFloat {
         let h = UIScreen.main.bounds.size.height
         return rogueScene.paddingEnabled ? h - SKViewPort.homeIndicatorPad : h
+    }
+
+    /// Width of the playable area in points. Honors the iPhone notch /
+    /// dynamic-island safe-area insets, but only when padding is enabled
+    /// (i.e. during gameplay — title and menu screens fill the full width).
+    @objc public var effectiveWidthPoints: CGFloat {
+        return UIScreen.main.bounds.size.width - leftInsetPoints - rightInsetPoints
+    }
+
+    /// Leading inset in points. Returns 0 outside of gameplay so the title /
+    /// menu screens render edge-to-edge.
+    @objc public var leftInsetPoints: CGFloat {
+        guard rogueScene.paddingEnabled else { return 0 }
+        let scale = UIScreen.main.scale
+        return rogueScene.leftPadPixels / scale
+    }
+
+    /// Trailing inset in points. Returns 0 outside of gameplay.
+    @objc public var rightInsetPoints: CGFloat {
+        guard rogueScene.paddingEnabled else { return 0 }
+        let scale = UIScreen.main.scale
+        return rogueScene.rightPadPixels / scale
     }
 
     var rogueScene: RogueScene!
