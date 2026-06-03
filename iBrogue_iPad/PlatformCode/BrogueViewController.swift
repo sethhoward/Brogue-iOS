@@ -152,21 +152,48 @@ final class BrogueViewController: UIViewController {
     fileprivate var inputRequestString: String?
 
     // ── Safe-area action buttons ─────────────────────────────────────────
-    // A small column of buttons that live in the iPhone notch / dynamic-island
-    // safe-area strip (the right edge in our landscape-left lock). Each injects
-    // a Brogue keystroke. Hardcoded for now; swap `actionButtonSpecs` for a
-    // UserDefaults-loaded list to make these user-configurable later.
-    private struct ActionButtonSpec {
-        let label: String   // glyph shown on the button
-        let key: UInt8      // Brogue keystroke injected on tap
+    // A small column of buttons in the iPhone notch / dynamic-island safe-area
+    // strip (the right edge in our landscape-left lock). Tapping a button injects
+    // its bound Brogue keystroke; long-pressing opens a menu to rebind it (saved
+    // to UserDefaults). The button face is always the literal bound key character.
+
+    /// A bindable Brogue command: the key it sends, a human-readable name (from
+    /// the engine's help screen), and the group it belongs to.
+    private struct Command {
+        let key: UInt8
+        let name: String
+        let category: String
     }
 
-    private let actionButtonSpecs: [ActionButtonSpec] = [
-        ActionButtonSpec(label: "A", key: "A".ascii),   // autoplay level
-        ActionButtonSpec(label: "X", key: "x".ascii),   // autoexplore
-        ActionButtonSpec(label: "S", key: "s".ascii),   // search for secrets
-        ActionButtonSpec(label: "R", key: "Z".ascii),   // rest until better
+    /// Commands a side button may be bound to. Names mirror printHelpScreen().
+    private static let commandCatalog: [Command] = [
+        // Stairs & Travel
+        Command(key: ">".ascii, name: "Descend",           category: "Stairs & Travel"),
+        Command(key: "<".ascii, name: "Ascend",            category: "Stairs & Travel"),
+        Command(key: "x".ascii, name: "Auto-explore",      category: "Stairs & Travel"),
+        // Resting & Waiting
+        Command(key: "z".ascii, name: "Rest once",         category: "Resting & Waiting"),
+        Command(key: "Z".ascii, name: "Rest until better", category: "Resting & Waiting"),
+        Command(key: "s".ascii, name: "Search",            category: "Resting & Waiting"),
+        // Item Actions
+        Command(key: "e".ascii, name: "Equip",             category: "Item Actions"),
+        Command(key: "r".ascii, name: "Remove",            category: "Item Actions"),
+        Command(key: "a".ascii, name: "Apply / use",       category: "Item Actions"),
+        Command(key: "t".ascii, name: "Throw",             category: "Item Actions"),
+        Command(key: "d".ascii, name: "Drop",              category: "Item Actions"),
+        Command(key: "c".ascii, name: "Call",              category: "Item Actions"),
+        Command(key: "R".ascii, name: "Relabel",           category: "Item Actions"),
     ]
+
+    /// Section order for the rebind menu.
+    private static let commandCategoryOrder = ["Stairs & Travel", "Resting & Waiting", "Item Actions"]
+
+    /// Default key per slot (top→bottom): throw, auto-explore, search, rest-until-better.
+    private static let defaultSideButtonKeys: [UInt8] = ["t".ascii, "x".ascii, "s".ascii, "Z".ascii]
+    private static let sideButtonKeysDefaultsKey = "sideButtonKeys"
+
+    /// Current key bound to each of the four slots; persisted to UserDefaults.
+    private var sideButtonKeys: [UInt8] = BrogueViewController.loadSideButtonKeys()
 
     private var actionButtons: [UIButton] = []
 
@@ -390,31 +417,42 @@ final class BrogueViewController: UIViewController {
     /// until `applyNotchInsets` positions them and `updateActionButtonVisibility`
     /// reveals them for cutout devices during gameplay.
     private func setupActionButtons() {
-        actionButtons = actionButtonSpecs.map { spec in
+        actionButtons = sideButtonKeys.indices.map { slot in
             let button = UIButton(type: .custom)
-            button.setTitle(spec.label, for: .normal)
             // Soft off-white to echo Brogue's menu text rather than a stark #FFF
             // (a crisp system font at pure white reads much harsher than the
             // game's anti-aliased bitmap font does).
-            button.setTitleColor(UIColor(white: 0.9, alpha: 1.0), for: .normal)
+            button.setTitleColor(UIColor(white: 0.8, alpha: 1.0), for: .normal)
             button.titleLabel?.font = .systemFont(ofSize: 22, weight: .semibold)
             button.backgroundColor = UIColor.black.withAlphaComponent(0.35)
             button.layer.cornerRadius = 8
             // Translucent gray border — Brogue's `gray` is {50,50,50} ≈ 0.5 white.
             button.layer.borderColor = UIColor(white: 0.5, alpha: 0.6).cgColor
             button.layer.borderWidth = 1
-            // Stash the keystroke in the tag so one handler serves every button.
-            button.tag = Int(spec.key)
+            // Tag holds the slot index; the bound key lives in sideButtonKeys[slot].
+            button.tag = slot
             button.addTarget(self, action: #selector(actionButtonTapped(_:)), for: .touchUpInside)
+            // Long-press opens the rebind menu (tap still fires the key).
+            button.addInteraction(UIContextMenuInteraction(delegate: self))
             button.isHidden = true
             view.addSubview(button)
             return button
         }
+        refreshActionButtonTitles()
+    }
+
+    /// Sets each button's face to the literal character of its bound key.
+    private func refreshActionButtonTitles() {
+        for (slot, button) in actionButtons.enumerated() where slot < sideButtonKeys.count {
+            button.setTitle(String(UnicodeScalar(sideButtonKeys[slot])), for: .normal)
+        }
     }
 
     @objc private func actionButtonTapped(_ sender: UIButton) {
+        let slot = sender.tag
+        guard slot >= 0, slot < sideButtonKeys.count else { return }
         actionButtonHaptics.impactOccurred()
-        addKeyEvent(event: UInt8(sender.tag))
+        addKeyEvent(event: sideButtonKeys[slot])
     }
 
     /// Lays the buttons out along the trailing (cutout) edge: the first half of
@@ -492,6 +530,69 @@ final class BrogueViewController: UIViewController {
     
     @objc private func playBrogue() {
         rogueMain()
+    }
+}
+
+// MARK: - Side-button rebinding (long-press menu + persistence)
+
+extension BrogueViewController: UIContextMenuInteractionDelegate {
+    func contextMenuInteraction(_ interaction: UIContextMenuInteraction,
+                                configurationForMenuAtLocation location: CGPoint) -> UIContextMenuConfiguration? {
+        guard let button = interaction.view as? UIButton,
+              let slot = actionButtons.firstIndex(of: button) else {
+            return nil
+        }
+        return UIContextMenuConfiguration(identifier: nil, previewProvider: nil) { [weak self] _ in
+            self?.rebindMenu(forSlot: slot)
+        }
+    }
+
+    /// Sectioned menu of bindable commands for one side-button slot. Each row
+    /// shows the human-readable name and the key; the current binding is checked.
+    private func rebindMenu(forSlot slot: Int) -> UIMenu {
+        let currentKey = sideButtonKeys[slot]
+        let sections = BrogueViewController.commandCategoryOrder.map { category -> UIMenu in
+            let actions = BrogueViewController.commandCatalog
+                .filter { $0.category == category }
+                .map { command -> UIAction in
+                    let keyChar = String(UnicodeScalar(command.key))
+                    let action = UIAction(title: "\(command.name) (\(keyChar))") { [weak self] _ in
+                        self?.bindSideButton(slot: slot, to: command.key)
+                    }
+                    action.state = (command.key == currentKey) ? .on : .off
+                    return action
+                }
+            return UIMenu(title: category, options: .displayInline, children: actions)
+        }
+        return UIMenu(title: "Rebind button", children: sections)
+    }
+
+    private func bindSideButton(slot: Int, to key: UInt8) {
+        guard slot >= 0, slot < sideButtonKeys.count else { return }
+        sideButtonKeys[slot] = key
+        saveSideButtonKeys()
+        refreshActionButtonTitles()
+    }
+
+    /// Loads the four bound keys from UserDefaults, validating each against the
+    /// catalog and falling back to the slot default for anything missing/invalid.
+    fileprivate static func loadSideButtonKeys() -> [UInt8] {
+        let valid = Set(commandCatalog.map { $0.key })
+        var keys = defaultSideButtonKeys
+        if let stored = UserDefaults.standard.array(forKey: sideButtonKeysDefaultsKey) as? [Int] {
+            for slot in keys.indices where slot < stored.count {
+                let candidate = UInt8(truncatingIfNeeded: stored[slot])
+                if valid.contains(candidate) {
+                    keys[slot] = candidate
+                }
+            }
+        }
+        return keys
+    }
+
+    private func saveSideButtonKeys() {
+        UserDefaults.standard.set(sideButtonKeys.map(Int.init),
+                                  forKey: BrogueViewController.sideButtonKeysDefaultsKey)
     }
 }
  
