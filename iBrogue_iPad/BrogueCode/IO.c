@@ -421,6 +421,12 @@ void initializeMenuButtons(buttonState *state, brogueButton buttons[5]) {
         buttons[i].y = ROWS - 1;
         buttons[i].flags |= B_WIDE_CLICK_AREA;
         buttons[i].flags &= ~B_KEYPRESS_HIGHLIGHT;
+        // iPhone: extend the tap area one extra row upward (2 rows above the
+        // bar) so the small bottom-bar buttons are easier to hit. iPad keeps
+        // the default 2-cell (wide) area.
+        if (PHONE_LAYOUT) {
+            buttons[i].flags |= B_TALL_CLICK_AREA;
+        }
     }
     
     buttonCount = 0;
