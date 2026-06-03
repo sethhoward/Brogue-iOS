@@ -204,6 +204,12 @@ final class BrogueViewController: UIViewController {
     /// actively moving around the dungeon, false on menus/dialogs/title.
     private var gameplayControlsActive = false
 
+    /// One-time first-run hint pointing at a side button to explain long-press
+    /// rebinding. The flag persists across launches; `keybindHintInFlight`
+    /// guards the short delayed-present window.
+    private static let keybindHintShownKey = "didShowKeybindHint"
+    private var keybindHintInFlight = false
+
     @IBOutlet var skViewPort: SKViewPort!
     @IBOutlet fileprivate weak var magView: SKMagView!
     @IBOutlet fileprivate weak var escButton: UIButton! {
@@ -215,7 +221,12 @@ final class BrogueViewController: UIViewController {
     @IBOutlet fileprivate weak var showInventoryButton: UIButton!
     @IBOutlet fileprivate weak var leaderBoardButton: UIButton!
     @IBOutlet fileprivate weak var seedButton: UIButton!
-   
+
+    /// Title-screen-only button (created in code, no art asset) that opens the
+    /// save/replay file manager. Visibility tracks `lastBrogueGameEvent` just like
+    /// the leaderboard/seed overlays.
+    private var manageFilesButton: UIButton!
+
     @IBOutlet weak var dContainerView: UIView!
     @objc var seedKeyDown = false
     @objc var lastBrogueGameEvent: BrogueGameEvent = .showTitle {
@@ -229,10 +240,12 @@ final class BrogueViewController: UIViewController {
                     self.showInventoryButton.isHidden = true
                     self.leaderBoardButton.isHidden = false
                     self.seedButton.isHidden = false
+                    self.manageFilesButton?.isHidden = false
                     self.escButton.isHidden = true
                 case .startNewGame, .openGame, .beginOpenGame:
                     self.leaderBoardButton.isHidden = true
                     self.seedButton.isHidden = true
+                    self.manageFilesButton?.isHidden = true
                     self.seedKeyDown = false
                 case .messagePlayerHasDied:
                     self.showInventoryButton.isHidden = false
@@ -303,6 +316,7 @@ final class BrogueViewController: UIViewController {
 
         setupHardwareKeyboardObserver()
         setupActionButtons()
+        setupManageFilesButton()
     }
 
     // ─────────────────────────────────────────────────────────────────────
@@ -441,6 +455,33 @@ final class BrogueViewController: UIViewController {
         refreshActionButtonTitles()
     }
 
+    /// Builds the title-screen file-manager button in code and pins it above the
+    /// seed button, joining the other title overlays. It starts visible because
+    /// the app always launches on the title screen; `lastBrogueGameEvent` hides it
+    /// once a game starts.
+    private func setupManageFilesButton() {
+        let button = UIButton(type: .system)
+        let symbolConfig = UIImage.SymbolConfiguration(pointSize: 34, weight: .regular)
+        button.setImage(UIImage(systemName: "tray.full.fill", withConfiguration: symbolConfig), for: .normal)
+        // Match the off-white the side buttons use to echo Brogue's menu text.
+        button.tintColor = UIColor(white: 0.8, alpha: 1.0)
+        button.translatesAutoresizingMaskIntoConstraints = false
+        button.addTarget(self, action: #selector(manageFilesButtonPressed), for: .touchUpInside)
+        view.addSubview(button)
+        NSLayoutConstraint.activate([
+            button.centerXAnchor.constraint(equalTo: seedButton.centerXAnchor),
+            button.bottomAnchor.constraint(equalTo: seedButton.topAnchor, constant: 26),
+            button.widthAnchor.constraint(equalToConstant: 60),
+            button.heightAnchor.constraint(equalToConstant: 60),
+        ])
+        manageFilesButton = button
+    }
+
+    @objc private func manageFilesButtonPressed() {
+        let nav = UINavigationController(rootViewController: FileManagementViewController())
+        present(nav, animated: true)
+    }
+
     /// Sets each button's face to the literal character of its bound key.
     private func refreshActionButtonTitles() {
         for (slot, button) in actionButtons.enumerated() where slot < sideButtonKeys.count {
@@ -506,6 +547,8 @@ final class BrogueViewController: UIViewController {
         // Warm up the haptic engine so the first tap fires without latency.
         if visible {
             actionButtonHaptics.prepare()
+            // First time the buttons appear in a game, explain long-press rebinding.
+            maybeShowKeybindHint()
         }
     }
 
@@ -593,6 +636,79 @@ extension BrogueViewController: UIContextMenuInteractionDelegate {
     private func saveSideButtonKeys() {
         UserDefaults.standard.set(sideButtonKeys.map(Int.init),
                                   forKey: BrogueViewController.sideButtonKeysDefaultsKey)
+    }
+}
+
+// MARK: - First-run keybind hint
+
+extension BrogueViewController: UIPopoverPresentationControllerDelegate {
+    /// Shows a one-time popover off the top side button explaining long-press
+    /// rebinding, the first time the buttons appear during gameplay. No-op once
+    /// shown, on non-cutout devices (buttons hidden), or if we can't present.
+    fileprivate func maybeShowKeybindHint() {
+        guard !UserDefaults.standard.bool(forKey: Self.keybindHintShownKey),
+              !keybindHintInFlight,
+              view.window != nil,
+              presentedViewController == nil,
+              let anchor = actionButtons.first, !anchor.isHidden else {
+            return
+        }
+        keybindHintInFlight = true
+        // Brief delay so it appears after the game screen settles, not instantly.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in
+            guard let self = self else { return }
+            guard self.view.window != nil,
+                  self.presentedViewController == nil,
+                  let anchor = self.actionButtons.first, !anchor.isHidden else {
+                self.keybindHintInFlight = false   // retry the next time the buttons show
+                return
+            }
+            UserDefaults.standard.set(true, forKey: Self.keybindHintShownKey)
+            self.presentKeybindHint(from: anchor)
+        }
+    }
+
+    private func presentKeybindHint(from anchor: UIView) {
+        let hint = UIViewController()
+        hint.modalPresentationStyle = .popover
+
+        let label = UILabel()
+        label.translatesAutoresizingMaskIntoConstraints = false
+        label.text = "Tip: long-press a button to change which command it triggers."
+        label.numberOfLines = 0
+        label.font = .preferredFont(forTextStyle: .subheadline)
+        label.textColor = .label
+        hint.view.addSubview(label)
+
+        let pad: CGFloat = 14
+        NSLayoutConstraint.activate([
+            label.topAnchor.constraint(equalTo: hint.view.topAnchor, constant: pad),
+            label.bottomAnchor.constraint(equalTo: hint.view.bottomAnchor, constant: -pad),
+            label.leadingAnchor.constraint(equalTo: hint.view.leadingAnchor, constant: pad),
+            label.trailingAnchor.constraint(equalTo: hint.view.trailingAnchor, constant: -pad),
+        ])
+
+        let width: CGFloat = 230
+        let textHeight = label.sizeThatFits(CGSize(width: width - pad * 2,
+                                                   height: .greatestFiniteMagnitude)).height
+        hint.preferredContentSize = CGSize(width: width, height: ceil(textHeight) + pad * 2)
+
+        if let pop = hint.popoverPresentationController {
+            pop.delegate = self
+            pop.sourceView = anchor
+            pop.sourceRect = anchor.bounds
+            // Buttons hug the trailing edge, so the popover sits to their left
+            // with the arrow pointing right at the button.
+            pop.permittedArrowDirections = .right
+        }
+        present(hint, animated: true)
+        keybindHintInFlight = false
+    }
+
+    // Keep it a popover on iPhone rather than auto-adapting to a full-screen sheet.
+    func adaptivePresentationStyle(for controller: UIPresentationController,
+                                   traitCollection: UITraitCollection) -> UIModalPresentationStyle {
+        return .none
     }
 }
  
