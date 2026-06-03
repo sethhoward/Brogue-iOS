@@ -244,6 +244,10 @@ final class BrogueViewController: UIViewController {
         // TODO: clean this up
         RogueDriver.sharedInstance(with: skViewPort, viewController: self)
 
+        // Opt the C engine into iPhone-only layout tweaks (e.g. the taller
+        // tap area for the bottom button bar). iPad keeps default behavior.
+        setPhoneLayout(UIDevice.current.userInterfaceIdiom == .phone ? 1 : 0)
+
         let thread = Thread(target: self, selector: #selector(BrogueViewController.playBrogue), object: nil)
         thread.stackSize = 400 * 8192
         thread.start()
@@ -643,7 +647,20 @@ extension BrogueViewController {
     }
     
     private func canShowMagnifier(at point: CGPoint) -> Bool {
-        return lastBrogueGameEvent.canShowMagnifyingGlass && pointIsInPlayArea(point: point)
+        guard lastBrogueGameEvent.canShowMagnifyingGlass, pointIsInPlayArea(point: point) else {
+            return false
+        }
+        // iPhone: the bottom dungeon row (window row 31) doubles as the bottom
+        // button bar's extended 3-cell tap area (see B_TALL_CLICK_AREA in
+        // BrogueCode/IOS_MODIFICATIONS.md). Suppress the magnifier there so it
+        // doesn't pop up over the map when the player is aiming for a button.
+        if UIDevice.current.userInterfaceIdiom == .phone {
+            let cell = getCellCoords(at: point, viewport: skViewPort)
+            if cell.y >= 31 {
+                return false
+            }
+        }
+        return true
     }
     
     fileprivate func showMagnifier(at point: CGPoint) {

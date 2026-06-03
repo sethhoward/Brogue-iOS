@@ -207,7 +207,10 @@ short processButtonInput(buttonState *state, boolean *canceled, rogueEvent *even
 		for (i=0; i < state->buttonCount; i++) {
 			if ((state->buttons[i].flags & B_DRAW)
 				&& (state->buttons[i].flags & B_ENABLED)
-				&& (state->buttons[i].y == y || ((state->buttons[i].flags & B_WIDE_CLICK_AREA) && abs(state->buttons[i].y - y) <= 1))
+				&& (state->buttons[i].y == y
+					|| ((state->buttons[i].flags & B_WIDE_CLICK_AREA) && abs(state->buttons[i].y - y) <= 1)
+					|| ((state->buttons[i].flags & B_TALL_CLICK_AREA)
+						&& (state->buttons[i].y - y) >= 0 && (state->buttons[i].y - y) <= 2))
 				&& x >= state->buttons[i].x
 				&& x < state->buttons[i].x + strLenWithoutEscapes(state->buttons[i].text)) {
 				

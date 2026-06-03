@@ -51,6 +51,12 @@ void setKeyboardLabelsEnabled(boolean enabled) {
     KEYBOARD_LABELS = enabled;
 }
 
+boolean PHONE_LAYOUT = false;
+
+void setPhoneLayout(boolean enabled) {
+    PHONE_LAYOUT = enabled;
+}
+
 char displayedMessage[MESSAGE_LINES][COLS*2];
 boolean messageConfirmed[MESSAGE_LINES];
 char combatText[COLS * 2];

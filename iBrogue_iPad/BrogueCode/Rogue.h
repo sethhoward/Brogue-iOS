@@ -90,6 +90,11 @@
 extern boolean KEYBOARD_LABELS;
 void setKeyboardLabelsEnabled(boolean enabled);
 
+// Runtime flag: true on iPhone. Set from the Swift layer via setPhoneLayout().
+// Used to opt iPhone-only layout tweaks into the engine without #ifdefs.
+extern boolean PHONE_LAYOUT;
+void setPhoneLayout(boolean enabled);
+
 #define Fl(N)                    (1 << (N))
 #define FP_BASE 16 // Don't change this without recalculating all of the power tables throughout the code!
 #define FP_FACTOR (1LL << FP_BASE)
@@ -2563,6 +2568,7 @@ enum BUTTON_FLAGS {
     B_HOVER_ENABLED            = Fl(3),
     B_WIDE_CLICK_AREA        = Fl(4),
     B_KEYPRESS_HIGHLIGHT    = Fl(5),
+    B_TALL_CLICK_AREA       = Fl(6),    // iPhone: extend the click area 2 rows upward
 };
 
 typedef struct buttonState {
