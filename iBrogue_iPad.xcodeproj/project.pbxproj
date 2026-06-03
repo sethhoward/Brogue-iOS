@@ -70,6 +70,7 @@
 		ECBE68A91EC0D4C600E9F366 /* Cell.swift in Sources */ = {isa = PBXBuildFile; fileRef = ECBE68A81EC0D4C600E9F366 /* Cell.swift */; };
 		ECBE68AB1EC0DB1800E9F366 /* SKViewPort.swift in Sources */ = {isa = PBXBuildFile; fileRef = ECBE68AA1EC0DB1800E9F366 /* SKViewPort.swift */; };
 		ECBE68AD1EC0E1C600E9F366 /* BrogueViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = ECBE68AC1EC0E1C600E9F366 /* BrogueViewController.swift */; };
+		ED0000000000000000000F01 /* FileManagementViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = ED0000000000000000000F02 /* FileManagementViewController.swift */; };
 		ECBE68AE1EC0E1C700E9F366 /* GameCenter.swift in Sources */ = {isa = PBXBuildFile; fileRef = ECBE68AF1EC0E1C700E9F366 /* GameCenter.swift */; };
 		ECBE68B11EC0E1C800E9F366 /* SceneDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = ECBE68B21EC0E1C800E9F366 /* SceneDelegate.swift */; };
 		ECBE68B31EC0E1C900E9F366 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = ECBE68B41EC0E1C900E9F366 /* ContentView.swift */; };
@@ -156,6 +157,7 @@
 		ECBE68A81EC0D4C600E9F366 /* Cell.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = Cell.swift; sourceTree = "<group>"; };
 		ECBE68AA1EC0DB1800E9F366 /* SKViewPort.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = SKViewPort.swift; sourceTree = "<group>"; };
 		ECBE68AC1EC0E1C600E9F366 /* BrogueViewController.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = BrogueViewController.swift; sourceTree = "<group>"; };
+		ED0000000000000000000F02 /* FileManagementViewController.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = FileManagementViewController.swift; sourceTree = "<group>"; };
 		ECBE68AF1EC0E1C700E9F366 /* GameCenter.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = GameCenter.swift; sourceTree = "<group>"; };
 		ECBE68B01EC0E1C700E9F366 /* iBrogue_iPad.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = iBrogue_iPad.entitlements; sourceTree = "<group>"; };
 		ECBE68B21EC0E1C800E9F366 /* SceneDelegate.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = SceneDelegate.swift; sourceTree = "<group>"; };
@@ -279,6 +281,7 @@
 				ECBE68A51EC0D45200E9F366 /* iBrogue_iPad-Bridging-Header.h */,
 				ECBE68AA1EC0DB1800E9F366 /* SKViewPort.swift */,
 				ECBE68AC1EC0E1C600E9F366 /* BrogueViewController.swift */,
+				ED0000000000000000000F02 /* FileManagementViewController.swift */,
 				ECBE68AF1EC0E1C700E9F366 /* GameCenter.swift */,
 				ECBE68B41EC0E1C900E9F366 /* ContentView.swift */,
 			);
@@ -462,6 +465,7 @@
 				C57A966616D7EB5500C233F1 /* Buttons.c in Sources */,
 				C57A966716D7EB5500C233F1 /* Combat.c in Sources */,
 				ECBE68AD1EC0E1C600E9F366 /* BrogueViewController.swift in Sources */,
+				ED0000000000000000000F01 /* FileManagementViewController.swift in Sources */,
 				ECBE68AE1EC0E1C700E9F366 /* GameCenter.swift in Sources */,
 				ECBE68B11EC0E1C800E9F366 /* SceneDelegate.swift in Sources */,
 				ECBE68B31EC0E1C900E9F366 /* ContentView.swift in Sources */,
@@ -620,7 +624,7 @@
 				CODE_SIGN_ENTITLEMENTS = iBrogue_iPad/iBrogue_iPad.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				"CODE_SIGN_IDENTITY[sdk=iphoneos*]" = "iPhone Developer";
-				CURRENT_PROJECT_VERSION = 0;
+				CURRENT_PROJECT_VERSION = 1;
 				GCC_C_LANGUAGE_STANDARD = "compiler-default";
 				GCC_PRECOMPILE_PREFIX_HEADER = YES;
 				GCC_PREFIX_HEADER = "iBrogue_iPad/iBrogue_iPad-Prefix.pch";
@@ -663,7 +667,7 @@
 				CODE_SIGN_ENTITLEMENTS = iBrogue_iPad/iBrogue_iPad.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Distribution";
 				"CODE_SIGN_IDENTITY[sdk=iphoneos*]" = "iPhone Developer";
-				CURRENT_PROJECT_VERSION = 0;
+				CURRENT_PROJECT_VERSION = 1;
 				GCC_C_LANGUAGE_STANDARD = "compiler-default";
 				GCC_PRECOMPILE_PREFIX_HEADER = YES;
 				GCC_PREFIX_HEADER = "iBrogue_iPad/iBrogue_iPad-Prefix.pch";
