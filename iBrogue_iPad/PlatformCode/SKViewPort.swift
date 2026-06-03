@@ -25,7 +25,7 @@ class SKViewPort: SKView {
     /// Points reserved at the bottom of the view so rendered text doesn't overlap
     /// the iPad home indicator / system gesture strip.
     /// Read by RogueScene (cell layout), BrogueViewController, and RogueDriver (touch math).
-    @objc public static let homeIndicatorPad: CGFloat = 15
+    @objc public static let homeIndicatorPad: CGFloat = 0
 
     /// Points to translate the whole gameplay grid to the right: the leading
     /// edge is inset by this much, and the trailing (notch) safe-area

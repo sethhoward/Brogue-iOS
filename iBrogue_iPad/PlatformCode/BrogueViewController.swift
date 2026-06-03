@@ -39,6 +39,54 @@ private func synchronized<T>(_ body: () throws -> T) rethrows -> T {
 fileprivate let COLS = 100
 fileprivate let ROWS = 34
 
+// ─────────────────────────────────────────────────────────────────────────
+// Front-display cutout classification.
+//
+// iOS exposes NO public API for "is this a notch or a Dynamic Island."
+// safeAreaInsets can tell you a cutout EXISTS, but the notch and island
+// top/side insets overlap too much to distinguish reliably. The only
+// dependable signal is the hardware model identifier matched against the
+// known Dynamic Island roster.
+// ─────────────────────────────────────────────────────────────────────────
+enum DisplayCutout {
+    case none
+    case notch
+    case dynamicIsland
+}
+
+extension UIDevice {
+    /// Raw hardware model id, e.g. "iPhone16,1". On the simulator `uname`
+    /// returns the host arch, so we read the env var Apple injects instead.
+    var modelIdentifier: String {
+        #if targetEnvironment(simulator)
+        return ProcessInfo.processInfo.environment["SIMULATOR_MODEL_IDENTIFIER"] ?? "unknown"
+        #else
+        var sysinfo = utsname()
+        uname(&sysinfo)
+        return withUnsafeBytes(of: &sysinfo.machine) { raw in
+            let bytes = raw.prefix { $0 != 0 }
+            return String(decoding: bytes, as: UTF8.self)
+        }
+        #endif
+    }
+
+    /// Every iPhone shipped with a Dynamic Island. MUST be extended as Apple
+    /// releases new models — an island device missing from this set degrades
+    /// gracefully to `.notch` (it still reserves cutout space, just labeled
+    /// wrong). Note iPhone 16e (iPhone17,5) has a NOTCH, not an island, and is
+    /// deliberately absent.
+    var hasDynamicIsland: Bool {
+        let islandModels: Set<String> = [
+            "iPhone15,2", "iPhone15,3",   // 14 Pro / 14 Pro Max
+            "iPhone15,4", "iPhone15,5",   // 15 / 15 Plus
+            "iPhone16,1", "iPhone16,2",   // 15 Pro / 15 Pro Max
+            "iPhone17,3", "iPhone17,4",   // 16 / 16 Plus
+            "iPhone17,1", "iPhone17,2",   // 16 Pro / 16 Pro Max
+        ]
+        return islandModels.contains(modelIdentifier)
+    }
+}
+
 fileprivate func getCellCoords(at point: CGPoint, viewport: SKViewPort?) -> CGPoint {
     let screenH = UIScreen.main.bounds.size.height
     let screenW = UIScreen.main.bounds.size.width
@@ -102,7 +150,33 @@ final class BrogueViewController: UIViewController {
     fileprivate var keyEvents = [UInt8]()
     fileprivate var magnifierTimer: Timer?
     fileprivate var inputRequestString: String?
-    
+
+    // ── Safe-area action buttons ─────────────────────────────────────────
+    // A small column of buttons that live in the iPhone notch / dynamic-island
+    // safe-area strip (the right edge in our landscape-left lock). Each injects
+    // a Brogue keystroke. Hardcoded for now; swap `actionButtonSpecs` for a
+    // UserDefaults-loaded list to make these user-configurable later.
+    private struct ActionButtonSpec {
+        let label: String   // glyph shown on the button
+        let key: UInt8      // Brogue keystroke injected on tap
+    }
+
+    private let actionButtonSpecs: [ActionButtonSpec] = [
+        ActionButtonSpec(label: "A", key: "A".ascii),   // autoplay level
+        ActionButtonSpec(label: "X", key: "x".ascii),   // autoexplore
+        ActionButtonSpec(label: "S", key: "s".ascii),   // search for secrets
+        ActionButtonSpec(label: "R", key: "Z".ascii),   // rest until better
+    ]
+
+    private var actionButtons: [UIButton] = []
+
+    /// Tactile feedback when an action button is tapped.
+    private let actionButtonHaptics = UIImpactFeedbackGenerator(style: .light)
+
+    /// Mirrors the directional pad's visibility: true while the player is
+    /// actively moving around the dungeon, false on menus/dialogs/title.
+    private var gameplayControlsActive = false
+
     @IBOutlet var skViewPort: SKViewPort!
     @IBOutlet fileprivate weak var magView: SKMagView!
     @IBOutlet fileprivate weak var escButton: UIButton! {
@@ -145,10 +219,13 @@ final class BrogueViewController: UIViewController {
                 case .waitingForConfirmation, .actionMenuOpen, .openedInventory, .showTitle, .openGameFinished, .playRecording, .showHighScores, .playBackPanic, .messagePlayerHasDied, .playerHasDiedMessageAcknowledged, .keyBoardInputRequired, .beginOpenGame:
                     self.dContainerView.isHidden = true
                     self.dContainerView.isUserInteractionEnabled = false
+                    self.gameplayControlsActive = false
                 default:
                     self.dContainerView.isHidden = false
                     self.dContainerView.isUserInteractionEnabled = true
+                    self.gameplayControlsActive = true
                 }
+                self.updateActionButtonVisibility()
 
                 // Reserve the home-indicator strip only during gameplay. On the title
                 // and other menu screens, let the grid fill the full screen.
@@ -187,13 +264,14 @@ final class BrogueViewController: UIViewController {
         // .center) keeps working on top.
         // Tune these constants to taste.
         if UIDevice.current.userInterfaceIdiom == .phone {
-            dContainerView.transform = CGAffineTransform(translationX: -80, y: 70)
+            dContainerView.transform = CGAffineTransform(translationX: -80, y: 100)
             escButton.transform = CGAffineTransform(translationX: -80, y: 90)
         }
 
         GameCenter.shared.authenticate(from: self)
 
         setupHardwareKeyboardObserver()
+        setupActionButtons()
     }
 
     // ─────────────────────────────────────────────────────────────────────
@@ -239,9 +317,39 @@ final class BrogueViewController: UIViewController {
         applyNotchInsets()
     }
 
+    /// Best-available safe-area insets. SwiftUI's `.ignoresSafeArea()` zeroes
+    /// the hosted view's insets, so we prefer the window's. If our own window
+    /// isn't attached yet, fall back to any foreground window scene's key
+    /// window so we never read a falsely-zeroed inset during early layout.
+    private var bestSafeAreaInsets: UIEdgeInsets {
+        if let window = view.window { return window.safeAreaInsets }
+        let keyWindow = UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+            .first { $0.activationState == .foregroundActive }?
+            .windows.first { $0.isKeyWindow }
+        return keyWindow?.safeAreaInsets ?? view.safeAreaInsets
+    }
+
+    /// Classifies the current device's front cutout. `.dynamicIsland` is
+    /// model-driven (the only reliable signal); `.notch` vs `.none` is decided
+    /// by whether a real safe-area inset exists. We're landscape-locked, so a
+    /// cutout shows up as a left/right inset rather than a top one. `.none`
+    /// covers the home-button iPhone SE models and every iPad (no iPad has a
+    /// cutout).
+    private func currentDisplayCutout(insets: UIEdgeInsets) -> DisplayCutout {
+        if UIDevice.current.hasDynamicIsland { return .dynamicIsland }
+        let sideInset = max(insets.left, insets.right)
+        return sideInset > 20 ? .notch : .none
+    }
+
     private func applyNotchInsets() {
-        let insets = view.window?.safeAreaInsets ?? view.safeAreaInsets
+        let insets = bestSafeAreaInsets
         let scale = UIScreen.main.scale
+
+        // Position the safe-area action buttons in the (now-known) cutout strip
+        // and show/hide them for this device + game state.
+        layoutActionButtons(insets: insets)
+        updateActionButtonVisibility()
 
         // The app is locked to UIInterfaceOrientation.landscapeLeft in
         // Info.plist. In that orientation the iPhone's notch / dynamic island
@@ -261,6 +369,104 @@ final class BrogueViewController: UIViewController {
         )
     }
     
+    // ── Safe-area action buttons ─────────────────────────────────────────
+
+    private static let actionButtonSize: CGFloat = 44
+    private static let actionButtonGap: CGFloat = 8
+    private static let actionButtonEdgeMargin: CGFloat = 4
+    /// Extra downward nudge for the TOP button pair (A/X) below the top inset.
+    /// Tweak to taste.
+    private static let actionButtonTopOffset: CGFloat = 20
+    /// On NOTCH devices only, push the pairs away from center — top pair up,
+    /// bottom pair down — by this much (the notch's clear zones differ from the
+    /// island's). Tweak to taste.
+    private static let actionButtonNotchCenterPush: CGFloat = 12
+
+    /// Builds the buttons once and adds them above the SKView. They stay hidden
+    /// until `applyNotchInsets` positions them and `updateActionButtonVisibility`
+    /// reveals them for cutout devices during gameplay.
+    private func setupActionButtons() {
+        actionButtons = actionButtonSpecs.map { spec in
+            let button = UIButton(type: .custom)
+            button.setTitle(spec.label, for: .normal)
+            // Soft off-white to echo Brogue's menu text rather than a stark #FFF
+            // (a crisp system font at pure white reads much harsher than the
+            // game's anti-aliased bitmap font does).
+            button.setTitleColor(UIColor(white: 0.9, alpha: 1.0), for: .normal)
+            button.titleLabel?.font = .systemFont(ofSize: 22, weight: .semibold)
+            button.backgroundColor = UIColor.black.withAlphaComponent(0.35)
+            button.layer.cornerRadius = 8
+            // Translucent gray border — Brogue's `gray` is {50,50,50} ≈ 0.5 white.
+            button.layer.borderColor = UIColor(white: 0.5, alpha: 0.6).cgColor
+            button.layer.borderWidth = 1
+            // Stash the keystroke in the tag so one handler serves every button.
+            button.tag = Int(spec.key)
+            button.addTarget(self, action: #selector(actionButtonTapped(_:)), for: .touchUpInside)
+            button.isHidden = true
+            view.addSubview(button)
+            return button
+        }
+    }
+
+    @objc private func actionButtonTapped(_ sender: UIButton) {
+        actionButtonHaptics.impactOccurred()
+        addKeyEvent(event: UInt8(sender.tag))
+    }
+
+    /// Lays the buttons out along the trailing (cutout) edge: the first half of
+    /// the list anchored to the top safe inset stacking down, the second half
+    /// anchored to the bottom stacking up. The island/notch occupies the center
+    /// of the edge, so leaving the middle empty dodges it without needing its
+    /// (unavailable) exact rect.
+    private func layoutActionButtons(insets: UIEdgeInsets) {
+        guard !actionButtons.isEmpty else { return }
+
+        let size = Self.actionButtonSize
+        let gap = Self.actionButtonGap
+        let margin = Self.actionButtonEdgeMargin
+        let bounds = view.bounds
+
+        // Flush to the trailing edge, a hair in from the rounded corner.
+        let x = bounds.maxX - size - margin
+
+        // Notch devices get an extra outward push on both pairs (away from center).
+        let notchPush = currentDisplayCutout(insets: insets) == .notch
+            ? Self.actionButtonNotchCenterPush : 0
+
+        let topCount = (actionButtons.count + 1) / 2   // 4 → 2 top, 2 bottom
+        let topStart = insets.top + gap + Self.actionButtonTopOffset - notchPush
+        let bottomBase = bounds.maxY - insets.bottom - gap + notchPush
+
+        for (index, button) in actionButtons.enumerated() {
+            let y: CGFloat
+            if index < topCount {
+                // Top zone: stack downward from the top inset.
+                y = topStart + CGFloat(index) * (size + gap)
+            } else {
+                // Bottom zone: stack upward from the bottom, last button lowest.
+                let fromBottom = actionButtons.count - 1 - index
+                y = bottomBase - size - CGFloat(fromBottom) * (size + gap)
+            }
+            button.frame = CGRect(x: x, y: y, width: size, height: size)
+        }
+    }
+
+    /// Buttons are visible only on cutout devices (there's no strip to occupy on
+    /// SE phones / iPads) and only while the directional pad is — i.e. during
+    /// active dungeon play.
+    private func updateActionButtonVisibility() {
+        let hasStrip = currentDisplayCutout(insets: bestSafeAreaInsets) != .none
+        let visible = hasStrip && gameplayControlsActive
+        for button in actionButtons {
+            button.isHidden = !visible
+            button.isUserInteractionEnabled = visible
+        }
+        // Warm up the haptic engine so the first tap fires without latency.
+        if visible {
+            actionButtonHaptics.prepare()
+        }
+    }
+
     @objc func handleDirectionTouch(_ sender: UIPanGestureRecognizer) {
         directionsViewController?.cancel()
     }
@@ -688,12 +894,12 @@ final class SKMagView: SKView {
         isHidden = false
     }
 
-    /// The magnifier normally hovers above the touch. Near the top of the
-    /// screen that puts it off-canvas (especially on iPhone in landscape) — in
-    /// that case, slide it to the LEFT of the finger instead of flipping
-    /// below (which would put it directly under the touch). Always clamped to
-    /// the parent's safe area so it never sits under the iPhone notch /
-    /// dynamic island or off the leading edge.
+    /// On iPad the magnifier hovers above the touch, flipping to the LEFT only
+    /// when that would clip off the top. On iPhone it ALWAYS sits to the left
+    /// of the finger — never above and never under it, so the finger never
+    /// occludes the magnified content. Always clamped to the parent's safe area
+    /// so it never sits under the iPhone notch / dynamic island or off the
+    /// leading edge.
     private func positionedCenter(forTouch point: CGPoint) -> CGPoint {
         let radius = size.width / 2
         let parent = superview
@@ -706,20 +912,22 @@ final class SKMagView: SKView {
             height: viewBounds.height - insets.top - insets.bottom
         )
 
+        let isPhone = UIDevice.current.userInterfaceIdiom == .phone
+
         // Default placement: above the touch (offset.height is negative).
         var c = CGPoint(
             x: point.x + size.width / 2 - offset.width,
             y: point.y - size.height / 2 + offset.height
         )
 
-        // If the default would clip off the top, move the magnifier to the
-        // LEFT of the finger rather than flipping below it (avoids the
-        // magnifier ending up under the user's finger).
+        // iPhone: ALWAYS place to the left of the finger.
+        // iPad: only flip left when the above-touch default would clip the top.
+        // Either way the magnifier sits beside the finger, never under it.
         //
         // TWEAK ME: `leftFlipPadding` is the gap between the finger and the
-        // magnifier's right edge when the magnifier flips to the left. Bigger
-        // = magnifier sits further left of the finger.
-        if c.y - radius < bounds.minY {
+        // magnifier's right edge when it sits to the left. Bigger = magnifier
+        // sits further left of the finger.
+        if isPhone || c.y - radius < bounds.minY {
             let leftFlipPadding: CGFloat = 38
             c.x = point.x - radius - leftFlipPadding
             c.y = point.y
