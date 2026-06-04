@@ -3226,7 +3226,11 @@ extern "C" {
     
     void setBrogueGameEvent(CBrogueGameEvent brogueGameState);
     void requestKeyboardInput(char *string);
-    
+
+    // iOS port (iBrogue): title-menu entries that open native screens.
+    void showFileManagementScreen(void);
+    void showGameCenterScreen(void);
+
 #if defined __cplusplus
 }
 #endif

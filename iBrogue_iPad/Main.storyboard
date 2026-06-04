@@ -94,8 +94,8 @@
                             <button opaque="NO" contentMode="scaleToFill" contentHorizontalAlignment="center" contentVerticalAlignment="center" lineBreakMode="middleTruncation" translatesAutoresizingMaskIntoConstraints="NO" id="3ab-lz-7c3">
                                 <rect key="frame" x="117.66666666666669" y="696" width="80" height="80"/>
                                 <constraints>
-                                    <constraint firstAttribute="width" constant="80" id="F0E-m9-Kw2"/>
-                                    <constraint firstAttribute="height" constant="80" id="WJz-Y9-7qt"/>
+                                    <constraint firstAttribute="width" constant="44" id="F0E-m9-Kw2"/>
+                                    <constraint firstAttribute="height" constant="44" id="WJz-Y9-7qt"/>
                                 </constraints>
                                 <fontDescription key="fontDescription" type="boldSystem" pointSize="15"/>
                                 <state key="normal" image="brogue_seed.png">
@@ -317,6 +317,12 @@
                                                 <rect key="frame" x="0.0" y="4" width="183" height="184"/>
                                                 <autoresizingMask key="autoresizingMask" flexibleMaxX="YES" flexibleMaxY="YES"/>
                                             </imageView>
+                                            <button opaque="NO" contentMode="scaleToFill" fixedFrame="YES" contentHorizontalAlignment="center" contentVerticalAlignment="center" lineBreakMode="middleTruncation" translatesAutoresizingMaskIntoConstraints="NO" id="Csb-bt-001" userLabel="Center Shortcut Button">
+                                                <rect key="frame" x="67" y="84" width="44" height="32"/>
+                                                <autoresizingMask key="autoresizingMask" flexibleMaxX="YES" flexibleMaxY="YES"/>
+                                                <fontDescription key="fontDescription" type="boldSystem" pointSize="15"/>
+                                                <state key="normal"/>
+                                            </button>
                                         </subviews>
                                         <color key="backgroundColor" red="1" green="1" blue="1" alpha="0.0" colorSpace="custom" customColorSpace="sRGB"/>
                                     </view>
@@ -343,6 +349,7 @@
                     <freeformSimulatedSizeMetrics key="simulatedDestinationMetrics"/>
                     <size key="freeformSize" width="200" height="220"/>
                     <connections>
+                        <outlet property="centerShortcutButton" destination="Csb-bt-001" id="Csb-ou-002"/>
                         <outlet property="dragAreaView" destination="DjS-Gt-Udj" id="8MW-nr-dbT"/>
                     </connections>
                 </viewController>

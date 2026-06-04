@@ -143,7 +143,25 @@ extension BrogueGameEvent {
 
 // MARK: - BrogueViewController
 
+/// Which engine is currently driving the shared rendering surface.
+enum EngineKind { case classic, ce }
+
 final class BrogueViewController: UIViewController {
+    /// Retains the BrogueCE host adapter for the lifetime of the CE engine thread.
+    private var ceHost: CEHost?
+    /// The engine currently running on `engineThread`.
+    private var currentEngine: EngineKind = .classic
+    /// The background thread running the active engine's `rogueMain`.
+    private var engineThread: Thread?
+    /// Set while a title-screen engine swap is in flight (awaiting clean exit).
+    private var switchPending = false
+    /// The title-screen version-chooser chip and its label.
+    private var versionChooser: UIView?
+    private var versionChooserLabel: UILabel?
+    /// Fades the chooser out after a few seconds so it isn't a persistent distraction.
+    private var versionChooserFadeTimer: Timer?
+    /// True while the active engine is showing its title screen (chooser visible).
+    private var atTitle = false { didSet { updateVersionChooserVisibility() } }
     fileprivate var touchEvents = [UIBrogueTouchEvent]()
     fileprivate var lastTouchLocation = CGPoint()
     @objc fileprivate var directionsViewController: DirectionControlsViewController?
@@ -188,6 +206,34 @@ final class BrogueViewController: UIViewController {
     /// Section order for the rebind menu.
     private static let commandCategoryOrder = ["Stairs & Travel", "Resting & Waiting", "Item Actions"]
 
+    /// SF Symbol shown on a button face for each bindable command key. Keyed by
+    /// the same `UInt8` keys as `commandCatalog`; the engine still receives the
+    /// key on tap, so this only controls appearance.
+    private static let commandSymbols: [UInt8: String] = [
+        ">".ascii: "arrow.down.to.line",
+        "<".ascii: "arrow.up.to.line",
+        "x".ascii: "map",
+        "z".ascii: "zzz",
+        "Z".ascii: "bed.double.fill",
+        "s".ascii: "magnifyingglass",
+        "e".ascii: "shield.lefthalf.filled",
+        "r".ascii: "xmark.shield",
+        "a".ascii: "wand.and.stars",
+        "t".ascii: "paperplane.fill",
+        "d".ascii: "arrow.down.circle",
+        "c".ascii: "tag",
+        "R".ascii: "textformat.abc",
+    ]
+
+    /// SF Symbol name for a bound key. The center button's "Nothing" sentinel
+    /// maps to a slashed circle; anything unmapped falls back to it too.
+    private static func symbolName(for key: UInt8) -> String {
+        commandSymbols[key] ?? "circle.slash"
+    }
+
+    /// Point size / weight for button-face glyphs, matched to the old text scale.
+    private static let buttonSymbolConfig = UIImage.SymbolConfiguration(pointSize: 20, weight: .semibold)
+
     /// Default key per slot (top→bottom): throw, auto-explore, search, rest-until-better.
     private static let defaultSideButtonKeys: [UInt8] = ["t".ascii, "x".ascii, "s".ascii, "Z".ascii]
     private static let sideButtonKeysDefaultsKey = "sideButtonKeys"
@@ -196,6 +242,20 @@ final class BrogueViewController: UIViewController {
     private var sideButtonKeys: [UInt8] = BrogueViewController.loadSideButtonKeys()
 
     private var actionButtons: [UIButton] = []
+
+    // ── Directional-pad center button ────────────────────────────────────
+    // A fifth programmable button living in the dead zone at the center of the
+    // directional pad (storyboard outlet on the D-pad VC, so it drags/hides with
+    // it). Like the side buttons but, uniquely, it may be set to "Nothing".
+
+    /// Sentinel binding meaning the center button does nothing when tapped.
+    private static let centerButtonNothing: UInt8 = 0
+    /// Center button's out-of-box binding: "Rest once" (z).
+    private static let centerButtonDefaultKey: UInt8 = "z".ascii
+    private static let centerButtonKeyDefaultsKey = "directionCenterButtonKey"
+
+    /// Key bound to the center button; `centerButtonNothing` (0) = unbound.
+    private var centerButtonKey: UInt8 = BrogueViewController.loadCenterButtonKey()
 
     /// Tactile feedback when an action button is tapped.
     private let actionButtonHaptics = UIImpactFeedbackGenerator(style: .light)
@@ -238,9 +298,9 @@ final class BrogueViewController: UIViewController {
                 case .showTitle, .openGameFinished:
                     self.inputTextField.resignFirstResponder()
                     self.showInventoryButton.isHidden = true
-                    self.leaderBoardButton.isHidden = false
+                    // Game Center + File Management moved into the Classic title menu.
+                    self.leaderBoardButton.isHidden = true
                     self.seedButton.isHidden = false
-                    self.manageFilesButton?.isHidden = false
                     self.escButton.isHidden = true
                 case .startNewGame, .openGame, .beginOpenGame:
                     self.leaderBoardButton.isHidden = true
@@ -275,22 +335,19 @@ final class BrogueViewController: UIViewController {
                 default:
                     self.skViewPort.rogueScene.paddingEnabled = true
                 }
+
+                // Show the version chooser only on the Classic title screen.
+                self.atTitle = (self.lastBrogueGameEvent == .showTitle)
             }
         }
     }
     
     override func viewDidLoad() {
         super.viewDidLoad()
-        // TODO: clean this up
-        RogueDriver.sharedInstance(with: skViewPort, viewController: self)
 
-        // Opt the C engine into iPhone-only layout tweaks (e.g. the taller
-        // tap area for the bottom button bar). iPad keeps default behavior.
-        setPhoneLayout(UIDevice.current.userInterfaceIdiom == .phone ? 1 : 0)
-
-        let thread = Thread(target: self, selector: #selector(BrogueViewController.playBrogue), object: nil)
-        thread.stackSize = 400 * 8192
-        thread.start()
+        currentEngine = BrogueViewController.persistedEngine()
+        setupVersionChooser()
+        startEngine()
 
         magView.viewToMagnify = skViewPort
         magView.hideMagnifier()
@@ -316,7 +373,32 @@ final class BrogueViewController: UIViewController {
 
         setupHardwareKeyboardObserver()
         setupActionButtons()
-        setupManageFilesButton()
+        setupCenterShortcutButton()
+        // File management and Game Center now live in the Classic title menu
+        // (engine-drawn), so the floating UIKit buttons are no longer created.
+        repositionSeedButton()
+    }
+
+    /// Moves the seed button from its storyboard spot (bottom-left) to just left
+    /// of the "New Game" menu item, outside the menu's black border. The Classic
+    /// menu is engine-drawn at fixed grid cells and the title grid fills the
+    /// screen, so we anchor with fractional (multiplier) constraints that track
+    /// rotation. New Game renders at roughly grid (x≈77, y≈21) of the 100×34 grid.
+    private func repositionSeedButton() {
+        guard let seedButton = seedButton, let host = seedButton.superview else { return }
+        // Drop the storyboard position constraints (leading vs leaderboard,
+        // bottom vs layout guide); the 80×80 size constraints live on the button
+        // itself and are preserved.
+        let positional = host.constraints.filter { $0.firstItem === seedButton || $0.secondItem === seedButton }
+        NSLayoutConstraint.deactivate(positional)
+        NSLayoutConstraint.activate([
+            // Right edge just left of the menu's left border (~grid x 77).
+            NSLayoutConstraint(item: seedButton, attribute: .trailing, relatedBy: .equal,
+                               toItem: view!, attribute: .trailing, multiplier: 75.0 / 100.0, constant: 0),
+            // Vertically centered on the New Game row (~grid y 21.5 of 34).
+            NSLayoutConstraint(item: seedButton, attribute: .centerY, relatedBy: .equal,
+                               toItem: view!, attribute: .bottom, multiplier: 21.5 / 34.0, constant: 0),
+        ])
     }
 
     // ─────────────────────────────────────────────────────────────────────
@@ -436,8 +518,8 @@ final class BrogueViewController: UIViewController {
             // Soft off-white to echo Brogue's menu text rather than a stark #FFF
             // (a crisp system font at pure white reads much harsher than the
             // game's anti-aliased bitmap font does).
-            button.setTitleColor(UIColor(white: 0.8, alpha: 1.0), for: .normal)
-            button.titleLabel?.font = .systemFont(ofSize: 22, weight: .semibold)
+            // Off-white tint so template SF Symbols echo Brogue's menu text.
+            button.tintColor = UIColor(white: 0.8, alpha: 1.0)
             button.backgroundColor = UIColor.black.withAlphaComponent(0.35)
             button.layer.cornerRadius = 8
             // Translucent gray border — Brogue's `gray` is {50,50,50} ≈ 0.5 white.
@@ -482,10 +564,40 @@ final class BrogueViewController: UIViewController {
         present(nav, animated: true)
     }
 
-    /// Sets each button's face to the literal character of its bound key.
+    /// Invoked from the Classic engine's title menu ("File Management" item).
+    @objc func presentFileManagementScreen() {
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self, self.presentedViewController == nil else { return }
+            let nav = UINavigationController(rootViewController: FileManagementViewController())
+            self.present(nav, animated: true)
+        }
+    }
+
+    /// Invoked from the BrogueCE engine's title menu ("File Management" item).
+    /// Scoped to the CE save directory (Documents/ce) so it doesn't show Classic's files.
+    @objc func presentFileManagementScreenForCE() {
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self, self.presentedViewController == nil else { return }
+            let ceDir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+                .appendingPathComponent("ce")
+            let nav = UINavigationController(rootViewController: FileManagementViewController(directory: ceDir))
+            self.present(nav, animated: true)
+        }
+    }
+
+    /// Invoked from the Classic engine's title menu ("Game Center" item).
+    @objc func presentGameCenterScreen() {
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self, self.presentedViewController == nil else { return }
+            GameCenter.shared.showLeaderboard(id: GameCenter.highScoreLeaderboardID, from: self)
+        }
+    }
+
+    /// Sets each button's face to the SF Symbol for its bound command.
     private func refreshActionButtonTitles() {
         for (slot, button) in actionButtons.enumerated() where slot < sideButtonKeys.count {
-            button.setTitle(String(UnicodeScalar(sideButtonKeys[slot])), for: .normal)
+            let name = BrogueViewController.symbolName(for: sideButtonKeys[slot])
+            button.setImage(UIImage(systemName: name, withConfiguration: BrogueViewController.buttonSymbolConfig), for: .normal)
         }
     }
 
@@ -494,6 +606,36 @@ final class BrogueViewController: UIViewController {
         guard slot >= 0, slot < sideButtonKeys.count else { return }
         actionButtonHaptics.impactOccurred()
         addKeyEvent(event: sideButtonKeys[slot])
+    }
+
+    /// Styles and wires the storyboard center button. Reuses the side-button
+    /// look; tap fires its bound key (unless "Nothing"), long-press rebinds it.
+    /// Visibility/position are handled by the D-pad it lives inside.
+    private func setupCenterShortcutButton() {
+        guard let button = directionsViewController?.centerShortcutButton else { return }
+        button.tintColor = UIColor(white: 0.8, alpha: 1.0)
+        button.backgroundColor = UIColor.black.withAlphaComponent(0.35)
+        button.layer.cornerRadius = 8
+        button.layer.borderColor = UIColor(white: 0.5, alpha: 0.6).cgColor
+        button.layer.borderWidth = 1
+        button.addTarget(self, action: #selector(centerButtonTapped), for: .touchUpInside)
+        button.addInteraction(UIContextMenuInteraction(delegate: self))
+        refreshCenterButtonAppearance()
+    }
+
+    /// Center button shows the SF Symbol for its bound command; when set to
+    /// "Nothing" it shows a slashed circle so it stays visible and long-pressable.
+    private func refreshCenterButtonAppearance() {
+        guard let button = directionsViewController?.centerShortcutButton else { return }
+        let name = BrogueViewController.symbolName(for: centerButtonKey)
+        button.setImage(UIImage(systemName: name, withConfiguration: BrogueViewController.buttonSymbolConfig), for: .normal)
+        button.alpha = 1.0
+    }
+
+    @objc private func centerButtonTapped() {
+        guard centerButtonKey != BrogueViewController.centerButtonNothing else { return }
+        actionButtonHaptics.impactOccurred()
+        addKeyEvent(event: centerButtonKey)
     }
 
     /// Lays the buttons out along the trailing (cutout) edge: the first half of
@@ -571,8 +713,216 @@ final class BrogueViewController: UIViewController {
         }
     }
     
-    @objc private func playBrogue() {
-        rogueMain()
+    // MARK: - Engine session (start / in-process swap)
+
+    /// Boots the engine named by `currentEngine` on a large-stack background
+    /// thread. When `rogueMain` returns (e.g. after a Quit), `engineDidExit` runs.
+    private func startEngine() {
+        switch currentEngine {
+        case .classic:
+            // Classic 1.7.5 engine, compiled into the app target.
+            setClassicTerminationRequested(false) // clear any prior switch request
+            RogueDriver.sharedInstance(with: skViewPort, viewController: self)
+            // iPhone-only layout tweaks (taller bottom button bar). iPad: default.
+            setPhoneLayout(UIDevice.current.userInterfaceIdiom == .phone ? 1 : 0)
+            let thread = Thread { [weak self] in
+                rogueMain()
+                self?.engineDidExit()
+            }
+            thread.stackSize = 400 * 8192
+            thread.start()
+            engineThread = thread
+
+        case .ce:
+            // BrogueCE 1.15 engine, in the embedded framework. Bridge → CEHost.
+            let host = CEHost(viewPort: skViewPort, viewController: self)
+            ceHost = host
+            let thread = Thread { [weak self] in
+                ce_start(host)
+                self?.engineDidExit()
+            }
+            thread.stackSize = 400 * 8192
+            thread.start()
+            engineThread = thread
+        }
+    }
+
+    /// Requests an in-place swap to the other engine. Only meaningful at the
+    /// title screen: injects the Quit keystroke so the active engine unwinds out
+    /// of its main-menu loop and `rogueMain` returns cleanly.
+    @objc func requestEngineSwitch() {
+        // Only switch from a title screen — the engine's terminate hook lives in
+        // its title loop, so requesting it mid-game would hang the engine.
+        guard atTitle, !switchPending else { return }
+        switchPending = true
+        switch currentEngine {
+        case .ce:
+            ce_requestTermination()
+        case .classic:
+            setClassicTerminationRequested(true)
+        }
+    }
+
+    /// Maps BrogueCE's `uiMode` (reported by the bridge) to on-screen control
+    /// visibility. CE has only four states and draws its own in-engine menu, so
+    /// this is a CE-specific mapping rather than the Classic `lastBrogueGameEvent`
+    /// path. Values: 0 = InMenu, 1 = InNormalPlay, 2 = ShowEscape,
+    /// 3 = ShowKeyboardAndEscape.
+    @objc func applyCEUIMode(_ uiMode: Int) {
+        DispatchQueue.main.async {
+            let inPlay = (uiMode == 1)
+            let showEscape = (uiMode == 2 || uiMode == 3)
+            let keyboard = (uiMode == 3)
+
+            // CE renders its own menu (New Game / Play / View); hide the Classic
+            // overlay buttons (leaderboard is Game Center — Classic only).
+            self.leaderBoardButton.isHidden = true
+            self.seedButton.isHidden = true
+            self.manageFilesButton?.isHidden = true
+            self.showInventoryButton.isHidden = true
+
+            // Directional pad + action bar only during normal play.
+            self.dContainerView.isHidden = !inPlay
+            self.dContainerView.isUserInteractionEnabled = inPlay
+            self.gameplayControlsActive = inPlay
+            self.updateActionButtonVisibility()
+
+            // Escape button when CE is showing an escapable sub-screen.
+            self.escButton.isHidden = !showEscape
+
+            // Keyboard for text entry (naming a save, entering a seed, etc.).
+            if keyboard {
+                self.inputTextField.becomeFirstResponder()
+            } else {
+                self.inputTextField.resignFirstResponder()
+            }
+
+            // NOTE: padding (insets) and atTitle are NOT driven from uiMode —
+            // uiMode==InMenu is also true for in-game menus, which would wrongly
+            // toggle the layout width. Both are driven by setCEAtTitle() instead.
+        }
+    }
+
+    /// Called by the CE bridge: true only while the CE title screen is showing.
+    @objc func setCEAtTitle(_ value: Bool) {
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self else { return }
+            self.atTitle = value
+            // Full-screen (no insets) on the title; reserve insets everywhere
+            // else — gameplay AND in-game menus — so the width doesn't jump.
+            self.skViewPort.rogueScene.paddingEnabled = !value
+        }
+    }
+
+    /// Runs (on the engine thread) when `rogueMain` returns. If a swap is pending,
+    /// boots the other engine on the main thread.
+    private func engineDidExit() {
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self, self.switchPending else { return }
+            self.switchPending = false
+            self.engineThread = nil
+            self.ceHost = nil
+            // Swap to the other engine in place, and remember the choice.
+            self.currentEngine = (self.currentEngine == .ce) ? .classic : .ce
+            self.persistEngine()
+            self.updateVersionChooserLabel()
+            self.startEngine()
+        }
+    }
+
+    // MARK: - Version chooser (title-screen engine swap)
+
+    private static let engineDefaultsKey = "selectedEngine"
+
+    /// The engine to boot on launch — the last one played, defaulting to Classic.
+    private static func persistedEngine() -> EngineKind {
+        return UserDefaults.standard.string(forKey: engineDefaultsKey) == "ce" ? .ce : .classic
+    }
+
+    private func persistEngine() {
+        UserDefaults.standard.set(currentEngine == .ce ? "ce" : "classic", forKey: Self.engineDefaultsKey)
+    }
+
+    /// Builds the title-only "‹ engine ›" chip. Swipe or tap it to switch engines.
+    private func setupVersionChooser() {
+        let chip = UIView()
+        chip.translatesAutoresizingMaskIntoConstraints = false
+        chip.backgroundColor = UIColor.black.withAlphaComponent(0.55)
+        chip.layer.cornerRadius = 16
+        chip.isHidden = true
+
+        let font = UIFont.monospacedSystemFont(ofSize: 17, weight: .semibold)
+        let makeChevron: (String) -> UILabel = { text in
+            let chevron = UILabel()
+            chevron.text = text
+            chevron.textColor = .white
+            chevron.font = font
+            return chevron
+        }
+        // The chip and these chevrons stay put; only `name` fades.
+        let name = UILabel()
+        name.textColor = .white
+        name.font = font
+        name.textAlignment = .center
+
+        let stack = UIStackView(arrangedSubviews: [makeChevron("‹"), name, makeChevron("›")])
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        stack.axis = .horizontal
+        stack.alignment = .center
+        stack.spacing = 14
+        chip.addSubview(stack)
+
+        view.addSubview(chip)
+        NSLayoutConstraint.activate([
+            chip.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            chip.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 8),
+            stack.topAnchor.constraint(equalTo: chip.topAnchor, constant: 6),
+            stack.bottomAnchor.constraint(equalTo: chip.bottomAnchor, constant: -6),
+            stack.leadingAnchor.constraint(equalTo: chip.leadingAnchor, constant: 16),
+            stack.trailingAnchor.constraint(equalTo: chip.trailingAnchor, constant: -16),
+        ])
+
+        for direction in [UISwipeGestureRecognizer.Direction.left, .right] {
+            let swipe = UISwipeGestureRecognizer(target: self, action: #selector(versionChooserActivated))
+            swipe.direction = direction
+            chip.addGestureRecognizer(swipe)
+        }
+        chip.addGestureRecognizer(UITapGestureRecognizer(target: self, action: #selector(versionChooserActivated)))
+
+        versionChooser = chip
+        versionChooserLabel = name
+        updateVersionChooserLabel()
+    }
+
+    @objc private func versionChooserActivated() {
+        requestEngineSwitch()
+    }
+
+    private func updateVersionChooserLabel() {
+        versionChooserLabel?.text = (currentEngine == .ce) ? "BrogueCE" : "Brogue"
+    }
+
+    private func updateVersionChooserVisibility() {
+        updateVersionChooserLabel()
+        if atTitle {
+            versionChooser?.isHidden = false
+            showVersionChooserName()
+        } else {
+            versionChooserFadeTimer?.invalidate()
+            versionChooser?.isHidden = true
+        }
+    }
+
+    /// Shows the engine name briefly, then fades just the name out — the chip and
+    /// its ‹ › chevrons stay visible so the affordance remains.
+    private func showVersionChooserName() {
+        guard let name = versionChooserLabel else { return }
+        versionChooserFadeTimer?.invalidate()
+        UIView.animate(withDuration: 0.2) { name.alpha = 1 }
+        versionChooserFadeTimer = Timer.scheduledTimer(withTimeInterval: 3.5, repeats: false) { [weak self] _ in
+            guard let name = self?.versionChooserLabel else { return }
+            UIView.animate(withDuration: 0.6) { name.alpha = 0 }
+        }
     }
 }
 
@@ -581,10 +931,13 @@ final class BrogueViewController: UIViewController {
 extension BrogueViewController: UIContextMenuInteractionDelegate {
     func contextMenuInteraction(_ interaction: UIContextMenuInteraction,
                                 configurationForMenuAtLocation location: CGPoint) -> UIContextMenuConfiguration? {
-        guard let button = interaction.view as? UIButton,
-              let slot = actionButtons.firstIndex(of: button) else {
-            return nil
+        guard let button = interaction.view as? UIButton else { return nil }
+        if button == directionsViewController?.centerShortcutButton {
+            return UIContextMenuConfiguration(identifier: nil, previewProvider: nil) { [weak self] _ in
+                self?.centerRebindMenu()
+            }
         }
+        guard let slot = actionButtons.firstIndex(of: button) else { return nil }
         return UIContextMenuConfiguration(identifier: nil, previewProvider: nil) { [weak self] _ in
             self?.rebindMenu(forSlot: slot)
         }
@@ -599,7 +952,8 @@ extension BrogueViewController: UIContextMenuInteractionDelegate {
                 .filter { $0.category == category }
                 .map { command -> UIAction in
                     let keyChar = String(UnicodeScalar(command.key))
-                    let action = UIAction(title: "\(command.name) (\(keyChar))") { [weak self] _ in
+                    let action = UIAction(title: "\(command.name) (\(keyChar))",
+                                          image: UIImage(systemName: BrogueViewController.symbolName(for: command.key))) { [weak self] _ in
                         self?.bindSideButton(slot: slot, to: command.key)
                     }
                     action.state = (command.key == currentKey) ? .on : .off
@@ -636,6 +990,56 @@ extension BrogueViewController: UIContextMenuInteractionDelegate {
     private func saveSideButtonKeys() {
         UserDefaults.standard.set(sideButtonKeys.map(Int.init),
                                   forKey: BrogueViewController.sideButtonKeysDefaultsKey)
+    }
+
+    /// Rebind menu for the center button: the same sectioned command list as the
+    /// side buttons, prefixed with a "Nothing" option that unbinds it.
+    private func centerRebindMenu() -> UIMenu {
+        let current = centerButtonKey
+        let none = UIAction(title: "Nothing",
+                            image: UIImage(systemName: "circle.slash")) { [weak self] _ in
+            self?.bindCenterButton(to: BrogueViewController.centerButtonNothing)
+        }
+        none.state = (current == BrogueViewController.centerButtonNothing) ? .on : .off
+        let noneSection = UIMenu(title: "", options: .displayInline, children: [none])
+
+        let sections = BrogueViewController.commandCategoryOrder.map { category -> UIMenu in
+            let actions = BrogueViewController.commandCatalog
+                .filter { $0.category == category }
+                .map { command -> UIAction in
+                    let keyChar = String(UnicodeScalar(command.key))
+                    let action = UIAction(title: "\(command.name) (\(keyChar))",
+                                          image: UIImage(systemName: BrogueViewController.symbolName(for: command.key))) { [weak self] _ in
+                        self?.bindCenterButton(to: command.key)
+                    }
+                    action.state = (command.key == current) ? .on : .off
+                    return action
+                }
+            return UIMenu(title: category, options: .displayInline, children: actions)
+        }
+        return UIMenu(title: "Rebind center button", children: [noneSection] + sections)
+    }
+
+    private func bindCenterButton(to key: UInt8) {
+        centerButtonKey = key
+        saveCenterButtonKey()
+        refreshCenterButtonAppearance()
+    }
+
+    /// Loads the center button's key, accepting any catalog key or the "Nothing"
+    /// sentinel; falls back to the default ("Rest once") when unset/invalid.
+    fileprivate static func loadCenterButtonKey() -> UInt8 {
+        guard UserDefaults.standard.object(forKey: centerButtonKeyDefaultsKey) != nil else {
+            return centerButtonDefaultKey
+        }
+        let valid = Set(commandCatalog.map { $0.key }).union([centerButtonNothing])
+        let stored = UInt8(truncatingIfNeeded: UserDefaults.standard.integer(forKey: centerButtonKeyDefaultsKey))
+        return valid.contains(stored) ? stored : centerButtonDefaultKey
+    }
+
+    private func saveCenterButtonKey() {
+        UserDefaults.standard.set(Int(centerButtonKey),
+                                  forKey: BrogueViewController.centerButtonKeyDefaultsKey)
     }
 }
 
@@ -864,7 +1268,14 @@ extension BrogueViewController {
     }
     
     private func canShowMagnifier(at point: CGPoint) -> Bool {
-        guard lastBrogueGameEvent.canShowMagnifyingGlass, pointIsInPlayArea(point: point) else {
+        // Classic gates on its fine-grained game-event states. CE drives only a
+        // coarse uiMode and never sets `lastBrogueGameEvent`, so use the shared
+        // `gameplayControlsActive` flag (true exactly when CE reports normal
+        // play, set in applyCEUIMode) to allow the magnifier there.
+        let engineAllowsMagnifier = (currentEngine == .ce)
+            ? gameplayControlsActive
+            : lastBrogueGameEvent.canShowMagnifyingGlass
+        guard engineAllowsMagnifier, pointIsInPlayArea(point: point) else {
             return false
         }
         // iPhone: the bottom dungeon row (window row 31) doubles as the bottom

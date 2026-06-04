@@ -38,4 +38,9 @@ extern NSString * _Nonnull kDOWNRIGHT_key;
 @property (nonatomic, strong, nullable) UIButton *directionalButton;
 @property (nonatomic, readonly) BOOL areDirectionalControlsHidden;
 
+/// Extra programmable shortcut button living in the dead zone at the center of
+/// the pad. Bound and handled by BrogueViewController; placed here so it drags
+/// and hides together with the directional controls.
+@property (weak, nonatomic, nullable) IBOutlet UIButton *centerShortcutButton;
+
 @end
