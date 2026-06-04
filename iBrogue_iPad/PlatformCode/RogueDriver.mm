@@ -44,6 +44,15 @@ static CGColorSpaceRef _colorSpace;
 static SKViewPort *skviewPort;
 static BrogueViewController *brogueViewController;
 
+// In-process engine switching: when set, the bridge unblocks the title-screen
+// input wait and the engine's titleMenu hook returns rogue.nextGame = NG_QUIT,
+// so rogueMain() exits and the Classic engine thread can be torn down. Defined
+// with C linkage so the engine (MainMenu.c) can extern it.
+volatile boolean classicTerminationRequested = false;
+extern "C" void setClassicTerminationRequested(BOOL requested) {
+    classicTerminationRequested = requested ? true : false;
+}
+
 @implementation RogueDriver 
 
 + (id)sharedInstanceWithViewPort:(SKViewPort *)viewPort viewController:(BrogueViewController *)viewController {
@@ -102,9 +111,13 @@ __unused void pausingTimerStartsNow() {}
 // Returns true if the player interrupted the wait with a keystroke; otherwise false.
 boolean pauseForMilliseconds(short milliseconds) {
     BOOL hasEvent = NO;
-    
+
     [NSThread sleepForTimeInterval:milliseconds/1000.];
-    
+
+    if (classicTerminationRequested) {
+        return true; // wake the title loop so it can observe the request
+    }
+
     if (brogueViewController.hasTouchEvent || brogueViewController.hasKeyEvent) {
         hasEvent = YES;
     }
@@ -124,6 +137,17 @@ void nextKeyOrMouseEvent(rogueEvent *returnEvent, __unused boolean textInput, bo
         // we should be ok to block here. We don't seem to call pauseForMilli and this at the same time
         // 60Hz
         [NSThread sleepForTimeInterval:0.016667];
+
+        // Engine-switch requested: unblock with a benign keystroke so the title
+        // loop iterates and its termination hook returns NG_QUIT.
+        if (classicTerminationRequested) {
+            returnEvent->eventType = KEYSTROKE;
+            returnEvent->param1 = 0;
+            returnEvent->param2 = 0;
+            returnEvent->controlKey = 0;
+            returnEvent->shiftKey = 0;
+            return;
+        }
         
         if (colorsDance) {
             shuffleTerrainColors(3, true);
@@ -181,6 +205,14 @@ void requestKeyboardInput(char *string) {
 
 void setBrogueGameEvent(CBrogueGameEvent brogueGameEvent) {
     brogueViewController.lastBrogueGameEvent = (BrogueGameEvent)brogueGameEvent;
+}
+
+void showFileManagementScreen() {
+    [brogueViewController presentFileManagementScreen];
+}
+
+void showGameCenterScreen() {
+    [brogueViewController presentGameCenterScreen];
 }
 
 boolean controlKeyIsDown() {

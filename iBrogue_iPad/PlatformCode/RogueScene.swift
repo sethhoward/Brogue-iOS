@@ -79,6 +79,17 @@ extension CGSize {
         return min(self.cellSize.width / calcBounds.width, self.cellSize.height / calcBounds.height)
     }()
 
+    // CE tile glyphs render from the "Brogue" font, whose metrics differ from
+    // ArialUnicodeMS, so they need their own clamp base. Only consulted for
+    // tile-range codepoints (0x4000+), which only the CE engine emits.
+    fileprivate lazy var brogueMaxScaleFactor: CGFloat = {
+        let char: NSString = "M"
+        let calcBounds: CGRect = char.boundingRect(with: CGSize(width: 0, height: 0),
+                                                   options: [.usesDeviceMetrics, .usesFontLeading],
+                                                   attributes: convertToOptionalNSAttributedStringKeyDictionary([convertFromNSAttributedStringKey(NSAttributedString.Key.font): UIFont(name: "Brogue", size: 120)!]), context: nil)
+        return min(self.cellSize.width / calcBounds.width, self.cellSize.height / calcBounds.height)
+    }()
+
     public init(size: CGSize, rows: Int, cols: Int, bottomPadPixels: CGFloat = 0) {
         gridSize = CGSize(rows: rows, cols: cols)
         bottomPad = bottomPadPixels
@@ -178,38 +189,91 @@ fileprivate extension RogueScene {
             case scroll
             case charm
             case ring
+            // CE's ring glyph is U+26AA (Classic's is 0xFFEE). Neither Monaco nor
+            // ArialUnicodeMS carry it, so it's font-substituted and renders too
+            // large for the cell (clipped at top). Same default font as `.glyph`,
+            // just scaled down to fit — see scaleFactor below.
+            case ringCE
             case foliage
             case amulet
             case weapon
             case glyph
-            
+            // CE tile-graphics glyphs (codepoints 0x4000+, emitted only by the
+            // BrogueCE engine in tile/hybrid mode). Rendered from the "Brogue" font.
+            case wall
+            case monster
+            case tile
+
             var fontName: String {
                 switch self {
+                case .wall, .monster, .tile:
+                    return "Brogue"
                 case .foliage, .ring, .weapon:
                     return "ArialUnicodeMS"
                 default:
                     return "Monaco"
                 }
             }
-            
+
+            /// True for the CE tile glyphs that draw from the "Brogue" font and
+            /// therefore clamp against the Brogue-font scale base.
+            var usesBrogueFont: Bool {
+                switch self {
+                case .wall, .monster, .tile: return true
+                default: return false
+                }
+            }
+
             var scaleFactor: CGFloat {
                 switch self {
                 case .scroll, .weapon, .ring:
                     return 1.3
-                
+
                 case .foliage, .charm:
                     return 1.1
+
+                // CE ring (U+26AA): shrink the substituted circle so it isn't
+                // clipped. Tune this value if it's still too big/small.
+                case .ringCE:
+                    return 0.8
+
+                // Tile categories — ported from the iBrogueCE reference renderer.
+                case .wall:
+                    return 1.1
+                case .monster:
+                    return 1.4
+                case .tile:
+                    return 1
                 default:
                     return 1
                 }
             }
-            
+
             var drawingOptions: NSStringDrawingOptions {
                 return [.usesFontLeading]
             }
-            
+
             // TODO: fix charm
             init(glyph: String) {
+                // CE tile glyphs live in a private codepoint range (0x4000+) that
+                // only the BrogueCE engine emits. Classify those first so they
+                // render from the Brogue tile font; everything below is the
+                // shared text path used by both engines.
+                if let scalar = glyph.unicodeScalars.first, scalar.value >= 0x4000 {
+                    switch scalar.value {
+                    case 0x4051, 0x4002: // U_TILES_WALL_TOP, U_TILES_WALL
+                        self = .wall
+                    case 0x4017...0x402a,
+                         0x402e...0x403e,
+                         0x4052...0x405a,
+                         0x405c, 0x4061:
+                        self = .monster
+                    default:
+                        self = .tile
+                    }
+                    return
+                }
+
                 // We want to use pretty font/centering if we can, but
                 // it makes tExT LOOk liKe THiS so we're defining characters
                 // that will be rendered at the same lineheight
@@ -230,6 +294,8 @@ fileprivate extension RogueScene {
                     self = .charm
                 case "\(UnicodeScalar(UInt32(RING_CHAR))!)":
                     self = .ring
+                case "\u{26AA}": // CE's ring glyph (U_CIRCLE)
+                    self = .ringCE
                 case "\(UnicodeScalar(UInt32(AMULET_CHAR))!)":
                     self = .amulet
                 case "\(UnicodeScalar(UInt32(WEAPON_CHAR))!)":
@@ -253,8 +319,11 @@ fileprivate extension RogueScene {
                 let calcOptions = glyphType.drawingOptions
                 let calcBounds = glyph.boundingRect(with: CGSize(), options: calcOptions, attributes: convertToOptionalNSAttributedStringKeyDictionary(calcAttributes), context: nil)
                 let rawScaleFactor = min(size.width / calcBounds.width, size.height / calcBounds.height)
-                let clampedScaleFactor = max(maxScaleFactor * 0.8, min(rawScaleFactor, maxScaleFactor * 1.2)) // Within 20% of original
-                
+                // Tile glyphs draw from the Brogue font, so clamp them against the
+                // Brogue-font scale base; text glyphs keep the ArialUnicodeMS base.
+                let baseMax = glyphType.usesBrogueFont ? brogueMaxScaleFactor : maxScaleFactor
+                let clampedScaleFactor = max(baseMax * 0.8, min(rawScaleFactor, baseMax * 1.2)) // Within 20% of original
+
                 return clampedScaleFactor * (glyphType.scaleFactor) // Shrink certain non-letters
             }
             

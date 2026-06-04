@@ -64,11 +64,17 @@ final class FileManagementViewController: UITableViewController {
         return formatter
     }()
 
-    init() {
+    /// Directory whose `.broguesave`/`.broguerec` files are listed. Defaults to
+    /// the flat Documents folder (Classic's saves); CE passes Documents/ce.
+    private let directoryURL: URL
+
+    init(directory: URL? = nil) {
+        self.directoryURL = directory ?? FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
         super.init(style: .insetGrouped)
     }
 
     required init?(coder: NSCoder) {
+        self.directoryURL = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
         super.init(coder: coder)
     }
 
@@ -97,13 +103,9 @@ final class FileManagementViewController: UITableViewController {
 
     // MARK: - Data
 
-    private var documentsURL: URL {
-        FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-    }
-
     private func reloadFiles() {
         let urls = (try? FileManager.default.contentsOfDirectory(
-            at: documentsURL,
+            at: directoryURL,
             includingPropertiesForKeys: [.contentModificationDateKey],
             options: [.skipsHiddenFiles])) ?? []
 

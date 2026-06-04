@@ -32,6 +32,7 @@
 	<array>
 		<string>Arial Unicode.ttf</string>
 		<string>MONACO.TTF</string>
+		<string>BrogueCE.ttf</string>
 	</array>
 	<key>UIApplicationSceneManifest</key>
 	<dict>

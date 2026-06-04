@@ -35,7 +35,7 @@
 #define MENU_FLAME_UPDATE_DELAY			50
 #define MENU_FLAME_ROW_PADDING			2
 #define MENU_TITLE_OFFSET_X				(-4)
-#define MENU_TITLE_OFFSET_Y				(-1)
+#define MENU_TITLE_OFFSET_Y				(-2)	// iOS port (iBrogue): nudged title up one cell
 
 #define MENU_FLAME_COLOR_SOURCE_COUNT	1136
 
@@ -269,6 +269,7 @@ void titleMenu() {
 	boolean controlKeyWasDown = false;
 	
 	short i, b, x, y, button;
+	short fileManagementButton = -1, gameCenterButton = -1; // iOS port (iBrogue)
 	buttonState state;
 	brogueButton buttons[6];
 	char whiteColorEscape[10] = "";
@@ -318,7 +319,22 @@ void titleMenu() {
 	buttons[b].hotkey[0] = 'h';
 	buttons[b].hotkey[1] = 'H';
 	b++;
-	
+
+	// iOS port (iBrogue): native screens surfaced as title-menu entries.
+	initializeButton(&(buttons[b]));
+	sprintf(buttons[b].text, "  %sF%sile Management   ", goldColorEscape, whiteColorEscape);
+	buttons[b].hotkey[0] = 'f';
+	buttons[b].hotkey[1] = 'F';
+	fileManagementButton = b;
+	b++;
+
+	initializeButton(&(buttons[b]));
+	sprintf(buttons[b].text, "    %sG%same Center     ", goldColorEscape, whiteColorEscape);
+	buttons[b].hotkey[0] = 'g';
+	buttons[b].hotkey[1] = 'G';
+	gameCenterButton = b;
+	b++;
+
     // Seth:
 	/*initializeButton(&(buttons[b]));
 	sprintf(buttons[b].text, "        %sQ%suit        ", goldColorEscape, whiteColorEscape);
@@ -368,7 +384,16 @@ void titleMenu() {
 		if (pauseBrogue(MENU_FLAME_UPDATE_DELAY)) {
 			// There was input during the pause! Get the input.
 			nextBrogueEvent(&theEvent, true, false, true);
-			
+
+			// iOS port (iBrogue): in-process engine switch. The host can ask the
+			// engine to leave the title so rogueMain() returns and the thread can
+			// be torn down. iOS has no Quit button (can't exit(0)).
+			extern volatile boolean classicTerminationRequested;
+			if (classicTerminationRequested) {
+				rogue.nextGame = NG_QUIT;
+				return;
+			}
+
 			// Process the input.
 			button = processButtonInput(&state, NULL, &theEvent);
 		}
@@ -379,7 +404,14 @@ void titleMenu() {
 	} while (button == -1 && rogue.nextGame == NG_NOTHING);
 	drawMenuFlames(flames, mask);
 	if (button != -1) {
-        if (button == 0 && controlKeyIsDown()) {
+        if (button == fileManagementButton) {
+            // iOS port (iBrogue): open the native file manager and stay on the title.
+            showFileManagementScreen();
+            rogue.nextGame = NG_NOTHING;
+        } else if (button == gameCenterButton) {
+            showGameCenterScreen();
+            rogue.nextGame = NG_NOTHING;
+        } else if (button == 0 && controlKeyIsDown()) {
             // Should fix an issue with Linux/Windows ports that require moving the mouse after
             // pressing control to get the button to change.
             rogue.nextGame = NG_NEW_GAME_WITH_SEED;

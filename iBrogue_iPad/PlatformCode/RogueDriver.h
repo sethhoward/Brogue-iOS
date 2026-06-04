@@ -55,3 +55,13 @@ typedef NS_ENUM(NSInteger, BrogueGameEvent) {
 + (unsigned long)rogueSeed;
 
 @end
+
+// In-process engine switching: ask the running Classic engine to leave its
+// title-menu loop so rogueMain() returns and the thread can be torn down.
+#ifdef __cplusplus
+extern "C" {
+#endif
+void setClassicTerminationRequested(BOOL requested);
+#ifdef __cplusplus
+}
+#endif
