@@ -3282,13 +3282,11 @@ void aggravateMonsters(short distance, short x, short y, const color *flashColor
             }
         }
     }
-    freeGrid(grid);
-    
     if (player.xLoc == x && player.yLoc == y) {
         player.status[STATUS_AGGRAVATING] = player.maxStatus[STATUS_AGGRAVATING] = distance;
         rogue.aggroRange = currentAggroValue();
     }
-    
+
     if (grid[player.xLoc][player.yLoc] >= 0 && grid[player.xLoc][player.yLoc] <= distance) {
         discover(x, y);
         discoverCell(x, y);
@@ -3297,6 +3295,8 @@ void aggravateMonsters(short distance, short x, short y, const color *flashColor
             message("You hear a piercing shriek; something must have triggered a nearby alarm.", false);
         }
     }
+
+    freeGrid(grid);
 }
 
 // Simple line algorithm (maybe this is Bresenham?) that returns a list of coordinates

@@ -69,6 +69,43 @@ extension CGSize {
     var cells = [[Cell]]()
     fileprivate var textureMap: [String : SKTexture] = [:]
 
+    // ─────────────────────────────────────────────────────────────────────
+    // Pinch-to-zoom (iPhone only). Only the dungeon map cells — window cols
+    // 21…99, rows 3…30 — are reparented under `dungeonContainer`, which is
+    // scaled and translated to zoom/pan the map. The container is wrapped in
+    // an SKCropNode clipped to the dungeon frame so the magnified map can't
+    // bleed over the sidebar / messages / button bar (which stay at 1×).
+    //
+    // The canonical zoom state is kept in UIKit POINT space (origin top-left,
+    // y down) so the touch→cell inverse (SKViewPort.unzoomedPoint) is a plain
+    // `u = (p - origin) / scale`. setZoom() converts that into the scene's
+    // pixel / bottom-up space exactly once, in applyZoomTransform().
+    //
+    // Window row 31 is deliberately NOT included: on iPhone it's part of the
+    // bottom buttons' tall (B_TALL_CLICK_AREA) tap zone and must stay at 1×.
+    private static let zoomColMin = 21, zoomColMax = 99
+    // Rows 3…31 are the full dungeon map (row 31 is the bottom dungeon row). It's
+    // included so the whole map magnifies uniformly — leaving it out left a
+    // 1× "bottom wall" when zoomed. Rows 32 (flavor) and 33 (buttons) stay chrome.
+    private static let zoomRowMin = 3,  zoomRowMax = 31
+
+    /// UserDefaults key for the experimental pinch-zoom toggle (default off).
+    /// Single source of truth, also read by BrogueViewController's options menu.
+    @objc public static let pinchZoomEnabledDefaultsKey = "pinchZoomEnabledExperimental"
+
+    private var dungeonCrop: SKCropNode?
+    private var dungeonContainer: SKNode?
+    private var dungeonMask: SKSpriteNode?
+
+    /// Current zoom factor (1.0 = no zoom). Read by SKViewPort.unzoomedPoint.
+    private(set) var zoomScale: CGFloat = 1.0
+    /// Container origin in UIKit points (see setZoom). Read by unzoomedPoint.
+    private(set) var zoomOriginXPoints: CGFloat = 0
+    private(set) var zoomOriginYPoints: CGFloat = 0
+
+    /// Zoom is an iPhone-only feature; iPad keeps the flat 1× scene unchanged.
+    private var zoomEnabled: Bool { UIDevice.current.userInterfaceIdiom == .phone }
+
     // We don't want small letters scaled to huge proportions, so we only allow letters to stretch
     // within a certain range (e.g. size of M +/- 20%)
     fileprivate lazy var maxScaleFactor: CGFloat = {
@@ -138,39 +175,165 @@ extension RogueScene {
         }
     }
 
-    private func relayoutCells() {
-        // Both the bottom (home-indicator) pad and the left/right (notch) pads
-        // are only applied during gameplay. On title / menu screens the grid
-        // fills the full scene.
+    /// The current cell layout in scene pixels: the bottom-left offset of grid
+    /// cell (0,0) and the per-cell size. Both the bottom (home-indicator) pad
+    /// and the left/right (notch) pads are only applied during gameplay; on
+    /// title / menu screens the grid fills the full scene.
+    private func currentLayout() -> (xOffset: CGFloat, yOffset: CGFloat, cell: CGSize) {
         let effectiveLeft: CGFloat = paddingEnabled ? leftPadPixels : 0
         let effectiveRight: CGFloat = paddingEnabled ? rightPadPixels : 0
         let usableHeight = paddingEnabled ? size.height - bottomPad : size.height
         let usableWidth = max(size.width - effectiveLeft - effectiveRight, 0)
         let yOffset: CGFloat = paddingEnabled ? bottomPad : 0
-        let xOffset: CGFloat = effectiveLeft
-        cellSize = CGSize(
+        let cell = CGSize(
             width: usableWidth / CGFloat(gridSize.cols),
             height: usableHeight / CGFloat(gridSize.rows)
         )
+        return (effectiveLeft, yOffset, cell)
+    }
+
+    private func relayoutCells() {
+        let layout = currentLayout()
+        cellSize = layout.cell
         for x in 0..<cells.count {
             let column = cells[x]
             for y in 0..<column.count {
                 let cell = column[y]
                 cell.size = cellSize
                 cell.position = CGPoint(
-                    x: xOffset + CGFloat(x) * cellSize.width,
-                    y: yOffset + CGFloat(gridSize.rows - y - 1) * cellSize.height
+                    x: layout.xOffset + CGFloat(x) * cellSize.width,
+                    y: layout.yOffset + CGFloat(gridSize.rows - y - 1) * cellSize.height
                 )
             }
         }
+        relayoutZoomLayer()
     }
-    
+
     override public func didMove(to view: SKView) {
-        (cells.flatMap { $0 }).forEach {
-            $0.background.anchorPoint = CGPoint(x: 0, y: 0)
-            addChild($0.background)
-            addChild($0.foreground)
+        // Every cell starts as a direct child of the scene (the un-zoomed layout).
+        for x in 0..<cells.count {
+            for y in 0..<cells[x].count {
+                let cell = cells[x][y]
+                cell.background.anchorPoint = CGPoint(x: 0, y: 0)
+                addChild(cell.background)
+                addChild(cell.foreground)
+            }
         }
+        // Build the zoom layer only if the experimental flag is on (iPhone). When
+        // off, the scene stays a flat 1× grid with no crop / offscreen pass.
+        if zoomEnabled, UserDefaults.standard.bool(forKey: RogueScene.pinchZoomEnabledDefaultsKey) {
+            enableZoomLayer()
+        }
+    }
+
+    // MARK: - Zoom layer
+
+    private func dungeonCellNodes() -> [SKNode] {
+        var nodes = [SKNode]()
+        for x in RogueScene.zoomColMin...RogueScene.zoomColMax {
+            for y in RogueScene.zoomRowMin...RogueScene.zoomRowMax {
+                nodes.append(cells[x][y].background)
+                nodes.append(cells[x][y].foreground)
+            }
+        }
+        return nodes
+    }
+
+    /// Builds the crop + container and reparents the dungeon-map cells into it.
+    /// Idempotent; iPhone-only. Toggling the experimental option calls this.
+    func enableZoomLayer() {
+        guard zoomEnabled, dungeonContainer == nil else { return }
+        setupZoomLayer()
+        guard let container = dungeonContainer else { return }
+        for node in dungeonCellNodes() {
+            node.removeFromParent()
+            container.addChild(node)
+        }
+    }
+
+    /// Tears the zoom layer down: resets to 1×, returns the dungeon cells to the
+    /// scene as flat children, and removes the crop. Leaves the scene exactly as
+    /// it was before the feature was ever enabled.
+    func disableZoomLayer() {
+        guard let crop = dungeonCrop else { return }
+        for node in dungeonCellNodes() {
+            node.removeFromParent()
+            addChild(node)
+        }
+        crop.removeFromParent()
+        dungeonCrop = nil
+        dungeonContainer = nil
+        dungeonMask = nil
+        zoomScale = 1.0
+        zoomOriginXPoints = 0
+        zoomOriginYPoints = 0
+    }
+
+    /// The dungeon-map rectangle (window cols 21…99, rows 3…30) in scene pixels,
+    /// derived from the live cell layout so it tracks rotations / inset changes.
+    private func dungeonFrameInScene() -> CGRect {
+        let layout = currentLayout()
+        let cols = CGFloat(RogueScene.zoomColMax - RogueScene.zoomColMin + 1) // 79
+        let rows = CGFloat(RogueScene.zoomRowMax - RogueScene.zoomRowMin + 1) // 28
+        let minX = layout.xOffset + CGFloat(RogueScene.zoomColMin) * layout.cell.width
+        // Bottom edge of the lowest zoomed row (row 30), measured bottom-up.
+        let minY = layout.yOffset
+            + CGFloat(gridSize.rows - RogueScene.zoomRowMax - 1) * layout.cell.height
+        return CGRect(x: minX, y: minY,
+                      width: cols * layout.cell.width,
+                      height: rows * layout.cell.height)
+    }
+
+    /// Builds the crop + container once, before cells are parented (didMove).
+    private func setupZoomLayer() {
+        let frame = dungeonFrameInScene()
+        let mask = SKSpriteNode(color: .white, size: frame.size)
+        mask.anchorPoint = CGPoint(x: 0, y: 0)
+        mask.position = frame.origin
+
+        let crop = SKCropNode()
+        crop.position = .zero
+        crop.zPosition = 0
+        crop.maskNode = mask
+
+        let container = SKNode()
+        container.position = .zero
+        crop.addChild(container)
+        addChild(crop)
+
+        dungeonMask = mask
+        dungeonCrop = crop
+        dungeonContainer = container
+    }
+
+    /// Applies a zoom transform expressed in UIKit point space. `scale` is the
+    /// magnification; `(originXPoints, originYPoints)` positions the scaled map
+    /// such that a touch point `p` maps back to the un-zoomed point
+    /// `u = (p - origin) / scale` (see SKViewPort.unzoomedPoint). Converts that
+    /// into the scene's pixel + bottom-up space here, the single place the
+    /// y-flip lives. No-op on iPad (no container).
+    func setZoom(scale: CGFloat, originXPoints: CGFloat, originYPoints: CGFloat) {
+        guard let container = dungeonContainer else { return }
+        zoomScale = scale
+        zoomOriginXPoints = originXPoints
+        zoomOriginYPoints = originYPoints
+
+        let pixelScale = UIScreen.main.scale
+        container.setScale(scale)
+        container.position = CGPoint(
+            x: pixelScale * originXPoints,
+            y: size.height * (1 - scale) - pixelScale * originYPoints
+        )
+    }
+
+    /// Keeps the crop mask sized to the dungeon frame and re-applies the current
+    /// transform after a relayout (rotation / safe-area change).
+    private func relayoutZoomLayer() {
+        guard let mask = dungeonMask else { return }
+        let frame = dungeonFrameInScene()
+        mask.size = frame.size
+        mask.position = frame.origin
+        setZoom(scale: zoomScale, originXPoints: zoomOriginXPoints, originYPoints: zoomOriginYPoints)
     }
 }
 
@@ -188,12 +351,10 @@ fileprivate extension RogueScene {
             case letter
             case scroll
             case charm
+            // Rings use codepoint 0xFFEE in both engines (Classic's RING_CHAR and,
+            // via the CE bridge's G_RING mapping, BrogueCE too), rendered through
+            // the `.ring` path below.
             case ring
-            // CE's ring glyph is U+26AA (Classic's is 0xFFEE). Neither Monaco nor
-            // ArialUnicodeMS carry it, so it's font-substituted and renders too
-            // large for the cell (clipped at top). Same default font as `.glyph`,
-            // just scaled down to fit — see scaleFactor below.
-            case ringCE
             case foliage
             case amulet
             case weapon
@@ -231,11 +392,6 @@ fileprivate extension RogueScene {
 
                 case .foliage, .charm:
                     return 1.1
-
-                // CE ring (U+26AA): shrink the substituted circle so it isn't
-                // clipped. Tune this value if it's still too big/small.
-                case .ringCE:
-                    return 0.8
 
                 // Tile categories — ported from the iBrogueCE reference renderer.
                 case .wall:
@@ -294,8 +450,6 @@ fileprivate extension RogueScene {
                     self = .charm
                 case "\(UnicodeScalar(UInt32(RING_CHAR))!)":
                     self = .ring
-                case "\u{26AA}": // CE's ring glyph (U_CIRCLE)
-                    self = .ringCE
                 case "\(UnicodeScalar(UInt32(AMULET_CHAR))!)":
                     self = .amulet
                 case "\(UnicodeScalar(UInt32(WEAPON_CHAR))!)":
@@ -328,21 +482,55 @@ fileprivate extension RogueScene {
             }
             
             // Actual font that we're going to render
-            let font = UIFont(name: glyphType.fontName, size: fontSize * scaleFactor)!
-            let fontAttributes = [
+            let font: UIFont
+            let stringOrigin: CGPoint
+
+            if case .letter = glyphType {
+                // Baseline-aligned, descender-safe layout for text glyphs (a–z,
+                // A–Z, 0–9, punctuation, brackets). The generic path below scales
+                // a capital to fill the full cell height, which pushes descenders
+                // (j, g, p, q, y) and tall brackets ([, ]) past the bottom edge of
+                // the cell-sized texture and clips them — most visibly on iPhone,
+                // where cells are smallest. Instead, scale so the font's whole line
+                // box (ascent + descent) fits the cell, then place every glyph on a
+                // shared baseline: nothing is clipped and text stays aligned.
+                let ns = glyph as NSString
+                let probe = UIFont(name: glyphType.fontName, size: fontSize)!
+                let probeWidth = max(ns.size(withAttributes: [.font: probe]).width, 0.0001)
+                let probeLineHeight = probe.ascender - probe.descender // descender is negative
+                let fit = min(size.height / probeLineHeight, size.width / probeWidth)
+                let letterFont = UIFont(name: glyphType.fontName, size: fontSize * fit)!
+
+                let lineHeight = letterFont.ascender - letterFont.descender
+                let topInset = (size.height - lineHeight) / 2
+                let advance = ns.size(withAttributes: [.font: letterFont]).width
+
+                font = letterFont
+                // draw(at:) takes the top of the line box; the baseline sits at
+                // topInset + ascender, so the descender bottom lands at
+                // size.height - topInset and never crosses the cell edge.
+                stringOrigin = CGPoint(x: (size.width - advance) / 2 + 1, y: topInset)
+            } else {
+                // Generic glyphs (items, monsters, tiles): fit-and-center.
+                font = UIFont(name: glyphType.fontName, size: fontSize * scaleFactor)!
+                let centerAttributes = convertToOptionalNSAttributedStringKeyDictionary([
+                    convertFromNSAttributedStringKey(NSAttributedString.Key.font): font
+                ])
+                let realBounds: CGRect = glyph.boundingRect(with: CGSize(), options: glyphType.drawingOptions, attributes: centerAttributes, context: nil)
+                stringOrigin = CGPoint(x: (size.width - realBounds.width)/2 - realBounds.origin.x + 1, y:
+                                           font.descender - realBounds.origin.y + (size.height - realBounds.height)/2)
+            }
+
+            let fontAttributes = convertToOptionalNSAttributedStringKeyDictionary([
                 convertFromNSAttributedStringKey(NSAttributedString.Key.font): font,
                 convertFromNSAttributedStringKey(NSAttributedString.Key.foregroundColor): SKColor.white // White so we can blend it
-            ]
-            
-            let realBounds: CGRect = glyph.boundingRect(with: CGSize(), options: glyphType.drawingOptions, attributes: convertToOptionalNSAttributedStringKeyDictionary(fontAttributes), context: nil)
-            let stringOrigin = CGPoint(x: (size.width - realBounds.width)/2 - realBounds.origin.x + 1, y:
-                                           font.descender - realBounds.origin.y + (size.height - realBounds.height)/2)
-           
+            ])
+
             UIGraphicsBeginImageContext(size)
-            glyph.draw(at: stringOrigin, withAttributes: convertToOptionalNSAttributedStringKeyDictionary(fontAttributes))
+            glyph.draw(at: stringOrigin, withAttributes: fontAttributes)
             let surface = UIGraphicsGetImageFromCurrentImageContext()
             UIGraphicsEndImageContext()
-            
+
             return surface!
         }
     

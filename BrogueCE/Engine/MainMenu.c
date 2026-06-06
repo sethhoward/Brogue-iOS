@@ -1253,11 +1253,18 @@ void mainBrogueJunction() {
                     strcpy(rogue.currentGamePath, rogue.nextGamePath);
                     rogue.nextGamePath[0] = '\0';
                 } else {
+                    // iOS port (iBrogue): the file picker is part of the title UI,
+                    // so keep the full-screen (unpadded) title layout while it is
+                    // open. Otherwise the host enables the in-game insets and the
+                    // view shrinks as if a game had already started. We leave the
+                    // title state below, once a file is actually opened.
+                    brogueCEAtTitle = true;
                     dialogChooseFile(path, GAME_SUFFIX, "Open saved game:");
                     //chooseFile(path, "Open saved game: ", "Saved game", GAME_SUFFIX);
                 }
 
                 if (openFile(path)) {
+                    brogueCEAtTitle = false; // entering the game: restore the in-game (padded) layout
                     if (loadSavedGame()) {
                         mainInputLoop();
                     }
@@ -1281,11 +1288,15 @@ void mainBrogueJunction() {
                     strcpy(rogue.currentGamePath, rogue.nextGamePath);
                     rogue.nextGamePath[0] = '\0';
                 } else {
+                    // See NG_OPEN_GAME: keep the full-screen title layout while the
+                    // picker is open so the view doesn't shrink before playback.
+                    brogueCEAtTitle = true;
                     dialogChooseFile(path, RECORDING_SUFFIX, "View recording:");
                     //chooseFile(path, "View recording: ", "Recording", RECORDING_SUFFIX);
                 }
 
                 if (openFile(path)) {
+                    brogueCEAtTitle = false; // entering playback: restore the in-game (padded) layout
                     randomNumbersGenerated = 0;
                     rogue.playbackMode = true;
                     initializeRogue(0); // Seed argument is ignored because we're in playback.

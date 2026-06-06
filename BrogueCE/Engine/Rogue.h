@@ -46,7 +46,7 @@
 // Macro to compare BROGUE_MAJOR.BROGUE_MINOR.patchVersion to a.b.c
 #define BROGUE_VERSION_ATLEAST(a,b,c) (BROGUE_MAJOR != (a) ? BROGUE_MAJOR > (a) : BROGUE_MINOR != (b) ? BROGUE_MINOR > (b) : rogue.patchVersion >= (c))
 
-#define WIZARD_MODE                     1//(rogue.mode == GAME_MODE_WIZARD)
+#define WIZARD_MODE                     (rogue.mode == GAME_MODE_WIZARD)
 
 // Wipe any existing DEBUG flag
 #ifdef DEBUG
