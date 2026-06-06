@@ -26,6 +26,11 @@
 #include "GlobalsBase.h"
 #include "Globals.h"
 
+// iOS port (iBrogue): host hook so the app knows when the player is aiming (the
+// throw/zap targeting loop). Defined in CEBridge.mm. Lets the app move the esc
+// button out of the way and enable the aiming magnifier. No-op off-device.
+extern void ceSetTargeting(boolean isTargeting);
+
 #define MAGIC_POLARITY_BENEVOLENT 1
 #define MAGIC_POLARITY_MALEVOLENT -1
 #define MAGIC_POLARITY_NEUTRAL 0
@@ -5680,6 +5685,7 @@ boolean chooseTarget(pos *returnLoc,
 
     CBrogueGameEvent oldUiMode = uiMode;
     uiMode = CBrogueGameEventShowEscape;
+    ceSetTargeting(true); // iOS port (iBrogue): entering the aiming loop
 
     do {
         printLocationDescription(targetLoc.x, targetLoc.y);
@@ -5690,6 +5696,7 @@ boolean chooseTarget(pos *returnLoc,
             confirmMessages();
             rogue.cursorLoc = INVALID_POS;
             uiMode = oldUiMode;
+            ceSetTargeting(false); // iOS port (iBrogue): aiming canceled
             restoreRNG;
             return false;
         }
@@ -5750,6 +5757,7 @@ boolean chooseTarget(pos *returnLoc,
     refreshDungeonCell(oldTargetLoc);
 
     uiMode = oldUiMode;
+    ceSetTargeting(false); // iOS port (iBrogue): aiming finished
 
     if (posEq(originLoc, targetLoc)) {
         confirmMessages();

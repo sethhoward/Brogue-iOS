@@ -27,6 +27,11 @@
 #include "Rogue.h"
 #include "IncludeGlobals.h"
 
+// iOS port (iBrogue): reports the player's window cell to the host after each
+// screen refresh so the iPhone pinch-zoom can auto-follow. Defined in the
+// Obj-C bridge (RogueDriver.mm).
+extern void iosSetPlayerWindowLocation(short windowX, short windowY);
+
 // Populates path[][] with a list of coordinates starting at origin and traversing down the map. Returns the number of steps in the path.
 short getPlayerPathOnMap(short path[1000][2], short **map, short originX, short originY) {
     short dir, x, y, steps;
@@ -421,12 +426,11 @@ void initializeMenuButtons(buttonState *state, brogueButton buttons[5]) {
         buttons[i].y = ROWS - 1;
         buttons[i].flags |= B_WIDE_CLICK_AREA;
         buttons[i].flags &= ~B_KEYPRESS_HIGHLIGHT;
-        // iPhone: extend the tap area one extra row upward (2 rows above the
-        // bar) so the small bottom-bar buttons are easier to hit. iPad keeps
-        // the default 2-cell (wide) area.
-        if (PHONE_LAYOUT) {
-            buttons[i].flags |= B_TALL_CLICK_AREA;
-        }
+        // iOS port (iBrogue): the bottom buttons keep the default 2-cell (wide)
+        // tap area on rows 32-33. The iPhone affordance is now the host-drawn
+        // bottom tap-band (see BrogueViewController), so the bar no longer steals
+        // the bottom dungeon row (window row 31) — that row is pure map again and
+        // is included in the iPhone pinch-zoom.
     }
     
     buttonCount = 0;
@@ -1793,6 +1797,9 @@ void commitDraws() {
             }
         }
     }
+    // iOS port (iBrogue): feed the player's window cell to the host for the
+    // iPhone pinch-zoom auto-follow (deduped host-side).
+    iosSetPlayerWindowLocation(mapToWindowX(player.xLoc), mapToWindowY(player.yLoc));
 }
 
 // Debug feature: display the level to the screen without regard to lighting, field of view, etc.

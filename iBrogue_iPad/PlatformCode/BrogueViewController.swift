@@ -21,6 +21,7 @@
 import UIKit
 import SpriteKit
 import GameController
+import QuartzCore
 
 fileprivate let kESC_Key: UInt8 = 27
 fileprivate let kReturnKey: UInt8 = 13
@@ -90,6 +91,10 @@ extension UIDevice {
 fileprivate func getCellCoords(at point: CGPoint, viewport: SKViewPort?) -> CGPoint {
     let screenH = UIScreen.main.bounds.size.height
     let screenW = UIScreen.main.bounds.size.width
+    // When the dungeon map is pinch-zoomed, invert the zoom transform so a
+    // touch resolves to the cell actually under the finger. No-op at 1× and
+    // for points outside the zoomable map (sidebar, messages, button bar).
+    let point = viewport?.unzoomedPoint(point) ?? point
     let effectiveHeight = viewport?.effectiveHeightPoints ?? screenH
     let effectiveWidth = viewport?.effectiveWidthPoints ?? screenW
     let leftInset = viewport?.leftInsetPoints ?? 0
@@ -160,8 +165,10 @@ final class BrogueViewController: UIViewController {
     private var versionChooserLabel: UILabel?
     /// Fades the chooser out after a few seconds so it isn't a persistent distraction.
     private var versionChooserFadeTimer: Timer?
+    /// Title-screen options button (lower-left). Universal across Classic and CE.
+    private var optionsButton: UIButton?
     /// True while the active engine is showing its title screen (chooser visible).
-    private var atTitle = false { didSet { updateVersionChooserVisibility() } }
+    private var atTitle = false { didSet { updateVersionChooserVisibility(); updateTitleOptionsVisibility() } }
     fileprivate var touchEvents = [UIBrogueTouchEvent]()
     fileprivate var lastTouchLocation = CGPoint()
     @objc fileprivate var directionsViewController: DirectionControlsViewController?
@@ -181,6 +188,9 @@ final class BrogueViewController: UIViewController {
         let key: UInt8
         let name: String
         let category: String
+        /// CE-only commands (e.g. re-throw) are hidden from the rebind menus
+        /// while the Classic engine is active, since 1.7.5 doesn't handle them.
+        var ceOnly: Bool = false
     }
 
     /// Commands a side button may be bound to. Names mirror printHelpScreen().
@@ -198,6 +208,7 @@ final class BrogueViewController: UIViewController {
         Command(key: "r".ascii, name: "Remove",            category: "Item Actions"),
         Command(key: "a".ascii, name: "Apply / use",       category: "Item Actions"),
         Command(key: "t".ascii, name: "Throw",             category: "Item Actions"),
+        Command(key: "T".ascii, name: "Re-throw at last monster", category: "Item Actions", ceOnly: true),
         Command(key: "d".ascii, name: "Drop",              category: "Item Actions"),
         Command(key: "c".ascii, name: "Call",              category: "Item Actions"),
         Command(key: "R".ascii, name: "Relabel",           category: "Item Actions"),
@@ -220,6 +231,7 @@ final class BrogueViewController: UIViewController {
         "r".ascii: "xmark.shield",
         "a".ascii: "wand.and.stars",
         "t".ascii: "paperplane.fill",
+        "T".ascii: "paperplane.circle.fill",
         "d".ascii: "arrow.down.circle",
         "c".ascii: "tag",
         "R".ascii: "textformat.abc",
@@ -257,12 +269,196 @@ final class BrogueViewController: UIViewController {
     /// Key bound to the center button; `centerButtonNothing` (0) = unbound.
     private var centerButtonKey: UInt8 = BrogueViewController.loadCenterButtonKey()
 
+    // ── Directional-pad position ─────────────────────────────────────────
+    // The pad can be two-finger-dragged. We persist that offset (one key,
+    // shared by Classic and CE) and apply it as a transform rather than by
+    // mutating `.center`: layout passes — e.g. opening a shortcut button's
+    // context menu — reset `.center` back to its constraint position, but
+    // leave `.transform` alone. So driving position via transform keeps the
+    // pad put across menus and across relaunches.
+    private static let dpadOffsetDefaultsKey = "directionPadUserOffset"
+
+    /// Base translation applied before the user's drag. iPhone tucks the pad
+    /// tighter into the corner; iPad keeps the storyboard position.
+    private var dpadBaseTranslation: CGPoint {
+        UIDevice.current.userInterfaceIdiom == .phone ? CGPoint(x: -80, y: 100) : .zero
+    }
+
+    /// User's accumulated two-finger-drag offset, persisted across launches.
+    private var dpadUserOffset: CGPoint = BrogueViewController.loadDpadOffset()
+
+    private static func loadDpadOffset() -> CGPoint {
+        guard let stored = UserDefaults.standard.array(forKey: dpadOffsetDefaultsKey) as? [Double],
+              stored.count == 2 else { return .zero }
+        return CGPoint(x: stored[0], y: stored[1])
+    }
+
+    private func saveDpadOffset() {
+        UserDefaults.standard.set([Double(dpadUserOffset.x), Double(dpadUserOffset.y)],
+                                  forKey: BrogueViewController.dpadOffsetDefaultsKey)
+    }
+
+    /// Position the pad at its base translation plus the persisted user drag.
+    private func applyDpadTransform() {
+        dContainerView.transform = CGAffineTransform(translationX: dpadBaseTranslation.x + dpadUserOffset.x,
+                                                     y: dpadBaseTranslation.y + dpadUserOffset.y)
+    }
+
+    /// All hand-tunable haptic parameters in one place. Adjust feel here; nothing
+    /// else hard-codes a style, intensity, or severity level. The `severity*`
+    /// values must stay in sync with the engine's Combat.c damage hook.
+    private enum Haptics {
+        // Generator styles.
+        static let buttonStyle: UIImpactFeedbackGenerator.FeedbackStyle = .light
+        static let lightDamageStyle: UIImpactFeedbackGenerator.FeedbackStyle = .light
+        static let strongDamageStyle: UIImpactFeedbackGenerator.FeedbackStyle = .heavy
+
+        // Impact intensities (0...1). NOTE: iOS effectively drops impacts below
+        // ~0.4 (imperceptible / not fired), so keep these at 0.4 or above.
+        static let buttonIntensity: CGFloat = 0.8          // on-screen button tap / option feedback
+        static let ordinaryDamageIntensity: CGFloat = 0.5  // severity 0: routine hit
+        static let lowHealthDamageIntensity: CGFloat = 0.6 // severity 1: hit while under 40% HP
+        // Death (severity 2) uses a notification buzz instead of an impact:
+        static let deathNotification: UINotificationFeedbackGenerator.FeedbackType = .error
+
+        // Damage severity levels passed up from the engine (see Combat.c).
+        static let severityLowHealth = 1
+        static let severityFatal = 2
+    }
+
     /// Tactile feedback when an action button is tapped.
-    private let actionButtonHaptics = UIImpactFeedbackGenerator(style: .light)
+    private let actionButtonHaptics = UIImpactFeedbackGenerator(style: Haptics.buttonStyle)
+
+    /// Whether tactile feedback is on. User-toggleable from the title options;
+    /// persisted and shared across Classic and CE. Defaults on.
+    private static let hapticsEnabledDefaultsKey = "hapticsEnabled"
+    private var hapticsEnabled: Bool = {
+        // Absent key → default on; honor an explicit stored value otherwise.
+        UserDefaults.standard.object(forKey: hapticsEnabledDefaultsKey) == nil
+            ? true
+            : UserDefaults.standard.bool(forKey: hapticsEnabledDefaultsKey)
+    }()
+
+    /// Fires the action-button haptic, unless the user has disabled haptics.
+    private func fireHaptic() {
+        guard hapticsEnabled else { return }
+        actionButtonHaptics.impactOccurred(intensity: Haptics.buttonIntensity)
+    }
+
+    /// Generators for the take-damage feedback: a soft tick for ordinary hits and
+    /// a heavy one for low-health hits, plus a notification generator for death.
+    private let lightDamageHaptics = UIImpactFeedbackGenerator(style: Haptics.lightDamageStyle)
+    private let strongDamageHaptics = UIImpactFeedbackGenerator(style: Haptics.strongDamageStyle)
+    private let deathHaptics = UINotificationFeedbackGenerator()
+
+    /// Tactile feedback when the player takes damage, scaled by severity (computed
+    /// by the engine): 0 = ordinary hit (very light), 1 = hit while under 40%
+    /// health, the threshold of the engine's low-health flash (stronger), 2 =
+    /// killing blow (very strong). Respects the haptics setting and is iPhone-only
+    /// (iPad has no haptic engine). Called from both engine bridges on the engine's
+    /// background thread, so it hops to main.
+    @objc func playerTookDamage(_ severity: Int) {
+        guard hapticsEnabled, UIDevice.current.userInterfaceIdiom == .phone else { return }
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self else { return }
+            if severity >= Haptics.severityFatal {            // death — very strong, distinct buzz
+                self.deathHaptics.notificationOccurred(Haptics.deathNotification)
+                self.deathHaptics.prepare()
+            } else if severity >= Haptics.severityLowHealth {  // low health (<40%) — stronger thud
+                self.strongDamageHaptics.impactOccurred(intensity: Haptics.lowHealthDamageIntensity)
+                self.strongDamageHaptics.prepare()             // keep warm for the next hit
+            } else {                                           // ordinary hit — very light tick
+                self.lightDamageHaptics.impactOccurred(intensity: Haptics.ordinaryDamageIntensity)
+                self.lightDamageHaptics.prepare()
+            }
+        }
+    }
+
+    /// Warms the take-damage generators so the first hit isn't dropped by a cold
+    /// Taptic Engine. Called when gameplay controls appear.
+    private func prepareDamageHaptics() {
+        lightDamageHaptics.prepare()
+        strongDamageHaptics.prepare()
+        deathHaptics.prepare()
+    }
+
+    /// iPhone "left-handed" magnifier mode: when on, the magnifier sits to the
+    /// right of the finger instead of the left. Persisted; iPhone-only option.
+    private static let leftHandMagnifierDefaultsKey = "leftHandMagnifier"
+    private var leftHandMagnifier: Bool =
+        UserDefaults.standard.bool(forKey: leftHandMagnifierDefaultsKey) // default off (right-handed)
+
+    /// Experimental iPhone pinch-to-zoom (dungeon map). Persisted, default off.
+    /// Gates the zoom gestures, the multi-touch handling, and the scene's zoom
+    /// layer — when off, everything behaves exactly as before the feature shipped.
+    private var pinchZoomEnabled: Bool =
+        UserDefaults.standard.bool(forKey: RogueScene.pinchZoomEnabledDefaultsKey) // default off
+    /// True only when the feature is both available (iPhone) and switched on.
+    private var pinchZoomActive: Bool { isPhoneIdiom && pinchZoomEnabled }
 
     /// Mirrors the directional pad's visibility: true while the player is
     /// actively moving around the dungeon, false on menus/dialogs/title.
-    private var gameplayControlsActive = false
+    private var gameplayControlsActive = false {
+        didSet { if oldValue != gameplayControlsActive { updateZoomForGameState() } }
+    }
+
+    /// True while the player is aiming a throw/zap (CE targeting loop). Reported
+    /// by the engine via setCETargeting; moves the esc button aside and re-enables
+    /// the magnifier so the player can see what they're aiming at.
+    private var isTargeting = false {
+        didSet { if oldValue != isTargeting { updateZoomForGameState() } }
+    }
+    /// The escape button's resting transform, captured so it can be restored after
+    /// being moved to the lower-left corner during targeting.
+    private var savedEscTransform: CGAffineTransform?
+
+    // ── Pinch-to-zoom (iPhone only) ──────────────────────────────────────
+    // Canonical zoom state, in UIKit point space. `zoomScale` is the
+    // magnification; `zoomOriginPt` positions the magnified map so a touch `p`
+    // inverts to `(p - origin) / scale` (see SKViewPort.unzoomedPoint). Pushed
+    // to the scene via skViewPort.applyZoom. Persists across levels; reset to 1×
+    // only on new game / death. iPad never zooms (gestures aren't installed).
+    private static let zoomMinScale: CGFloat = 1.0
+    private static let zoomMaxScale: CGFloat = 2.5
+    private static let zoomRubberBandFloor: CGFloat = 0.8
+
+    /// Center columns of the 5 engine bottom buttons (Explore/Rest/Search/Menu/
+    /// Inventory), mirroring initializeMenuButtons in BrogueCode/IO.c (starts
+    /// 21/38/53/68/81, widths 15/13/13/11/15). Both engines share this layout.
+    /// Used to snap bottom tap-band touches to the nearest button.
+    private static let bottomButtonCenterColumns = [28, 44, 59, 73, 88]
+    private var zoomScale: CGFloat = 1.0
+    private var zoomOriginPt: CGPoint = .zero
+    /// Scale captured at the start of a pinch, and the un-zoomed point under the
+    /// pinch midpoint, so the gesture scales about the fingers.
+    private var pinchStartScale: CGFloat = 1.0
+    private var pinchAnchorUnzoomed: CGPoint = .zero
+    /// True once the player two-finger-drags to look around; cleared on the next
+    /// real player move, which re-centers (auto-follow).
+    private var manualPanActive = false
+    /// Last player window cell received from the engine bridge (auto-follow).
+    private var lastPlayerWindowCell: CGPoint?
+    /// The zoom recognizers, kept so the magnifier can be suppressed while a
+    /// pinch or two-finger pan is in progress.
+    private weak var zoomPinch: UIPinchGestureRecognizer?
+    private weak var zoomPan: UIPanGestureRecognizer?
+    /// True while a pinch or two-finger pan is actively recognizing.
+    private var zoomGestureInProgress: Bool {
+        func active(_ g: UIGestureRecognizer?) -> Bool {
+            guard let state = g?.state else { return false }
+            return state == .began || state == .changed
+        }
+        return active(zoomPinch) || active(zoomPan)
+    }
+
+    /// Drives the rubber-band snap-back to 1× when a pinch ends below 1×.
+    private var zoomSnapBackLink: CADisplayLink?
+    private var snapBackStartScale: CGFloat = 1.0
+    private var snapBackStartOrigin: CGPoint = .zero
+    private var snapBackStartTime: CFTimeInterval = 0
+    private let snapBackDuration: CFTimeInterval = 0.18
+
+    private var isPhoneIdiom: Bool { UIDevice.current.userInterfaceIdiom == .phone }
 
     /// One-time first-run hint pointing at a side button to explain long-press
     /// rebinding. The flag persists across launches; `keybindHintInFlight`
@@ -302,13 +498,16 @@ final class BrogueViewController: UIViewController {
                     self.leaderBoardButton.isHidden = true
                     self.seedButton.isHidden = false
                     self.escButton.isHidden = true
+                    self.resetZoom()
                 case .startNewGame, .openGame, .beginOpenGame:
                     self.leaderBoardButton.isHidden = true
                     self.seedButton.isHidden = true
                     self.manageFilesButton?.isHidden = true
                     self.seedKeyDown = false
+                    self.resetZoom()
                 case .messagePlayerHasDied:
                     self.showInventoryButton.isHidden = false
+                    self.resetZoom()
                 case .playerHasDiedMessageAcknowledged:
                     self.showInventoryButton.isHidden = true
                 default: ()
@@ -347,9 +546,11 @@ final class BrogueViewController: UIViewController {
 
         currentEngine = BrogueViewController.persistedEngine()
         setupVersionChooser()
+        setupOptionsButton()
         startEngine()
 
         magView.viewToMagnify = skViewPort
+        magView.leftHandMode = leftHandMagnifier
         magView.hideMagnifier()
         inputTextField.delegate = self
 
@@ -358,16 +559,18 @@ final class BrogueViewController: UIViewController {
         dContainerView.addGestureRecognizer(panGesture)
         dContainerView.alpha = 0.3
 
+        setupZoomGestures()
+
         // Storyboard positions these for iPad. On iPhone (much less screen
-        // real estate, landscape-only) push them tighter into the edges.
-        // Applied once as a transform so auto-layout passes don't fight us,
-        // and so any user-drag gesture on dContainerView (which modifies
-        // .center) keeps working on top.
-        // Tune these constants to taste.
+        // real estate, landscape-only) push the esc button tighter into the
+        // edge. Applied as a transform so auto-layout passes don't fight us.
+        // Tune this constant to taste.
         if UIDevice.current.userInterfaceIdiom == .phone {
-            dContainerView.transform = CGAffineTransform(translationX: -80, y: 100)
             escButton.transform = CGAffineTransform(translationX: -80, y: 90)
         }
+        // Position the draggable pad from its base offset plus any saved drag.
+        // (Transform, not .center — see dpad position note above.)
+        applyDpadTransform()
 
         GameCenter.shared.authenticate(from: self)
 
@@ -604,7 +807,7 @@ final class BrogueViewController: UIViewController {
     @objc private func actionButtonTapped(_ sender: UIButton) {
         let slot = sender.tag
         guard slot >= 0, slot < sideButtonKeys.count else { return }
-        actionButtonHaptics.impactOccurred()
+        fireHaptic()
         addKeyEvent(event: sideButtonKeys[slot])
     }
 
@@ -634,7 +837,7 @@ final class BrogueViewController: UIViewController {
 
     @objc private func centerButtonTapped() {
         guard centerButtonKey != BrogueViewController.centerButtonNothing else { return }
-        actionButtonHaptics.impactOccurred()
+        fireHaptic()
         addKeyEvent(event: centerButtonKey)
     }
 
@@ -686,9 +889,13 @@ final class BrogueViewController: UIViewController {
             button.isHidden = !visible
             button.isUserInteractionEnabled = visible
         }
-        // Warm up the haptic engine so the first tap fires without latency.
+        // Warm up the haptic engine so the first tap / hit fires without latency.
+        // (A cold Taptic Engine often drops or weakens the first impactOccurred.)
         if visible {
-            actionButtonHaptics.prepare()
+            if hapticsEnabled {
+                actionButtonHaptics.prepare()
+                prepareDamageHaptics()
+            }
             // First time the buttons appear in a game, explain long-press rebinding.
             maybeShowKeybindHint()
         }
@@ -699,11 +906,16 @@ final class BrogueViewController: UIViewController {
     }
     
     @objc func draggedView(_ sender: UIPanGestureRecognizer) {
-
         directionsViewController?.cancel()
         let translation = sender.translation(in: view)
-        dContainerView.center = CGPoint(x: dContainerView.center.x + translation.x, y: dContainerView.center.y + translation.y)
-        sender.setTranslation(CGPoint.zero, in: view)
+        dpadUserOffset.x += translation.x
+        dpadUserOffset.y += translation.y
+        applyDpadTransform()
+        sender.setTranslation(.zero, in: view)
+        // Persist once the drag settles, not on every incremental move.
+        if sender.state == .ended || sender.state == .cancelled {
+            saveDpadOffset()
+        }
     }
     
     override func prepare(for segue: UIStoryboardSegue, sender: Any?) {
@@ -803,6 +1015,42 @@ final class BrogueViewController: UIViewController {
         }
     }
 
+    /// Called by the CE bridge while the player aims a throw/zap. Moves the esc
+    /// button to the lower-left corner so it's out of the aiming area, and flags
+    /// targeting so the magnifier is allowed (see canShowMagnifier).
+    @objc func setCETargeting(_ targeting: Bool) {
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self else { return }
+            self.isTargeting = targeting
+            self.positionEscButtonForTargeting(targeting)
+        }
+    }
+
+    /// Moves the esc button to the lower-left safe-area corner during targeting,
+    /// restoring its resting position afterward. Uses a transform (rather than
+    /// touching .center) so it composes with the storyboard layout, matching how
+    /// the button is already offset at launch.
+    private func positionEscButtonForTargeting(_ targeting: Bool) {
+        guard let escButton = escButton, let parent = escButton.superview else { return }
+        if targeting {
+            if savedEscTransform == nil { savedEscTransform = escButton.transform }
+            // `center` is transform-independent (constraint-defined), so the
+            // delta below lands the button's center at the lower-left corner.
+            // Hug the actual left edge (ignoring the left safe-area inset) with a
+            // little padding, and sit low — just clear of the home indicator.
+            let size = escButton.bounds.size
+            let leftPadding: CGFloat = 10
+            let bottomPadding: CGFloat = 6
+            let targetCenter = CGPoint(
+                x: parent.bounds.minX + leftPadding + size.width / 2,
+                y: parent.bounds.maxY - parent.safeAreaInsets.bottom - bottomPadding - size.height / 2)
+            escButton.transform = CGAffineTransform(translationX: targetCenter.x - escButton.center.x,
+                                                    y: targetCenter.y - escButton.center.y)
+        } else if let saved = savedEscTransform {
+            escButton.transform = saved
+        }
+    }
+
     /// Called by the CE bridge: true only while the CE title screen is showing.
     @objc func setCEAtTitle(_ value: Bool) {
         DispatchQueue.main.async { [weak self] in
@@ -811,6 +1059,9 @@ final class BrogueViewController: UIViewController {
             // Full-screen (no insets) on the title; reserve insets everywhere
             // else — gameplay AND in-game menus — so the width doesn't jump.
             self.skViewPort.rogueScene.paddingEnabled = !value
+            // Returning to the CE title means a run ended (or a new one is about
+            // to start) — reset the dungeon zoom. CE never sets lastBrogueGameEvent.
+            if value { self.resetZoom() }
         }
     }
 
@@ -898,6 +1149,114 @@ final class BrogueViewController: UIViewController {
         requestEngineSwitch()
     }
 
+    // MARK: - Title-screen options (universal, Classic + CE)
+
+    /// Builds the lower-left options button. A single tap opens its menu; the
+    /// button is title-only, shown/hidden alongside the version chooser.
+    private func setupOptionsButton() {
+        let button = UIButton(type: .system)
+        button.translatesAutoresizingMaskIntoConstraints = false
+        button.tintColor = UIColor(white: 0.85, alpha: 1.0)
+        button.backgroundColor = UIColor.black.withAlphaComponent(0.55)
+        button.layer.cornerRadius = 22
+        button.setImage(UIImage(systemName: "gearshape.fill",
+                                withConfiguration: UIImage.SymbolConfiguration(pointSize: 20, weight: .semibold)),
+                        for: .normal)
+        button.isHidden = true
+        button.showsMenuAsPrimaryAction = true
+        button.menu = optionsMenu()
+
+        view.addSubview(button)
+        NSLayoutConstraint.activate([
+            button.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor, constant: 16),
+            button.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -16),
+            button.widthAnchor.constraint(equalToConstant: 44),
+            button.heightAnchor.constraint(equalToConstant: 44),
+        ])
+        optionsButton = button
+    }
+
+    /// The options menu. Universal across engines; add new entries here.
+    private func optionsMenu() -> UIMenu {
+        let resetDirections = UIAction(title: "Default d-pad position",
+                                       image: UIImage(systemName: "arrow.counterclockwise")) { [weak self] _ in
+            self?.resetDpadPosition()
+        }
+
+        var children: [UIMenuElement] = []
+
+        // Haptics and magnifier orientation are iPhone-only: iPad has no haptic
+        // engine, and the beside-the-finger magnifier placement is iPhone-only.
+        if UIDevice.current.userInterfaceIdiom == .phone {
+            let haptics = UIAction(title: "Haptics",
+                                   image: UIImage(systemName: "iphone.radiowaves.left.and.right"),
+                                   state: hapticsEnabled ? .on : .off) { [weak self] _ in
+                self?.toggleHaptics()
+            }
+            // Title states the current side (left-handed mode = magnifier on the
+            // right); no checkmark, since the text itself conveys the state.
+            let magnifierSide = UIAction(title: leftHandMagnifier ? "Magnifier: right side" : "Magnifier: left side",
+                                         image: UIImage(systemName: "magnifyingglass")) { [weak self] _ in
+                self?.toggleLeftHandMagnifier()
+            }
+            // Experimental: pinch-to-zoom the dungeon map. Default off.
+            let pinchZoom = UIAction(title: "Pinch zoom (experimental)",
+                                     image: UIImage(systemName: "arrow.up.left.and.arrow.down.right"),
+                                     state: pinchZoomEnabled ? .on : .off) { [weak self] _ in
+                self?.togglePinchZoom()
+            }
+            children.append(contentsOf: [haptics, magnifierSide, pinchZoom])
+        }
+
+        children.append(resetDirections)
+        return UIMenu(title: "Options", children: children)
+    }
+
+    /// Flips the left-handed magnifier setting, persists it, applies it to the
+    /// live magnifier, and rebuilds the menu so its checkmark updates.
+    private func toggleLeftHandMagnifier() {
+        leftHandMagnifier.toggle()
+        UserDefaults.standard.set(leftHandMagnifier, forKey: BrogueViewController.leftHandMagnifierDefaultsKey)
+        magView.leftHandMode = leftHandMagnifier
+        fireHaptic()
+        optionsButton?.menu = optionsMenu()
+    }
+
+    /// Flips the experimental pinch-zoom setting, persists it, builds/tears down
+    /// the scene's zoom layer and recognizers, and rebuilds the menu.
+    private func togglePinchZoom() {
+        pinchZoomEnabled.toggle()
+        UserDefaults.standard.set(pinchZoomEnabled, forKey: RogueScene.pinchZoomEnabledDefaultsKey)
+        applyPinchZoomEnabled()
+        fireHaptic()
+        optionsButton?.menu = optionsMenu()
+    }
+
+    /// Flips the haptics setting, persists it, gives confirming feedback if it was
+    /// just enabled, and rebuilds the menu so its checkmark reflects the new state.
+    private func toggleHaptics() {
+        hapticsEnabled.toggle()
+        UserDefaults.standard.set(hapticsEnabled, forKey: BrogueViewController.hapticsEnabledDefaultsKey)
+        if hapticsEnabled {
+            actionButtonHaptics.prepare()
+            actionButtonHaptics.impactOccurred(intensity: Haptics.buttonIntensity)
+        }
+        optionsButton?.menu = optionsMenu()
+    }
+
+    /// Clears the saved two-finger-drag offset so the directional pad returns to
+    /// its default position. Universal — the offset is shared by Classic and CE.
+    private func resetDpadPosition() {
+        fireHaptic()
+        dpadUserOffset = .zero
+        saveDpadOffset()
+        applyDpadTransform()
+    }
+
+    private func updateTitleOptionsVisibility() {
+        optionsButton?.isHidden = !atTitle
+    }
+
     private func updateVersionChooserLabel() {
         versionChooserLabel?.text = (currentEngine == .ce) ? "BrogueCE" : "Brogue"
     }
@@ -945,10 +1304,17 @@ extension BrogueViewController: UIContextMenuInteractionDelegate {
 
     /// Sectioned menu of bindable commands for one side-button slot. Each row
     /// shows the human-readable name and the key; the current binding is checked.
+    /// Commands offered in the rebind menus for the active engine. CE-only
+    /// commands (e.g. re-throw) are dropped while Classic is running.
+    private func availableCommands() -> [Command] {
+        BrogueViewController.commandCatalog.filter { currentEngine == .ce || !$0.ceOnly }
+    }
+
     private func rebindMenu(forSlot slot: Int) -> UIMenu {
         let currentKey = sideButtonKeys[slot]
+        let catalog = availableCommands()
         let sections = BrogueViewController.commandCategoryOrder.map { category -> UIMenu in
-            let actions = BrogueViewController.commandCatalog
+            let actions = catalog
                 .filter { $0.category == category }
                 .map { command -> UIAction in
                     let keyChar = String(UnicodeScalar(command.key))
@@ -1003,8 +1369,9 @@ extension BrogueViewController: UIContextMenuInteractionDelegate {
         none.state = (current == BrogueViewController.centerButtonNothing) ? .on : .off
         let noneSection = UIMenu(title: "", options: .displayInline, children: [none])
 
+        let catalog = availableCommands()
         let sections = BrogueViewController.commandCategoryOrder.map { category -> UIMenu in
-            let actions = BrogueViewController.commandCatalog
+            let actions = catalog
                 .filter { $0.category == category }
                 .map { command -> UIAction in
                     let keyChar = String(UnicodeScalar(command.key))
@@ -1145,6 +1512,277 @@ extension BrogueViewController {
     }
 }
 
+// MARK: - Pinch-to-zoom (iPhone)
+
+extension BrogueViewController: UIGestureRecognizerDelegate {
+
+    /// Installs the pinch + two-finger-pan recognizers on the SpriteKit viewport.
+    /// iPhone only; iPad keeps the flat, un-zoomable scene.
+    private func setupZoomGestures() {
+        guard isPhoneIdiom else { return }
+        let pinch = UIPinchGestureRecognizer(target: self, action: #selector(handleZoomPinch(_:)))
+        pinch.name = "zoomPinch"
+        pinch.delegate = self
+        let pan = UIPanGestureRecognizer(target: self, action: #selector(handleZoomPan(_:)))
+        pan.name = "zoomPan"
+        pan.minimumNumberOfTouches = 2
+        pan.maximumNumberOfTouches = 2
+        pan.delegate = self
+        pinch.isEnabled = pinchZoomEnabled
+        pan.isEnabled = pinchZoomEnabled
+        skViewPort.addGestureRecognizer(pinch)
+        skViewPort.addGestureRecognizer(pan)
+        zoomPinch = pinch
+        zoomPan = pan
+    }
+
+    /// Applies the experimental pinch-zoom toggle: builds/tears down the scene's
+    /// zoom layer and enables/disables the recognizers. Title-screen only, so a
+    /// mid-game scene rebuild is never in play.
+    private func applyPinchZoomEnabled() {
+        guard isPhoneIdiom else { return }
+        if pinchZoomEnabled {
+            skViewPort.rogueScene.enableZoomLayer()
+        } else {
+            resetZoom()
+            skViewPort.rogueScene.disableZoomLayer()
+        }
+        zoomPinch?.isEnabled = pinchZoomEnabled
+        zoomPan?.isEnabled = pinchZoomEnabled
+    }
+
+    // Pinch + two-finger pan must run together, but not alongside unrelated
+    // recognizers (e.g. the dpad's drag).
+    func gestureRecognizer(_ g: UIGestureRecognizer,
+                           shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool {
+        let zoomNames: Set<String> = ["zoomPinch", "zoomPan"]
+        return zoomNames.contains(g.name ?? "") && zoomNames.contains(other.name ?? "")
+    }
+
+    @objc private func handleZoomPinch(_ g: UIPinchGestureRecognizer) {
+        guard isPhoneIdiom, gameplayControlsActive || isTargeting else { return }
+        switch g.state {
+        case .began:
+            cancelZoomSnapBack()
+            magView.hideMagnifier() // a pinch is starting — kill any lingering magnifier
+            pinchStartScale = zoomScale
+            let mid = g.location(in: view)
+            pinchAnchorUnzoomed = CGPoint(x: (mid.x - zoomOriginPt.x) / zoomScale,
+                                          y: (mid.y - zoomOriginPt.y) / zoomScale)
+        case .changed:
+            let s = clampedDisplayScale(pinchStartScale * g.scale)
+            let mid = g.location(in: view)
+            // Keep the un-zoomed anchor pinned under the fingers: mid = s·anchor + origin.
+            zoomScale = s
+            zoomOriginPt = CGPoint(x: mid.x - s * pinchAnchorUnzoomed.x,
+                                   y: mid.y - s * pinchAnchorUnzoomed.y)
+            pushZoom()
+        case .ended, .cancelled, .failed:
+            if zoomScale < 1.0 {
+                animateZoomSnapBack()
+            } else {
+                pushZoom()
+            }
+        default:
+            break
+        }
+    }
+
+    @objc private func handleZoomPan(_ g: UIPanGestureRecognizer) {
+        guard isPhoneIdiom, gameplayControlsActive || isTargeting, zoomScale > 1.0 else { return }
+        switch g.state {
+        case .began:
+            manualPanActive = true
+            cancelZoomSnapBack()
+            magView.hideMagnifier() // a pan is starting — kill any lingering magnifier
+        case .changed:
+            let t = g.translation(in: view)
+            zoomOriginPt.x += t.x
+            zoomOriginPt.y += t.y
+            g.setTranslation(.zero, in: view)
+            pushZoom()
+        default:
+            // Keep manualPanActive set until the next real player move re-centers.
+            break
+        }
+    }
+
+    /// The dungeon-map rectangle in UIKit points (window cols 21…99, rows 3…30),
+    /// mirroring RogueScene.dungeonFrameInScene but in point space.
+    private func dungeonFramePoints() -> CGRect {
+        let w = skViewPort.effectiveWidthPoints
+        let h = skViewPort.effectiveHeightPoints
+        let li = skViewPort.leftInsetPoints
+        let cw = w / CGFloat(COLS)
+        let ch = h / CGFloat(ROWS)
+        let left = li + 21 * cw
+        let right = li + 100 * cw   // right edge of col 99
+        let top = 3 * ch            // top edge of row 3
+        let bottom = 32 * ch        // bottom edge of row 31 (full dungeon map)
+        return CGRect(x: left, y: top, width: right - left, height: bottom - top)
+    }
+
+    /// Clamps the origin so the magnified map always fully covers the dungeon
+    /// frame (no empty gutters). Below 1× there's nothing to clamp.
+    private func clampedOrigin(_ origin: CGPoint, scale: CGFloat) -> CGPoint {
+        guard scale > 1.0 else { return origin }
+        let f = dungeonFramePoints()
+        let xLo = f.maxX * (1 - scale), xHi = f.minX * (1 - scale)
+        let yLo = f.maxY * (1 - scale), yHi = f.minY * (1 - scale)
+        return CGPoint(x: min(max(origin.x, xLo), xHi),
+                       y: min(max(origin.y, yLo), yHi))
+    }
+
+    private func clampedDisplayScale(_ raw: CGFloat) -> CGFloat {
+        if raw >= BrogueViewController.zoomMinScale {
+            return min(raw, BrogueViewController.zoomMaxScale)
+        }
+        // Rubber-band resistance below 1×, with a hard floor.
+        let resisted = 1 - (1 - raw) * 0.4
+        return max(resisted, BrogueViewController.zoomRubberBandFloor)
+    }
+
+    private func pushZoom() {
+        zoomOriginPt = clampedOrigin(zoomOriginPt, scale: zoomScale)
+        skViewPort.applyZoom(scale: zoomScale,
+                             originXPoints: zoomOriginPt.x,
+                             originYPoints: zoomOriginPt.y)
+    }
+
+    /// Centers the player's window cell in the dungeon frame (auto-follow).
+    private func applyAutoFollow(playerCell: CGPoint) {
+        guard zoomScale > 1.0 else { return }
+        let f = dungeonFramePoints()
+        let cw = skViewPort.effectiveWidthPoints / CGFloat(COLS)
+        let ch = skViewPort.effectiveHeightPoints / CGFloat(ROWS)
+        let li = skViewPort.leftInsetPoints
+        // Player cell center in 1× view points.
+        let px = li + (playerCell.x + 0.5) * cw
+        let py = (playerCell.y + 0.5) * ch
+        // Want player at frame center: f.mid = scale·p + origin.
+        zoomOriginPt = CGPoint(x: f.midX - zoomScale * px, y: f.midY - zoomScale * py)
+        pushZoom()
+    }
+
+    /// Engine bridge callback (both engines), reporting the player's window cell
+    /// each refresh. Runs auto-follow unless the user is currently looking around.
+    @objc func setPlayerWindowX(_ x: Int, y: Int) {
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self, self.isPhoneIdiom else { return }
+            let cell = CGPoint(x: x, y: y)
+            let moved = (self.lastPlayerWindowCell != cell)
+            self.lastPlayerWindowCell = cell
+            guard self.gameplayControlsActive, self.zoomScale > 1.0 else { return }
+            // A real move re-establishes follow after a manual look-around.
+            if moved { self.manualPanActive = false }
+            if !self.manualPanActive {
+                self.applyAutoFollow(playerCell: cell)
+            }
+        }
+    }
+
+    /// Suspend-and-restore: engine-drawn overlays (inventory, menus, confirmations)
+    /// render into the same dungeon cells, so they'd appear magnified and clipped
+    /// off-screen while zoomed. So whenever the game leaves map play
+    /// (`gameplayControlsActive` false, and not aiming) we display the map at 1×
+    /// — keeping the user's stored zoom intact — and restore it (re-centered on
+    /// the player) when normal play resumes. Driven by didSet on the two flags.
+    private func updateZoomForGameState() {
+        guard isPhoneIdiom else { return }
+        cancelZoomSnapBack()
+        // Aiming a throw/zap is map interaction — keep the zoom.
+        let onMap = gameplayControlsActive || isTargeting
+        guard onMap, zoomScale > 1.0 else {
+            // Overlay up (or not zoomed): show the displayed map at 1×. The stored
+            // zoomScale / zoomOriginPt are deliberately left untouched.
+            skViewPort.applyZoom(scale: 1.0, originXPoints: 0, originYPoints: 0)
+            return
+        }
+        // Back on the map: restore the stored zoom, recentered on the player.
+        if let cell = lastPlayerWindowCell, !manualPanActive {
+            applyAutoFollow(playerCell: cell)
+        } else {
+            pushZoom()
+        }
+    }
+
+    /// Resets to 1× (new game / death / return to title). iPad no-op.
+    private func resetZoom() {
+        guard isPhoneIdiom else { return }
+        cancelZoomSnapBack()
+        zoomScale = 1.0
+        zoomOriginPt = .zero
+        manualPanActive = false
+        lastPlayerWindowCell = nil
+        skViewPort.applyZoom(scale: 1.0, originXPoints: 0, originYPoints: 0)
+    }
+
+    // MARK: - Bottom button tap-band (iPhone)
+
+    /// True when a touch lands in the reserved band below the grid (iPhone, during
+    /// normal play). The band is the fat, easy-to-hit target for the bottom buttons.
+    private func isBandTouch(_ point: CGPoint) -> Bool {
+        guard isPhoneIdiom, gameplayControlsActive else { return false }
+        return point.y >= skViewPort.effectiveHeightPoints
+    }
+
+    /// Maps a tap in the bottom band to the nearest of the 5 engine buttons and
+    /// replays it as a touch at that button's cell (window row 33), so the engine
+    /// fires the button exactly as a direct tap would (Menu opens its submenu, etc.).
+    private func handleBandTap(_ point: CGPoint) {
+        let width = skViewPort.effectiveWidthPoints
+        let height = skViewPort.effectiveHeightPoints
+        let leftInset = skViewPort.leftInsetPoints
+        guard width > 0, height > 0 else { return }
+        let cw = width / CGFloat(COLS)
+        let ch = height / CGFloat(ROWS)
+        // Column under the finger; ignore the sidebar side of the band (no button).
+        let col = Int(CGFloat(COLS) * max(point.x - leftInset, 0) / width)
+        guard col >= 21 else { return }
+        let centers = BrogueViewController.bottomButtonCenterColumns
+        let target = centers.min(by: { abs($0 - col) < abs($1 - col) }) ?? centers[0]
+        // Center of the chosen button cell on the button row (33), in view points.
+        let p = CGPoint(x: leftInset + (CGFloat(target) + 0.5) * cw, y: (33.0 + 0.5) * ch)
+        // Mirror the regular tap path: MOUSE_DOWN (stationary) then MOUSE_UP (ended).
+        addTouchEvent(event: UIBrogueTouchEvent(phase: .stationary, location: p))
+        addTouchEvent(event: UIBrogueTouchEvent(phase: .ended, location: p))
+        fireHaptic()
+    }
+
+    private func animateZoomSnapBack() {
+        cancelZoomSnapBack()
+        snapBackStartScale = zoomScale
+        snapBackStartOrigin = zoomOriginPt
+        snapBackStartTime = CACurrentMediaTime()
+        let link = CADisplayLink(target: self, selector: #selector(stepZoomSnapBack(_:)))
+        link.add(to: .main, forMode: .common)
+        zoomSnapBackLink = link
+    }
+
+    @objc private func stepZoomSnapBack(_ link: CADisplayLink) {
+        let raw = (CACurrentMediaTime() - snapBackStartTime) / snapBackDuration
+        let t = CGFloat(min(max(raw, 0), 1))
+        let e = t * t * (3 - 2 * t) // smoothstep
+        let s = snapBackStartScale + (1.0 - snapBackStartScale) * e
+        if t >= 1.0 {
+            cancelZoomSnapBack()
+            zoomScale = 1.0
+            zoomOriginPt = .zero
+            skViewPort.applyZoom(scale: 1.0, originXPoints: 0, originYPoints: 0)
+        } else {
+            zoomScale = s
+            zoomOriginPt = CGPoint(x: snapBackStartOrigin.x * (1 - e),
+                                   y: snapBackStartOrigin.y * (1 - e))
+            skViewPort.applyZoom(scale: s, originXPoints: zoomOriginPt.x, originYPoints: zoomOriginPt.y)
+        }
+    }
+
+    private func cancelZoomSnapBack() {
+        zoomSnapBackLink?.invalidate()
+        zoomSnapBackLink = nil
+    }
+}
+
 extension BrogueViewController {
     override func motionBegan(_ motion: UIEvent.EventSubtype, with event: UIEvent?) {
         addKeyEvent(event: kESC_Key)
@@ -1152,9 +1790,24 @@ extension BrogueViewController {
     
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
         super.touchesBegan(touches, with: event)
-        
+
+        // iPhone (zoom on): a second finger means a pinch / two-finger pan is
+        // starting — don't feed the engine a stray one-cell event, and drop any
+        // magnifier the first finger raised before the recognizer formally begins.
+        if pinchZoomActive, (event?.allTouches?.count ?? touches.count) >= 2 {
+            magView.hideMagnifier()
+            return
+        }
+        // Bottom tap-band: handled on release; swallow the down (before the dpad
+        // guard, so the dpad container can't eat band taps) so it never becomes a
+        // map-move or pops the magnifier.
+        if isBandTouch(touches.first!.location(in: view)) {
+            magView.hideMagnifier()
+            return
+        }
+
         guard dContainerView.hitTest(touches.first!.location(in: dContainerView), with: event) == nil else { return }
-        
+
         for touch in touches {
             let location = touch.location(in: view)
             // handle double tap on began.
@@ -1174,9 +1827,18 @@ extension BrogueViewController {
     
     override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent?) {
         super.touchesMoved(touches, with: event)
-        
+
+        if pinchZoomActive, (event?.allTouches?.count ?? touches.count) >= 2 {
+            magView.hideMagnifier()
+            return
+        }
+        if isBandTouch(touches.first!.location(in: view)) {
+            magView.hideMagnifier()
+            return
+        }
+
         guard dContainerView.hitTest(touches.first!.location(in: dContainerView), with: event) == nil else { return }
-        
+
         if let touch = touches.first {
             let location = touch.location(in: view)
             let brogueEvent = UIBrogueTouchEvent(phase: touch.phase, location: location)
@@ -1188,12 +1850,20 @@ extension BrogueViewController {
     
     override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
         super.touchesEnded(touches, with: event)
-        
+
+        // Bottom tap-band takes priority over the dpad container and normal
+        // routing, so a tap at the very bottom always fires a button.
+        if let loc = touches.first?.location(in: view), isBandTouch(loc) {
+            handleBandTap(loc)
+            hideMagnifier()
+            return
+        }
+
         guard dContainerView.hitTest(touches.first!.location(in: dContainerView), with: event) == nil else { return }
-        
+
         if let touch = touches.first {
             let location = touch.location(in: view)
-            
+
             if pointIsInSideBar(point: location) {
                 // side bar
                 if touch.tapCount >= 2 {
@@ -1272,19 +1942,27 @@ extension BrogueViewController {
         // coarse uiMode and never sets `lastBrogueGameEvent`, so use the shared
         // `gameplayControlsActive` flag (true exactly when CE reports normal
         // play, set in applyCEUIMode) to allow the magnifier there.
+        // CE drives only a coarse uiMode and never sets `lastBrogueGameEvent`, so
+        // allow the magnifier during normal play (gameplayControlsActive) and also
+        // while aiming a throw/zap (isTargeting), where it helps the player see the
+        // target cell under their finger.
+        // Never while pinching / two-finger panning the map — the magnifier would
+        // fight the gesture and lag behind the moving cells.
+        guard !zoomGestureInProgress else { return false }
         let engineAllowsMagnifier = (currentEngine == .ce)
-            ? gameplayControlsActive
+            ? (gameplayControlsActive || isTargeting)
             : lastBrogueGameEvent.canShowMagnifyingGlass
         guard engineAllowsMagnifier, pointIsInPlayArea(point: point) else {
             return false
         }
-        // iPhone: the bottom dungeon row (window row 31) doubles as the bottom
-        // button bar's extended 3-cell tap area (see B_TALL_CLICK_AREA in
-        // BrogueCode/IOS_MODIFICATIONS.md). Suppress the magnifier there so it
-        // doesn't pop up over the map when the player is aiming for a button.
-        if UIDevice.current.userInterfaceIdiom == .phone {
+        // iPhone: suppress the magnifier over the chrome rows — the flavor line
+        // (row 32) and the button bar (row 33) — so it doesn't pop up when the
+        // player is aiming for a button. Row 31 is now pure dungeon (the bottom
+        // map row), so the magnifier is allowed there. Not suppressed while
+        // targeting, when the buttons are hidden.
+        if UIDevice.current.userInterfaceIdiom == .phone, !isTargeting {
             let cell = getCellCoords(at: point, viewport: skViewPort)
-            if cell.y >= 31 {
+            if cell.y >= 32 {
                 return false
             }
         }
@@ -1478,6 +2156,11 @@ extension BrogueViewController {
 final class SKMagView: SKView {
     var viewToMagnify: SKViewPort?
 
+    /// iPhone "left-handed" mode: place the magnifier to the RIGHT of the finger
+    /// instead of the left, so a left hand gripping the device doesn't cover it.
+    /// No effect on iPad (which hovers the magnifier above the touch).
+    var leftHandMode: Bool = false
+
     // Half-extents (cells out from the center) of the magnified block.
     // `xHalf` is the horizontal axis (2*xHalf+1 cells wide), `yHalf` the
     // vertical (2*yHalf+1 cells tall). The centering math in cellsAtTouch
@@ -1565,16 +2248,19 @@ final class SKMagView: SKView {
             y: point.y - size.height / 2 + offset.height
         )
 
-        // iPhone: ALWAYS place to the left of the finger.
+        // iPhone: ALWAYS place beside the finger — to the left by default, or to
+        // the right in left-handed mode (so the gripping hand never covers it).
         // iPad: only flip left when the above-touch default would clip the top.
         // Either way the magnifier sits beside the finger, never under it.
         //
-        // TWEAK ME: `leftFlipPadding` is the gap between the finger and the
-        // magnifier's right edge when it sits to the left. Bigger = magnifier
-        // sits further left of the finger.
-        if isPhone || c.y - radius < bounds.minY {
-            let leftFlipPadding: CGFloat = 38
-            c.x = point.x - radius - leftFlipPadding
+        // TWEAK ME: `flipPadding` is the gap between the finger and the nearer
+        // edge of the magnifier when it sits beside it. Bigger = further away.
+        let flipPadding: CGFloat = 38
+        if isPhone && leftHandMode {
+            c.x = point.x + radius + flipPadding   // to the RIGHT of the finger
+            c.y = point.y
+        } else if isPhone || c.y - radius < bounds.minY {
+            c.x = point.x - radius - flipPadding    // to the LEFT of the finger
             c.y = point.y
         }
 
@@ -1700,8 +2386,15 @@ final class SKMagView: SKView {
             // drifts the content left by leftInset*scale (an empty column on the
             // right). The y-axis has no matching inset, so it's left as-is.
             let leftInset = viewToMagnify.leftInsetPoints
-            let xMouseOffset = (point.x - leftInset - (currentCellXY.x * (viewToMagnify.rogueScene.cells[0][0].size.width / screenScale))) * magnificationOffset
-            let yMouseOffset = (point.y - (currentCellXY.y * (viewToMagnify.rogueScene.cells[0][0].size.height / screenScale))) * magnificationOffset
+            // Measure the sub-cell offset in the SAME space currentCellXY came
+            // from. getCellCoords un-zooms internally, so when the dungeon map is
+            // pinch-zoomed the raw touch point is in zoomed space while the cell
+            // index is in 1× space — using `point` here would put the content
+            // wildly off-center. Un-zoom the point so both agree; across one
+            // on-screen (zoomed) cell the un-zoomed point sweeps exactly one cell.
+            let unzoomed = viewToMagnify.unzoomedPoint(point)
+            let xMouseOffset = (unzoomed.x - leftInset - (currentCellXY.x * (viewToMagnify.rogueScene.cells[0][0].size.width / screenScale))) * magnificationOffset
+            let yMouseOffset = (unzoomed.y - (currentCellXY.y * (viewToMagnify.rogueScene.cells[0][0].size.height / screenScale))) * magnificationOffset
             
             // center cell is at index (rows, cols) and should be in the middle of the magnifying glass view. As touches move so does the view need to move to follow.
             let xFinalOffset = ((CGFloat(rows) * cellSize.width - self.size.width/2) + cellSize.width/2) + xMouseOffset

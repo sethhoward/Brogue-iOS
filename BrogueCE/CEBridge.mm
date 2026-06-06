@@ -33,6 +33,10 @@
 #define U_ANKH                0x2640
 #define U_MUSIC_NOTE          0x266A
 #define U_CIRCLE              0x26AA
+// Match Classic's RING_CHAR (iBrogue_iPad/BrogueCode/Rogue.h) so the ring renders
+// through RogueScene's `.ring` path (ArialUnicodeMS) as a proper ring, not the
+// substituted circle that U_CIRCLE (0x26AA) produces via the `.ringCE` fallback.
+#define U_RING                0xFFEE
 #define U_LIGHTNING_BOLT      0x03DF
 #define U_FILLED_CIRCLE       0x25cf
 #define U_NEUTER              0x26b2
@@ -195,7 +199,7 @@ static unsigned int ce_glyphToUnicode(enum displayGlyph glyph) {
         case G_FOLIAGE: return U_ARIES;
         case G_AMULET: return U_ANKH;
         case G_SCROLL: return U_MUSIC_NOTE;
-        case G_RING: return U_CIRCLE;
+        case G_RING: return U_RING;
         case G_WEAPON: return U_UP_ARROW;
         case G_GEM: return U_FILLED_CIRCLE;
         case G_TOTEM: return U_NEUTER;
@@ -461,10 +465,14 @@ void nextKeyOrMouseEvent(rogueEvent *returnEvent, boolean textInput, boolean col
             CGFloat width = [gHost effectiveWidthPoints];
             CGFloat height = [gHost effectiveHeightPoints];
             CGFloat leftInset = [gHost leftInsetPoints];
-            CGFloat xInPlay = MAX((CGFloat)location.x - leftInset, (CGFloat)0.0);
+            // Invert pinch-zoom (iPhone) so the engine sees the cell under the
+            // finger; identity at 1× / outside the map. Same inverse the Swift
+            // getCellCoords and the Classic bridge use.
+            CGPoint loc = [gHost unzoomedPoint:location];
+            CGFloat xInPlay = MAX((CGFloat)loc.x - leftInset, (CGFloat)0.0);
 
             returnEvent->param1 = (long)(COLS * xInPlay / width);
-            returnEvent->param2 = (long)(ROWS * (CGFloat)location.y / height);
+            returnEvent->param2 = (long)(ROWS * (CGFloat)loc.y / height);
             returnEvent->controlKey = 0;
             returnEvent->shiftKey = 0;
             return;
@@ -502,28 +510,278 @@ void ceShowFileManagement(void) {
     [gHost presentFileManagement];
 }
 
-short getHighScoresList(rogueHighScoresEntry returnList[HIGH_SCORES_COUNT]) {
-    return 0;
+// iOS port (iBrogue): Combat.c calls this when the player takes damage.
+void cePlayerTookDamage(int severity) {
+    if (gHost) [gHost playDamageHaptic:severity];
 }
 
+// iOS port (iBrogue): Items.c calls this around the throw/zap aiming loop.
+void ceSetTargeting(boolean isTargeting) {
+    if (gHost) [gHost setTargeting:(BOOL)isTargeting];
+}
+
+// iOS port (iBrogue): commitDraws() reports the player's WINDOW cell here every
+// refresh so the iPhone pinch-zoom can auto-follow. Deduped against the last
+// reported cell so the (frequent) commitDraws calls don't spam the host.
+void ceSetPlayerWindowLocation(short windowX, short windowY) {
+    static short lastX = -1, lastY = -1;
+    if (windowX == lastX && windowY == lastY) return;
+    lastX = windowX;
+    lastY = windowY;
+    if (gHost) [gHost setPlayerWindowX:windowX y:windowY];
+}
+
+// iOS port (iBrogue): high scores are persisted in NSUserDefaults as three
+// parallel arrays. Kept under CE-specific keys, separate from the Classic
+// engine's list, since the two engines score independently. CE's
+// rogueHighScoresEntry has no seed field, so (unlike Classic) we store none.
+static NSString * const kCEHighScoresScoresKey = @"ce high scores scores";
+static NSString * const kCEHighScoresTextKey   = @"ce high scores text";
+static NSString * const kCEHighScoresDatesKey  = @"ce high scores dates";
+
+// Ensure all three arrays exist and hold exactly HIGH_SCORES_COUNT entries,
+// padding empty slots (score 0). Safe to call before every read/write.
+static void ceInitHighScores(void) {
+    NSUserDefaults *d = [NSUserDefaults standardUserDefaults];
+    NSMutableArray *scores = [([d arrayForKey:kCEHighScoresScoresKey] ?: @[]) mutableCopy];
+    NSMutableArray *text   = [([d arrayForKey:kCEHighScoresTextKey]   ?: @[]) mutableCopy];
+    NSMutableArray *dates  = [([d arrayForKey:kCEHighScoresDatesKey]  ?: @[]) mutableCopy];
+
+    while ((short)[scores count] < HIGH_SCORES_COUNT) [scores addObject:@(0L)];
+    while ((short)[text count]   < HIGH_SCORES_COUNT) [text addObject:@""];
+    while ((short)[dates count]  < HIGH_SCORES_COUNT) [dates addObject:[NSDate date]];
+
+    [d setObject:scores forKey:kCEHighScoresScoresKey];
+    [d setObject:text   forKey:kCEHighScoresTextKey];
+    [d setObject:dates  forKey:kCEHighScoresDatesKey];
+}
+
+// Fills returnList sorted by score (descending) and returns the index (within
+// the sorted list) of the most recently dated entry, so printHighScores can
+// highlight it. Mirrors the Classic port's algorithm.
+short getHighScoresList(rogueHighScoresEntry returnList[HIGH_SCORES_COUNT]) {
+    ceInitHighScores();
+    NSUserDefaults *d = [NSUserDefaults standardUserDefaults];
+    NSArray *scores = [d arrayForKey:kCEHighScoresScoresKey];
+    NSArray *text   = [d arrayForKey:kCEHighScoresTextKey];
+    NSArray *dates  = [d arrayForKey:kCEHighScoresDatesKey];
+
+    NSDateFormatter *fmt = [[NSDateFormatter alloc] init];
+    [fmt setDateFormat:@"MM/dd/yy"];
+
+    boolean taken[HIGH_SCORES_COUNT];
+    for (short i = 0; i < HIGH_SCORES_COUNT; i++) taken[i] = false;
+
+    NSDate *mostRecentDate = [NSDate distantPast];
+    short mostRecentIndex = 0;
+
+    for (short i = 0; i < HIGH_SCORES_COUNT; i++) {
+        // Pick the highest score not yet placed (>= so empty 0-slots fill too).
+        long maxScore = -1;
+        short maxIndex = 0;
+        for (short j = 0; j < HIGH_SCORES_COUNT; j++) {
+            if (!taken[j] && [[scores objectAtIndex:j] longValue] >= maxScore) {
+                maxScore = [[scores objectAtIndex:j] longValue];
+                maxIndex = j;
+            }
+        }
+        taken[maxIndex] = true;
+
+        returnList[i].score = [[scores objectAtIndex:maxIndex] longValue];
+        const char *desc = [[text objectAtIndex:maxIndex] UTF8String];
+        const char *date = [[fmt stringFromDate:[dates objectAtIndex:maxIndex]] UTF8String];
+        strncpy(returnList[i].description, desc ? desc : "", sizeof(returnList[i].description) - 1);
+        returnList[i].description[sizeof(returnList[i].description) - 1] = '\0';
+        strncpy(returnList[i].date, date ? date : "", sizeof(returnList[i].date) - 1);
+        returnList[i].date[sizeof(returnList[i].date) - 1] = '\0';
+
+        if ([mostRecentDate compare:[dates objectAtIndex:maxIndex]] == NSOrderedAscending) {
+            mostRecentDate = [dates objectAtIndex:maxIndex];
+            mostRecentIndex = i;
+        }
+    }
+    return mostRecentIndex;
+}
+
+// Replaces the lowest entry if theEntry beats it; returns whether it qualified.
+// The passed-in date is ignored in favor of the current date, as upstream does.
 boolean saveHighScore(rogueHighScoresEntry theEntry) {
-    return false;
+    ceInitHighScores();
+    NSUserDefaults *d = [NSUserDefaults standardUserDefaults];
+    NSMutableArray *scores = [[d arrayForKey:kCEHighScoresScoresKey] mutableCopy];
+    NSMutableArray *text   = [[d arrayForKey:kCEHighScoresTextKey]   mutableCopy];
+    NSMutableArray *dates  = [[d arrayForKey:kCEHighScoresDatesKey]  mutableCopy];
+
+    short minIndex = -1;
+    long minScore = theEntry.score;
+    for (short j = 0; j < HIGH_SCORES_COUNT; j++) {
+        if ([[scores objectAtIndex:j] longValue] < minScore) {
+            minScore = [[scores objectAtIndex:j] longValue];
+            minIndex = j;
+        }
+    }
+
+    if (minIndex == -1) {
+        return false; // didn't beat any existing entry
+    }
+
+    [scores replaceObjectAtIndex:minIndex withObject:@((long)theEntry.score)];
+    [text   replaceObjectAtIndex:minIndex withObject:([NSString stringWithUTF8String:theEntry.description] ?: @"")];
+    [dates  replaceObjectAtIndex:minIndex withObject:[NSDate date]];
+
+    [d setObject:scores forKey:kCEHighScoresScoresKey];
+    [d setObject:text   forKey:kCEHighScoresTextKey];
+    [d setObject:dates  forKey:kCEHighScoresDatesKey];
+    [d synchronize];
+    return true;
+}
+
+// iOS port (iBrogue): CE's lifetime "game stats" screen is built from a run
+// history — one rogueRun per finished game, kept in chronological order (the
+// streak math in MainMenu.c depends on that order), with a seed==0 entry acting
+// as a "player reset their recent stats here" sentinel. Persisted as an array of
+// dictionaries in NSUserDefaults under a CE-specific key. `rogue` (the engine's
+// global game state) supplies the fields saveRunHistory isn't handed directly.
+static NSString * const kCERunHistoryKey = @"ce run history";
+extern playerCharacter rogue;
+
+static void ceAppendRun(NSDictionary *run) {
+    NSUserDefaults *d = [NSUserDefaults standardUserDefaults];
+    NSMutableArray *runs = [([d arrayForKey:kCERunHistoryKey] ?: @[]) mutableCopy];
+    [runs addObject:run];
+    [d setObject:runs forKey:kCERunHistoryKey];
+    [d synchronize];
 }
 
 void saveRunHistory(char *result, char *killedBy, int score, int lumenstones) {
+    ceAppendRun(@{
+        @"seed":         @((unsigned long long)rogue.seed),
+        @"dateNumber":   @((long)[[NSDate date] timeIntervalSince1970]),
+        @"result":       (result   ? [NSString stringWithUTF8String:result]   : @"") ?: @"",
+        @"killedBy":     (killedBy ? [NSString stringWithUTF8String:killedBy] : @"") ?: @"",
+        @"gold":         @((int)rogue.gold),
+        @"lumenstones":  @(lumenstones),
+        @"score":        @(score),
+        @"turns":        @((int)rogue.playerTurnNumber),
+        @"deepestLevel": @((int)rogue.deepestLevel),
+    });
 }
 
 void saveResetRun(void) {
+    // A seed==0 entry marks where the player reset their "recent" stats; the
+    // other fields are unused for sentinels.
+    ceAppendRun(@{
+        @"seed":         @(0ULL),
+        @"dateNumber":   @((long)[[NSDate date] timeIntervalSince1970]),
+        @"result":       @"",
+        @"killedBy":     @"",
+        @"gold":         @(0),
+        @"lumenstones":  @(0),
+        @"score":        @(0),
+        @"turns":        @(0),
+        @"deepestLevel": @(0),
+    });
 }
 
+// Returns a malloc'd, chronologically-ordered linked list; the caller frees each
+// node (result/killedBy are inline arrays, so a plain free() per node suffices).
 rogueRun *loadRunHistory(void) {
-    return NULL;
+    NSArray *runs = [[NSUserDefaults standardUserDefaults] arrayForKey:kCERunHistoryKey];
+    rogueRun *head = NULL, *tail = NULL;
+
+    for (id obj in runs) {
+        if (![obj isKindOfClass:[NSDictionary class]]) continue;
+        NSDictionary *dict = (NSDictionary *)obj;
+
+        rogueRun *node = (rogueRun *)calloc(1, sizeof(rogueRun));
+        if (!node) break;
+
+        node->seed         = (uint64_t)[dict[@"seed"] unsignedLongLongValue];
+        node->dateNumber   = (long)[dict[@"dateNumber"] longValue];
+        node->gold         = [dict[@"gold"] intValue];
+        node->lumenstones  = [dict[@"lumenstones"] intValue];
+        node->score        = [dict[@"score"] intValue];
+        node->turns        = [dict[@"turns"] intValue];
+        node->deepestLevel = [dict[@"deepestLevel"] intValue];
+        node->nextRun      = NULL;
+
+        NSString *result   = [dict[@"result"]   isKindOfClass:[NSString class]] ? dict[@"result"]   : @"";
+        NSString *killedBy = [dict[@"killedBy"] isKindOfClass:[NSString class]] ? dict[@"killedBy"] : @"";
+        const char *resultC   = [result UTF8String];
+        const char *killedByC = [killedBy UTF8String];
+        strncpy(node->result,   resultC   ? resultC   : "", sizeof(node->result) - 1);
+        node->result[sizeof(node->result) - 1] = '\0';
+        strncpy(node->killedBy, killedByC ? killedByC : "", sizeof(node->killedBy) - 1);
+        node->killedBy[sizeof(node->killedBy) - 1] = '\0';
+
+        if (tail) {
+            tail->nextRun = node;
+            tail = node;
+        } else {
+            head = tail = node;
+        }
+    }
+    return head;
 }
 
+// Enumerates the files in the engine's working directory (Documents/ce, set by
+// initializeBrogueCESaveLocation) so the title menu's Load Game / View Recording
+// pickers have something to filter. dialogChooseFile keeps only the entries whose
+// name ends in the requested suffix, then frees the returned list and *membuf.
+//
+// The path strings are packed into a single dynamically grown buffer returned via
+// dynamicMemoryBuffer; fileEntry.path entries point into it. fileEntry.date is a
+// struct tm (CE differs from Classic's date string) consumed by strftime and
+// mktime in MainMenu.c, so we fill it from each file's modification time.
 fileEntry *listFiles(short *fileCount, char **dynamicMemoryBuffer) {
-    if (fileCount) *fileCount = 0;
-    if (dynamicMemoryBuffer) *dynamicMemoryBuffer = NULL;
-    return NULL;
+    NSFileManager *manager = [NSFileManager defaultManager];
+    NSError *err = nil;
+    NSArray<NSString *> *names =
+        [manager contentsOfDirectoryAtPath:[manager currentDirectoryPath] error:&err];
+
+    short count = (short)[names count];
+    fileEntry *fileList = (fileEntry *)malloc(sizeof(fileEntry) * (count > 0 ? count : 1));
+    unsigned long *offsets = (unsigned long *)malloc(sizeof(unsigned long) * (count > 0 ? count : 1));
+
+    char *buffer = NULL;
+    unsigned long bufferPosition = 0, bufferSize = 0;
+
+    for (short i = 0; i < count; i++) {
+        NSString *name = names[i];
+        const char *cName = [name cStringUsingEncoding:NSUTF8StringEncoding];
+        if (!cName) {
+            cName = "";
+        }
+        unsigned long nameLength = strlen(cName);
+
+        if (bufferPosition + nameLength + 1 > bufferSize) {
+            bufferSize += 1024;
+            buffer = (char *)realloc(buffer, bufferSize);
+        }
+        offsets[i] = bufferPosition;
+        strcpy(&buffer[bufferPosition], cName);
+        bufferPosition += nameLength + 1;
+
+        // Modification date -> struct tm for MainMenu's strftime/mktime.
+        memset(&fileList[i].date, 0, sizeof(fileList[i].date));
+        NSDictionary *attrs = [manager attributesOfItemAtPath:name error:nil];
+        NSDate *modDate = [attrs fileModificationDate];
+        if (modDate) {
+            time_t t = (time_t)[modDate timeIntervalSince1970];
+            localtime_r(&t, &fileList[i].date);
+        }
+    }
+
+    // realloc may have moved the buffer, so resolve offsets to pointers last.
+    for (short i = 0; i < count; i++) {
+        fileList[i].path = &buffer[offsets[i]];
+    }
+
+    free(offsets);
+
+    *fileCount = count;
+    *dynamicMemoryBuffer = buffer;
+    return fileList;
 }
 
 void initializeLaunchArguments(enum NGCommands *command, char *path, uint64_t *seed) {

@@ -34,6 +34,10 @@ NS_ASSUME_NONNULL_BEGIN
 - (CGFloat)effectiveWidthPoints;
 - (CGFloat)effectiveHeightPoints;
 - (CGFloat)leftInsetPoints;
+// Inverts the dungeon-map pinch-zoom (iPhone) for a touch point in view points:
+// returns the point the engine should treat the touch as. Identity at 1× and
+// for touches outside the zoomable map.
+- (CGPoint)unzoomedPoint:(CGPoint)point;
 
 // --- Input source -----------------------------------------------------------
 - (BOOL)hasKeyEvent;
@@ -57,6 +61,19 @@ NS_ASSUME_NONNULL_BEGIN
 // Present the native file manager (CE title menu's "File Management" entry),
 // scoped to the CE save directory.
 - (void)presentFileManagement;
+
+// Fire a haptic when the player takes damage, scaled by severity (0 = ordinary
+// hit, 1 = now under 40% health, 2 = fatal). The host gates this on its own
+// haptics setting and device support, so the engine can call it freely.
+- (void)playDamageHaptic:(NSInteger)severity;
+
+// True while the player is aiming a throw/zap (the engine's targeting loop), so
+// the host can move the escape button aside and enable the aiming magnifier.
+- (void)setTargeting:(BOOL)targeting;
+
+// Reports the player's WINDOW cell (already mapToWindow-converted) after each
+// screen refresh, so the host's iPhone pinch-zoom can keep the player centered.
+- (void)setPlayerWindowX:(short)x y:(short)y;
 
 @end
 

@@ -30,6 +30,11 @@
 
 #define D_DISABLE_BACKGROUND_COLORS     (WIZARD_MODE && 0)
 
+// iOS port (iBrogue): reports the player's window cell to the host after each
+// screen refresh so the iPhone pinch-zoom can auto-follow. Defined in the
+// Obj-C++ bridge (CEBridge.mm).
+extern void ceSetPlayerWindowLocation(short windowX, short windowY);
+
 // Populates path[][] with a list of coordinates starting at origin and traversing down the map. Returns the number of steps in the path.
 short getPlayerPathOnMap(pos path[1000], short **map, pos origin) {
     pos at = origin;
@@ -533,6 +538,12 @@ static void initializeMenuButtons(buttonState *state, brogueButton buttons[5]) {
 }
 
 
+// iOS port (iBrogue): one-shot flag so a single tap on the on-screen Explore
+// button auto-explores immediately, instead of the desktop two-step "tap once to
+// preview the path, tap again to commit." Consumed in exploreKey(). Mirrors the
+// Classic engine's fix. Keyboard 'x' (a KEYSTROKE) is unaffected.
+static boolean exploreImmediately = false;
+
 // This is basically the main loop for the game.
 void mainInputLoop() {
     pos oldTargetLoc = { 0, 0 };
@@ -711,6 +722,13 @@ void mainInputLoop() {
                     doEvent = true;
                 }
             } else if (state.buttonChosen > -1) {
+                // iOS port (iBrogue): a single tap on the on-screen Explore button
+                // should auto-explore immediately rather than just previewing the
+                // path. Keyboard 'x' (which arrives as KEYSTROKE) is unaffected.
+                if (theEvent.eventType == MOUSE_UP
+                    && buttons[state.buttonChosen].hotkey[0] == EXPLORE_KEY) {
+                    exploreImmediately = true;
+                }
                 theEvent.eventType = KEYSTROKE;
                 theEvent.param1 = buttons[state.buttonChosen].hotkey[0];
                 theEvent.param2 = 0;
@@ -884,6 +902,9 @@ void commitDraws() {
             *lastPlotted = *curr;
         }
     }
+    // iOS port (iBrogue): feed the player's window cell to the host for the
+    // iPhone pinch-zoom auto-follow (deduped host-side).
+    ceSetPlayerWindowLocation(mapToWindowX(player.loc.x), mapToWindowY(player.loc.y));
 }
 
 // flags the entire window as needing to be redrawn at next flush.
@@ -2316,6 +2337,8 @@ static void exploreKey(const boolean controlKey) {
     short **exploreMap;
     enum directions dir;
     boolean tooDark = false;
+    boolean forceExplore = exploreImmediately;  // iOS port (iBrogue): consume the one-shot
+    exploreImmediately = false;
 
     // fight any adjacent enemies first
     dir = adjacentFightingDir();
@@ -2358,7 +2381,8 @@ static void exploreKey(const boolean controlKey) {
         message("It's too dark to explore!", 0);
     } else if (x == player.loc.x && y == player.loc.y) {
         message("I see no path for further exploration.", 0);
-    } else if (proposeOrConfirmLocation((pos){ finalX, finalY }, "I see no path for further exploration.")) {
+    } else if (proposeOrConfirmLocation((pos){ finalX, finalY }, "I see no path for further exploration.")
+               || forceExplore) {
         explore(controlKey ? 1 : 20); // Do the exploring until interrupted.
         hideCursor();
         exploreKey(controlKey);

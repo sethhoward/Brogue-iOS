@@ -106,6 +106,23 @@ void plotChar(uchar inputChar,
     CGColorRelease(foreColor);
 }
 
+// iOS port (iBrogue): Combat.c calls this when the player takes damage. C
+// linkage so the C engine resolves the unmangled symbol.
+extern "C" void iosPlayerTookDamage(int severity) {
+    [brogueViewController playerTookDamage:severity];
+}
+
+// iOS port (iBrogue): commitDraws() reports the player's WINDOW cell here every
+// refresh so the iPhone pinch-zoom can auto-follow. Deduped against the last
+// reported cell so the (frequent) commitDraws calls don't spam the main queue.
+extern "C" void iosSetPlayerWindowLocation(short windowX, short windowY) {
+    static short lastX = -1, lastY = -1;
+    if (windowX == lastX && windowY == lastY) return;
+    lastX = windowX;
+    lastY = windowY;
+    [brogueViewController setPlayerWindowX:windowX y:windowY];
+}
+
 __unused void pausingTimerStartsNow() {}
 
 // Returns true if the player interrupted the wait with a keystroke; otherwise false.
@@ -182,9 +199,13 @@ void nextKeyOrMouseEvent(rogueEvent *returnEvent, __unused boolean textInput, bo
                         break;
                 }
                 
-                float xInPlay = MAX(float(touch.location.x) - leftInset, 0.0f);
+                // Invert pinch-zoom (iPhone) so the engine sees the cell under
+                // the finger; identity at 1× / outside the map. Same inverse as
+                // the Swift getCellCoords and the CE bridge.
+                CGPoint loc = [skviewPort unzoomedPoint:touch.location];
+                float xInPlay = MAX(float(loc.x) - leftInset, 0.0f);
                 x = COLS * xInPlay / width;
-                y = ROWS * float(touch.location.y) / height;
+                y = ROWS * float(loc.y) / height;
                 
                 returnEvent->param1 = x;
                 returnEvent->param2 = y;

@@ -39,6 +39,7 @@ final class CEHost: NSObject, BrogueCEHost {
     func effectiveWidthPoints() -> CGFloat { viewPort?.effectiveWidthPoints ?? 0 }
     func effectiveHeightPoints() -> CGFloat { viewPort?.effectiveHeightPoints ?? 0 }
     func leftInsetPoints() -> CGFloat { viewPort?.leftInsetPoints ?? 0 }
+    func unzoomedPoint(_ point: CGPoint) -> CGPoint { viewPort?.unzoomedPoint(point) ?? point }
 
     // MARK: Input
 
@@ -66,5 +67,17 @@ final class CEHost: NSObject, BrogueCEHost {
 
     func presentFileManagement() {
         viewController?.presentFileManagementScreenForCE()
+    }
+
+    func playDamageHaptic(_ severity: Int) {
+        viewController?.playerTookDamage(severity)
+    }
+
+    func setTargeting(_ targeting: Bool) {
+        viewController?.setCETargeting(targeting)
+    }
+
+    func setPlayerWindowX(_ x: Int16, y: Int16) {
+        viewController?.setPlayerWindowX(Int(x), y: Int(y))
     }
 }

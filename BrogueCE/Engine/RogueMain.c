@@ -1085,7 +1085,12 @@ void gameOver(char *killedBy, boolean useCustomPhrasing) {
         displayMoreSignWithoutWaitingForAcknowledgment();
 
         boolean exit = false;
-        uiMode = CBrogueGameEventShowEscape; // tablet ui mode
+        // iOS port (iBrogue): use InMenu (not ShowEscape) so the on-screen escape
+        // button doesn't appear on the "You die... press space or click" screen —
+        // a tap already advances it, so the button is redundant clutter. uiMode is
+        // only a host control-visibility signal; the loop still gets MOUSE_UP from
+        // a tap regardless of the mode.
+        uiMode = CBrogueGameEventInMenu; // tablet ui mode
         do {
             if (rogue.playbackMode) break;
             nextBrogueEvent(&theEvent, false, false, false);
