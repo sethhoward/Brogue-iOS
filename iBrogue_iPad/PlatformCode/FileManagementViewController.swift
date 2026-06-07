@@ -83,6 +83,11 @@ final class FileManagementViewController: UITableViewController {
     private lazy var deleteSelectedButton = UIBarButtonItem(
         title: "Delete", style: .plain, target: self, action: #selector(deleteSelectedTapped))
 
+    /// Bottom-toolbar button (editing mode) that offers a per-section
+    /// "delete all" via an action sheet — clears all Saves or all Replays.
+    private lazy var deleteAllButton = UIBarButtonItem(
+        title: "Delete All", style: .plain, target: self, action: #selector(deleteAllTapped))
+
     override func viewDidLoad() {
         super.viewDidLoad()
         title = "Manage Files"
@@ -235,15 +240,16 @@ final class FileManagementViewController: UITableViewController {
         if editing {
             let flexible = UIBarButtonItem(barButtonSystemItem: .flexibleSpace, target: nil, action: nil)
             deleteSelectedButton.tintColor = .systemRed
-            toolbarItems = [flexible, deleteSelectedButton]
-            updateDeleteButtonState()
+            deleteAllButton.tintColor = .systemRed
+            toolbarItems = [deleteAllButton, flexible, deleteSelectedButton]
+            updateToolbarButtonStates()
         }
         navigationController?.setToolbarHidden(!editing, animated: animated)
     }
 
     override func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
         if isEditing {
-            updateDeleteButtonState()
+            updateToolbarButtonStates()
         } else {
             // No tap action outside editing — clear the transient selection.
             tableView.deselectRow(at: indexPath, animated: false)
@@ -251,13 +257,17 @@ final class FileManagementViewController: UITableViewController {
     }
 
     override func tableView(_ tableView: UITableView, didDeselectRowAt indexPath: IndexPath) {
-        if isEditing { updateDeleteButtonState() }
+        if isEditing { updateToolbarButtonStates() }
     }
 
-    private func updateDeleteButtonState() {
+    private func updateToolbarButtonStates() {
         let count = tableView.indexPathsForSelectedRows?.count ?? 0
         deleteSelectedButton.isEnabled = count > 0
         deleteSelectedButton.title = count > 0 ? "Delete (\(count))" : "Delete"
+
+        // "Delete All" is independent of selection — enabled whenever any file exists.
+        let total = files.values.reduce(0) { $0 + $1.count }
+        deleteAllButton.isEnabled = total > 0
     }
 
     @objc private func deleteSelectedTapped() {
@@ -281,5 +291,38 @@ final class FileManagementViewController: UITableViewController {
         }
         reloadFiles()
         setEditing(false, animated: true)
+    }
+
+    // MARK: - Delete all (per section)
+
+    /// Action sheet offering one destructive "delete all" per non-empty section.
+    /// The sheet selection is the confirmation (standard for bulk delete); each
+    /// option names the section and its file count so the choice is unambiguous.
+    @objc private func deleteAllTapped() {
+        let alert = UIAlertController(
+            title: "Delete All Files",
+            message: "This cannot be undone.",
+            preferredStyle: .actionSheet)
+        for section in Section.allCases {
+            let count = files[section]?.count ?? 0
+            guard count > 0 else { continue }
+            alert.addAction(UIAlertAction(
+                title: "Delete All \(section.title) (\(count))",
+                style: .destructive) { [weak self] _ in
+                    self?.deleteAll(in: section)
+            })
+        }
+        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        // Anchor for iPad's popover presentation.
+        alert.popoverPresentationController?.barButtonItem = deleteAllButton
+        present(alert, animated: true)
+    }
+
+    private func deleteAll(in section: Section) {
+        for url in files[section] ?? [] {
+            removeFile(at: url)
+        }
+        reloadFiles()
+        updateToolbarButtonStates()
     }
 }

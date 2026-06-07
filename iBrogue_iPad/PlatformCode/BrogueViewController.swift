@@ -287,6 +287,17 @@ final class BrogueViewController: UIViewController {
     /// User's accumulated two-finger-drag offset, persisted across launches.
     private var dpadUserOffset: CGPoint = BrogueViewController.loadDpadOffset()
 
+    /// Transient, NON-persisted horizontal correction that lifts the d-pad clear
+    /// of the notch-side safe area in whichever landscape it would otherwise hide
+    /// under the cutout. Recomputed on launch and on rotation; never saved, so the
+    /// user's flush/default placement is preserved in the non-notch orientation.
+    private var dpadNotchAvoidance: CGFloat = 0
+
+    /// Extra points the notch-avoidance nudge clears the safe-area inset by.
+    /// Higher = pad sits further from the cutout; can go to 0 (flush to the inset)
+    /// or negative (allow slight overlap). Tune to taste.
+    private static let dpadNotchClearanceMargin: CGFloat = -20
+
     private static func loadDpadOffset() -> CGPoint {
         guard let stored = UserDefaults.standard.array(forKey: dpadOffsetDefaultsKey) as? [Double],
               stored.count == 2 else { return .zero }
@@ -298,10 +309,12 @@ final class BrogueViewController: UIViewController {
                                   forKey: BrogueViewController.dpadOffsetDefaultsKey)
     }
 
-    /// Position the pad at its base translation plus the persisted user drag.
+    /// Position the pad at its base translation plus the persisted user drag plus
+    /// the transient notch-avoidance correction.
     private func applyDpadTransform() {
-        dContainerView.transform = CGAffineTransform(translationX: dpadBaseTranslation.x + dpadUserOffset.x,
-                                                     y: dpadBaseTranslation.y + dpadUserOffset.y)
+        dContainerView.transform = CGAffineTransform(
+            translationX: dpadBaseTranslation.x + dpadUserOffset.x + dpadNotchAvoidance,
+            y: dpadBaseTranslation.y + dpadUserOffset.y)
     }
 
     /// All hand-tunable haptic parameters in one place. Adjust feel here; nothing
@@ -315,7 +328,7 @@ final class BrogueViewController: UIViewController {
 
         // Impact intensities (0...1). NOTE: iOS effectively drops impacts below
         // ~0.4 (imperceptible / not fired), so keep these at 0.4 or above.
-        static let buttonIntensity: CGFloat = 0.8          // on-screen button tap / option feedback
+        static let buttonIntensity: CGFloat = 0.6          // on-screen button tap / option feedback
         static let ordinaryDamageIntensity: CGFloat = 0.5  // severity 0: routine hit
         static let lowHealthDamageIntensity: CGFloat = 0.6 // severity 1: hit while under 40% HP
         // Death (severity 2) uses a notification buzz instead of an impact:
@@ -388,11 +401,11 @@ final class BrogueViewController: UIViewController {
     private var leftHandMagnifier: Bool =
         UserDefaults.standard.bool(forKey: leftHandMagnifierDefaultsKey) // default off (right-handed)
 
-    /// Experimental iPhone pinch-to-zoom (dungeon map). Persisted, default off.
+    /// iPhone pinch-to-zoom (dungeon map). Persisted, **default on** (an explicit
+    /// prior choice is respected — see RogueScene.isPinchZoomEnabledSetting).
     /// Gates the zoom gestures, the multi-touch handling, and the scene's zoom
     /// layer — when off, everything behaves exactly as before the feature shipped.
-    private var pinchZoomEnabled: Bool =
-        UserDefaults.standard.bool(forKey: RogueScene.pinchZoomEnabledDefaultsKey) // default off
+    private var pinchZoomEnabled: Bool = RogueScene.isPinchZoomEnabledSetting
     /// True only when the feature is both available (iPhone) and switched on.
     private var pinchZoomActive: Bool { isPhoneIdiom && pinchZoomEnabled }
 
@@ -421,6 +434,9 @@ final class BrogueViewController: UIViewController {
     private static let zoomMinScale: CGFloat = 1.0
     private static let zoomMaxScale: CGFloat = 2.5
     private static let zoomRubberBandFloor: CGFloat = 0.8
+    /// Fractional finger-spread change required before a pinch starts zooming.
+    /// Below this, a two-finger drag is treated as a pure pan (Photos-style).
+    private static let zoomActivationThreshold: CGFloat = 0.10   // 10%
 
     /// Center columns of the 5 engine bottom buttons (Explore/Rest/Search/Menu/
     /// Inventory), mirroring initializeMenuButtons in BrogueCode/IO.c (starts
@@ -429,13 +445,21 @@ final class BrogueViewController: UIViewController {
     private static let bottomButtonCenterColumns = [28, 44, 59, 73, 88]
     private var zoomScale: CGFloat = 1.0
     private var zoomOriginPt: CGPoint = .zero
-    /// Scale captured at the start of a pinch, and the un-zoomed point under the
-    /// pinch midpoint, so the gesture scales about the fingers.
-    private var pinchStartScale: CGFloat = 1.0
-    private var pinchAnchorUnzoomed: CGPoint = .zero
+    /// Previous UIPinchGestureRecognizer.scale, for incremental scale-about-
+    /// centroid updates (jump-free, vs. a captured-anchor recompute).
+    private var lastPinchScale: CGFloat = 1.0
+    /// True from the moment a second finger lands (or a zoom gesture begins)
+    /// until all fingers lift. While set, raw touches are NOT fed to the engine,
+    /// so the first finger of a pinch/pan can't leak a tap/travel that would
+    /// snap the view via auto-follow.
+    private var multiTouchGestureActive = false
     /// True once the player two-finger-drags to look around; cleared on the next
     /// real player move, which re-centers (auto-follow).
     private var manualPanActive = false
+    /// Latches true once a pinch's spread crosses `zoomActivationThreshold`, and
+    /// stays set until the gesture ends. Until it latches, the pinch is dormant
+    /// so a two-finger pan with incidental spread drift reads as a pure pan.
+    private var pinchZoomEngaged = false
     /// Last player window cell received from the engine bridge (auto-follow).
     private var lastPlayerWindowCell: CGPoint?
     /// The zoom recognizers, kept so the magnifier can be suppressed while a
@@ -645,6 +669,7 @@ final class BrogueViewController: UIViewController {
         // view.window only becomes non-nil once the view is in the hierarchy.
         // Run after viewDidAppear so we definitely have it.
         applyNotchInsets()
+        updateDpadNotchAvoidance()
     }
 
     /// Best-available safe-area insets. SwiftUI's `.ignoresSafeArea()` zeroes
@@ -672,6 +697,17 @@ final class BrogueViewController: UIViewController {
         return sideInset > 20 ? .notch : .none
     }
 
+    /// Which screen edge the front cutout (notch / dynamic island) sits on in the
+    /// current landscape. In `landscapeLeft` the device's camera end points RIGHT;
+    /// in `landscapeRight` it points LEFT. iOS reports near-symmetric horizontal
+    /// safe-area insets in landscape, so the interface orientation — not inset
+    /// asymmetry — is the reliable signal. Defaults to right (the app's original
+    /// single-orientation assumption) before a window scene is attached.
+    private var notchOnRight: Bool {
+        let orientation = view.window?.windowScene?.interfaceOrientation ?? .landscapeLeft
+        return orientation != .landscapeRight
+    }
+
     private func applyNotchInsets() {
         let insets = bestSafeAreaInsets
         let scale = UIScreen.main.scale
@@ -681,22 +717,62 @@ final class BrogueViewController: UIViewController {
         layoutActionButtons(insets: insets)
         updateActionButtonVisibility()
 
-        // The app is locked to UIInterfaceOrientation.landscapeLeft in
-        // Info.plist. In that orientation the iPhone's notch / dynamic island
-        // sits along the RIGHT edge of the screen. iOS reports symmetric
-        // safe-area insets on both sides (~62pt each, including the bezel
-        // safe area on the non-notch side), but we only want to reserve
-        // space on the actual-notch side.
-        //
-        // We then slide the whole grid right by `gridRightShift`: inset the
-        // left edge by that amount and reduce the right (notch) reservation by
-        // the same amount, so the grid keeps its width and pushes that far into
-        // the right safe area.
+        // Reserve space on whichever side the notch / dynamic island currently
+        // sits (landscapeLeft → right edge, landscapeRight → left edge). iOS
+        // reports near-symmetric horizontal insets in landscape, so we reserve
+        // only the actual-notch side and slide the whole grid AWAY from it by
+        // `gridRightShift`: the non-notch edge is inset by that amount, and the
+        // notch-side reservation is reduced by the same amount, so the grid keeps
+        // its width and pushes that far into the notch-side safe area.
         let shift = SKViewPort.gridRightShift
+        let onRight = notchOnRight
+        let notchInset = onRight ? insets.right : insets.left
+        let nearPixels = shift * scale                          // non-notch edge
+        let notchPixels = max(notchInset - shift, 0) * scale    // notch edge
         skViewPort.rogueScene.setHorizontalEdgeInsets(
-            leftPixels: shift * scale,
-            rightPixels: max(insets.right - shift, 0) * scale
+            leftPixels: onRight ? nearPixels : notchPixels,
+            rightPixels: onRight ? notchPixels : nearPixels
         )
+    }
+
+    override func viewWillTransition(to size: CGSize, with coordinator: UIViewControllerTransitionCoordinator) {
+        super.viewWillTransition(to: size, with: coordinator)
+        // Re-mirror the grid shift and action-button edge for the new landscape
+        // once the rotation (bounds + interface orientation) has settled, then
+        // rescue the d-pad if it now sits under the cutout.
+        coordinator.animate(alongsideTransition: nil) { [weak self] _ in
+            self?.applyNotchInsets()
+            self?.updateDpadNotchAvoidance()
+        }
+    }
+
+    /// Recomputes the transient notch-avoidance shift for the current landscape:
+    /// if the d-pad's saved/default position would overlap the notch-side safe
+    /// area, push it just clear; otherwise zero. Display-only — never persisted —
+    /// so the user's placement is intact and simply returns to where they left it
+    /// in the orientation whose cutout it doesn't touch. Called on launch and on
+    /// rotation, never during normal play (a deliberate under-cutout park stays).
+    private func updateDpadNotchAvoidance() {
+        guard isPhoneIdiom else { return }
+        // Measure the pad at its true (un-corrected) position first.
+        dpadNotchAvoidance = 0
+        applyDpadTransform()
+
+        let insets = bestSafeAreaInsets
+        let bounds = view.bounds
+        let frame = dContainerView.frame
+        let margin = BrogueViewController.dpadNotchClearanceMargin
+        var dx: CGFloat = 0
+        if notchOnRight {
+            let limit = bounds.maxX - insets.right - margin
+            if frame.maxX > limit { dx = limit - frame.maxX }   // shift left
+        } else {
+            let limit = bounds.minX + insets.left + margin
+            if frame.minX < limit { dx = limit - frame.minX }   // shift right
+        }
+        guard dx != 0 else { return }
+        dpadNotchAvoidance = dx
+        applyDpadTransform()
     }
     
     // ── Safe-area action buttons ─────────────────────────────────────────
@@ -854,8 +930,9 @@ final class BrogueViewController: UIViewController {
         let margin = Self.actionButtonEdgeMargin
         let bounds = view.bounds
 
-        // Flush to the trailing edge, a hair in from the rounded corner.
-        let x = bounds.maxX - size - margin
+        // Follow the notch: hug the cutout edge (right in landscapeLeft, left in
+        // landscapeRight), a hair in from the rounded corner.
+        let x = notchOnRight ? bounds.maxX - size - margin : bounds.minX + margin
 
         // Notch devices get an extra outward push on both pairs (away from center).
         let notchPush = currentDisplayCutout(insets: insets) == .notch
@@ -907,6 +984,13 @@ final class BrogueViewController: UIViewController {
     
     @objc func draggedView(_ sender: UIPanGestureRecognizer) {
         directionsViewController?.cancel()
+        // Fold any transient notch-avoidance into the real offset as the drag
+        // starts, so the pad doesn't jump and the saved value is exactly where the
+        // user leaves it (a deliberate park, even under the cutout, is honored).
+        if sender.state == .began {
+            dpadUserOffset.x += dpadNotchAvoidance
+            dpadNotchAvoidance = 0
+        }
         let translation = sender.translation(in: view)
         dpadUserOffset.x += translation.x
         dpadUserOffset.y += translation.y
@@ -1559,30 +1643,53 @@ extension BrogueViewController: UIGestureRecognizerDelegate {
         return zoomNames.contains(g.name ?? "") && zoomNames.contains(other.name ?? "")
     }
 
+    // Only zoom when the gesture is centered on the dungeon map — not over the
+    // sidebar, message lines, or the bottom button bar. Uses the same play-area
+    // helper as touch routing; getCellCoords is zoom-aware so this holds whether
+    // or not the map is already zoomed.
+    func gestureRecognizerShouldBegin(_ g: UIGestureRecognizer) -> Bool {
+        let zoomNames: Set<String> = ["zoomPinch", "zoomPan"]
+        guard zoomNames.contains(g.name ?? "") else { return true }
+        return pointIsInPlayArea(point: g.location(in: view))
+    }
+
     @objc private func handleZoomPinch(_ g: UIPinchGestureRecognizer) {
         guard isPhoneIdiom, gameplayControlsActive || isTargeting else { return }
         switch g.state {
         case .began:
-            cancelZoomSnapBack()
-            magView.hideMagnifier() // a pinch is starting — kill any lingering magnifier
-            pinchStartScale = zoomScale
-            let mid = g.location(in: view)
-            pinchAnchorUnzoomed = CGPoint(x: (mid.x - zoomOriginPt.x) / zoomScale,
-                                          y: (mid.y - zoomOriginPt.y) / zoomScale)
+            multiTouchGestureActive = true
+            clearTouchEvents()       // drop any tap the first finger queued
+            clearTravelCursor()      // erase any travel path the first finger drew
+            hideMagnifier()          // invalidates the pending magnifier timer too
+            lastPinchScale = 1.0     // g.scale resets to 1 at each gesture start
+            pinchZoomEngaged = false // dormant until the spread crosses the threshold
         case .changed:
-            let s = clampedDisplayScale(pinchStartScale * g.scale)
-            let mid = g.location(in: view)
-            // Keep the un-zoomed anchor pinned under the fingers: mid = s·anchor + origin.
-            zoomScale = s
-            zoomOriginPt = CGPoint(x: mid.x - s * pinchAnchorUnzoomed.x,
-                                   y: mid.y - s * pinchAnchorUnzoomed.y)
-            pushZoom()
-        case .ended, .cancelled, .failed:
-            if zoomScale < 1.0 {
-                animateZoomSnapBack()
-            } else {
-                pushZoom()
+            // Dormant until the cumulative spread (g.scale is relative to gesture
+            // start) crosses the activation threshold, so a two-finger pan with
+            // incidental spread drift reads as a pure pan. Once latched, zoom and
+            // pan coexist for the rest of the gesture (Photos-style).
+            if !pinchZoomEngaged {
+                guard abs(g.scale - 1.0) >= BrogueViewController.zoomActivationThreshold else {
+                    lastPinchScale = g.scale   // keep tracking so engagement has no jump
+                    return
+                }
+                pinchZoomEngaged = true
+                lastPinchScale = g.scale       // anchor at current spread: first zoom frame is a no-op
             }
+            // Incremental scale about the live two-finger centroid: keep the
+            // content point under the centroid fixed as the scale changes. No
+            // captured anchor, so no jump; clamped to [1×, max], so no snap-back.
+            let factor = g.scale / lastPinchScale
+            lastPinchScale = g.scale
+            let newScale = min(max(zoomScale * factor,
+                                   BrogueViewController.zoomMinScale),
+                               BrogueViewController.zoomMaxScale)
+            let applied = zoomScale > 0 ? newScale / zoomScale : 1
+            let c = g.location(in: view)
+            zoomOriginPt = CGPoint(x: c.x - applied * (c.x - zoomOriginPt.x),
+                                   y: c.y - applied * (c.y - zoomOriginPt.y))
+            zoomScale = newScale
+            pushZoom()
         default:
             break
         }
@@ -1593,8 +1700,9 @@ extension BrogueViewController: UIGestureRecognizerDelegate {
         switch g.state {
         case .began:
             manualPanActive = true
-            cancelZoomSnapBack()
-            magView.hideMagnifier() // a pan is starting — kill any lingering magnifier
+            multiTouchGestureActive = true
+            clearTravelCursor()      // erase any travel path the first finger drew
+            hideMagnifier()
         case .changed:
             let t = g.translation(in: view)
             zoomOriginPt.x += t.x
@@ -1666,18 +1774,23 @@ extension BrogueViewController: UIGestureRecognizerDelegate {
 
     /// Engine bridge callback (both engines), reporting the player's window cell
     /// each refresh. Runs auto-follow unless the user is currently looking around.
+    ///
+    /// Called on the ENGINE thread at the end of `commitDraws`, right after the
+    /// changed cells were plotted. We deliberately do NOT hop to the main queue:
+    /// re-centering in the same pass as the cell redraw keeps camera and cells in
+    /// lockstep. Dispatching to a later runloop left the map a frame behind the
+    /// player — a visible stutter when zoomed. This mirrors how `setCell` already
+    /// mutates SpriteKit nodes directly from the engine thread in this bridge.
     @objc func setPlayerWindowX(_ x: Int, y: Int) {
-        DispatchQueue.main.async { [weak self] in
-            guard let self = self, self.isPhoneIdiom else { return }
-            let cell = CGPoint(x: x, y: y)
-            let moved = (self.lastPlayerWindowCell != cell)
-            self.lastPlayerWindowCell = cell
-            guard self.gameplayControlsActive, self.zoomScale > 1.0 else { return }
-            // A real move re-establishes follow after a manual look-around.
-            if moved { self.manualPanActive = false }
-            if !self.manualPanActive {
-                self.applyAutoFollow(playerCell: cell)
-            }
+        guard isPhoneIdiom else { return }
+        let cell = CGPoint(x: x, y: y)
+        let moved = (lastPlayerWindowCell != cell)
+        lastPlayerWindowCell = cell
+        guard gameplayControlsActive, zoomScale > 1.0 else { return }
+        // A real move re-establishes follow after a manual look-around.
+        if moved { manualPanActive = false }
+        if !manualPanActive {
+            applyAutoFollow(playerCell: cell)
         }
     }
 
@@ -1715,6 +1828,14 @@ extension BrogueViewController: UIGestureRecognizerDelegate {
         manualPanActive = false
         lastPlayerWindowCell = nil
         skViewPort.applyZoom(scale: 1.0, originXPoints: 0, originYPoints: 0)
+    }
+
+    /// Cancels the engine's travel cursor/path by injecting Escape. While the
+    /// player is choosing a destination the engine is in its moveCursor loop, and
+    /// ESCAPE_KEY (27) there sets `canceled` → `hideCursor()`, erasing the drawn
+    /// path. Same keycode and behavior in both engines; harmless if no path is up.
+    private func clearTravelCursor() {
+        addKeyEvent(event: kESC_Key)
     }
 
     // MARK: - Bottom button tap-band (iPhone)
@@ -1791,18 +1912,30 @@ extension BrogueViewController {
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
         super.touchesBegan(touches, with: event)
 
+        // A fresh single-finger touch means any prior pinch/pan is over. Clear the
+        // latch here: the gesture recognizer cancels its touches while fingers are
+        // still down, so the lift produces no touchesEnded to reset it — leaving it
+        // stuck, which made the first post-gesture touch flash the magnifier and
+        // then hide it.
+        if (event?.allTouches?.count ?? touches.count) <= 1 {
+            multiTouchGestureActive = false
+        }
+
         // iPhone (zoom on): a second finger means a pinch / two-finger pan is
-        // starting — don't feed the engine a stray one-cell event, and drop any
-        // magnifier the first finger raised before the recognizer formally begins.
+        // starting. Flush the tap the first finger queued (so it can't commit a
+        // map-move that auto-follow then snaps to), kill any pending magnifier,
+        // and stop feeding the engine until all fingers lift.
         if pinchZoomActive, (event?.allTouches?.count ?? touches.count) >= 2 {
-            magView.hideMagnifier()
+            multiTouchGestureActive = true
+            clearTouchEvents()
+            hideMagnifier()
             return
         }
         // Bottom tap-band: handled on release; swallow the down (before the dpad
         // guard, so the dpad container can't eat band taps) so it never becomes a
         // map-move or pops the magnifier.
         if isBandTouch(touches.first!.location(in: view)) {
-            magView.hideMagnifier()
+            hideMagnifier()
             return
         }
 
@@ -1828,12 +1961,14 @@ extension BrogueViewController {
     override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent?) {
         super.touchesMoved(touches, with: event)
 
-        if pinchZoomActive, (event?.allTouches?.count ?? touches.count) >= 2 {
-            magView.hideMagnifier()
+        if multiTouchGestureActive || (pinchZoomActive && (event?.allTouches?.count ?? touches.count) >= 2) {
+            multiTouchGestureActive = true
+            clearTouchEvents()
+            hideMagnifier()
             return
         }
         if isBandTouch(touches.first!.location(in: view)) {
-            magView.hideMagnifier()
+            hideMagnifier()
             return
         }
 
@@ -1850,6 +1985,16 @@ extension BrogueViewController {
     
     override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
         super.touchesEnded(touches, with: event)
+
+        // A multi-touch gesture (pinch / two-finger pan) was in progress: never
+        // commit a tap on release — that's what produced the view "snap." Reset
+        // once every finger has lifted.
+        if multiTouchGestureActive {
+            clearTouchEvents()
+            hideMagnifier()
+            if activeTouchCount(event) == 0 { multiTouchGestureActive = false }
+            return
+        }
 
         // Bottom tap-band takes priority over the dpad container and normal
         // routing, so a tap at the very bottom always fires a button.
@@ -1880,7 +2025,22 @@ extension BrogueViewController {
         
         hideMagnifier()
     }
-    
+
+    // When a gesture recognizer (pinch / pan) claims the touches, UIKit cancels
+    // them here instead of calling touchesEnded. Flush anything queued so a leaked
+    // first-finger touch can't linger, and clear the multi-touch latch on lift.
+    override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent?) {
+        super.touchesCancelled(touches, with: event)
+        clearTouchEvents()
+        hideMagnifier()
+        if activeTouchCount(event) == 0 { multiTouchGestureActive = false }
+    }
+
+    /// Touches still down (not ended/cancelled) in this event.
+    private func activeTouchCount(_ event: UIEvent?) -> Int {
+        (event?.allTouches?.filter { $0.phase != .ended && $0.phase != .cancelled }.count) ?? 0
+    }
+
     fileprivate func pointIsInPlayArea(point: CGPoint) -> Bool {
         let cellCoord = getCellCoords(at: point, viewport: skViewPort)
         if cellCoord.x > 20 && cellCoord.y < 32 && cellCoord.y > 3 {
@@ -1934,6 +2094,10 @@ extension BrogueViewController {
     @objc private func handleMagnifierTimer() {
         if canShowMagnifier(at: lastTouchLocation) {
             magView.showMagnifier(at: lastTouchLocation)
+            // Magnifier is now up: stop any in-progress d-pad press (kills its
+            // repeat timer so a held button can't keep moving) and hide the pad.
+            directionsViewController?.cancel()
+            setDpadHiddenForMagnifier(true)
         }
     }
     
@@ -1991,9 +2155,18 @@ extension BrogueViewController {
     fileprivate func hideMagnifier() {
         magnifierTimer?.invalidate()
         magnifierTimer = nil
+        setDpadHiddenForMagnifier(false)
         DispatchQueue.main.async {
             self.magView.hideMagnifier()
         }
+    }
+
+    /// Hides the directional pad while the magnifier is up, and restores it (to the
+    /// game-state-appropriate visibility) when the magnifier goes away. The codebase
+    /// keeps `dContainerView.isHidden == !gameplayControlsActive`, so that's the
+    /// correct value to restore even if game state changed during the inspect.
+    private func setDpadHiddenForMagnifier(_ hidden: Bool) {
+        dContainerView.isHidden = hidden ? true : !gameplayControlsActive
     }
 }
 
@@ -2001,6 +2174,10 @@ extension BrogueViewController {
     
     override func observeValue(forKeyPath keyPath: String?, of object: Any?, change: [NSKeyValueChangeKey : Any]?, context: UnsafeMutableRawPointer?) {
         guard keyPath == #keyPath(directionsViewController.directionalButton) else { return }
+
+        // While the magnifier is up (a held inspect touch), ignore the d-pad so a
+        // second hand on the pad can't fire a move and interrupt the inspection.
+        guard magView.isHidden else { return }
 
         if let tag = directionsViewController?.directionalButton?.tag, let direction = ControlDirection(rawValue: tag) {
             var key: String
