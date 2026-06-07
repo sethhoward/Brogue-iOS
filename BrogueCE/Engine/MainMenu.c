@@ -310,19 +310,19 @@ static void initializeMainMenuButton(brogueButton *button, char *textWithHotkey,
 static void initializeMainMenuButtons(brogueButton *buttons) {
 
     initializeMainMenuButton(&(buttons[0]), "     %sN%sew Game     ", 'n', 'N', NG_NEW_GAME);
-    initializeMainMenuButton(&(buttons[1]), " *     %sP%slay       ", 'p', 'P', NG_FLYOUT_PLAY);
-    initializeMainMenuButton(&(buttons[2]), " *     %sV%siew       ", 'v', 'V', NG_FLYOUT_VIEW);
+    // iOS port (iBrogue): the flyout buttons (Play, View) are marked with a plain
+    // ASCII '<' (the flyout opens to their left). Upstream used the G_LEFT_TRIANGLE
+    // display glyph (U_LEFT_TRIANGLE, 0x25C4/0x1F780), which renders through a font
+    // that doesn't carry it on every locale/device — '<' is in our reliable text
+    // set, so it always renders the same. New Game / File Management have no flyout.
+    initializeMainMenuButton(&(buttons[1]), " <     %sP%slay       ", 'p', 'P', NG_FLYOUT_PLAY);
+    initializeMainMenuButton(&(buttons[2]), " <     %sV%siew       ", 'v', 'V', NG_FLYOUT_VIEW);
     // iOS port (iBrogue): native file manager, like the Classic title menu.
     initializeMainMenuButton(&(buttons[3]), "  %sF%sile Management  ", 'f', 'F', NG_FILE_MANAGEMENT);
 
 #ifndef BROGUE_TABLET
     initializeMainMenuButton(&(buttons[4]), "       %sQ%suit       ", 'q', 'Q', NG_QUIT);
 #endif
-
-    // Mark the flyout buttons (Play, View) with a left-facing triangle. (New
-    // Game has no flyout; Quit, when present, is the last button and has none.)
-    buttons[1].symbol[0] = G_LEFT_TRIANGLE; // Play
-    buttons[2].symbol[0] = G_LEFT_TRIANGLE; // View
 
 }
 

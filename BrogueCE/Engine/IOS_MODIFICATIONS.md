@@ -28,6 +28,22 @@ covers the separate Classic engine that ships in the app target).
 
 ## Change log
 
+### 2026-06-06 — Title flyout marker: ASCII `<` instead of a triangle glyph
+
+**What.** The main-menu flyout buttons (Play, View) are marked with a literal ASCII
+`<` in their button text instead of the `G_LEFT_TRIANGLE` display glyph.
+
+**Why.** `G_LEFT_TRIANGLE` maps (via `ce_glyphToUnicode`) to `U_LEFT_TRIANGLE`
+(`0x25C4` / `0x1F780`), which renders through a font that doesn't carry the glyph on
+every locale/device, so it showed up inconsistently. `<` is in the reliable text set
+(rendered from Monaco) and always looks the same. The flyout opens to the buttons'
+left, so a left-pointing marker still reads correctly.
+
+**Where.** `MainMenu.c` `initializeMainMenuButtons` — the Play/View button text uses
+` <  ...` and the two `buttons[n].symbol[0] = G_LEFT_TRIANGLE;` assignments were
+removed. (`*` in button text is the symbol placeholder; with no symbol set it would
+render literally, so the text uses `<` directly.)
+
 ### 2026-06-06 — On-screen Explore button: single-tap auto-explore
 
 **What.** A single tap on the on-screen Explore button now auto-explores

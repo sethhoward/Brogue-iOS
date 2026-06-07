@@ -89,9 +89,21 @@ extension CGSize {
     // 1× "bottom wall" when zoomed. Rows 32 (flavor) and 33 (buttons) stay chrome.
     private static let zoomRowMin = 3,  zoomRowMax = 31
 
-    /// UserDefaults key for the experimental pinch-zoom toggle (default off).
-    /// Single source of truth, also read by BrogueViewController's options menu.
+    /// UserDefaults key for the pinch-zoom toggle. Single source of truth, also
+    /// read by BrogueViewController's options menu.
     @objc public static let pinchZoomEnabledDefaultsKey = "pinchZoomEnabledExperimental"
+
+    /// Whether pinch-zoom is enabled. **Default ON**, but only when the user
+    /// hasn't made an explicit choice: an absent key (never toggled) returns the
+    /// default, while a stored value (on OR off) is respected. This is why the
+    /// default can be flipped in a later release without overriding anyone who
+    /// deliberately set it — `bool(forKey:)` alone can't tell "absent" from
+    /// "explicitly false", so we check for the key's presence first.
+    @objc public static var isPinchZoomEnabledSetting: Bool {
+        let defaults = UserDefaults.standard
+        if defaults.object(forKey: pinchZoomEnabledDefaultsKey) == nil { return true }
+        return defaults.bool(forKey: pinchZoomEnabledDefaultsKey)
+    }
 
     private var dungeonCrop: SKCropNode?
     private var dungeonContainer: SKNode?
@@ -221,7 +233,7 @@ extension RogueScene {
         }
         // Build the zoom layer only if the experimental flag is on (iPhone). When
         // off, the scene stays a flat 1× grid with no crop / offscreen pass.
-        if zoomEnabled, UserDefaults.standard.bool(forKey: RogueScene.pinchZoomEnabledDefaultsKey) {
+        if zoomEnabled, RogueScene.isPinchZoomEnabledSetting {
             enableZoomLayer()
         }
     }
