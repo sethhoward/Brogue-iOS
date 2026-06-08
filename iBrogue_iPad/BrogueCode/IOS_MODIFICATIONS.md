@@ -23,6 +23,25 @@ future maintainers (human or AI) don't mistake an intentional port change for a 
 
 ## Change log
 
+### 2026-06-06 — Suspend pinch-zoom while an entity description box is shown
+
+**What.** When a creature/item description box lingers in the cursor loop (e.g. the
+player taps an entity in the sidebar), the host suspends the iPhone pinch-zoom to 1×
+so the box isn't magnified/clipped, then restores it — matching menu/inventory.
+
+**Why.** The description box (`printMonsterDetails`/`printFloorItemDetails` →
+`printTextBox`) renders into the dungeon cells but fired no host signal, so it was
+drawn magnified and ran off-screen while zoomed.
+
+**Where.** `IO.c` — `extern void setBrogueExamining(boolean);` at file top; in
+`mainInputLoop`'s cursor `do/while`, `setBrogueExamining(textDisplayed)` right before
+`moveCursor` and `setBrogueExamining(false)` right after the loop. Defined (with
+`extern "C"`) in `RogueDriver.mm` (deduped) → `BrogueViewController setExamining:`. The
+host only suspends zoom when the box was armed by a **sidebar single-tap** (`examineArmed`,
+set in `touchesEnded`); auto-appearing boxes (auto-explore stopping on an item, tap-to-move
+over a monster) aren't armed and don't zoom out — that previously flickered while exploring.
+Mirrors CE's `ceSetExamining`.
+
 ### 2026-06-02 — iPhone: taller tap area for the bottom button bar
 
 **What.** On iPhone only, the in-game bottom button bar (Explore / Rest / Search /

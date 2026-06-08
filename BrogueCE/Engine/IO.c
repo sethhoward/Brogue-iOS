@@ -35,6 +35,10 @@
 // Obj-C++ bridge (CEBridge.mm).
 extern void ceSetPlayerWindowLocation(short windowX, short windowY);
 
+// iOS port (iBrogue): reports whether a creature/item description box is showing
+// in the cursor loop, so the host can suspend pinch-zoom to 1×. Bridge dedupes.
+extern void ceSetExamining(boolean examining);
+
 // Populates path[][] with a list of coordinates starting at origin and traversing down the map. Returns the number of steps in the path.
 short getPlayerPathOnMap(pos path[1000], short **map, pos origin) {
     pos at = origin;
@@ -705,6 +709,11 @@ void mainInputLoop() {
                 printLocationDescription(rogue.cursorLoc.x, rogue.cursorLoc.y);
             }
 
+            // iOS port (iBrogue): tell the host whether a description box is up so the
+            // iPhone pinch-zoom can suspend to 1× while one lingers (moveCursor blocks
+            // below while it's shown). Host debounces, so a tap-through doesn't flicker.
+            ceSetExamining(textDisplayed);
+
             // Get the input!
             rogue.playbackMode = playingBack;
             doEvent = moveCursor(&targetConfirmed, &canceled, &tabKey, &rogue.cursorLoc, &theEvent, &state, !textDisplayed, rogue.cursorMode, true);
@@ -776,6 +785,10 @@ void mainInputLoop() {
                     doEvent = false;
                 }
         } while (!targetConfirmed && !canceled && !doEvent && !rogue.gameHasEnded);
+
+        // iOS port (iBrogue): cursor interaction ended (action/cancel) — clear the
+        // examine state so the host restores any suspended pinch-zoom.
+        ceSetExamining(false);
 
         if (isPosInMap(oldTargetLoc)) {
             refreshDungeonCell(oldTargetLoc);                       // Remove old rogue.cursorLoc.
@@ -2951,8 +2964,13 @@ void waitForAcknowledgment() {
         return;
     }
 
-    CBrogueGameEvent oldUiMode = uiMode;
-    uiMode = CBrogueGameEventShowEscape;    // tablet ui mode
+    // iOS port (iBrogue): do NOT force the ESC button here. This is a "tap anywhere /
+    // press any key to continue" prompt (the --more-- message acknowledgment); the
+    // MOUSE_UP case below already dismisses it, so the ESC button was redundant and
+    // appeared for transient messages (e.g. "A pressure plate clicks..."). uiMode is
+    // left as-is (InNormalPlay during play → no ESC). ESC stays reserved for states a
+    // tap can't dismiss — text entry (getInputTextString → ShowKeyboardAndEscape) and
+    // aiming (Items.c targeting loop).
     do {
         nextBrogueEvent(&theEvent, false, false, false);
         if (theEvent.eventType == KEYSTROKE && theEvent.param1 != ACKNOWLEDGE_KEY && theEvent.param1 != ESCAPE_KEY) {
@@ -2960,18 +2978,16 @@ void waitForAcknowledgment() {
         }
     } while (!(theEvent.eventType == KEYSTROKE && (theEvent.param1 == ACKNOWLEDGE_KEY || theEvent.param1 == ESCAPE_KEY)
                || theEvent.eventType == MOUSE_UP));
-    uiMode = oldUiMode;    // tablet ui mode
 }
 
 void waitForKeystrokeOrMouseClick() {
     rogueEvent theEvent;
 
-    CBrogueGameEvent oldUiMode = uiMode;
-    uiMode = CBrogueGameEventShowEscape;    // tablet ui mode
+    // iOS port (iBrogue): tap/key anywhere dismisses (MOUSE_UP below), so don't force
+    // the ESC button — leave uiMode as-is. Same rationale as waitForAcknowledgment.
     do {
         nextBrogueEvent(&theEvent, false, false, false);
     } while (theEvent.eventType != KEYSTROKE && theEvent.eventType != MOUSE_UP);
-    uiMode = oldUiMode;    // tablet ui mode
 }
 
 boolean confirm(char *prompt, boolean alsoDuringPlayback) {

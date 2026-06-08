@@ -33,6 +33,17 @@ zoom-related caveats apply whenever it's enabled, i.e. by default.
   before zoom latches on (then zoom + pan coexist for the rest of the gesture).
 - **Rubber-band / snap-back below 1× was removed (behavior change).** Pinching in just
   stops at fit (1×) with no bounce — deliberate, to kill a motion that read as a "snap."
+- **Only a sidebar SINGLE-tap suspends zoom, and it's toggleable.** Single-tapping a
+  creature/item in the **sidebar** shows its description box and, like menus/inventory,
+  drops the zoom to 1× so the box isn't clipped, restoring on dismiss. Gated on
+  `examineArmed`, which is **deferred** ~0.3s past the double-tap window: a **double-tap**
+  (attack / run toward) cancels the pending arm, so it never zooms out — only a lone single
+  tap does. Also cleared when the box ends or on a competing input (map tap, bottom-bar
+  button). So boxes that auto-appear — auto-explore stopping on an item, a tap-to-move over
+  a monster — and map-tap / long-press examines do **not** zoom out. The whole behavior is
+  an Options toggle, **"Zoom out on examine" (default on)**, shown only when pinch zoom is
+  on (`RogueScene.isExamineZoomEnabledSetting`). Side effect of the defer: the zoom-out
+  begins ~0.3s after the tap (the box itself still appears immediately).
 - **Auto-follow re-centers on the engine thread.** To keep the camera in lockstep with
   the cell redraw (a main-queue hop made the map lurch a frame behind the player —
   visible stutter when zoomed), `setPlayerWindowX` applies the zoom transform directly on
@@ -54,6 +65,13 @@ zoom-related caveats apply whenever it's enabled, i.e. by default.
   centers (cols 28/44/59/73/88) mirroring `initializeMenuButtons`; if the engine button
   layout changes, update the table (`bottomButtonCenterColumns`). It also assumes the
   normal 5-button bar, not playback mode's different set (gated off in playback anyway).
+- **Bottom-row button backgrounds extend to the screen edge (taller-looking buttons).**
+  In `RogueScene.relayoutCells`, the bottom row's cell *backgrounds* (cols ≥ 21) are
+  stretched down through the tap-band to the scene bottom so the buttons read as taller,
+  flush-to-bottom tabs. Only the background grows — the engine glyph stays on row 33, so
+  the label sits toward the *top* of the taller button (deliberate; we don't re-center
+  because the text is engine-drawn at a fixed row). The extra height equals
+  `SKViewPort.bottomButtonBandPoints`, so the colored area and the tap-band stay in lockstep.
 
 ## Magnifier ↔ d-pad
 

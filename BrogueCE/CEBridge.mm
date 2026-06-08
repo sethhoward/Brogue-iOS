@@ -520,6 +520,16 @@ void ceSetTargeting(boolean isTargeting) {
     if (gHost) [gHost setTargeting:(BOOL)isTargeting];
 }
 
+// iOS port (iBrogue): IO.c's mainInputLoop calls this each cursor frame with
+// whether a creature/item description box is showing. Deduped (the loop polls at
+// frame rate) so we only forward state changes to the host.
+void ceSetExamining(boolean examining) {
+    static boolean last = false;
+    if ((boolean)examining == last) return;
+    last = examining;
+    if (gHost) [gHost setExamining:(BOOL)examining];
+}
+
 // iOS port (iBrogue): commitDraws() reports the player's WINDOW cell here every
 // refresh so the iPhone pinch-zoom can auto-follow. Deduped against the last
 // reported cell so the (frequent) commitDraws calls don't spam the host.

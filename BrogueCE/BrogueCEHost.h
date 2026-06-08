@@ -71,6 +71,10 @@ NS_ASSUME_NONNULL_BEGIN
 // the host can move the escape button aside and enable the aiming magnifier.
 - (void)setTargeting:(BOOL)targeting;
 
+// True while a creature/item description box is lingering on the map (the cursor
+// examine loop), so the host can suspend pinch-zoom to 1× and not clip the box.
+- (void)setExamining:(BOOL)examining;
+
 // Reports the player's WINDOW cell (already mapToWindow-converted) after each
 // screen refresh, so the host's iPhone pinch-zoom can keep the player centered.
 - (void)setPlayerWindowX:(short)x y:(short)y;

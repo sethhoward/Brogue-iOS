@@ -228,6 +228,17 @@ void setBrogueGameEvent(CBrogueGameEvent brogueGameEvent) {
     brogueViewController.lastBrogueGameEvent = (BrogueGameEvent)brogueGameEvent;
 }
 
+// iOS port (iBrogue): IO.c's mainInputLoop calls this each cursor frame with
+// whether a creature/item description box is showing, so the host can suspend
+// pinch-zoom to 1×. Deduped (the loop polls at frame rate) so we only forward
+// state changes. Mirrors CE's ceSetExamining.
+extern "C" void setBrogueExamining(boolean examining) {
+    static boolean last = false;
+    if (examining == last) return;
+    last = examining;
+    [brogueViewController setExamining:(BOOL)examining];
+}
+
 void showFileManagementScreen() {
     [brogueViewController presentFileManagementScreen];
 }
