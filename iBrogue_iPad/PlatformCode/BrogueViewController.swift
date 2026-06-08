@@ -322,15 +322,15 @@ final class BrogueViewController: UIViewController {
     /// values must stay in sync with the engine's Combat.c damage hook.
     private enum Haptics {
         // Generator styles.
-        static let buttonStyle: UIImpactFeedbackGenerator.FeedbackStyle = .light
-        static let lightDamageStyle: UIImpactFeedbackGenerator.FeedbackStyle = .light
+        static let buttonStyle: UIImpactFeedbackGenerator.FeedbackStyle = .soft
+        static let lightDamageStyle: UIImpactFeedbackGenerator.FeedbackStyle = .medium
         static let strongDamageStyle: UIImpactFeedbackGenerator.FeedbackStyle = .heavy
 
         // Impact intensities (0...1). NOTE: iOS effectively drops impacts below
         // ~0.4 (imperceptible / not fired), so keep these at 0.4 or above.
         static let buttonIntensity: CGFloat = 0.6          // on-screen button tap / option feedback
-        static let ordinaryDamageIntensity: CGFloat = 0.5  // severity 0: routine hit
-        static let lowHealthDamageIntensity: CGFloat = 0.6 // severity 1: hit while under 40% HP
+        static let ordinaryDamageIntensity: CGFloat = 0.6  // severity 0: routine hit
+        static let lowHealthDamageIntensity: CGFloat = 0.8 // severity 1: hit while under 40% HP
         // Death (severity 2) uses a notification buzz instead of an impact:
         static let deathNotification: UINotificationFeedbackGenerator.FeedbackType = .error
 
@@ -409,6 +409,10 @@ final class BrogueViewController: UIViewController {
     /// True only when the feature is both available (iPhone) and switched on.
     private var pinchZoomActive: Bool { isPhoneIdiom && pinchZoomEnabled }
 
+    /// When on (default), single-tapping a sidebar entity zooms out to 1× so its
+    /// description box isn't clipped while zoomed. Toggleable in Options.
+    private var examineZoomEnabled: Bool = RogueScene.isExamineZoomEnabledSetting
+
     /// Mirrors the directional pad's visibility: true while the player is
     /// actively moving around the dungeon, false on menus/dialogs/title.
     private var gameplayControlsActive = false {
@@ -421,6 +425,41 @@ final class BrogueViewController: UIViewController {
     private var isTargeting = false {
         didSet { if oldValue != isTargeting { updateZoomForGameState() } }
     }
+
+    /// Derived: suspend zoom only when a description box is shown AND it was armed by a
+    /// sidebar selection. Recomputed whenever either input below changes, so the order in
+    /// which they arrive doesn't matter (the engine's box signal can race ahead of the
+    /// arm set in touchesEnded). didSet drives the suspend/restore animation.
+    private var isExamining = false {
+        didSet { if oldValue != isExamining { updateZoomForGameState() } }
+    }
+    /// True while the engine is showing a creature/item description box (reported by both
+    /// engines via setExamining). On its own it does NOT suspend zoom — it must be armed.
+    private var examineBoxShown = false {
+        didSet {
+            guard oldValue != examineBoxShown else { return }
+            if !examineBoxShown {
+                examineArmDebounce?.cancel()                  // box gone → drop a pending arm
+                examineArmed = false                          // …and require a fresh sidebar tap
+            }
+            isExamining = examineBoxShown && examineArmed
+        }
+    }
+    /// Set only by a sidebar single-tap; gates the zoom-suspend so deliberate sidebar
+    /// selections suspend but auto-appearing boxes (auto-explore stopping on an item, a
+    /// tap-to-move over a monster) do not. Cleared when the box ends and on competing inputs.
+    private var examineArmed = false {
+        didSet {
+            guard oldValue != examineArmed else { return }
+            isExamining = examineBoxShown && examineArmed
+        }
+    }
+    /// Deferred arm: a sidebar single-tap schedules arming after the double-tap window
+    /// so a double-tap (attack/run toward) cancels it first and never zooms out.
+    private var examineArmDebounce: DispatchWorkItem?
+    /// How long to wait before a sidebar single-tap arms the examine zoom — long enough
+    /// to let a second tap (double-tap) arrive and cancel it.
+    private let examineArmDelay: TimeInterval = 0.3
     /// The escape button's resting transform, captured so it can be restored after
     /// being moved to the lower-left corner during targeting.
     private var savedEscTransform: CGAffineTransform?
@@ -429,14 +468,20 @@ final class BrogueViewController: UIViewController {
     // Canonical zoom state, in UIKit point space. `zoomScale` is the
     // magnification; `zoomOriginPt` positions the magnified map so a touch `p`
     // inverts to `(p - origin) / scale` (see SKViewPort.unzoomedPoint). Pushed
-    // to the scene via skViewPort.applyZoom. Persists across levels; reset to 1×
-    // only on new game / death. iPad never zooms (gestures aren't installed).
+    // to the scene via skViewPort.applyZoom. Persists across levels; on the title
+    // and on death the *display* drops to 1×, but the magnification is remembered
+    // (see zoomScaleDefaultsKey) and carries into the next run. iPad never zooms
+    // (gestures aren't installed).
     private static let zoomMinScale: CGFloat = 1.0
     private static let zoomMaxScale: CGFloat = 2.5
     private static let zoomRubberBandFloor: CGFloat = 0.8
     /// Fractional finger-spread change required before a pinch starts zooming.
     /// Below this, a two-finger drag is treated as a pure pan (Photos-style).
-    private static let zoomActivationThreshold: CGFloat = 0.10   // 10%
+    private static let zoomActivationThreshold: CGFloat = 0.20   // 10%
+    /// UserDefaults key for the player's preferred dungeon magnification. Persisted
+    /// so the zoom level carries between game runs and across app launches; the
+    /// origin is intentionally not stored (each run recenters on the player).
+    private static let zoomScaleDefaultsKey = "preferredZoomScale"
 
     /// Center columns of the 5 engine bottom buttons (Explore/Rest/Search/Menu/
     /// Inventory), mirroring initializeMenuButtons in BrogueCode/IO.c (starts
@@ -445,6 +490,16 @@ final class BrogueViewController: UIViewController {
     private static let bottomButtonCenterColumns = [28, 44, 59, 73, 88]
     private var zoomScale: CGFloat = 1.0
     private var zoomOriginPt: CGPoint = .zero
+    /// The persisted preferred zoom magnification, clamped to the valid range.
+    /// An absent/zero default reads back as 1× (no zoom).
+    private var storedZoomScale: CGFloat {
+        get {
+            let v = CGFloat(UserDefaults.standard.double(forKey: BrogueViewController.zoomScaleDefaultsKey))
+            guard v >= BrogueViewController.zoomMinScale else { return BrogueViewController.zoomMinScale }
+            return min(v, BrogueViewController.zoomMaxScale)
+        }
+        set { UserDefaults.standard.set(Double(newValue), forKey: BrogueViewController.zoomScaleDefaultsKey) }
+    }
     /// Previous UIPinchGestureRecognizer.scale, for incremental scale-about-
     /// centroid updates (jump-free, vs. a captured-anchor recompute).
     private var lastPinchScale: CGFloat = 1.0
@@ -475,12 +530,20 @@ final class BrogueViewController: UIViewController {
         return active(zoomPinch) || active(zoomPan)
     }
 
-    /// Drives the rubber-band snap-back to 1× when a pinch ends below 1×.
-    private var zoomSnapBackLink: CADisplayLink?
-    private var snapBackStartScale: CGFloat = 1.0
-    private var snapBackStartOrigin: CGPoint = .zero
-    private var snapBackStartTime: CFTimeInterval = 0
-    private let snapBackDuration: CFTimeInterval = 0.18
+    /// Drives the smooth automatic zoom suspend/restore (overlay/menu/examine ↔ map).
+    /// Interpolates the *applied* scene transform only; the canonical zoomScale /
+    /// zoomOriginPt are owned by the caller and untouched by the animation.
+    private var zoomAnimLink: CADisplayLink?
+    private var zoomAnimStartScale: CGFloat = 1.0
+    private var zoomAnimStartOrigin: CGPoint = .zero
+    private var zoomAnimTargetScale: CGFloat = 1.0
+    private var zoomAnimTargetOrigin: CGPoint = .zero
+    private var zoomAnimStartTime: CFTimeInterval = 0
+    private let zoomAnimDuration: CFTimeInterval = 0.2
+    /// The transform currently shown on screen, so an animation starts from it and
+    /// instant applies (gestures, per-step auto-follow) stay in sync.
+    private var appliedScale: CGFloat = 1.0
+    private var appliedOrigin: CGPoint = .zero
 
     private var isPhoneIdiom: Bool { UIDevice.current.userInterfaceIdiom == .phone }
 
@@ -528,7 +591,7 @@ final class BrogueViewController: UIViewController {
                     self.seedButton.isHidden = true
                     self.manageFilesButton?.isHidden = true
                     self.seedKeyDown = false
-                    self.resetZoom()
+                    self.restoreStoredZoom()
                 case .messagePlayerHasDied:
                     self.showInventoryButton.isHidden = false
                     self.resetZoom()
@@ -1110,6 +1173,17 @@ final class BrogueViewController: UIViewController {
         }
     }
 
+    /// Reported by both engines (CE: setExamining via the host protocol; Classic:
+    /// setBrogueExamining) as the cursor-loop description box appears/disappears. Just
+    /// records box state; the actual zoom-suspend is gated on examineArmed and computed
+    /// in the flags' didSet, so it works regardless of whether the box signal arrives
+    /// before or after the sidebar tap arms it.
+    @objc func setExamining(_ examining: Bool) {
+        DispatchQueue.main.async { [weak self] in
+            self?.examineBoxShown = examining
+        }
+    }
+
     /// Moves the esc button to the lower-left safe-area corner during targeting,
     /// restoring its resting position afterward. Uses a transform (rather than
     /// touching .center) so it composes with the storyboard layout, matching how
@@ -1290,6 +1364,16 @@ final class BrogueViewController: UIViewController {
                 self?.togglePinchZoom()
             }
             children.append(contentsOf: [haptics, magnifierSide, pinchZoom])
+            // Sub-option of pinch zoom: zoom out to show a tapped sidebar entity's
+            // description. Only relevant (and only shown) when pinch zoom is on.
+            if pinchZoomEnabled {
+                let examineZoom = UIAction(title: "Zoom out on examine",
+                                           image: UIImage(systemName: "sidebar.left"),
+                                           state: examineZoomEnabled ? .on : .off) { [weak self] _ in
+                    self?.toggleExamineZoom()
+                }
+                children.append(examineZoom)
+            }
         }
 
         children.append(resetDirections)
@@ -1312,6 +1396,19 @@ final class BrogueViewController: UIViewController {
         pinchZoomEnabled.toggle()
         UserDefaults.standard.set(pinchZoomEnabled, forKey: RogueScene.pinchZoomEnabledDefaultsKey)
         applyPinchZoomEnabled()
+        fireHaptic()
+        optionsButton?.menu = optionsMenu()
+    }
+
+    /// Flips "zoom out on examine" (sidebar-tap description), persists it, and rebuilds
+    /// the menu. If turned off mid-examine, restore the zoom immediately.
+    private func toggleExamineZoom() {
+        examineZoomEnabled.toggle()
+        UserDefaults.standard.set(examineZoomEnabled, forKey: RogueScene.examineZoomEnabledDefaultsKey)
+        if !examineZoomEnabled {                            // drops any active/pending examine suspend
+            examineArmDebounce?.cancel()
+            examineArmed = false
+        }
         fireHaptic()
         optionsButton?.menu = optionsMenu()
     }
@@ -1690,6 +1787,9 @@ extension BrogueViewController: UIGestureRecognizerDelegate {
                                    y: c.y - applied * (c.y - zoomOriginPt.y))
             zoomScale = newScale
             pushZoom()
+        case .ended, .cancelled:
+            // Remember the level the player settled on, so the next run starts here.
+            storedZoomScale = zoomScale
         default:
             break
         }
@@ -1752,14 +1852,11 @@ extension BrogueViewController: UIGestureRecognizerDelegate {
 
     private func pushZoom() {
         zoomOriginPt = clampedOrigin(zoomOriginPt, scale: zoomScale)
-        skViewPort.applyZoom(scale: zoomScale,
-                             originXPoints: zoomOriginPt.x,
-                             originYPoints: zoomOriginPt.y)
+        setAppliedZoom(scale: zoomScale, origin: zoomOriginPt)
     }
 
-    /// Centers the player's window cell in the dungeon frame (auto-follow).
-    private func applyAutoFollow(playerCell: CGPoint) {
-        guard zoomScale > 1.0 else { return }
+    /// Origin that centers the player's window cell in the dungeon frame.
+    private func autoFollowOrigin(playerCell: CGPoint) -> CGPoint {
         let f = dungeonFramePoints()
         let cw = skViewPort.effectiveWidthPoints / CGFloat(COLS)
         let ch = skViewPort.effectiveHeightPoints / CGFloat(ROWS)
@@ -1768,8 +1865,30 @@ extension BrogueViewController: UIGestureRecognizerDelegate {
         let px = li + (playerCell.x + 0.5) * cw
         let py = (playerCell.y + 0.5) * ch
         // Want player at frame center: f.mid = scale·p + origin.
-        zoomOriginPt = CGPoint(x: f.midX - zoomScale * px, y: f.midY - zoomScale * py)
-        pushZoom()
+        return CGPoint(x: f.midX - zoomScale * px, y: f.midY - zoomScale * py)
+    }
+
+    /// Centers the player's window cell in the dungeon frame (auto-follow), instantly.
+    /// Called per player step from the engine thread. When already at full zoom this
+    /// applies the pan instantly (lockstep with the cell redraw, no lag). When returning
+    /// from a suspended (≈1×) view — e.g. the very move that dismissed an examine/overlay
+    /// — it animates the zoom-in instead of snapping. The CADisplayLink is created on the
+    /// main thread (where it must live); the instant path only runs once appliedScale has
+    /// reached full zoom, so it never races a live link.
+    private func applyAutoFollow(playerCell: CGPoint) {
+        guard zoomScale > 1.0 else { return }
+        let origin = clampedOrigin(autoFollowOrigin(playerCell: playerCell), scale: zoomScale)
+        zoomOriginPt = origin
+        if appliedScale < zoomScale - 0.001 {
+            // Suspended: ease the zoom back in (and keep following — each step retargets
+            // the animation toward the latest player cell from the current applied scale).
+            DispatchQueue.main.async { [weak self] in
+                guard let self = self, self.zoomScale > 1.0, !self.manualPanActive else { return }
+                self.animateZoom(toScale: self.zoomScale, toOrigin: origin)
+            }
+        } else {
+            applyAppliedTransform(scale: zoomScale, origin: origin)
+        }
     }
 
     /// Engine bridge callback (both engines), reporting the player's window cell
@@ -1802,32 +1921,52 @@ extension BrogueViewController: UIGestureRecognizerDelegate {
     /// the player) when normal play resumes. Driven by didSet on the two flags.
     private func updateZoomForGameState() {
         guard isPhoneIdiom else { return }
-        cancelZoomSnapBack()
-        // Aiming a throw/zap is map interaction — keep the zoom.
-        let onMap = gameplayControlsActive || isTargeting
+        // Aiming a throw/zap is map interaction — keep the zoom. An examine
+        // description box is treated like an overlay — suspend to 1× so it isn't clipped.
+        let onMap = (gameplayControlsActive || isTargeting) && !isExamining
         guard onMap, zoomScale > 1.0 else {
-            // Overlay up (or not zoomed): show the displayed map at 1×. The stored
+            // Overlay up (or not zoomed): animate the displayed map to 1×. The stored
             // zoomScale / zoomOriginPt are deliberately left untouched.
-            skViewPort.applyZoom(scale: 1.0, originXPoints: 0, originYPoints: 0)
+            animateZoom(toScale: 1.0, toOrigin: .zero)
             return
         }
-        // Back on the map: restore the stored zoom, recentered on the player.
+        // Back on the map: animate back to the stored zoom, recentered on the player.
         if let cell = lastPlayerWindowCell, !manualPanActive {
-            applyAutoFollow(playerCell: cell)
+            zoomOriginPt = clampedOrigin(autoFollowOrigin(playerCell: cell), scale: zoomScale)
+        } else if lastPlayerWindowCell == nil {
+            // Run just started with a remembered zoom but no player cell yet: hold at
+            // 1× and let the first cell report (setPlayerWindowX) animate the zoom in,
+            // centered on the player rather than the dungeon corner.
+            animateZoom(toScale: 1.0, toOrigin: .zero)
+            return
         } else {
-            pushZoom()
+            zoomOriginPt = clampedOrigin(zoomOriginPt, scale: zoomScale)
         }
+        animateZoom(toScale: zoomScale, toOrigin: zoomOriginPt)
     }
 
-    /// Resets to 1× (new game / death / return to title). iPad no-op.
+    /// Resets to 1× (death / return to title), instantly. iPad no-op. The persisted
+    /// preference (storedZoomScale) is untouched, so the next run still restores it.
     private func resetZoom() {
         guard isPhoneIdiom else { return }
-        cancelZoomSnapBack()
         zoomScale = 1.0
         zoomOriginPt = .zero
         manualPanActive = false
         lastPlayerWindowCell = nil
-        skViewPort.applyZoom(scale: 1.0, originXPoints: 0, originYPoints: 0)
+        setAppliedZoom(scale: 1.0, origin: .zero)
+    }
+
+    /// Begins a run at the player's remembered zoom (iPhone). Clears follow/pan state
+    /// like resetZoom, but seeds zoomScale from the stored preference while leaving the
+    /// display at 1× — the first player-cell report (setPlayerWindowX) then animates
+    /// the zoom in, recentered on the player. When no zoom is stored this is just a reset.
+    private func restoreStoredZoom() {
+        guard isPhoneIdiom else { return }
+        manualPanActive = false
+        lastPlayerWindowCell = nil
+        zoomOriginPt = .zero
+        zoomScale = storedZoomScale
+        setAppliedZoom(scale: 1.0, origin: .zero)
     }
 
     /// Cancels the engine's travel cursor/path by injecting Escape. While the
@@ -1860,6 +1999,10 @@ extension BrogueViewController: UIGestureRecognizerDelegate {
         // Column under the finger; ignore the sidebar side of the band (no button).
         let col = Int(CGFloat(COLS) * max(point.x - leftInset, 0) / width)
         guard col >= 21 else { return }
+        // A bottom-bar button (incl. Explore) is an action, not an examine — disarm so
+        // any description box that auto-appears afterward doesn't suspend the zoom.
+        examineArmDebounce?.cancel()
+        examineArmed = false
         let centers = BrogueViewController.bottomButtonCenterColumns
         let target = centers.min(by: { abs($0 - col) < abs($1 - col) }) ?? centers[0]
         // Center of the chosen button cell on the button row (33), in view points.
@@ -1870,37 +2013,63 @@ extension BrogueViewController: UIGestureRecognizerDelegate {
         fireHaptic()
     }
 
-    private func animateZoomSnapBack() {
-        cancelZoomSnapBack()
-        snapBackStartScale = zoomScale
-        snapBackStartOrigin = zoomOriginPt
-        snapBackStartTime = CACurrentMediaTime()
-        let link = CADisplayLink(target: self, selector: #selector(stepZoomSnapBack(_:)))
-        link.add(to: .main, forMode: .common)
-        zoomSnapBackLink = link
+    /// Writes a transform to the scene and records it as the current applied state.
+    /// Does NOT touch the animation link, so it is safe to call from the engine thread
+    /// (per-step auto-follow) — callers guarantee no animation is mid-flight when they
+    /// use this directly (appliedScale has already reached the target zoom).
+    private func applyAppliedTransform(scale: CGFloat, origin: CGPoint) {
+        appliedScale = scale
+        appliedOrigin = origin
+        skViewPort.applyZoom(scale: scale, originXPoints: origin.x, originYPoints: origin.y)
     }
 
-    @objc private func stepZoomSnapBack(_ link: CADisplayLink) {
-        let raw = (CACurrentMediaTime() - snapBackStartTime) / snapBackDuration
+    /// Instantly applies a zoom transform, cancelling any in-flight animation. MAIN
+    /// THREAD only (it touches the CADisplayLink). Used by gestures (pinch/pan) and reset.
+    private func setAppliedZoom(scale: CGFloat, origin: CGPoint) {
+        cancelZoomAnimation()
+        applyAppliedTransform(scale: scale, origin: origin)
+    }
+
+    /// Smoothly animates the *applied* transform from where it is now to a target
+    /// (smoothstep over zoomAnimDuration). Canonical zoomScale / zoomOriginPt are NOT
+    /// touched here — the caller owns those (so a suspend keeps the user's stored zoom).
+    private func animateZoom(toScale targetScale: CGFloat, toOrigin targetOrigin: CGPoint) {
+        cancelZoomAnimation()
+        // Already there → apply instantly, skipping a no-op animation.
+        if abs(appliedScale - targetScale) < 0.001,
+           abs(appliedOrigin.x - targetOrigin.x) < 0.5,
+           abs(appliedOrigin.y - targetOrigin.y) < 0.5 {
+            setAppliedZoom(scale: targetScale, origin: targetOrigin)
+            return
+        }
+        zoomAnimStartScale = appliedScale
+        zoomAnimStartOrigin = appliedOrigin
+        zoomAnimTargetScale = targetScale
+        zoomAnimTargetOrigin = targetOrigin
+        zoomAnimStartTime = CACurrentMediaTime()
+        let link = CADisplayLink(target: self, selector: #selector(stepZoomAnimation(_:)))
+        link.add(to: .main, forMode: .common)
+        zoomAnimLink = link
+    }
+
+    @objc private func stepZoomAnimation(_ link: CADisplayLink) {
+        let raw = (CACurrentMediaTime() - zoomAnimStartTime) / zoomAnimDuration
         let t = CGFloat(min(max(raw, 0), 1))
         let e = t * t * (3 - 2 * t) // smoothstep
-        let s = snapBackStartScale + (1.0 - snapBackStartScale) * e
+        let s = zoomAnimStartScale + (zoomAnimTargetScale - zoomAnimStartScale) * e
+        let ox = zoomAnimStartOrigin.x + (zoomAnimTargetOrigin.x - zoomAnimStartOrigin.x) * e
+        let oy = zoomAnimStartOrigin.y + (zoomAnimTargetOrigin.y - zoomAnimStartOrigin.y) * e
+        applyAppliedTransform(scale: s, origin: CGPoint(x: ox, y: oy))
         if t >= 1.0 {
-            cancelZoomSnapBack()
-            zoomScale = 1.0
-            zoomOriginPt = .zero
-            skViewPort.applyZoom(scale: 1.0, originXPoints: 0, originYPoints: 0)
-        } else {
-            zoomScale = s
-            zoomOriginPt = CGPoint(x: snapBackStartOrigin.x * (1 - e),
-                                   y: snapBackStartOrigin.y * (1 - e))
-            skViewPort.applyZoom(scale: s, originXPoints: zoomOriginPt.x, originYPoints: zoomOriginPt.y)
+            // Land exactly on target, then stop.
+            applyAppliedTransform(scale: zoomAnimTargetScale, origin: zoomAnimTargetOrigin)
+            cancelZoomAnimation()
         }
     }
 
-    private func cancelZoomSnapBack() {
-        zoomSnapBackLink?.invalidate()
-        zoomSnapBackLink = nil
+    private func cancelZoomAnimation() {
+        zoomAnimLink?.invalidate()
+        zoomAnimLink = nil
     }
 }
 
@@ -2012,12 +2181,30 @@ extension BrogueViewController {
             if pointIsInSideBar(point: location) {
                 // side bar
                 if touch.tapCount >= 2 {
+                    // Double-tap acts on the entity (attack / run toward) — not an examine.
+                    // Cancel the pending single-tap arm so it never zooms out.
+                    examineArmDebounce?.cancel()
+                    examineArmed = false
                     addTouchEvent(event: UIBrogueTouchEvent(phase: .ended, location: lastTouchLocation))
                 } else {
+                    // Single-tap selects an entity → the engine shows its description box.
+                    // Defer arming past the double-tap window so a follow-up double-tap
+                    // cancels it; only a lone single tap actually suspends the zoom.
+                    examineArmDebounce?.cancel()
+                    if examineZoomEnabled {
+                        let work = DispatchWorkItem { [weak self] in
+                            guard let self = self, self.examineBoxShown else { return }
+                            self.examineArmed = true
+                        }
+                        examineArmDebounce = work
+                        DispatchQueue.main.asyncAfter(deadline: .now() + examineArmDelay, execute: work)
+                    }
                     addTouchEvent(event: UIBrogueTouchEvent(phase: .moved, location: location))
                 }
             } else {
                 // other touch
+                examineArmDebounce?.cancel()
+                examineArmed = false
                 addTouchEvent(event: UIBrogueTouchEvent(phase: .stationary, location: lastTouchLocation))
                 addTouchEvent(event: UIBrogueTouchEvent(phase: .ended, location: lastTouchLocation))
             }

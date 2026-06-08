@@ -77,6 +77,10 @@ final class CEHost: NSObject, BrogueCEHost {
         viewController?.setCETargeting(targeting)
     }
 
+    func setExamining(_ examining: Bool) {
+        viewController?.setExamining(examining)
+    }
+
     func setPlayerWindowX(_ x: Int16, y: Int16) {
         viewController?.setPlayerWindowX(Int(x), y: Int(y))
     }

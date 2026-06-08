@@ -32,6 +32,10 @@
 // Obj-C bridge (RogueDriver.mm).
 extern void iosSetPlayerWindowLocation(short windowX, short windowY);
 
+// iOS port (iBrogue): reports whether a creature/item description box is showing
+// in the cursor loop, so the host can suspend pinch-zoom to 1×. Bridge dedupes.
+extern void setBrogueExamining(boolean examining);
+
 // Populates path[][] with a list of coordinates starting at origin and traversing down the map. Returns the number of steps in the path.
 short getPlayerPathOnMap(short path[1000][2], short **map, short originX, short originY) {
     short dir, x, y, steps;
@@ -701,7 +705,12 @@ void mainInputLoop() {
                 
                 printLocationDescription(cursor[0], cursor[1]);
             }
-            
+
+            // iOS port (iBrogue): tell the host whether a description box is up so the
+            // iPhone pinch-zoom can suspend to 1× while one lingers (moveCursor blocks
+            // below while it's shown). Host debounces, so a tap-through doesn't flicker.
+            setBrogueExamining(textDisplayed);
+
             // Get the input!
             rogue.playbackMode = playingBack;
             doEvent = moveCursor(&targetConfirmed, &canceled, &tabKey, cursor, &theEvent, &state, !textDisplayed, rogue.cursorMode, true);
@@ -773,7 +782,11 @@ void mainInputLoop() {
                     doEvent = false;
                 }
         } while (!targetConfirmed && !canceled && !doEvent && !rogue.gameHasEnded);
-        
+
+        // iOS port (iBrogue): cursor interaction ended (action/cancel) — clear the
+        // examine state so the host restores any suspended pinch-zoom.
+        setBrogueExamining(false);
+
         if (coordinatesAreInMap(oldTargetLoc[0], oldTargetLoc[1])) {
             refreshDungeonCell(oldTargetLoc[0], oldTargetLoc[1]);                        // Remove old cursor.
         }

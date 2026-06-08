@@ -28,6 +28,45 @@ covers the separate Classic engine that ships in the app target).
 
 ## Change log
 
+### 2026-06-07 — Don't show the ESC button for tap-to-continue prompts
+
+**What.** `waitForAcknowledgment()` and `waitForKeystrokeOrMouseClick()` no longer force
+`uiMode = CBrogueGameEventShowEscape`; they leave `uiMode` as-is (InNormalPlay during play,
+so no ESC button).
+
+**Why.** Both prompts already dismiss on `MOUSE_UP` (tap anywhere) — they're "press any key
+/ click to continue" acknowledgments, including the `--more--` message prompt
+(`displayMoreSign → waitForAcknowledgment`). The on-screen ESC button was appearing for
+transient messages like "A pressure plate clicks underneath the dart!", which is redundant
+and noisy. The ESC button stays for states a tap can NOT dismiss: text entry
+(`getInputTextString` → `ShowKeyboardAndEscape`: save game / save recording / seed) and the
+throw/zap aiming loop (`Items.c`, which needs ESC to cancel an aim). Care was taken not to
+remove ESC anywhere it's the only way out — these two functions provably exit on a tap.
+
+**Where.** `IO.c` — removed the `uiMode = CBrogueGameEventShowEscape` (and the
+save/restore of `oldUiMode`) in `waitForAcknowledgment` and `waitForKeystrokeOrMouseClick`.
+Classic doesn't set a UI mode in its equivalents, so this is CE-only.
+
+### 2026-06-06 — Suspend pinch-zoom while an entity description box is shown
+
+**What.** When a creature/item description box lingers in the cursor loop (e.g. the
+player taps an entity in the sidebar), the host suspends the iPhone pinch-zoom to 1×
+so the box isn't magnified/clipped, then restores it — the same treatment menu and
+inventory already get.
+
+**Why.** The description box (`printMonsterDetails`/`printFloorItemDetails` →
+`printTextBox`) renders into the dungeon cells but fired no host signal, so it was
+drawn magnified and ran off-screen while zoomed.
+
+**Where.** `IO.c` — `extern void ceSetExamining(boolean);` at file top; in
+`mainInputLoop`'s cursor `do/while`, `ceSetExamining(textDisplayed)` right before
+`moveCursor` and `ceSetExamining(false)` right after the loop (clears on action/cancel).
+Defined in `CEBridge.mm` (deduped) → `BrogueCEHost setExamining:` → host. The host only
+suspends zoom when the box was armed by a **sidebar single-tap** (`examineArmed`, set in
+`touchesEnded`); boxes that auto-appear (auto-explore stopping on an item, a tap-to-move
+over a monster) are not armed, so they don't zoom out — that previously caused an in/out
+flicker while exploring.
+
 ### 2026-06-06 — Title flyout marker: ASCII `<` instead of a triangle glyph
 
 **What.** The main-menu flyout buttons (Play, View) are marked with a literal ASCII

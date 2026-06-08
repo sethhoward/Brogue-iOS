@@ -105,6 +105,18 @@ extension CGSize {
         return defaults.bool(forKey: pinchZoomEnabledDefaultsKey)
     }
 
+    /// UserDefaults key for "zoom out to show a tapped sidebar entity's description".
+    @objc public static let examineZoomEnabledDefaultsKey = "examineZoomOutEnabled"
+
+    /// Whether tapping a sidebar entity zooms out to 1× so its description box isn't
+    /// clipped. **Default ON**; absent key → default, stored value (on/off) respected
+    /// (same presence-check pattern as isPinchZoomEnabledSetting).
+    @objc public static var isExamineZoomEnabledSetting: Bool {
+        let defaults = UserDefaults.standard
+        if defaults.object(forKey: examineZoomEnabledDefaultsKey) == nil { return true }
+        return defaults.bool(forKey: examineZoomEnabledDefaultsKey)
+    }
+
     private var dungeonCrop: SKCropNode?
     private var dungeonContainer: SKNode?
     private var dungeonMask: SKSpriteNode?
@@ -218,6 +230,27 @@ extension RogueScene {
                 )
             }
         }
+        // iOS port (iBrogue): on iPhone the engine button bar is a single row floating
+        // above the tap-band. Extend each bottom-row button cell's BACKGROUND down past
+        // the scene bottom so the buttons read as taller, flush-to-bottom tabs. The glyph
+        // (foreground) stays put, so the label sits toward the top of the taller button.
+        // yOffset == band height in gameplay, 0 on title/menu — so this no-ops off-gameplay.
+        // Two subtleties handled here:
+        //  • The cell array has one unused extra row (index gridSize.rows) whose black
+        //    background lands over the band; bumping zPosition above it (but below the
+        //    foreground glyph at z=1) keeps the button color on top in the band.
+        //  • Overshoot below y=0 by a cell so the color reaches the physical bottom edge
+        //    (the SKView is edge-to-edge); SpriteKit clips the overshoot.
+        if layout.yOffset > 0 {
+            let lastRow = gridSize.rows - 1
+            let overshoot = cellSize.height
+            for x in 21...gridSize.cols - 1 {
+                let bg = cells[x][lastRow].background
+                bg.zPosition = 0.5
+                bg.position = CGPoint(x: layout.xOffset + CGFloat(x) * cellSize.width, y: -overshoot)
+                bg.size = CGSize(width: cellSize.width, height: cellSize.height + layout.yOffset + overshoot)
+            }
+        }
         relayoutZoomLayer()
     }
 
@@ -236,6 +269,10 @@ extension RogueScene {
         if zoomEnabled, RogueScene.isPinchZoomEnabledSetting {
             enableZoomLayer()
         }
+        // paddingEnabled's didSet only fires on change, and updatePadding early-returns
+        // on non-notch phones, so relayoutCells may not run before the first frame. Run
+        // it once here so the bottom-row button-background extension is applied on entry.
+        relayoutCells()
     }
 
     // MARK: - Zoom layer
