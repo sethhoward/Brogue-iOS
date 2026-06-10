@@ -28,6 +28,30 @@ covers the separate Classic engine that ships in the app target).
 
 ## Change log
 
+### 2026-06-10 — Candidate-narrowing inspect line for unidentified potions/scrolls
+
+**What.** An unidentified potion's or scroll's inspect text now ends with a line like "You have narrowed
+it down to one of 3 remaining beneficial potions." — the count of kinds it could still be, narrowed to
+its polarity if that's known (the count is colored good/bad accordingly). It never names candidate kinds,
+and is shown only when the count is ≥ 2.
+
+**Why.** Surfaces the deduction bookkeeping a player otherwise tracks by hand. It reveals no new
+information: the count is derived purely from what the player already knows (which kinds are identified,
+plus this item's polarity if detect-magic/elimination has revealed it). The engine already
+auto-identifies the last unknown kind of a polarity (`tryIdentifyLastItemKinds`, fired from every ID
+path), so an unidentified item's count is always ≥ 2 — rendering only at ≥ 2 guarantees the line can
+never hand out a free identification.
+
+**Where.** `Items.c` — a forward prototype above `itemDetails`; a new `static short
+candidateKindCount(item*, boolean *knownGood, boolean *knownBad)` defined just after
+`itemMagicPolarityIsKnown` (iterates the category's kinds, counts unidentified ones matching known
+polarity); and a render block appended to the unidentified branch of `itemDetails` (after the category
+switch's `strcat`), gated on `POTION | SCROLL`. Reuses `itemMagicPolarityIsKnown`, `itemKindCount`,
+`tableForItemCategory`, and `itemDetails`'s existing color-escape locals. All vanilla symbols.
+
+**Determinism.** Pure display, recomputed on each inspect — no RNG, no serialized state; seeds and
+recordings are unaffected.
+
 ### 2026-06-10 — Fire/lightning bolts detonate dropped bad potions
 
 **What.** A fire or lightning bolt (`BF_FIERY` / `BF_ELECTRIC`) passing over a *dropped* potion now

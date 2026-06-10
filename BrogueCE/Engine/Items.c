@@ -1881,6 +1881,9 @@ static boolean monsterClassHasAcidicMonster(const short classID) {
     return false;
 }
 
+// iOS port (iBrogue): count of still-possible kinds for an unidentified potion/scroll (defined below)
+static short candidateKindCount(item *theItem, boolean *knownGood, boolean *knownBad);
+
 void itemDetails(char *buf, item *theItem) {
     char buf2[1000], buf3[1000], theName[500], goodColorEscape[20], badColorEscape[20], whiteColorEscape[20];
     boolean singular, carried;
@@ -1991,6 +1994,23 @@ void itemDetails(char *buf, item *theItem) {
                 break;
         }
         strcat(buf, buf2);
+
+        // iOS port (iBrogue): candidate-narrowing — surface how far ID has come for an unidentified
+        // potion/scroll. No new info (the engine already auto-IDs the last kind); shown only at >=2 so
+        // it can never reveal a free identification, and it never names a candidate.
+        if (theItem->category & (POTION | SCROLL)) {
+            boolean knownGood = false, knownBad = false;
+            short candidates = candidateKindCount(theItem, &knownGood, &knownBad);
+            if (candidates >= 2) {
+                char *polColor = knownGood ? goodColorEscape : (knownBad ? badColorEscape : whiteColorEscape);
+                const char *polWord = knownGood ? " beneficial" : (knownBad ? " malevolent" : "");
+                sprintf(buf2, " You have narrowed %s down to one of %s%i%s remaining%s %s.",
+                        (singular ? "it" : "them"),
+                        polColor, candidates, whiteColorEscape, polWord,
+                        (theItem->category & POTION) ? "potions" : "scrolls");
+                strcat(buf, buf2);
+            }
+        }
     }
 
     if (carried && theItem->originDepth > 0) {
@@ -5214,6 +5234,26 @@ static boolean itemMagicPolarityIsKnown(const item *theItem, int magicPolarity) 
             return itemMagicPolarity(theItem) == magicPolarity;
     }
     return false;
+}
+
+// iOS port (iBrogue): how many kinds an unidentified potion/scroll could still be — unidentified kinds
+// of its category, narrowed to its polarity if known. Pure derivation of what the player already knows
+// (no new info; the engine already auto-IDs the last kind), used by the candidate line in itemDetails.
+static short candidateKindCount(item *theItem, boolean *knownGood, boolean *knownBad) {
+    itemTable *table = tableForItemCategory(theItem->category);
+    short total = itemKindCount(theItem->category, 0);
+    boolean kg = itemMagicPolarityIsKnown(theItem, MAGIC_POLARITY_BENEVOLENT);
+    boolean kb = itemMagicPolarityIsKnown(theItem, MAGIC_POLARITY_MALEVOLENT);
+    short count = 0;
+    for (short i = 0; i < total; i++) {
+        if (table[i].identified) continue;                                   // a known kind can't be this flask
+        if (kg && table[i].magicPolarity != MAGIC_POLARITY_BENEVOLENT) continue;
+        if (kb && table[i].magicPolarity != MAGIC_POLARITY_MALEVOLENT) continue;
+        count++;
+    }
+    if (knownGood) *knownGood = kg;
+    if (knownBad)  *knownBad = kb;
+    return count;
 }
 
 /// @brief Checks if a monster is a valid auto-target when the player is using a staff/wand or throwing something.
