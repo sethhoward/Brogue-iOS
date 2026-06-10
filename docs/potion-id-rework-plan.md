@@ -8,6 +8,7 @@
   - Phase 3 — fire/lightning bolts detonate dropped bad potions. (fork: `potion-bolt-detonation`)
   - Phase 6 — candidate-narrowing inspect line for unidentified potions + scrolls. (fork: `potion-candidate-ui`)
   - Phase 8 — passive polarity insight while resting (+ iOS-only debug rest-count readout). (fork: `rest-polarity-insight`)
+  - Phase 9 — eating a scroll-bearer's safe meal reveals one unidentified scroll's polarity. (fork: `eat-scroll-insight`)
   - All commits authored as a human (no AI-attribution trailer); upstream PRs are drafted (see `docs/pr-notes-*`) but **not opened**.
 - **Deferred** (not started): Phase 4 (carried-potion volatility); Phase 7 (insight altar — itself a
   polarity reveal, in tension with the "ID is a gamble" goal).
@@ -302,6 +303,38 @@ warranted at release and left to the maintainers — the diff does not bump it.
 **Test.** Rest from early game → after ~`BASE` turns a polarity reveal fires on the first unknown item,
 colored, auto-rest interrupts. ID more kinds → the gap lengthens. Never full-IDs. Die → recap shows the
 `[rests/lvl: …]` tally, and the saved high-score description does not. Record→replay a resting session → no desync.
+
+---
+
+## Phase 9 — Eating studies a scroll (shipped on iOS)
+
+**Idea.** Companion to Phase 8. Eating a meal (`eat` returns true) while **nothing is hunting you** reveals
+the polarity of the first still-unknown scroll in your pack — a calm moment to study a scroll while you eat.
+*"you study a scroll intently while eating; it radiates a benevolent/malevolent aura."* (colored). Polarity
+only, never a full ID.
+
+**Gate = "no monster Hunting you."** No live creature in `MONSTER_TRACKING_SCENT` — the state the game shows
+as **"(Hunting)"**. Sleeping/wandering/fleeing monsters, allies, and captives never count, so a lull is
+reachable even deep down (unlike "no monsters on the level," which is almost never true late).
+
+**Cadence:** one scroll per safe meal — meals are scarce, so it self-limits. **No counter, no stored state.**
+
+**Reuse.** `eat()` ([Items.c:6789](BrogueCE/Engine/Items.c:6789)) is the single chokepoint (called once per
+`apply`); new `gainScrollInsightFromEating()` reuses `detectMagicOnItem` + `tryIdentifyLastItemKinds(SCROLL)`
++ `itemMagicPolarity`/`itemMagicPolarityIsKnown`, and iterates `monsters` for the gate. **No Phase 8 symbols
+→ ports to master verbatim.**
+
+**Determinism / saves.** `eat()` is one command per keystroke (no `autoRest` re-recording), reveal is
+RNG-free, no new state → reconstructed identically on replay; saves are recordings (no format change). A
+deterministic gameplay-rule change, so pre-feature recordings diverge → per-variant `recordingVersionString`
+bump at release, left to maintainers; the diff does not bump it.
+
+**Benign overlap.** On the cumulative iOS branch, Phase 8 (rest) also reveals scroll polarity; whichever
+fires first wins and the other skips. Upstream PRs are independent branches off `master`, each standalone.
+
+**Test.** With nothing hunting you, eat while holding ≥1 unidentified scroll → one scroll's polarity revealed,
+colored; eat again → next unknown scroll. While **(Hunting)** → normal meal, no reveal. No unknown scrolls →
+no reveal. Record→replay an eating session → no desync.
 
 ---
 

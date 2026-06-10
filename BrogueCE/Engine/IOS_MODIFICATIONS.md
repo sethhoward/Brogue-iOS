@@ -28,6 +28,28 @@ covers the separate Classic engine that ships in the app target).
 
 ## Change log
 
+### 2026-06-10 — Eating studies a scroll: reveal one scroll's polarity on a safe meal
+
+**What.** Eating a meal (`eat` returning true) while **nothing is hunting you** reveals the polarity
+(benevolent/malevolent) of the first still-unknown scroll in your pack, with a colored message
+("you study a scroll intently while eating; it radiates a … aura."). Polarity only, never a full ID. One
+scroll per safe meal; if something is hunting you (any creature in the `MONSTER_TRACKING_SCENT` /
+"(Hunting)" state) or you hold no unknown scroll, the meal proceeds normally with no reveal.
+
+**Why.** Companion to the rest-insight feature: a calm moment to study a scroll while you eat. Meals are
+scarce and the reward is safety-gated, so it eases scroll identification without removing the gamble.
+
+**Where.** `Items.c` — a new `void gainScrollInsightFromEating(void)` defined just after
+`gainPolarityInsightFromRest` (iterates `monsters` for the Hunting gate, then the pack for the first
+unknown-polarity scroll; reuses `detectMagicOnItem` + `tryIdentifyLastItemKinds(SCROLL)` + `itemMagicPolarity`
++ `itemMagicPolarityIsKnown`), called from `eat()` just before its `return true`. Prototype in `Rogue.h`.
+All vanilla symbols.
+
+**Determinism.** `eat()` is one command per keystroke (no `autoRest`-style per-turn re-recording), the
+reveal is RNG-free, and there's no new stored state — so it's reconstructed identically on replay (saves
+are recordings). Like the rest feature it's a deterministic gameplay-rule change, so pre-feature recordings
+diverge on replay; a per-variant `recordingVersionString` bump is warranted at release (not in the diff).
+
 ### 2026-06-10 — Passive polarity insight while resting (+ debug rest-count readout)
 
 **What.** Resting slowly reveals item polarity. Each rested turn accrues toward a threshold; on reaching

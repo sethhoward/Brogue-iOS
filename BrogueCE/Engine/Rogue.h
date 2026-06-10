@@ -3423,6 +3423,7 @@ extern "C" {
     short magicCharDiscoverySuffix(short category, short kind);
     int itemMagicPolarity(item *theItem);
     void gainPolarityInsightFromRest(void);
+    void gainScrollInsightFromEating(void);
     item *itemAtLoc(pos loc);
     item *dropItem(item *theItem);
     itemTable *tableForItemCategory(enum itemCategory theCat);
