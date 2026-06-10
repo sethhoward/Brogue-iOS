@@ -28,6 +28,21 @@ covers the separate Classic engine that ships in the app target).
 
 ## Change log
 
+### 2026-06-08 — Rethrow falls through to a normal throw prompt
+
+**What.** The rethrow command (`RETHROW_KEY`, Shift+T) used to no-op when there was no
+valid item to rethrow. It now falls through to a normal throw prompt in that case.
+
+**Why.** Upstream, rethrow only fires if `rogue.lastItemThrown != NULL` *and* that item
+is still carried (`itemIsCarried`); otherwise the keystroke silently does nothing — most
+visibly the first time you press it in a game (nothing thrown yet). On touch a button that
+does nothing reads as broken, so we degrade to the ordinary "Throw what?" item picker
+(`throwCommand(NULL, false)`), the same thing `THROW_KEY` does. Auto-targeting at
+`lastTarget` is intentionally *not* preserved in the fall-through case (it would require a
+`throwCommand` that can both prompt for an item and auto-aim).
+
+**Where.** `IO.c` — `executeKeystroke()`, the `RETHROW_KEY` case gains an `else` branch.
+
 ### 2026-06-07 — Don't show the ESC button for tap-to-continue prompts
 
 **What.** `waitForAcknowledgment()` and `waitForKeystrokeOrMouseClick()` no longer force

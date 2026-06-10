@@ -2598,6 +2598,10 @@ void executeKeystroke(signed long keystroke, boolean controlKey, boolean shiftKe
         case RETHROW_KEY:
             if (rogue.lastItemThrown != NULL && itemIsCarried(rogue.lastItemThrown)) {
                 throwCommand(rogue.lastItemThrown, true);
+            } else {
+                // iOS port (iBrogue): when there is no valid last-thrown item to
+                // rethrow, fall through to a normal throw prompt instead of no-opping.
+                throwCommand(NULL, false);
             }
             break;
         case RELABEL_KEY:
