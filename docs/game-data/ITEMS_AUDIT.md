@@ -1,0 +1,672 @@
+# Brogue Items Audit (BrogueCE 1.15)
+
+> **Source of truth.** This document was generated entirely from the **BrogueCE 1.15** C
+> engine vendored at `BrogueCE/Engine/`. Every value below was read from the code, not from
+> memory of the game.
+>
+> Primary source files:
+> - `BrogueCE/Engine/Globals.c` — static item catalogs (keys, food, weapons, armor, staffs, rings, runic name tables, appearance pools).
+> - `BrogueCE/Engine/GlobalsBrogue.c` — Brogue-variant tables (potions, scrolls, wands, charms, charm-effect table, metered generation table) and the `brogueGameConst` constants block.
+> - `BrogueCE/Engine/GlobalsBase.c` — shared power-curve arrays (charm increment tables).
+> - `BrogueCE/Engine/Items.c` — generation, enchantment, charges, identification, metered generation.
+> - `BrogueCE/Engine/Combat.c` — runic effects, strength modifier, net enchant.
+> - `BrogueCE/Engine/PowerTables.c` — enchant-level → effect scaling tables.
+> - `BrogueCE/Engine/Rogue.h` — `itemTable` struct, item flags, all item-kind / runic / bolt enums.
+
+---
+
+## 0. The `itemTable` struct and how to read the catalogs
+
+`itemTable` (source: `BrogueCE/Engine/Rogue.h:1439`):
+
+```c
+typedef struct itemTable {
+    char *name;
+    char *flavor;            // randomized appearance (color/wood/metal/gem/title), or "" for prenamed
+    char callTitle[30];
+    short frequency;         // generation weight within the category (see chooseKind)
+    short marketValue;       // shop / score value
+    short strengthRequired;  // weapons & armor only; 0 otherwise
+    int power;               // bolt type for staffs/wands; enchant magnitude for scroll of enchanting; nutrition for food
+    randomRange range;       // {lowerBound, upperBound, clumpFactor}
+    boolean identified;
+    boolean called;
+    int magicPolarity;       // +1 good, -1 bad, used for detect-magic sigils
+    boolean magicPolarityRevealed;
+    char description[1500];
+} itemTable;
+```
+
+The column order in the catalogs is therefore:
+`{name, flavor, callTitle, frequency, marketValue, strengthRequired, power, {range}, identified, called, magicPolarity, magicPolarityRevealed, description}`.
+
+### Item categories
+Source: `BrogueCE/Engine/Rogue.h:759` (`NUMBER_ITEM_CATEGORIES 13`) and `itemCategoryNames` (`Globals.c:1439`):
+
+`food, weapon, armor, potion, scroll, staff, wand, ring, charm, gold, amulet, lumenstone (GEM), key`.
+
+Category flag groupings (`Rogue.h:777`):
+- `HAS_INTRINSIC_POLARITY = POTION | SCROLL | RING | WAND | STAFF`
+- `CAN_BE_DETECTED = WEAPON | ARMOR | POTION | SCROLL | RING | CHARM | WAND | STAFF | AMULET`
+- `CAN_BE_ENCHANTED = WEAPON | ARMOR | RING | CHARM | WAND | STAFF`
+- `PRENAMED_CATEGORY = FOOD | GOLD | AMULET | GEM | KEY`
+- `NEVER_IDENTIFIABLE = FOOD | CHARM | GOLD | AMULET | GEM | KEY`
+- `CAN_BE_SWAPPED = WEAPON | ARMOR | STAFF | CHARM | RING`
+
+### Game constants (`brogueGameConst`, `GlobalsBrogue.c:1010`)
+| Constant | Value |
+|---|---|
+| `amuletLevel` (`AMULET_LEVEL`) | 26 |
+| `deepestLevel` (`DEEPEST_LEVEL`) | 40 |
+| `depthAccelerator` | 1 |
+| `extraItemsPerLevel` | 0 |
+| `goldAdjustmentStartDepth` | 6 |
+| `playerTransferenceRatio` | 20 |
+| `onHitHallucinateDuration` | 20 |
+| `onHitWeakenDuration` | 300 |
+| `onHitMercyHealPercent` | 50 |
+| `weaponKillsToAutoID` | 20 |
+| `armorDelayToAutoID` | 1000 (turns) |
+| `ringDelayToAutoID` | 1500 (turns) |
+| `numberGoodPotionKinds` | 8 |
+| `numberGoodScrollKinds` | 12 |
+| `numberGoodWandKinds` | 6 |
+| `fallDamageMin / Max` | 8 / 10 |
+
+### Category generation probabilities
+Source: `itemGenerationProbabilities_Brogue[13]` (`GlobalsBrogue.c:109`). Order is
+`{GOLD, SCROLL, POTION, STAFF, WAND, WEAPON, ARMOR, FOOD, RING, CHARM, AMULET, GEM, KEY}`
+(per `pickItemCategory`, `Items.c:88`):
+
+| Category | Weight |
+|---|---|
+| gold | 50 |
+| scroll | 42 |
+| potion | 52 |
+| staff | 3 |
+| wand | 3 |
+| weapon | 10 |
+| armor | 8 |
+| food | 2 |
+| ring | 3 |
+| charm | 2 |
+| amulet | 0 |
+| lumenstone (gem) | 0 |
+| key | 0 |
+
+Within a category, `chooseKind` (`Items.c:414`) picks a kind weighted by each entry's
+`frequency` field (negative frequencies treated as 0). So the per-category `frequency`
+column controls relative drop rates of the individual kinds.
+
+---
+
+## 1. Weapons
+
+Source: `weaponTable[NUMBER_WEAPON_KINDS]` at `Globals.c:1582`. Enum order: `Rogue.h:824`.
+Damage is `{lowerBound, upperBound, clumpFactor}`. `strengthReq` is the strength to use
+without penalty. The "Attribute" column is the special melee behavior flag assigned in
+`makeItemInto` (`Items.c:214`).
+
+| # | Weapon | StrReq | Damage (lo–hi, clump) | Freq | MktVal | Attribute flag / behavior |
+|---|---|---|---|---|---|---|
+| 0 | dagger | 12 | 3–4 (1) | 10 | 190 | `ITEM_SNEAK_ATTACK_BONUS` — sneak attacks deal **5×** instead of 3× |
+| 1 | sword | 14 | 7–9 (1) | 10 | 440 | (plain) |
+| 2 | broadsword | 19 | 14–22 (1) | 10 | 990 | (plain, heavy) |
+| 3 | whip | 14 | 3–5 (1) | 10 | 440 | `ITEM_ATTACKS_EXTEND` — reaches enemies up to 5 spaces away |
+| 4 | rapier | 15 | 3–5 (1) | 10 | 440 | `ITEM_ATTACKS_QUICKLY | ITEM_LUNGE_ATTACKS` — attacks twice as fast; lunge = 3× and never misses |
+| 5 | flail | 17 | 9–15 (1) | 10 | 440 | `ITEM_PASS_ATTACKS` — free attack when moving between two cells adjacent to a foe |
+| 6 | mace | 16 | 16–20 (1) | 10 | 660 | `ITEM_ATTACKS_STAGGER` — extra recovery turn on hit; knockback |
+| 7 | war hammer | 20 | 25–35 (1) | 10 | 1100 | `ITEM_ATTACKS_STAGGER` — extra recovery turn on hit; knockback |
+| 8 | spear | 13 | 4–5 (1) | 10 | 330 | `ITEM_ATTACKS_PENETRATE` — hits adjacent foe + foe directly behind |
+| 9 | war pike | 18 | 11–15 (1) | 10 | 880 | `ITEM_ATTACKS_PENETRATE` |
+| 10 | axe | 15 | 7–9 (1) | 10 | 550 | `ITEM_ATTACKS_ALL_ADJACENT` — hits all adjacent foes |
+| 11 | war axe | 19 | 12–17 (1) | 10 | 990 | `ITEM_ATTACKS_ALL_ADJACENT` |
+| 12 | dart | **0** | 2–4 (1) | **0** | 15 | thrown; stacks 5–18; can't be magical/runic |
+| 13 | incendiary dart | 12 | 1–2 (1) | 10 | 25 | thrown; stacks 3–6; explodes into fire |
+| 14 | javelin | 15 | 3–11 (3) | 10 | 40 | thrown; stacks 5–18 |
+
+Notes:
+- Darts have frequency 0, so they never appear in the normal weapon raffle; they spawn via
+  blueprints / special placement. Throwing weapons (`dart`, `incendiary dart`, `javelin`)
+  are forced non-cursed, non-runic, non-magical and given a random `quiverNumber`
+  (`Items.c:270`).
+- All non-thrown weapons get `charges = weaponKillsToAutoID` (20) — kill 20 foes to auto-ID
+  (`Items.c:280`).
+
+### Weapon runics (W_*)
+Names: `weaponRunicNames` (`Globals.c:1614`). Enum: `Rogue.h:848`. Good runics are
+`W_SPEED..W_MERCY` (`NUMBER_GOOD_WEAPON_ENCHANT_KINDS = W_MERCY`); bad runics are `W_PLENTY`
+(and conceptually the cursed ones). Effects implemented in `Combat.c:600` (`magicWeaponHit`).
+
+| Runic | Good? | Effect (per `Combat.c`) | Scaling fn (`PowerTables.c`) |
+|---|---|---|---|
+| `W_SPEED` (0) | good | Grants a free turn on a triggered hit (`player.ticksUntilTurn = -1`) | `runicWeaponChance`, base decrement `POW_16` |
+| `W_QUIETUS` (1) | good | Instant kill (`inflictLethalDamage` + `killCreature`) | `POW_6` (rare trigger) |
+| `W_PARALYSIS` (2) | good | Paralyzes target for `weaponParalysisDuration(e) = max(2, 2 + e/2)` turns | `POW_7` |
+| `W_MULTIPLICITY` (3) | good | Spawns `weaponImageCount(e) = clamp(e/3,1,7)` spectral allies for `weaponImageDuration = 3` turns | `POW_15` |
+| `W_SLOWING` (4) | good | Slows target for `weaponSlowDuration(e) = max(3, ((e+2)*(e+2))/3)` turns | `POW_14` |
+| `W_CONFUSION` (5) | good | Confuses target for `weaponConfusionDuration(e) = max(3, e*3/2)` turns | `POW_11` |
+| `W_FORCE` (6) | good | Knocks target back `weaponForceDistance(e) = max(4, e*2 + 2)` cells, damaging on collision | `POW_15` |
+| `W_SLAYING` (7) | good | 100% kill vs its random `vorpalEnemy` class, 0% otherwise (`chance` short-circuits) | n/a (always 0/100) |
+| `W_MERCY` (8) | good (de facto bad for you) | Heals the target by `onHitMercyHealPercent` = 50% | n/a (fixed 15% trigger for bad) |
+| `W_PLENTY` (9) | **bad** | Clones the target (`cloneMonster`) | fixed 15% trigger |
+
+Trigger chance: `runicWeaponChance` (`PowerTables.c:220`). Key mechanics:
+- `W_SLAYING` → returns 0 here (handled separately as 100% vs vorpal enemy).
+- Bad runics (`>= NUMBER_GOOD_WEAPON_ENCHANT_KINDS`, i.e. W_PLENTY and the cursed bad set)
+  → fixed **15%**.
+- Good runics: chance derived from a per-runic `(1-p)^x` decrement table (mapping above),
+  indexed by `enchantLevel * modifier`. `modifier` shrinks with the weapon's average base
+  damage (`FP_FACTOR - min(0.99, avgDamage/18)`) — **higher-damage weapons trigger runics
+  less often**. Stagger weapons get `1-(1-p)^2`; quick weapons get `1-sqrt(1-p)`. Floor is
+  `max(1, enchantLevel)` percent.
+- Backstabs double the chance (capped) (`Combat.c:624`).
+
+---
+
+## 2. Armor
+
+Source: `armorTable[NUMBER_ARMOR_KINDS]` at `Globals.c:1605`. Enum: `Rogue.h` armor kinds.
+Base armor value is rolled from `range` (`randClump`). Auto-ID after `armorDelayToAutoID`
+(1000) turns worn (`Items.c:290`).
+
+| # | Armor | StrReq | Base armor (lo–hi) | Freq | MktVal |
+|---|---|---|---|---|---|
+| 0 | leather armor | 10 | 30 | 10 | 250 |
+| 1 | scale mail | 12 | 40 | 10 | 350 |
+| 2 | chain mail | 13 | 50 | 10 | 500 |
+| 3 | banded mail | 15 | 70 | 10 | 800 |
+| 4 | splint mail | 17 | 90 | 10 | 1000 |
+| 5 | plate armor | 19 | 110 | 10 | 1300 |
+
+(Armor values are stored ×10 internally; displayed armor is `value/10`. The defense curve is
+`defenseFraction`, `PowerTables.c:184`, a `0.877^x` table indexed by net defense in 0.25
+display-point steps.)
+
+### Armor runics (A_*)
+Names: `armorRunicNames` (`Globals.c:1627`). Enum: `Rogue.h:874`. Good runics are
+`A_MULTIPLICITY..A_BURDEN` (`NUMBER_GOOD_ARMOR_ENCHANT_KINDS = A_BURDEN`); bad runics are
+`A_VULNERABILITY`, `A_IMMOLATION`. **Note:** `A_BURDEN` is classed as "good" by the enum
+boundary even though its effect is detrimental. Effects in `Combat.c:836`
+(`applyArmorRunicEffect`).
+
+| Runic | Good? | Effect | Scaling fn |
+|---|---|---|---|
+| `A_MULTIPLICITY` (0) | good | On melee hit, 33% chance to spawn `armorImageCount(e) = clamp(e/3,1,5)` spectral clones of the attacker (1 HP, 3-turn lifespan) | `armorImageCount` |
+| `A_MUTUALITY` (1) | good | Splits incoming damage among adjacent enemies: `dmg = (dmg+count)/(count+1)` | — |
+| `A_ABSORPTION` (2) | good | Reduces damage by `rand(1, armorAbsorptionMax(e))`, `armorAbsorptionMax = max(1, e)` | `armorAbsorptionMax` |
+| `A_REPRISAL` (3) | good | Reflects `armorReprisalPercent(e) = max(5, e*5)`% of melee damage back to attacker | `armorReprisalPercent` |
+| `A_IMMUNITY` (4) | good | Takes **0** damage from its random `vorpalEnemy` class | — |
+| `A_REFLECTION` (5) | good | Reflects bolts; `reflectionChance(e)` from `POW_REFLECT` (0.85^x) table | `reflectionChance` |
+| `A_RESPIRATION` (6) | good | Immunity to harmful gases (checked elsewhere) | — |
+| `A_DAMPENING` (7) | good | Suppresses bolt/explosion effects in the wearer's vicinity (checked elsewhere) | — |
+| `A_BURDEN` (8) | "good" (bad effect) | 10% chance per hit to permanently raise `strengthRequired` by 1 | — |
+| `A_VULNERABILITY` (9) | **bad** | Doubles all incoming damage (`*damage *= 2`) | — |
+| `A_IMMOLATION` (10) | **bad** | 10% chance per hit to ignite the wearer (`DF_ARMOR_IMMOLATION`) | — |
+
+(`A_RESPIRATION` and `A_DAMPENING` are passive and handled outside `applyArmorRunicEffect`;
+the switch there covers the active-on-hit runics.)
+
+---
+
+## 3. Staffs
+
+Source: `staffTable[NUMBER_STAFF_KINDS]` at `Globals.c:1641`. Enum: `Rogue.h:901`.
+The `power` column is the `boltType`. All staffs share `range {2,4,1}`. Good staffs are
+`STAFF_LIGHTNING..STAFF_HEALING` (`NUMBER_GOOD_STAFF_KINDS = STAFF_HEALING`); `STAFF_HASTE`
+and `STAFF_PROTECTION` have `magicPolarity = -1` (they help the *target*, so bad to fire at
+a foe). On generation (`Items.c:327`): start with 2 charges, 50% +1, then 15% +1, then 10%
+chains; `enchant1 = charges`; recharge counter starts at 500 (1000 for blinking/obstruction).
+
+| # | Staff | Bolt | StrReq | Freq | MktVal | Polarity |
+|---|---|---|---|---|---|---|
+| 0 | lightning | `BOLT_LIGHTNING` | 0 | 15 | 1300 | + |
+| 1 | firebolt | `BOLT_FIRE` | 0 | 15 | 1300 | + |
+| 2 | poison | `BOLT_POISON` | 0 | 10 | 1200 | + |
+| 3 | tunneling | `BOLT_TUNNELING` | 0 | 10 | 1000 | + |
+| 4 | blinking | `BOLT_BLINKING` | 0 | 11 | 1200 | + |
+| 5 | entrancement | `BOLT_ENTRANCEMENT` | 0 | 6 | 1000 | + |
+| 6 | obstruction | `BOLT_OBSTRUCTION` | 0 | 10 | 1000 | + |
+| 7 | discord | `BOLT_DISCORD` | 0 | 10 | 1000 | + |
+| 8 | conjuration | `BOLT_CONJURATION` | 0 | 8 | 1000 | + |
+| 9 | healing | `BOLT_HEALING` | 0 | 5 | 1100 | − |
+| 10 | haste | `BOLT_HASTE` | 0 | 5 | 900 | − |
+| 11 | protection | `BOLT_SHIELDING` | 0 | 5 | 900 | − |
+
+### Staff power scaling by enchant level
+All from `PowerTables.c:48`. `enchant` below is the net enchant ×`FP_FACTOR`; the formulas
+use `enchant/FP_FACTOR` (= the displayed staff level).
+
+| Staff | Effect formula |
+|---|---|
+| damage staffs (lightning/fire/etc.) | `staffDamageLow = (2 + level)*3/4`; `staffDamageHigh = 4 + 5*level/2`; rolled clumped |
+| poison | `staffPoison(e) = 5 * 1.3^(level-2)` doses (table `POW_POISON`, 1.3^x) |
+| blinking | `staffBlinkDistance = 2 + level*2` cells |
+| haste | `staffHasteDuration = 2 + level*4` turns |
+| conjuration | `staffBladeCount = level*3/2` blades |
+| discord | `staffDiscordDuration = level*4` turns |
+| entrancement | `staffEntrancementDuration = level*3` turns |
+| obstruction | scales with level (larger crystal walls); uses bolt magnitude |
+| protection (shielding) | `staffProtection(e) = 130 * 1.40^(level-2)` shield points |
+
+---
+
+## 4. Wands
+
+Source: `wandTable_Brogue[]` at `GlobalsBrogue.c:701`. Enum: `Rogue.h:889`. `power` column
+is the `boltType`. `numberWandKinds` = 9, `numberGoodWandKinds` = 6. On generation
+(`Items.c:345`): `charges = randClump(range)`. A wand auto-IDs immediately if its charge
+range is a single value (`range.lowerBound == range.upperBound`) (`Items.c:5970`).
+
+| # | Wand | Bolt | Charges (lo–hi, clump) | StrReq | Freq | MktVal | Polarity |
+|---|---|---|---|---|---|---|---|
+| 0 | teleportation | `BOLT_TELEPORT` | 3–5 (1) | 0 | 3 | 800 | + |
+| 1 | slowness | `BOLT_SLOW` | 2–5 (1) | 0 | 3 | 800 | + |
+| 2 | polymorphism | `BOLT_POLYMORPH` | 3–5 (1) | 0 | 3 | 700 | + |
+| 3 | negation | `BOLT_NEGATION` | 4–6 (1) | 0 | 3 | 550 | + |
+| 4 | domination | `BOLT_DOMINATION` | 1–2 (1) | 0 | 1 | 1000 | + |
+| 5 | beckoning | `BOLT_BECKONING` | 2–4 (1) | 0 | 3 | 500 | + |
+| 6 | plenty | `BOLT_PLENTY` | 1–2 (1) | 0 | 2 | 700 | − |
+| 7 | invisibility | `BOLT_INVISIBILITY` | 3–5 (1) | 0 | 3 | 100 | − |
+| 8 | empowerment | `BOLT_EMPOWERMENT` | 1–1 (1) | 0 | 1 | 100 | − |
+
+Notes: `domination` (`wandDominate`, `PowerTables.c:45`) is 100% if the target is below 20%
+max HP, otherwise scales with the target's missing HP. Empowerment has a fixed 1 charge and
+auto-IDs on pickup. Wands gain charges (not levels) when read with a scroll of enchanting:
+`charges += range.lowerBound * enchantMagnitude` (`Items.c:7097`).
+
+---
+
+## 5. Rings
+
+Source: `ringTable[NUMBER_RING_KINDS]` at `Globals.c:1656`. Enum: `Rogue.h:952`. All rings
+share `range {1,3,1}` (initial enchant). On generation (`Items.c:352`): `enchant1 =
+randClump(range)`; 16% cursed (negated enchant + `ITEM_CURSED`), otherwise 10% chains add +1.
+Auto-IDs after `ringDelayToAutoID` (1500) turns worn; a non-positive ring auto-identifies
+immediately on inspection (`Items.c:5964`).
+
+| # | Ring | Freq | MktVal | Effect (positive enchant) | Cursed |
+|---|---|---|---|---|---|
+| 0 | clairvoyance | 1 | 900 | See through walls/doors within radius = enchant | Blinds immediate surroundings |
+| 1 | stealth | 1 | 800 | Reduces stealth range | Increases stealth range |
+| 2 | regeneration | 1 | 750 | Faster HP regen (`turnsForFullRegenInThousandths`, 0.75^x) | Slows/halts regen |
+| 3 | transference | 1 | 750 | Heal % of damage dealt (`playerTransferenceRatio` = 20% per level base) | Lose HP when dealing damage |
+| 4 | light | 1 | 600 | See farther in dim light; no extra noticeability | (always good kind) |
+| 5 | awareness | 1 | 700 | Better detection of traps/secret doors/levers | Dulls detection |
+| 6 | wisdom | 1 | 700 | Staffs recharge faster (`ringWisdomMultiplier`, 1.3^x, `PowerTables.c:72`) | Slower staff recharge |
+| 7 | reaping | 1 | 700 | Recharge staffs/charms on each hit | Drains staffs/charms on each hit |
+
+---
+
+## 6. Charms
+
+Source: `charmTable_Brogue[]` at `GlobalsBrogue.c:713`; effect table
+`charmEffectTable_Brogue[]` at `GlobalsBrogue.c:731`. Enum: `Rogue.h:964`. All charms share
+`range {1,2,1}` (initial enchant). On generation (`Items.c:369`): `charges = 0` (ready),
+`enchant1 = randClump(range)`, then 7% chains add +1, and the charm is flagged
+`ITEM_IDENTIFIED` (charms are `NEVER_IDENTIFIABLE` — appearance is plain text). Charm of fear
+is commented out in the table.
+
+| # | Charm | Freq | MktVal | Effect summary |
+|---|---|---|---|---|
+| 0 | health | 5 | 900 | Instantly heals `charmHealing(e) = clamp(20*e, 0,100)`% of max HP |
+| 1 | protection | 5 | 800 | Shield for `charmProtection(e) = 150 * 1.35^(e-1)` (×10 internal) |
+| 2 | haste | 5 | 750 | Haste for `effectDurationBase=7` × `1.20^e` turns |
+| 3 | fire immunity | 3 | 750 | Fire immunity, base 10 × `1.25^e` turns |
+| 4 | invisibility | 5 | 700 | Invisibility, base 5 × `1.20^e` turns |
+| 5 | telepathy | 3 | 700 | Telepathy, base 25 × `1.25^e` turns |
+| 6 | levitation | 1 | 700 | Levitation, base 10 × `1.25^e` turns |
+| 7 | shattering | 1 | 700 | Shatters nearby walls; radius `charmShattering(e) = 4 + e` |
+| 8 | guardian | 5 | 700 | Summons a guardian; lifespan `charmGuardianLifespan(e) = 4 + 2*e`, base duration 18 |
+| 9 | teleportation | 4 | 700 | Teleports the player to a random location |
+| 10 | recharging | 5 | 700 | Recharges staffs/charms |
+| 11 | negation | 5 | 700 | Negation burst; radius `charmNegationRadius(e) = 1 + 3*e` |
+| 12 | rewind | **0** | 900 | **iOS-port addition** — rewinds time up to `effectMagnitudeConstant = 10` player turns. Frequency 0 keeps it out of loot; only via the `D_REWIND_CHARM_START` debug start. (`GlobalsBrogue.c:728`, `Rogue.h:977`) |
+
+### `charmEffectTable_Brogue` (source `GlobalsBrogue.c:731`)
+Fields: `effectDurationBase`, `effectDurationIncrement` (one of the `POW_*_CHARM_INCREMENT`
+arrays in `GlobalsBase.c:112`), `rechargeDelayDuration`, `rechargeDelayBase`
+(`FP_FACTOR * pct/100`), `rechargeDelayMinTurns`, `effectMagnitudeConstant`,
+`effectMagnitudeMultiplier`.
+
+| Charm | durBase | durIncr | rechargeDur | rechargeBase | magConst | magMult |
+|---|---|---|---|---|---|---|
+| HEALTH | 3 | POW_0 (×1.0) | 2500 | 0.55 | — | 20 |
+| PROTECTION | 20 | POW_0 | 1000 | 0.60 | — | 150 |
+| HASTE | 7 | POW_120 (1.20^x) | 800 | 0.65 | — | — |
+| FIRE_IMMUNITY | 10 | POW_125 (1.25^x) | 800 | 0.60 | — | — |
+| INVISIBILITY | 5 | POW_120 | 800 | 0.65 | — | — |
+| TELEPATHY | 25 | POW_125 | 800 | 0.65 | — | — |
+| LEVITATION | 10 | POW_125 | 800 | 0.65 | — | — |
+| SHATTERING | 0 | POW_0 | 2500 | 0.60 | 4 | — |
+| GUARDIAN | 18 | POW_0 | 700 | 0.70 | 4 | 2 |
+| TELEPORTATION | 0 | POW_0 | 920 | 0.60 | — | — |
+| RECHARGING | 0 | POW_0 | 10000 | 0.55 | — | — |
+| NEGATION | 0 | POW_0 | 2500 | 0.60 | 1 | 3 |
+| REWIND (iOS) | 0 | POW_0 | 3000 | 0.60 | 10 | — |
+
+Effect duration: `charmEffectDuration(kind, enchant) = durBase * durIncr[enchant-1]`
+(`PowerTables.c:206`). Recharge delay: `charmRechargeDelay = effectDuration + rechargeDur *
+rechargeBase^enchant`, floored at `rechargeDelayMinTurns` (`PowerTables.c:212`). So higher
+enchant = longer effect **and** shorter relative recharge for the duration-scaling charms.
+
+---
+
+## 7. Potions
+
+Source: `potionTable_Brogue[]` at `GlobalsBrogue.c:665`. Enum: `Rogue.h:805`. 16 kinds.
+`magicPolarity` +1 = beneficial, −1 = malevolent. The `range` for many is the effect duration
+in turns. Appearance is a random color from `itemColorsRef`. `numberGoodPotionKinds` = 8.
+
+| # | Potion | Good? | Freq | MktVal | Range (effect) | Description summary |
+|---|---|---|---|---|---|---|
+| 0 | life | + | **0†** | 500 | 10,10 | Full heal, cure, +max HP permanently |
+| 1 | strength | + | **0†** | 400 | 1,1 | +1 strength permanently |
+| 2 | telepathy | + | 20 | 350 | 300 | Sense creatures |
+| 3 | levitation | + | 15 | 250 | 100 | Hover over hazards |
+| 4 | detect magic | + | 20 | 500 | 0 | Reveal good/bad sigils on items |
+| 5 | speed (haste self) | + | 10 | 500 | 25 | Move at double speed |
+| 6 | fire immunity | + | 15 | 500 | 150 | Immune to heat/fire/lava |
+| 7 | invisibility | + | 15 | 400 | 75 | Temporarily invisible |
+| 8 | caustic gas | − | 15 | 200 | 0 | Cloud of caustic gas (throwable) |
+| 9 | paralysis | − | 10 | 250 | 0 | Paralysis gas |
+| 10 | hallucination | − | 10 | 500 | 300 | Long hallucinogen |
+| 11 | confusion | − | 15 | 450 | 0 | Confusion gas |
+| 12 | incineration | − | 15 | 500 | 0 | Bursts into flame |
+| 13 | darkness | − | 7 | 150 | 400 | Blinds; supernatural darkness cloud |
+| 14 | descent | − | 15 | 500 | 0 | Ground vanishes (fall to next level) |
+| 15 | creeping death (lichen) | − | 7 | 450 | 0 | Plants deadly lichen |
+
+† **Metered.** `POTION_LIFE` and `POTION_STRENGTH` have base `frequency = 0` in the table;
+their generation is driven entirely by the metered system (see §10). Comments in the table
+note "frequency is dynamically adjusted".
+
+---
+
+## 8. Scrolls
+
+Source: `scrollTable_Brogue[]` at `GlobalsBrogue.c:684`. Enum: `Rogue.h:980`. 14 kinds.
+Appearance is a random title (`itemTitles`, assembled from `titlePhonemes`, `Globals.c:1455`).
+All scrolls are `ITEM_FLAMMABLE`. `numberGoodScrollKinds` = 12.
+`SCROLL_ENCHANTING.power = 1` — this is the global `enchantMagnitude()` (`Items.c:1765`).
+
+| # | Scroll | Good? | Freq | MktVal | Effect summary |
+|---|---|---|---|---|---|
+| 0 | enchanting | + | **0†** | 550 | +1 magic charge to an item (see §11). `power = 1` |
+| 1 | identify | + | 30 | 300 | Reveal one item fully |
+| 2 | teleportation | + | 10 | 500 | Random relocation on the level |
+| 3 | remove curse | + | 15 | 150 | Strip curses from equipped/carried items |
+| 4 | recharging | + | 12 | 375 | Recharge all staffs & charms |
+| 5 | protect armor | + | 10 | 400 | Armor immune to acid degradation; uncurses |
+| 6 | protect weapon | + | 10 | 400 | Weapon immune to acid degradation; uncurses |
+| 7 | sanctuary | + | 10 | 500 | Warding glyphs monsters avoid |
+| 8 | magic mapping | + | 12 | 500 | Reveal level, traps, secret doors, levers |
+| 9 | negation | + | 8 | 400 | Anti-magic blast in field of view |
+| 10 | shattering | + | 8 | 500 | Dissolves nearby stone |
+| 11 | discord | + | 8 | 400 | Visible creatures attack each other 30 turns |
+| 12 | aggravate monsters | − | 15 | 50 | Wakes & alerts all monsters |
+| 13 | summon monsters | − | 10 | 50 | Summons monsters next to reader |
+
+† **Metered.** `SCROLL_ENCHANTING` has base `frequency = 0`; generation is metered (see §10).
+
+---
+
+## 9. Food, Keys, Gold, Lumenstones, Amulet
+
+### Food (`foodTable[NUMBER_FOOD_KINDS]`, `Globals.c:1577`; enum `Rogue.h:799`)
+The `power` column is nutrition. Always spawn `ITEM_IDENTIFIED`. Frequency-driven nutrition
+guarantee in `populateItems` (~one ration per 4 levels, more when deeper).
+
+| # | Food | Nutrition (power) | Freq | MktVal | StrReq |
+|---|---|---|---|---|---|
+| 0 | ration of food | 1800 | 3 | 25 | 0 |
+| 1 | mango | 1550 | 1 | 15 | 0 |
+
+### Keys (`keyTable[NUMBER_KEY_TYPES]`, `Globals.c:1571`; enum `Rogue.h:792`)
+Always `ITEM_IDENTIFIED`, `ITEM_IS_KEY`, frequency 1, no value. Generated by blueprints, not
+the normal raffle.
+
+| # | Key | Purpose |
+|---|---|---|
+| 0 | door key (`KEY_DOOR`) | Opens a specific locked door |
+| 1 | cage key (`KEY_CAGE`) | Opens a captive monster's cage |
+| 2 | crystal orb (`KEY_PORTAL`) | Activates a commutation/portal device |
+
+### Gold (`GOLD`)
+No table entry. Quantity = `rand_range(50 + depth*10, 100 + depth*15)` (`Items.c:380`,
+`depthAccelerator` = 1). Gold piles placed separately from the item raffle; count
+self-corrects against `aggregateGoldLowerBound/UpperBound` past depth 6 (`Items.c:597`).
+
+### Lumenstones (`GEM`) and the Amulet (`AMULET`)
+- Below the amulet level (depth > 26), items become **lumenstones** (`GEM`). The number per
+  level is `lumenstoneDistribution_Brogue` (`GlobalsBrogue.c:105`), one entry per depth from
+  27 to 40: `{3,3,3,2,2,2,2,2,1,1,1,1,1,1}`. They are score-only collectibles.
+- The **Amulet of Yendor** (`AMULET`) is generated `ITEM_IDENTIFIED`, kind 0, no table entry
+  (`Items.c:384`). It appears at `AMULET_LEVEL` (26).
+
+### Appearance pools (randomized per game; `Globals.c`)
+- Colors (potions), `itemColorsRef[21]` (`:1481`): crimson, scarlet, orange, yellow, green,
+  blue, indigo, violet, puce, mauve, burgundy, turquoise, aquamarine, gray, pink, white,
+  lavender, tan, brown, cyan, black.
+- Woods (staffs), `itemWoodsRef[21]` (`:1507`): teak, oak, redwood, rowan, willow, mahogany,
+  pinewood, maple, bamboo, ironwood, pearwood, birch, cherry, eucalyptus, walnut, cedar,
+  rosewood, yew, sandalwood, hickory, hemlock.
+- Metals (wands), `itemMetalsRef[12]` (`:1533`): bronze, steel, brass, pewter, nickel,
+  copper, aluminum, tungsten, titanium, cobalt, chromium, silver.
+- Gems (rings), `itemGemsRef[18]` (`:1550`): diamond, opal, garnet, ruby, amethyst, topaz,
+  onyx, tourmaline, sapphire, obsidian, malachite, aquamarine, emerald, jade, alexandrite,
+  agate, bloodstone, jasper.
+- Scroll titles built from `titlePhonemes[21]` (`:1455`).
+
+---
+
+## 10. Item generation & the metered system
+
+### Per-level item count (`populateItems`, `Items.c:542`)
+- Above the amulet level: `numberOfItems = 3`, then `while (rand_percent(60)) numberOfItems++`.
+- Depth ≤ 2: +2 items; depth ≤ 4: +1 item (kickstart). Plus `extraItemsPerLevel` (0).
+- A spawn **heat map** biases placement toward areas behind secret/regular doors
+  (`fillItemSpawnHeatMap`); items are placed at random heat-weighted cells, then the map
+  cools around chosen spots so items spread out. Food and potions of strength ignore the heat
+  map and avoid hallways.
+- Below the amulet level: items become lumenstones per the distribution above.
+
+### Metered generation (`meteredItemsGenerationTable_Brogue`, `GlobalsBrogue.c:626`)
+This system meters the appearance of the "ration"-style guaranteed items and suppresses /
+biases certain scrolls and potions. Per-entry fields:
+`category, kind, initialFrequency, incrementFrequency, decrementFrequency, genMultiplier,
+genIncrement, levelScaling, levelGuarantee, itemNumberGuarantee`.
+
+Mechanics (`Items.c:582`, `Items.c:677`):
+- Each level, `rogue.meteredItems[i].frequency += incrementFrequency`.
+- For entries with `incrementFrequency != 0`, the running `frequency` is copied into the live
+  `scrollTable`/`potionTable` frequency before the raffle, then `-= decrementFrequency` and
+  `numberSpawned++` whenever one actually spawns. This makes a kind progressively more likely
+  the longer it hasn't appeared, and less likely right after it does.
+- `levelScaling != 0` entries are **hard-thresholded**: if
+  `numberSpawned*genMultiplier + genIncrement < depth*levelScaling + randomDepthOffset`, that
+  exact kind is force-generated.
+- `levelGuarantee`/`itemNumberGuarantee` force a kind by a specific depth if not enough have
+  spawned.
+
+The only entries with nonzero tuning are:
+
+| Entry | initialFreq | incrFreq | decrFreq | genMult | genIncr | levelScaling |
+|---|---|---|---|---|---|---|
+| `SCROLL_ENCHANTING` | 60 | 30 | 50 | — | — | — |
+| `POTION_LIFE` | 0 | 34 | 150 | 4 | 3 | 1 |
+| `POTION_STRENGTH` | 40 | 17 | 50 | — | — | — |
+
+All other scroll/potion kinds appear with default zeros and use their static `frequency`
+from the catalog. **Important:** after each level's population, `populateItems` restores the
+original potion/scroll tables (`memcpy` from saved copies, `Items.c:800`), which is what keeps
+enchant scrolls and life/strength potions out of the ordinary raffle except via the metered
+path or blueprints.
+
+---
+
+## 11. How enchantments are applied
+
+### Net enchant and strength
+- `netEnchant(item)` (`Combat.c:74`): `enchant1 * FP_FACTOR`, plus `strengthModifier` for
+  weapons/armor, clamped to **[−20, 50]** display points (×`FP_FACTOR`).
+- `strengthModifier(item)` (`Combat.c:65`): `diff = (strength − weakness) − strengthRequired`.
+  If `diff > 0`: bonus `diff * 0.25`. If `diff ≤ 0`: penalty `diff * 2.5`. So being *under*
+  the strength requirement is punished 10× harder than the reward for being over it.
+- Combat scaling uses `accuracyFraction` / `damageFraction` (`PowerTables.c:161/138`, 1.065^x
+  tables indexed by net enchant in 0.25 steps) and `defenseFraction` for armor.
+
+### Scroll of enchanting (`readScroll`, `Items.c:7047`)
+`enchantMagnitude()` returns `scrollTable[SCROLL_ENCHANTING].power` = **1**. Each read:
+- `timesEnchanted += enchantMagnitude()`.
+- **Weapon:** `strengthRequired = max(0, strengthRequired − 1)`; `enchant1 += 1`. Reroll
+  quiver number if thrown.
+- **Armor:** `strengthRequired = max(0, strengthRequired − 1)`; `enchant1 += 1`.
+- **Ring:** `enchant1 += 1`; recompute bonuses (and clairvoyance display).
+- **Staff:** `enchant1 += 1`; `charges += 1`; `enchant2 = 500 / enchant1` (faster recharge).
+- **Wand:** `charges += range.lowerBound * 1` (gains charges in the smallest increment that
+  wand can be found with — no levels).
+- **Charm:** `enchant1 += 1`; `charges = min(0, charges)` (instant full recharge).
+- Reaching `enchant1 >= 16` on weapon/armor/staff/ring/charm sets the `FEAT_SPECIALIST`
+  achievement.
+- The item is **uncursed** (`uncurse`) and re-equipped if worn.
+
+`enchantIncrement(item)` (`Items.c:1819`) gives the *effective* per-level step shown in
+tooltips for weapons/armor: `1.0` if no strength req, `3.5×` if currently under the req
+(so enchanting also relieves the strength penalty quickly), `1.25×` if meeting it.
+
+### Cursing & runic assignment at generation (`makeItemInto`, `Items.c:206`)
+**Weapons** (`:243`): 40% chance to get any magic at all. If so, `enchant1 += rand(1,3)`, then:
+- 50% → **cursed**: negate `enchant1`, set `ITEM_CURSED`; 33% of those also get a *bad* runic
+  (`rand(NUMBER_GOOD_WEAPON_ENCHANT_KINDS, NUMBER_WEAPON_RUNIC_KINDS-1)`, i.e. `W_PLENTY`).
+- else if `rand(3,10) * staggerFactor / quickFactor / extendFactor > damage.lowerBound` →
+  **good runic** (`rand(0, NUMBER_GOOD_WEAPON_ENCHANT_KINDS-1)`). Lower-damage weapons are
+  thus more likely to be runic. If the runic is `W_SLAYING`, pick a random `vorpalEnemy`.
+- else 10%-chained extra `enchant1++`.
+
+**Armor** (`:291`): same 40% gate. `enchant1 += rand(1,3)`, then:
+- 50% → **cursed** (negate, `ITEM_CURSED`); 33% of those get a *bad* runic
+  (`rand(NUMBER_GOOD_ARMOR_ENCHANT_KINDS, NUMBER_ARMOR_ENCHANT_KINDS-1)`: `A_VULNERABILITY` or
+  `A_IMMOLATION`).
+- else if `rand(0,95) > armor` → **good runic** (`rand(0, NUMBER_GOOD_ARMOR_ENCHANT_KINDS-1)`).
+  Lower-armor pieces are more likely to be runic. `A_IMMUNITY` picks a random `vorpalEnemy`.
+- else 10%-chained extra `enchant1++`.
+
+**Rings** (`:359`): 16% cursed (negate enchant), else 10%-chained extra `enchant1++`.
+
+Throwing weapons can never be cursed/runic/magical (`Items.c:277`).
+
+### Auto-identification
+- **Item-kind ID** (`identifyItemKind`, `Items.c:5935`): marks the whole kind identified;
+  cascades via `tryIdentifyLastItemKinds` (if all but one kind in a category are known, the
+  last is deduced). A ring with `enchant1 <= 0` and a single-charge-range wand are flagged
+  `ITEM_IDENTIFIED` directly.
+- **autoIdentify** (`Items.c:5982`): identifies the kind on use, and reveals a weapon/armor
+  **runic** (`ITEM_RUNIC_IDENTIFIED`) when its effect triggers in combat (`Combat.c:788`,
+  `:983`).
+- **Time/kill-based reveal:** weapons reveal enchant/runic after `weaponKillsToAutoID` = 20
+  kills (`charges` countdown set at generation); armor after `armorDelayToAutoID` = 1000 turns
+  worn; rings after `ringDelayToAutoID` = 1500 turns worn.
+- Potions of hallucination thrown can self-ID once all good potions are known
+  (`Items.c:6269`).
+
+---
+
+## 12. Enchantment effects: behavior vs. stats
+
+A common question is whether enchanting an item ever grants a genuinely **new ability**
+(e.g. "does a high-level lightning staff start hitting multiple enemies?"). Tracing the
+scaling code (`PowerTables.c`) and the runic/bolt application code (`Combat.c`,
+`GlobalsBrogue.c`), the answer is: **almost never.** Pass-through bolts, instakills, and
+similar behaviors are *inherent* properties present at +1 — enchanting only scales them.
+Every enchant-driven change falls into one of four buckets:
+
+### (a) More spawned entities (count scales) — the only "feels like a new ability" case
+
+| Item | What scales with enchant | Formula | Source |
+|---|---|---|---|
+| Staff of conjuration | number of spectral blades summoned | `staffBladeCount = enchant × 1.5` | `PowerTables.c:54` |
+| Weapon of multiplicity | number of spectral duplicates (and their accuracy) | `weaponImageCount = clamp(enchant/3, 1, 7)`; clone accuracy = `player.accuracy + 5×enchant` | `PowerTables.c:103`, `Combat.c:689` |
+| Armor of multiplicity | number of spectral clones of the attacker | `armorImageCount = clamp(enchant/3, 1, 5)` | `PowerTables.c:108`, `Combat.c:839` |
+
+### (b) Proc chance — scales for weapon runics, mostly **fixed** for armor runics
+
+- **Weapon runics**: trigger chance rises with enchant, each runic with its own decay curve
+  (heavier weapons proc less often). `runicWeaponChance`, `PowerTables.c:220`. Exceptions:
+  **slaying** is binary (100% vs its vorpal class, else 0%, `Combat.c:618`); bad runics are a
+  flat 15% (`PowerTables.c:303`).
+- **Armor runics** — proc chance does **not** scale with enchant (`Combat.c:813`):
+  - multiplicity → **fixed 33%** (`Combat.c:838`); burden → fixed 10% (`Combat.c:957`);
+    immolation → fixed 10% (`Combat.c:972`)
+  - mutuality, absorption, reprisal, immunity, vulnerability → **always trigger** (no roll);
+    only their *magnitude* scales
+  - **reflection** is the one armor effect whose *chance* scales — `reflectionChance` climbs
+    toward 100% (`PowerTables.c:109`)
+
+### (c) Duration / magnitude / distance (effect "size," not behavior)
+
+Staff blink distance, haste/discord/entrancement duration, poison stacks, protection shield;
+weapon paralysis/confusion/slow duration and **force knockback distance**; charm magnitudes,
+durations, recharge delay, and **negation radius** / guardian lifespan. Sources:
+`PowerTables.c:52-104` and `:206-218`.
+
+### (d) Pure stats (no behavior change)
+
+Weapon/armor base damage/accuracy/defense fractions, ring bonuses (regeneration, stealth,
+etc.), and the ring of wisdom's staff-recharge multiplier. Sources: `PowerTables.c:138-204`,
+`:72-81`.
+
+### Inherent properties that enchanting does **not** grant
+
+These are set by bolt/item flags and apply at every enchant level:
+- **Lightning, spark, dragonfire** carry `BF_PASSES_THRU_CREATURES` (`GlobalsBrogue.c`
+  `boltCatalog_Brogue`), so they hit *every* creature in their line even at +1. Enchanting
+  only raises their damage (`staffDamage`, `PowerTables.c:51`). They gain no extra reflections
+  or targets from enchanting.
+- **Firebolt / dragonfire** ignite flammable terrain (`BF_FIERY`); **tunneling** passes through
+  walls — both inherent, level-independent.
+- **Weapon of slaying** / **armor of immunity** are binary vs. their vorpal monster class
+  (`vorpalEnemy`), not scaled.
+
+---
+
+## 13. Charges, depletion & destruction
+
+Do items break from use? **No — normal use never destroys an item.** Use either consumes a
+single-use item or decrements a charge; the only effect that outright *destroys* an item
+(outside of consumption) is the commutation-altar shatter below.
+
+### Use & charge behavior (`useStaffOrWand`, `Items.c:6649`)
+- **Potions / scrolls / food** — single-use; consumed via `consumePackItem` (`Items.c:6685`),
+  which decrements `quantity` and removes the item only when the last one is used. Used up,
+  not "broken."
+- **Staffs** — charges decrement on use (`Items.c:6655`); at 0, *"fizzles; it must be out of
+  charges for now"* (`Items.c:6636`). Staffs **recharge over time** and remain in the pack.
+- **Wands** — charges decrement on use; at 0, *"fizzles; it must be depleted"* (`Items.c:6638`).
+  Wands **do not recharge**, but the depleted wand **stays in inventory** (useless, not
+  destroyed). `enchant2` counts discharges for the player's convenience (`Items.c:6658`).
+- **Charms** — go on a recharge cooldown (`charges` counts down) after use, then become usable
+  again. Never destroyed.
+- **Weapons / armor** — never break. They can be **corroded** (enchant level reduced) by acid
+  mounds / acidic jellies, but the item persists.
+
+### The one destruction-by-effect: commutation-altar shatter
+`swapItemToEnchantLevel` (`Items.c:1094`) is the only place a game effect destroys an item. At a
+**commutation altar** (paired altars carrying `TM_SWAP_ENCHANTS_ACTIVATION` that swap two items'
+enchant levels, `swapItemEnchants`, `Items.c:1165`), if the swap would drop:
+- a **staff below +2**, or
+- a **charm below +1**, or
+- a **wand below 0**,
+
+the item *"shatters from the strain!"* and is removed (`Items.c:1099-1111`). This is a guard
+against commuting a staff/charm/wand down to a nonfunctional enchant level — it is triggered by
+the altar swap, **not** by using the item.
+
+---
+
+## 14. iOS-port-only items
+
+- **Charm of rewinding** (`CHARM_REWIND`, `charmTable_Brogue` index 12, frequency 0) is an
+  iBrogue addition, marked `// iOS port (iBrogue):` at `GlobalsBrogue.c:727` /
+  `GlobalsBrogue.c:744` and `Rogue.h:977`. It is debug-only (obtainable via
+  `D_REWIND_CHARM_START`) and never enters the loot pool.

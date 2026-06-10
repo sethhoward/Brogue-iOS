@@ -44,13 +44,31 @@ zoom-related caveats apply whenever it's enabled, i.e. by default.
   an Options toggle, **"Zoom out on examine" (default on)**, shown only when pinch zoom is
   on (`RogueScene.isExamineZoomEnabledSetting`). Side effect of the defer: the zoom-out
   begins ~0.3s after the tap (the box itself still appears immediately).
-- **Auto-follow re-centers on the engine thread.** To keep the camera in lockstep with
-  the cell redraw (a main-queue hop made the map lurch a frame behind the player —
-  visible stutter when zoomed), `setPlayerWindowX` applies the zoom transform directly on
-  the engine thread, mirroring how `setCell` mutates SK nodes there. The cost: `zoomScale`
-  / `zoomOriginPt` and the container transform can be touched by both the engine thread
-  (movement) and the main thread (a gesture) at once. In practice you don't pinch and walk
-  simultaneously; a collision is at worst a one-frame visual glitch, not a crash.
+- **While the zoom layer is up, engine-thread draws are buffered and flushed in
+  `RogueScene.update(_:)`.** The engine runs `rogueMain()` on a background thread and, in
+  `commitDraws`, mutates SK nodes directly — first the changed cells (`setCell`), then the
+  auto-follow camera (`setPlayerWindowX` → the container transform). SpriteKit renders that
+  node tree on the main thread with no synchronization, so the renderer can sample a
+  half-applied batch. The visible symptom: the player glyph and the camera tear apart by a
+  fixed offset for one frame, then snap back. It's invisible when the engine settles between
+  moves, but animated terrain (water/fire/lava) keeps `commitDraws` — and thus the
+  background-thread node writes — running every frame, so the jitter becomes continuous
+  while walking. Fix: when the zoom layer exists (iPhone, pinch on), `setCell` and the
+  auto-follow `setZoom` don't touch nodes from the engine thread; they buffer into
+  `pendingCells` / `pendingZoom` (under `pendingLock`), and `update(_:)` — which SpriteKit
+  calls on the main thread right before it renders — flushes the whole batch (cells, then
+  the camera that frames them) so every frame is atomic. Notes:
+  - A camera-only deferral was tried first and was *not* enough: the glyph, still written
+    from the engine thread, could leak into a render a frame before the camera caught up.
+    Both must flush together.
+  - A plain main-queue *async* hop (an even earlier attempt) lurched the map a frame behind
+    the player; `update(_:)` avoids that — no extra runloop hop, lands in the next render.
+  - The flat 1× / iPad path (no zoom container) keeps writing nodes directly — there's no
+    camera to tear against — so its long-proven behavior is unchanged.
+  - The published `zoomScale` / origin fields (read by `unzoomedPoint` for touch inversion)
+    are still updated synchronously on the calling thread; only the node writes are deferred.
+  - `disableZoomLayer` flushes any buffered cells before switching to the direct path
+    (`commitDraws` only re-plots *changed* cells, so dropping them would leave stale glyphs).
 - **Clearing the travel cursor on gesture-begin also acknowledges messages.** Starting a
   pinch/pan injects `ESCAPE_KEY` to erase the engine's travel path; the engine also runs
   `confirmMessages()` on Escape, so a pending `--more--` prompt would be dismissed if a

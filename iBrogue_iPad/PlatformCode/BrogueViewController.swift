@@ -517,10 +517,24 @@ final class BrogueViewController: UIViewController {
     private var pinchZoomEngaged = false
     /// Last player window cell received from the engine bridge (auto-follow).
     private var lastPlayerWindowCell: CGPoint?
+    /// Set by restoreStoredZoom when a run opens with a remembered zoom. The launch
+    /// zoom-in is a one-shot: it waits until we're on the map AND the player's cell is
+    /// known, then eases in once, centered on the player. This makes the open immune to
+    /// engine event ordering (controls-flip vs. cell-report vs. restore) — no premature
+    /// animate-to-1× jitter, and never the map-center because it always has the cell.
+    private var pendingLaunchZoom = false
     /// The zoom recognizers, kept so the magnifier can be suppressed while a
     /// pinch or two-finger pan is in progress.
     private weak var zoomPinch: UIPinchGestureRecognizer?
     private weak var zoomPan: UIPanGestureRecognizer?
+    /// Two-finger double-tap "zoom out / back" toggle, kept for enable/disable.
+    private weak var zoomToggle: UITapGestureRecognizer?
+    /// The zoom (scale + origin) to return to when a two-finger double-tap toggles
+    /// back in. Captured at the moment of toggling out; restoring the origin directly
+    /// means the restore doesn't depend on a live auto-follow cell (which can be nil).
+    /// scale 0 = nothing captured this session.
+    private var zoomToggleRestoreScale: CGFloat = 0
+    private var zoomToggleRestoreOrigin: CGPoint = .zero
     /// True while a pinch or two-finger pan is actively recognizing.
     private var zoomGestureInProgress: Bool {
         func active(_ g: UIGestureRecognizer?) -> Bool {
@@ -552,6 +566,13 @@ final class BrogueViewController: UIViewController {
     /// guards the short delayed-present window.
     private static let keybindHintShownKey = "didShowKeybindHint"
     private var keybindHintInFlight = false
+
+    /// One-time first-run hint, the first time a game starts on iPhone with
+    /// pinch-zoom available, explaining the pinch / two-finger-double-tap gestures.
+    /// Mirrors the keybind-hint flags: the key persists across launches, the
+    /// in-flight bool guards the short delayed-present window.
+    private static let zoomHintShownKey = "didShowPinchZoomHint"
+    private var zoomHintInFlight = false
 
     @IBOutlet var skViewPort: SKViewPort!
     @IBOutlet fileprivate weak var magView: SKMagView!
@@ -1217,9 +1238,11 @@ final class BrogueViewController: UIViewController {
             // Full-screen (no insets) on the title; reserve insets everywhere
             // else — gameplay AND in-game menus — so the width doesn't jump.
             self.skViewPort.rogueScene.paddingEnabled = !value
-            // Returning to the CE title means a run ended (or a new one is about
-            // to start) — reset the dungeon zoom. CE never sets lastBrogueGameEvent.
-            if value { self.resetZoom() }
+            // CE never sets lastBrogueGameEvent, so this is where a CE run begins/ends
+            // for zoom purposes. At the title, drop the display to 1×; leaving the title
+            // (a game is starting/resuming) restores the player's remembered zoom — the
+            // first player-cell report then animates it in, recentered on the player.
+            if value { self.resetZoom() } else { self.restoreStoredZoom() }
         }
     }
 
@@ -1657,10 +1680,83 @@ extension BrogueViewController: UIPopoverPresentationControllerDelegate {
         keybindHintInFlight = false
     }
 
+    /// Shows a one-time popover over the dungeon explaining the zoom gestures, the
+    /// first time a game starts with pinch-zoom available. No-op once shown, when
+    /// the feature is off or unavailable (non-iPhone), or if we can't present.
+    fileprivate func maybeShowZoomHint() {
+        guard !UserDefaults.standard.bool(forKey: Self.zoomHintShownKey),
+              !zoomHintInFlight,
+              pinchZoomActive,
+              view.window != nil,
+              presentedViewController == nil else {
+            return
+        }
+        zoomHintInFlight = true
+        // Brief delay so it appears after the game screen settles, not instantly.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in
+            guard let self = self else { return }
+            guard self.pinchZoomActive,
+                  self.view.window != nil,
+                  self.presentedViewController == nil else {
+                self.zoomHintInFlight = false   // retry the next time a game starts
+                return
+            }
+            UserDefaults.standard.set(true, forKey: Self.zoomHintShownKey)
+            self.presentZoomHint()
+        }
+    }
+
+    private func presentZoomHint() {
+        let hint = UIViewController()
+        hint.modalPresentationStyle = .popover
+
+        let label = UILabel()
+        label.translatesAutoresizingMaskIntoConstraints = false
+        label.text = "Tip: pinch to zoom the map. Two-finger double-tap to zoom all the way out, and again to zoom back in."
+        label.numberOfLines = 0
+        label.font = .preferredFont(forTextStyle: .subheadline)
+        label.textColor = .label
+        hint.view.addSubview(label)
+
+        let pad: CGFloat = 14
+        NSLayoutConstraint.activate([
+            label.topAnchor.constraint(equalTo: hint.view.topAnchor, constant: pad),
+            label.bottomAnchor.constraint(equalTo: hint.view.bottomAnchor, constant: -pad),
+            label.leadingAnchor.constraint(equalTo: hint.view.leadingAnchor, constant: pad),
+            label.trailingAnchor.constraint(equalTo: hint.view.trailingAnchor, constant: -pad),
+        ])
+
+        let width: CGFloat = 260
+        let textHeight = label.sizeThatFits(CGSize(width: width - pad * 2,
+                                                   height: .greatestFiniteMagnitude)).height
+        hint.preferredContentSize = CGSize(width: width, height: ceil(textHeight) + pad * 2)
+
+        if let pop = hint.popoverPresentationController {
+            pop.delegate = self
+            // Anchor over the dungeon view, arrow pointing down so the bubble sits
+            // above the center rather than over the directional pad at the bottom.
+            pop.sourceView = skViewPort
+            pop.sourceRect = CGRect(x: skViewPort.bounds.midX, y: skViewPort.bounds.midY,
+                                    width: 1, height: 1)
+            pop.permittedArrowDirections = .down
+        }
+        present(hint, animated: true)
+        zoomHintInFlight = false
+    }
+
     // Keep it a popover on iPhone rather than auto-adapting to a full-screen sheet.
     func adaptivePresentationStyle(for controller: UIPresentationController,
                                    traitCollection: UITraitCollection) -> UIModalPresentationStyle {
         return .none
+    }
+
+    /// Only one first-run hint can occupy the popover slot at a time, so they're
+    /// chained: when one is dismissed, offer the next still-pending one. Each is
+    /// gated on its own "shown" flag, so the one already seen no-ops and only the
+    /// remaining hint presents — letting a fresh install see both in one game.
+    func popoverPresentationControllerDidDismissPopover(_ popoverPresentationController: UIPopoverPresentationController) {
+        maybeShowKeybindHint()
+        maybeShowZoomHint()
     }
 }
  
@@ -1709,12 +1805,24 @@ extension BrogueViewController: UIGestureRecognizerDelegate {
         pan.minimumNumberOfTouches = 2
         pan.maximumNumberOfTouches = 2
         pan.delegate = self
+        // Two-finger double-tap toggles fully out to 1× and back to the prior zoom.
+        // Distinct from the engine's one-finger double-tap-to-move (different touch
+        // count), and its touches never reach the engine (touchesBegan flushes any
+        // ≥2-finger touch), so it can't trigger a cursor select or move.
+        let toggle = UITapGestureRecognizer(target: self, action: #selector(handleZoomToggleTap(_:)))
+        toggle.name = "zoomToggle"
+        toggle.numberOfTouchesRequired = 2
+        toggle.numberOfTapsRequired = 2
+        toggle.delegate = self
         pinch.isEnabled = pinchZoomEnabled
         pan.isEnabled = pinchZoomEnabled
+        toggle.isEnabled = pinchZoomEnabled
         skViewPort.addGestureRecognizer(pinch)
         skViewPort.addGestureRecognizer(pan)
+        skViewPort.addGestureRecognizer(toggle)
         zoomPinch = pinch
         zoomPan = pan
+        zoomToggle = toggle
     }
 
     /// Applies the experimental pinch-zoom toggle: builds/tears down the scene's
@@ -1730,13 +1838,14 @@ extension BrogueViewController: UIGestureRecognizerDelegate {
         }
         zoomPinch?.isEnabled = pinchZoomEnabled
         zoomPan?.isEnabled = pinchZoomEnabled
+        zoomToggle?.isEnabled = pinchZoomEnabled
     }
 
-    // Pinch + two-finger pan must run together, but not alongside unrelated
-    // recognizers (e.g. the dpad's drag).
+    // Pinch + two-finger pan + the two-finger double-tap toggle must run together,
+    // but not alongside unrelated recognizers (e.g. the dpad's drag).
     func gestureRecognizer(_ g: UIGestureRecognizer,
                            shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool {
-        let zoomNames: Set<String> = ["zoomPinch", "zoomPan"]
+        let zoomNames: Set<String> = ["zoomPinch", "zoomPan", "zoomToggle"]
         return zoomNames.contains(g.name ?? "") && zoomNames.contains(other.name ?? "")
     }
 
@@ -1745,7 +1854,7 @@ extension BrogueViewController: UIGestureRecognizerDelegate {
     // helper as touch routing; getCellCoords is zoom-aware so this holds whether
     // or not the map is already zoomed.
     func gestureRecognizerShouldBegin(_ g: UIGestureRecognizer) -> Bool {
-        let zoomNames: Set<String> = ["zoomPinch", "zoomPan"]
+        let zoomNames: Set<String> = ["zoomPinch", "zoomPan", "zoomToggle"]
         guard zoomNames.contains(g.name ?? "") else { return true }
         return pointIsInPlayArea(point: g.location(in: view))
     }
@@ -1754,6 +1863,15 @@ extension BrogueViewController: UIGestureRecognizerDelegate {
         guard isPhoneIdiom, gameplayControlsActive || isTargeting else { return }
         switch g.state {
         case .began:
+            // Start the pinch from what's actually on screen. Usually the applied
+            // transform already equals the canonical zoom, but at game-open the zoom
+            // is seeded (zoomScale>1, origin .zero) while the display is still 1×
+            // pending the first auto-follow; without this sync the first frame would
+            // jump to the seeded scale at origin .zero — i.e. snap to the top-left
+            // corner — before the pinch pans it back.
+            zoomScale = appliedScale
+            zoomOriginPt = appliedOrigin
+            pendingLaunchZoom = false // manual zoom supersedes the one-shot launch zoom
             multiTouchGestureActive = true
             clearTouchEvents()       // drop any tap the first finger queued
             clearTravelCursor()      // erase any travel path the first finger drew
@@ -1799,6 +1917,12 @@ extension BrogueViewController: UIGestureRecognizerDelegate {
         guard isPhoneIdiom, gameplayControlsActive || isTargeting, zoomScale > 1.0 else { return }
         switch g.state {
         case .began:
+            // Sync to the on-screen transform (see handleZoomPinch .began): if the
+            // canonical zoom is seeded but the display is still 1×, a pan must not
+            // apply the seeded scale. After this the guard above re-evaluates each
+            // .changed, so panning a 1× display is a no-op until a pinch zooms in.
+            zoomScale = appliedScale
+            zoomOriginPt = appliedOrigin
             manualPanActive = true
             multiTouchGestureActive = true
             clearTravelCursor()      // erase any travel path the first finger drew
@@ -1812,6 +1936,49 @@ extension BrogueViewController: UIGestureRecognizerDelegate {
         default:
             // Keep manualPanActive set until the next real player move re-centers.
             break
+        }
+    }
+
+    /// Two-finger double-tap: toggle fully out to 1× and back to the prior zoom.
+    /// When zoomed in, remembers the current magnification and eases out to 1×;
+    /// when already out, eases back to that remembered level (falling back to the
+    /// persisted preference), recentered on the player. The two-finger touches are
+    /// suppressed by touchesBegan, so this never leaks a cursor select or move.
+    @objc private func handleZoomToggleTap(_ g: UITapGestureRecognizer) {
+        guard isPhoneIdiom, pinchZoomActive, gameplayControlsActive || isTargeting else { return }
+        clearTouchEvents()   // drop anything the fingers queued before the tap resolved
+        hideMagnifier()
+        manualPanActive = false
+        if zoomScale > 1.0 {
+            // Remember the exact view (scale + origin) to come back to, then ease out.
+            zoomToggleRestoreScale = zoomScale
+            zoomToggleRestoreOrigin = zoomOriginPt
+            zoomScale = 1.0
+            zoomOriginPt = .zero
+            animateZoom(toScale: 1.0, toOrigin: .zero)
+        } else {
+            // Ease back to the remembered zoom (or the saved preference if none).
+            let prior = zoomToggleRestoreScale > BrogueViewController.zoomMinScale
+                ? zoomToggleRestoreScale : storedZoomScale
+            let target = min(max(prior, BrogueViewController.zoomMinScale),
+                             BrogueViewController.zoomMaxScale)
+            guard target > 1.0 else { return }   // nothing to restore
+            zoomScale = target
+            // Pick the recenter target, in priority order — never the (0,0) corner:
+            //   1. the live player cell (follow the player, freshest);
+            //   2. the origin we captured on the way out (back to the same view);
+            //   3. the dungeon-map center (last-resort fallback).
+            let origin: CGPoint
+            if let cell = lastPlayerWindowCell {
+                origin = autoFollowOrigin(playerCell: cell)
+            } else if zoomToggleRestoreScale > BrogueViewController.zoomMinScale {
+                origin = zoomToggleRestoreOrigin
+            } else {
+                let f = dungeonFramePoints()
+                origin = CGPoint(x: f.midX * (1 - zoomScale), y: f.midY * (1 - zoomScale))
+            }
+            zoomOriginPt = clampedOrigin(origin, scale: zoomScale)
+            animateZoom(toScale: zoomScale, toOrigin: zoomOriginPt)
         }
     }
 
@@ -1905,6 +2072,14 @@ extension BrogueViewController: UIGestureRecognizerDelegate {
         let cell = CGPoint(x: x, y: y)
         let moved = (lastPlayerWindowCell != cell)
         lastPlayerWindowCell = cell
+        // A run just opened with a remembered zoom: the cell we just recorded may be the
+        // last piece the one-shot launch zoom-in was waiting for. Let it own the first
+        // zoom-in (don't also auto-follow, which would animate a second time). Hop to
+        // main — this runs on the engine thread and the launch zoom drives a CADisplayLink.
+        if pendingLaunchZoom {
+            DispatchQueue.main.async { [weak self] in self?.runPendingLaunchZoomIfReady() }
+            return
+        }
         guard gameplayControlsActive, zoomScale > 1.0 else { return }
         // A real move re-establishes follow after a manual look-around.
         if moved { manualPanActive = false }
@@ -1926,19 +2101,26 @@ extension BrogueViewController: UIGestureRecognizerDelegate {
         let onMap = (gameplayControlsActive || isTargeting) && !isExamining
         guard onMap, zoomScale > 1.0 else {
             // Overlay up (or not zoomed): animate the displayed map to 1×. The stored
-            // zoomScale / zoomOriginPt are deliberately left untouched.
+            // zoomScale / zoomOriginPt are deliberately left untouched. (While a launch
+            // zoom is still pending the display is already 1×, so this is a no-op.)
             animateZoom(toScale: 1.0, toOrigin: .zero)
             return
         }
-        // Back on the map: animate back to the stored zoom, recentered on the player.
+        // A fresh run's first zoom-in is owned by the one-shot launch zoom, which waits
+        // for the player's cell so it eases in centered on them — don't also animate here
+        // (that double-trigger caused the "snap to 1× then zoom in" jitter).
+        if pendingLaunchZoom {
+            runPendingLaunchZoomIfReady()
+            return
+        }
+        // Back on the map: animate to the stored zoom, recentered on the player.
         if let cell = lastPlayerWindowCell, !manualPanActive {
             zoomOriginPt = clampedOrigin(autoFollowOrigin(playerCell: cell), scale: zoomScale)
         } else if lastPlayerWindowCell == nil {
-            // Run just started with a remembered zoom but no player cell yet: hold at
-            // 1× and let the first cell report (setPlayerWindowX) animate the zoom in,
-            // centered on the player rather than the dungeon corner.
-            animateZoom(toScale: 1.0, toOrigin: .zero)
-            return
+            // Run just started with a remembered zoom but no player cell yet: zoom in
+            // centered on the dungeon map (never the (0,0) corner) so the game still
+            // opens zoomed; the first cell report then recenters on the player.
+            zoomOriginPt = mapCenterOrigin(scale: zoomScale)
         } else {
             zoomOriginPt = clampedOrigin(zoomOriginPt, scale: zoomScale)
         }
@@ -1953,20 +2135,55 @@ extension BrogueViewController: UIGestureRecognizerDelegate {
         zoomOriginPt = .zero
         manualPanActive = false
         lastPlayerWindowCell = nil
+        pendingLaunchZoom = false
         setAppliedZoom(scale: 1.0, origin: .zero)
     }
 
-    /// Begins a run at the player's remembered zoom (iPhone). Clears follow/pan state
-    /// like resetZoom, but seeds zoomScale from the stored preference while leaving the
-    /// display at 1× — the first player-cell report (setPlayerWindowX) then animates
-    /// the zoom in, recentered on the player. When no zoom is stored this is just a reset.
+    /// Origin that centers the dungeon map itself in the frame. Used as the recenter
+    /// fallback before the player's cell is known, so a zoom-in never defaults to the
+    /// (0,0) corner. The first player-cell report then recenters on the player.
+    private func mapCenterOrigin(scale: CGFloat) -> CGPoint {
+        let f = dungeonFramePoints()
+        return clampedOrigin(CGPoint(x: f.midX * (1 - scale), y: f.midY * (1 - scale)), scale: scale)
+    }
+
+    /// Begins a run at the player's remembered zoom (iPhone). Seeds zoomScale from the
+    /// stored preference but leaves the *display* at 1×, so the zoom EASES in (rather
+    /// than snapping) once the map becomes visible — driven by `updateZoomForGameState`
+    /// on the gameplay-controls flip, or by the first `setPlayerWindowX` auto-follow,
+    /// both of which `animateZoom` from 1× to the stored scale centered on the player.
+    /// NOTE: deliberately does NOT clear `lastPlayerWindowCell` — this runs on the main
+    /// queue while the engine is already drawing the new level and reporting the player
+    /// cell on its thread; clearing it here would wipe that report and the zoom-in would
+    /// land on the map center instead of the player. `resetZoom` (title/death) clears it.
     private func restoreStoredZoom() {
         guard isPhoneIdiom else { return }
         manualPanActive = false
-        lastPlayerWindowCell = nil
-        zoomOriginPt = .zero
         zoomScale = storedZoomScale
+        zoomOriginPt = .zero
         setAppliedZoom(scale: 1.0, origin: .zero)
+        // Arm the one-shot launch zoom-in; it fires from runPendingLaunchZoomIfReady once
+        // we're on the map and the player's cell is known (whichever arrives last).
+        pendingLaunchZoom = zoomScale > 1.0
+        runPendingLaunchZoomIfReady()
+
+        // First game on iPhone: point out the pinch / two-finger-tap zoom gestures.
+        maybeShowZoomHint()
+    }
+
+    /// Fires the one-shot launch zoom-in (see `pendingLaunchZoom`). No-op until we're on
+    /// the map AND the player's cell is known, so it always eases in from 1× centered on
+    /// the player. Runs at most once per `restoreStoredZoom`, regardless of whether the
+    /// controls-flip or the first cell report arrives first. Must run on the main thread
+    /// (it drives the CADisplayLink animation); the engine-thread caller dispatches.
+    private func runPendingLaunchZoomIfReady() {
+        guard isPhoneIdiom, pendingLaunchZoom, zoomScale > 1.0,
+              gameplayControlsActive || isTargeting, !isExamining,
+              let cell = lastPlayerWindowCell else { return }
+        pendingLaunchZoom = false
+        manualPanActive = false
+        zoomOriginPt = clampedOrigin(autoFollowOrigin(playerCell: cell), scale: zoomScale)
+        animateZoom(toScale: zoomScale, toOrigin: zoomOriginPt)
     }
 
     /// Cancels the engine's travel cursor/path by injecting Escape. While the
@@ -2329,7 +2546,7 @@ extension BrogueViewController {
         if magView.isHidden {
             magnifierTimer?.invalidate()
             magnifierTimer = nil
-            magnifierTimer = Timer.scheduledTimer(timeInterval: 0.2, target: self, selector: #selector(BrogueViewController.handleMagnifierTimer), userInfo: nil, repeats: false)
+            magnifierTimer = Timer.scheduledTimer(timeInterval: 0.3, target: self, selector: #selector(BrogueViewController.handleMagnifierTimer), userInfo: nil, repeats: false)
             // Need to go iOS 10
             //            magnifierTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: false) { _ in
             //                self.magView.showMagnifier(at: self.lastTouchLocation)
