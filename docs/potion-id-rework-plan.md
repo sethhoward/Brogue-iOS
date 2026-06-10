@@ -9,9 +9,9 @@
   - Phase 6 — candidate-narrowing inspect line for unidentified potions + scrolls. (fork: `potion-candidate-ui`)
   - Phase 8 — passive polarity insight while resting (+ iOS-only debug rest-count readout). (fork: `rest-polarity-insight`)
   - Phase 9 — eating a scroll-bearer's safe meal reveals one unidentified scroll's polarity. (fork: `eat-scroll-insight`)
+  - Phase 7 — altars of insight: a guaranteed two-altar room (depths 5/15/25) where you sacrifice one item to reveal another. (fork: `insight-altar`)
   - All commits authored as a human (no AI-attribution trailer); upstream PRs are drafted (see `docs/pr-notes-*`) but **not opened**.
-- **Deferred** (not started): Phase 4 (carried-potion volatility); Phase 7 (insight altar — itself a
-  polarity reveal, in tension with the "ID is a gamble" goal).
+- **Deferred** (not started): Phase 4 (carried-potion volatility).
 - **Shelved**: Phase 5 (passive sensory tells). A player-simulation showed that any cluster scheme
   trivializes Life/Strength identification once the player holds detect-magic: the self-identifying
   common goods plus elimination make Life/Strength riskless to find. The validated mitigation — pair
@@ -238,32 +238,37 @@ unidentified true name is ever printed.
 
 ---
 
-## Phase 7 — Sacrificial insight altar (largest; new content)
+## Phase 7 — Altars of insight (shipped on iOS; new content)
 
-**Goal:** a rare deep-dungeon altar (sibling to commutation/resurrection). Drop an unidentified potion/scroll on
-it; the sacrifice is consumed and it reveals the **magic polarity of every unidentified consumable in your pack**,
-then goes inert.
+**Redesigned** away from the original "whole-pack polarity reveal" (which was just on-demand detect magic). The
+shipped mechanic is a **costed trade**: a guaranteed two-altar reward room — an **insight altar** + an **offering
+altar** — modeled on the commutation altars. Drop the item to reveal on the insight altar and a payment item on
+the offering altar; when both hold items the payment is consumed and the other item is revealed, then both go
+inert (one-shot).
 
-**Recommendation — whole-pile polarity reveal, not identify-one-item.** The commutation altar fires *passively*
-from `updateFloorItems` with no prompt ([Items.c:1276-1293](BrogueCE/Engine/Items.c:1276)); a polarity reveal is a
-silent batch op (reuse the detect-magic pack loop, [Items.c:7372-7382](BrogueCE/Engine/Items.c:7372)) that fits
-that trigger with zero new UI. "Identify one chosen item" would require a blocking prompt inside automatic turn
-processing (replay-desync hazard) — ~3× the work.
+**Reveal scales with the payment (the risk dial):** sacrifice an **unidentified** item → the offered item is
+**fully identified**; sacrifice an **identified** item → only its **polarity/aura** is revealed (`detectMagicOnItem`).
+**Fire only if it helps** — never consumes the payment unless the offered item gains info, so a `+0` mundane
+weapon reveals as "no aura" and an already-known item does nothing.
 
-**Touch points (append-at-end everywhere):** `INSIGHT_ALTAR`/`INSIGHT_ALTAR_INERT` (tileType),
-`DF_ALTAR_INSIGHT` (dungeonFeatureType), `MT_REWARD_INSIGHT_ALTAR` (machineTypes), a `TM_INSIGHT_ALTAR_ACTIVATION`
-flag — all in `Rogue.h`; cloned `tileCatalog`/`dungeonFeatureCatalog` rows in `Globals.c` (model on commutation,
-[532](BrogueCE/Engine/Globals.c:532)/[793](BrogueCE/Engine/Globals.c:793)); a `blueprintCatalog_Brogue` entry
-cloned from resurrection ([GlobalsBrogue.c:227](BrogueCE/Engine/GlobalsBrogue.c:227)), depth `{13, AMULET_LEVEL}`,
-low frequency; a sibling handler block in `updateFloorItems` calling a new `revealPolarityOfPack()`
-(loop `packItems` → `detectMagicOnItem` → `tryIdentifyLastItemKinds`), consume the sacrifice, `activateMachine`
-to promote inert.
+**Guaranteed placement, not a rare raffle:** force-built at depths **5, 15, 25** (`depth>=5 && (depth-5)%10==0`),
+Brogue only, via the same `addMachines()` mechanism that guarantees the amulet vault. **Force-only** (no
+`BP_REWARD`, frequency 0), so the random reward raffle is untouched.
 
-**Determinism:** adding a blueprint shifts the depth-13+ reward-room raffle → all seeds diverge at the first deep
-reward room (unavoidable for new content; document it, breaks shared seed catalogs at 13+). The handler adds no RNG.
+**Touch points:** `Rogue.h` — `INSIGHT_ALTAR_INSIGHT/_PAYMENT/_INERT` (tileType), `DF_ALTAR_INSIGHT_INERT`,
+`TM_INSIGHT_ACTIVATION=Fl(26)`, `MT_INSIGHT_ALTAR = MT_REWARD_HEAVY_OR_RUNIC_WEAPON` (the variant-specific reward
+slot, index 72, that Bullet uses for its weapon vault — per-variant + variant-gated, no collision). `Globals.c` —
+`blueAltarBackColor` + three tile rows + a promote-to-inert DF (model on commutation). `Items.c` —
+`performInsightSacrifice()` + a sibling block in `updateFloorItems` (clone of the commutation `TM_*` block).
+`GlobalsBrogue.c` — blueprint at index 72. `Architect.c` — the depth-gated force-build in `addMachines`.
 
-**Test:** reach 13+ (seed/debug spawn), drop an unidentified potion → whole-pack polarity revealed, altar inert,
-sacrifice consumed; drop an identified/non-consumable → no-op.
+**Determinism:** handler is RNG-free; saves are recordings. Force-only ⇒ raffle byte-unchanged at every depth; the
+only seed divergence is on the forced levels 5/15/25 (Brogue only). New content → per-variant
+`recordingVersionString` bump warranted at release (left to maintainers; diff doesn't bump it).
+
+**Test:** descend to 5/15/25 → the room is present every time, absent elsewhere. Sacrifice unidentified → offered
+item fully IDed; sacrifice identified → polarity only; offer a `+0` weapon → "no aura", IDed mundane; offer an
+already-known item or fill only one altar → no fire, payment kept. Record→replay → no desync.
 
 ---
 
@@ -350,7 +355,8 @@ no reveal. Record→replay an eating session → no desync.
    tell. (No monster strength stat exists; maxHP is the physical-buff analog.)
 2. **Life (Phase 1↔2):** direct-hit heal of the struck creature **and** an area healing cloud — both.
 3. **Healing cloud heals enemies too** (`T_CAUSES_HEALING`) — accepted as the risk/tell tradeoff.
-4. **Altar (Phase 7):** whole-pile polarity reveal (cheap, replay-safe), not identify-one-item.
+4. **Altar (Phase 7):** *superseded* — shipped as a two-altar costed trade (sacrifice one item to fully ID
+   or reveal the polarity of another), guaranteed at depths 5/15/25, **not** the original whole-pile reveal.
 
 ## Cross-phase verification
 

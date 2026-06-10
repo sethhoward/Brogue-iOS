@@ -163,6 +163,8 @@ const color altarForeColor =        {5,     7,      9,      0,      0,          
 const color altarBackColor =        {35,    18,     18,     0,      0,          0,          0,      false};
 const color greenAltarBackColor =   {18,    25,     18,     0,      0,          0,          0,      false};
 const color goldAltarBackColor =    {25,    24,     12,     0,      0,          0,          0,      false};
+// iOS port (iBrogue): backdrop for the altars of insight
+const color blueAltarBackColor =    {15,    18,     28,     0,      0,          0,          0,      false};
 const color pedestalBackColor =     {10,    5,      20,     0,      0,          0,          0,      false};
 
 // monster colors
@@ -576,6 +578,13 @@ const floorTileType tileCatalog[NUMBER_TILETYPES] = {
  /*MUD_FLOOR*/                  {G_FLOOR,   &mudBackColor,          &refuseBackColor,   85, 0,  DF_STENCH_SMOLDER,0,0,                      0,  NO_LIGHT,       (T_IS_FLAMMABLE), (TM_VANISHES_UPON_PROMOTION),                                                     "the mud floor",        "Rotting animal matter has been ground into the mud floor; the stench is awful."},
  /*MUD_WALL*/                   {G_WALL,    &mudWallForeColor,      &mudWallBackColor,  0,  0,  DF_PLAIN_FIRE,0,0,                          0,  NO_LIGHT,       (T_OBSTRUCTS_EVERYTHING), (TM_STAND_IN_TILE),                                                       "a mud-covered wall",   "A malodorous layer of clay and fecal matter coats the wall."},
  /*MUD_DOORWAY*/                {G_DOORWAY, &mudWallForeColor,      &refuseBackColor,   25, 50, DF_EMBERS,0,0,                              0,  NO_LIGHT,       (T_OBSTRUCTS_VISION | T_OBSTRUCTS_GAS | T_IS_FLAMMABLE), (TM_STAND_IN_TILE | TM_VISUALLY_DISTINCT), "hanging animal skins", "you push through the animal skins that hang across the threshold."},
+
+ // iOS port (iBrogue): altars of insight — a linked pair. Drop the item to reveal on the insight altar
+ // and a payment item on the offering altar; the payment is consumed, the other item is revealed, and
+ // both altars promote to the inert form (see performInsightSacrifice in Items.c).
+ /*INSIGHT_ALTAR_INSIGHT*/      {G_ORB_ALTAR,&altarForeColor,       &blueAltarBackColor,17, 0,  0,0,DF_ALTAR_INSIGHT_INERT, 0,  CANDLE_LIGHT,   (T_OBSTRUCTS_SURFACE_EFFECTS), (TM_VANISHES_UPON_PROMOTION | TM_IS_WIRED | TM_INSIGHT_ACTIVATION | TM_LIST_IN_SIDEBAR | TM_VISUALLY_DISTINCT), "an altar of insight",  "place an item here, and an offering on its twin, to divine the item's nature."},
+ /*INSIGHT_ALTAR_PAYMENT*/      {G_ALTAR,    &altarForeColor,       &blueAltarBackColor,17, 0,  0,0,DF_ALTAR_INSIGHT_INERT, 0,  CANDLE_LIGHT,   (T_OBSTRUCTS_SURFACE_EFFECTS), (TM_VANISHES_UPON_PROMOTION | TM_IS_WIRED | TM_INSIGHT_ACTIVATION | TM_LIST_IN_SIDEBAR | TM_VISUALLY_DISTINCT), "an altar of offering", "place an offering here, and an item on its twin; the offering will be consumed."},
+ /*INSIGHT_ALTAR_INERT*/        {G_ORB_ALTAR,&black,                &blueAltarBackColor,17, 0,  0,0,0,                      0,  NO_LIGHT,       (T_OBSTRUCTS_SURFACE_EFFECTS), (TM_LIST_IN_SIDEBAR | TM_VISUALLY_DISTINCT),                  "a scorched altar",     "scorch marks cover the surface of the altar, but it is cold to the touch."},
 };
 
 unsigned long terrainFlags(pos p) {
@@ -932,6 +941,10 @@ dungeonFeature dungeonFeatureCatalog[NUMBER_DUNGEON_FEATURES] = {
 
     // iOS port (iBrogue): thrown potion of life bursts into the bloodwort healing gas (HEALING_CLOUD)
     {HEALING_CLOUD,             GAS,        350,    0,      0},
+
+    // iOS port (iBrogue): an insight altar promotes to its inert form after a sacrifice (visual flash;
+    // the reveal message is emitted by performInsightSacrifice so it appears once, not once per altar)
+    {INSIGHT_ALTAR_INERT,       DUNGEON,    0,      0,      0,  "", SCROLL_ENCHANTMENT_LIGHT},
 };
 
 const dungeonProfile dungeonProfileCatalog[NUMBER_DUNGEON_PROFILES] = {

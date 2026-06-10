@@ -618,6 +618,16 @@ const blueprint blueprintCatalog_Brogue[] = {
     {1,DEEPEST_LEVEL}, {40, 40},   0,      2,          0,                  (BP_NO_INTERIOR_FLAG), {
         {0,         STATUE_INERT,DUNGEON,       {3, 3},     3,          0,          -1,         MK_SENTINEL,    2,              0,          0,          (MF_NOT_IN_HALLWAY | MF_TREAT_AS_BLOCKING | MF_IN_VIEW_OF_ORIGIN)},
         {DF_ASH,    0,          0,              {2, 3},     0,          0,          -1,         0,              0,              0,          0,          0}}},
+    // iOS port (iBrogue): altars of insight -- force-built at depths 5/15/25 (see addMachines); occupies
+    // the variant-specific reward slot (index 72 = MT_INSIGHT_ALTAR). Force-only: no BP_REWARD, freq 0, so
+    // it never enters the random reward raffle.
+    {"Altars of insight -- sacrifice an offering to reveal the nature of another item",
+    {5, AMULET_LEVEL},{7, 30},     0,      5,          0,                  (BP_ROOM | BP_PURGE_INTERIOR | BP_SURROUND_WITH_WALLS | BP_OPEN_INTERIOR), {
+        {0,         CARPET,     DUNGEON,        {0,0},      0,          0,          -1,         0,              0,              0,          0,          (MF_EVERYWHERE)},
+        {0,         STATUE_INERT,DUNGEON,       {1,3},      0,          0,          -1,         0,              2,              0,          0,          (MF_TREAT_AS_BLOCKING | MF_BUILD_IN_WALLS)},
+        {0,         INSIGHT_ALTAR_INSIGHT,DUNGEON,{1,1},    1,          0,          -1,         0,              2,              0,          0,          (MF_TREAT_AS_BLOCKING)},
+        {0,         INSIGHT_ALTAR_PAYMENT,DUNGEON,{1,1},    1,          0,          -1,         0,              2,              0,          0,          (MF_TREAT_AS_BLOCKING)},
+        {0,         0,          0,              {1,1},      1,          0,          0,          0,              2,              0,          0,          (MF_BUILD_AT_ORIGIN | MF_PERMIT_BLOCKING | MF_BUILD_VESTIBULE)}}},
 };
 
 // To meter item generation (on level generation):

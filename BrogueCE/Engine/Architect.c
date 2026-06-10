@@ -1753,6 +1753,17 @@ static void addMachines() {
         }
     }
 
+    // iOS port (iBrogue): a guaranteed altars-of-insight reward room every 10 levels from depth 5
+    // (Brogue only). Best-effort like the amulet vault: if no room fits after 50 tries, it's skipped.
+    if (gameVariant == VARIANT_BROGUE
+        && rogue.depthLevel >= 5 && (rogue.depthLevel - 5) % 10 == 0) {
+        for (failsafe = 50; failsafe; failsafe--) {
+            if (buildAMachine(MT_INSIGHT_ALTAR, -1, -1, 0, NULL, NULL, NULL)) {
+                break;
+            }
+        }
+    }
+
     // Add reward rooms, if any:
     machineCount = 0;
     while (rogue.depthLevel <= gameConst->deepestLevelForMachines

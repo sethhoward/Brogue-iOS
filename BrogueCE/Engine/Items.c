@@ -1194,6 +1194,9 @@ static boolean swapItemEnchants(const short machineNumber) {
     return false;
 }
 
+// iOS port (iBrogue): the altars-of-insight machine; defined below near detectMagicOnItem.
+static boolean performInsightSacrifice(short machineNumber);
+
 void updateFloorItems() {
     short x, y;
     char buf[DCOLS*3], buf2[DCOLS*3];
@@ -1287,6 +1290,25 @@ void updateFloorItems() {
 
             if (!circuitBreakersPreventActivation(pmap[x][y].machineNumber)
                 && swapItemEnchants(pmap[x][y].machineNumber)) {
+
+                activateMachine(pmap[x][y].machineNumber);
+            }
+        }
+
+        // iOS port (iBrogue): sibling of the commutation block — the altars-of-insight machine.
+        if (cellHasTMFlag((pos){ x, y }, TM_INSIGHT_ACTIVATION)
+            && pmap[x][y].machineNumber) {
+
+            while (nextItem != NULL
+                   && pmap[x][y].machineNumber == pmapAt(nextItem->loc)->machineNumber
+                   && cellHasTMFlag(nextItem->loc, TM_INSIGHT_ACTIVATION)) {
+
+                // Skip future items in this machine so we don't update the consumed offering.
+                nextItem = nextItem->nextItem;
+            }
+
+            if (!circuitBreakersPreventActivation(pmap[x][y].machineNumber)
+                && performInsightSacrifice(pmap[x][y].machineNumber)) {
 
                 activateMachine(pmap[x][y].machineNumber);
             }
@@ -7443,6 +7465,70 @@ void gainScrollInsightFromEating(void) {
                      ? "you study a scroll intently while eating; it radiates a benevolent aura."
                      : "you study a scroll intently while eating; it radiates a malevolent aura.",
                      (benevolent ? &goodMessageColor : &badMessageColor), 0);
+}
+
+// iOS port (iBrogue): the altars-of-insight machine. When both linked altars hold items, reveal the item
+// on the insight altar and consume the item on the offering altar. Sacrificing an UNidentified item fully
+// identifies the offering; an identified item only reveals its polarity/aura. "Fire only if it helps":
+// never consume the payment unless the offering would actually gain information. RNG-free.
+static boolean performInsightSacrifice(short machineNumber) {
+    item *insightItem = NULL, *paymentItem = NULL;
+    pos paymentLoc = INVALID_POS;
+
+    for (short i = 0; i < DCOLS; i++) {
+        for (short j = 0; j < DROWS; j++) {
+            if (pmap[i][j].machineNumber != machineNumber
+                || !cellHasTMFlag((pos){ i, j }, TM_INSIGHT_ACTIVATION)) {
+                continue;
+            }
+            item *theItem = itemAtLoc((pos){ i, j });
+            if (theItem == NULL) {
+                continue;
+            }
+            if (pmap[i][j].layers[DUNGEON] == INSIGHT_ALTAR_INSIGHT) {
+                insightItem = theItem;
+            } else if (pmap[i][j].layers[DUNGEON] == INSIGHT_ALTAR_PAYMENT) {
+                paymentItem = theItem;
+                paymentLoc = (pos){ i, j };
+            }
+        }
+    }
+    if (insightItem == NULL || paymentItem == NULL) {
+        return false; // need an item on both altars
+    }
+
+    char theName[COLS * 3], buf[COLS * 3];
+    if (!(paymentItem->flags & ITEM_IDENTIFIED)) {
+        // Gambled an unknown offering -> fully identify the insight item.
+        if (insightItem->flags & ITEM_IDENTIFIED) {
+            return false; // already fully known; don't waste the sacrifice
+        }
+        identify(insightItem);
+        itemName(insightItem, theName, true, true, NULL);
+        sprintf(buf, "the altar consumes your offering; the other item is revealed to be %s.", theName);
+        messageWithColor(buf, &itemMessageColor, 0);
+    } else {
+        // Paid with a known item -> reveal only the insight item's polarity/aura.
+        if (insightItem->flags & (ITEM_IDENTIFIED | ITEM_MAGIC_DETECTED)) {
+            return false; // aura already known; don't waste the sacrifice
+        }
+        detectMagicOnItem(insightItem);
+        tryIdentifyLastItemKinds(insightItem->category);
+        const int polarity = itemMagicPolarity(insightItem);
+        const char *aura = (polarity == MAGIC_POLARITY_BENEVOLENT) ? "a benevolent"
+                         : (polarity == MAGIC_POLARITY_MALEVOLENT) ? "a malevolent" : "no magical";
+        const color *auraColor = (polarity == MAGIC_POLARITY_BENEVOLENT) ? &goodMessageColor
+                               : (polarity == MAGIC_POLARITY_MALEVOLENT) ? &badMessageColor : &itemMessageColor;
+        sprintf(buf, "the altar consumes your offering; you sense %s aura around the other item.", aura);
+        messageWithColor(buf, auraColor, 0);
+    }
+
+    // Consume the payment; leave the revealed item on its altar for pickup.
+    removeItemFromChain(paymentItem, floorItems);
+    pmap[paymentLoc.x][paymentLoc.y].flags &= ~(HAS_ITEM | ITEM_DETECTED);
+    deleteItem(paymentItem);
+    refreshDungeonCell(paymentLoc);
+    return true;
 }
 
 // iOS port (iBrogue): apply a thrown good potion's effect to the creature it shatters on.

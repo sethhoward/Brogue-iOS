@@ -28,6 +28,47 @@ covers the separate Classic engine that ships in the app target).
 
 ## Change log
 
+### 2026-06-10 — Altars of insight: sacrifice one item to reveal another (new content)
+
+**What.** A new guaranteed reward room — a pair of linked altars (an "altar of insight" + an "altar of
+offering") that appears once every 10 levels starting at depth 5 (depths 5, 15, 25), Brogue variant only.
+Place the item you want to learn about on the insight altar and a payment item on the offering altar; when
+both hold items the offering is consumed and the other item is revealed. The reveal scales with the
+payment: **sacrificing an unidentified item fully identifies** the offered item, while sacrificing an
+**identified item only reveals its polarity/aura** (via `detectMagicOnItem`). Both altars then go inert. It
+"fires only if it helps" — never consumes the payment unless the offered item would actually gain info, so
+a `+0` mundane weapon reveals as "no aura" rather than wasting the sacrifice, and an already-known item
+does nothing.
+
+**Why.** The deferred Phase 7 of the potion-ID arc, redesigned as a costed trade (give up an item to learn
+one) rather than the original free whole-pack polarity reveal, which was effectively on-demand detect
+magic. The risk dial (gamble an unknown for a full ID, or pay a known item for just polarity) keeps
+identification a gamble while easing it.
+
+**Where.**
+- `Rogue.h`: `tileType` — `INSIGHT_ALTAR_INSIGHT` / `INSIGHT_ALTAR_PAYMENT` / `INSIGHT_ALTAR_INERT`;
+  `dungeonFeatureType` — `DF_ALTAR_INSIGHT_INERT`; `TM_INSIGHT_ACTIVATION = Fl(26)`; `machineTypes` —
+  `MT_INSIGHT_ALTAR` aliased to `MT_REWARD_HEAVY_OR_RUNIC_WEAPON` (Brogue fills the variant-specific reward
+  slot, index 72, that BulletBrogue uses for its weapon vault — they never collide, being per-variant + variant-gated).
+- `Globals.c`: `blueAltarBackColor`; three `tileCatalog` rows (model on `COMMUTATION_ALTAR`); a
+  `DF_ALTAR_INSIGHT_INERT` `dungeonFeatureCatalog` row (empty message — the reveal text is emitted once by
+  the handler, not per promoted altar).
+- `Items.c`: `static boolean performInsightSacrifice(short)` (defined near `detectMagicOnItem`, forward-declared
+  above `updateFloorItems`) + a sibling block in `updateFloorItems`, modeled exactly on the commutation-altar
+  block (`TM_*` flag + machineNumber + `nextItem`-skip + `activateMachine`). Reuses `identify`,
+  `detectMagicOnItem`, `tryIdentifyLastItemKinds`, `itemMagicPolarity`, `itemName`, `messageWithColor`,
+  `removeItemFromChain`, `deleteItem`. All vanilla.
+- `GlobalsBrogue.c`: the blueprint appended at index 72 (force-only — no `BP_REWARD`, frequency 0).
+- `Architect.c`: a Brogue-gated, depth-gated force-build in `addMachines` (modeled on the amulet vault and
+  BulletBrogue's L1 weapon vault).
+
+**Determinism.** The reveal handler is RNG-free (flag/table flips + a deterministic machine scan); saves are
+recordings (no serialized format change). Because the altar is force-only (not in the BP_REWARD raffle), the
+random reward-room raffle is byte-unchanged at every depth — the only seed divergence is on the forced
+levels (5, 15, 25, Brogue only), where placing the room draws RNG. As new dungeon content it warrants a
+per-variant `recordingVersionString` bump at release (left to maintainers; not bumped here). Rapid/Bullet
+untouched.
+
 ### 2026-06-10 — Eating studies a scroll: reveal one scroll's polarity on a safe meal
 
 **What.** Eating a meal (`eat` returning true) while **nothing is hunting you** reveals the polarity
