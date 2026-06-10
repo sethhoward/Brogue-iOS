@@ -1171,6 +1171,25 @@ void gameOver(char *killedBy, boolean useCustomPhrasing) {
 
     strcpy(theEntry.description, highScoreText);
 
+    // iOS port (iBrogue): personal debug readout — rested turns per level, appended to the on-screen
+    // recap buffer only. The high-score text (theEntry.description) is already captured above, so this
+    // never touches the saved record. Length-guarded to stay within buf[200].
+    {
+        char restDbg[200] = "";
+        for (short d = 1; d <= rogue.deepestLevel && strlen(buf) + strlen(restDbg) < 170; d++) {
+            if (levels[d].restTurnsOnLevel > 0) {
+                char one[32];
+                sprintf(one, "%s%i:%lu", (restDbg[0] ? " " : ""), d, levels[d].restTurnsOnLevel);
+                strcat(restDbg, one);
+            }
+        }
+        if (restDbg[0]) {
+            strcat(buf, "  [rests/lvl: ");
+            strcat(buf, restDbg);
+            strcat(buf, "]");
+        }
+    }
+
     if (!rogue.quit) {
         printString(buf, (COLS - strLenWithoutEscapes(buf)) / 2, ROWS / 2, &gray, &black, 0);
 

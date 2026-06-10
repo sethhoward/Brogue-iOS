@@ -2577,6 +2577,8 @@ typedef struct playerCharacter {
 
     // Path of the current save game or recording, NULL for a new game
     char currentGamePath[BROGUE_FILENAME_MAX];
+
+    unsigned long restTurnsSinceInsight; // rested turns accrued toward the next polarity reveal
 } playerCharacter;
 
 // Stores the necessary info about a level so it can be regenerated:
@@ -2592,6 +2594,7 @@ typedef struct levelData {
     pos downStairsLoc;
     pos playerExitedVia;
     unsigned long awaySince;
+    unsigned long restTurnsOnLevel; // iOS port (iBrogue): debug per-level rest tally (death-recap readout)
 } levelData;
 
 enum machineFeatureFlags {
@@ -3419,6 +3422,7 @@ extern "C" {
     boolean unequipItem(item *theItem, boolean force);
     short magicCharDiscoverySuffix(short category, short kind);
     int itemMagicPolarity(item *theItem);
+    void gainPolarityInsightFromRest(void);
     item *itemAtLoc(pos loc);
     item *dropItem(item *theItem);
     itemTable *tableForItemCategory(enum itemCategory theCat);

@@ -28,6 +28,40 @@ covers the separate Classic engine that ships in the app target).
 
 ## Change log
 
+### 2026-06-10 — Passive polarity insight while resting (+ debug rest-count readout)
+
+**What.** Resting slowly reveals item polarity. Each rested turn accrues toward a threshold; on reaching
+it, the first still-unknown (good/bad) item in the pack has its benevolent/malevolent polarity revealed
+(same effect as detect-magic on one item), with a colored "while resting, you sense the … aura of …"
+message, and any in-progress auto-rest is interrupted so the player notices. The threshold grows with the
+number of polarity kinds already known (`BASE = 120`, `STEP = 30` rested turns per known kind), so it
+eases the early-game ID burden but tapers off late so it can't trivialize identification. Separately, an
+**iOS-only debug readout** appends `[rests/lvl: 1:12 3:40 …]` (rested turns per depth) to the on-screen
+death/quit recap.
+
+**Why.** Requested feature: ease the chore of identifying healing/strength items without removing the
+gamble. Polarity-only (never a full ID) and self-tapering keeps it in line with the arc's anti-triviality
+goal (the concern that shelved Phase 5). The debug readout exists to tune `BASE`/`STEP` from real runs.
+
+**Where.**
+- *Feature (also ported upstream):* `Rogue.h` — `playerCharacter.restTurnsSinceInsight` field + a
+  `void gainPolarityInsightFromRest(void)` prototype. `Items.c` — `static int knownPolarityKindCount(void)`
+  and `gainPolarityInsightFromRest()` defined just after `detectMagicOnItem` (reuses `detectMagicOnItem`,
+  `tryIdentifyLastItemKinds`, `itemMagicPolarityIsKnown`, `itemMagicPolarity`, `itemKindCount`,
+  `tableForItemCategory`, `itemName`, `messageWithColor` — all vanilla). `Time.c` — a call in
+  `playerTurnEnded`, gated on `rogue.justRested`, just before the `justRested` reset.
+- *iOS-only debug:* `Rogue.h` — `levelData.restTurnsOnLevel` field; `Time.c` — increment in the same
+  `justRested` block; `RogueMain.c` — the `[rests/lvl: …]` append in `gameOver`, after
+  `theEntry.description` is copied (so the saved high-score text is untouched), length-guarded to `buf[200]`.
+
+**Determinism.** Brogue "saves" are recordings (state is rebuilt by replay), so the new fields add no
+serialized format to break. Counting is done in `playerTurnEnded` rather than at the command dispatch on
+purpose: `autoRest` re-records each rested turn as `REST_KEY`, so one `Z` replays as N rests — the
+turn-resolution chokepoint is the only place that tallies identically live and on replay. The reveal is
+pure flag-flipping (no RNG). It is, however, a deterministic *gameplay-rule* change: recordings/seeds made
+before it will diverge on replay, so a `recordingVersionString` bump is warranted at release (per-variant;
+left to the maintainers — the diff does not bump it).
+
 ### 2026-06-10 — Candidate-narrowing inspect line for unidentified potions/scrolls
 
 **What.** An unidentified potion's or scroll's inspect text now ends with a line like "You have narrowed

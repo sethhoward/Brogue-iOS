@@ -2579,6 +2579,14 @@ void playerTurnEnded() {
 
     } while (player.status[STATUS_PARALYZED]);
 
+    // iOS port (iBrogue): passive rest-polarity insight — counted here (not at command dispatch)
+    // because autoRest re-records each rested turn as REST_KEY, so this is the one chokepoint that
+    // tallies identically live and on replay. See gainPolarityInsightFromRest in Items.c.
+    if (rogue.justRested) {
+        gainPolarityInsightFromRest();
+        levels[rogue.depthLevel].restTurnsOnLevel++; // iOS port (iBrogue): debug-only per-level rest tally
+    }
+
     rogue.justRested = false;
     rogue.justSearched = false;
     updateFlavorText();

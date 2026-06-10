@@ -7339,6 +7339,73 @@ static void detectMagicOnItem(item *theItem) {
     }
 }
 
+// iOS port (iBrogue): passive polarity insight while resting. Each rested turn accrues toward a
+// threshold that grows with the number of polarity kinds already known, so it eases the early-game
+// ID burden without trivializing the late game. On reaching the threshold it reveals the polarity of
+// the first still-unknown (good/bad) item in the pack. Pure flag-flipping via detectMagicOnItem — no
+// RNG — so the counter and the reveal are reconstructed identically on replay (Brogue saves are
+// recordings; see gainPolarityInsightFromRest's call site in playerTurnEnded).
+#define POLARITY_INSIGHT_BASE_TURNS       120
+#define POLARITY_INSIGHT_TURNS_PER_KIND   30
+
+static int knownPolarityKindCount(void) {
+    // kinds whose polarity the player already knows (identified or polarity-revealed), across all
+    // intrinsic-polarity categories
+    static const enum itemCategory polarityCategories[] = {POTION, SCROLL, RING, WAND, STAFF};
+    int known = 0;
+    for (int c = 0; c < 5; c++) {
+        itemTable *table = tableForItemCategory(polarityCategories[c]);
+        const int total = itemKindCount(polarityCategories[c], 0);
+        for (int i = 0; i < total; i++) {
+            if (table[i].identified || table[i].magicPolarityRevealed) {
+                known++;
+            }
+        }
+    }
+    return known;
+}
+
+void gainPolarityInsightFromRest(void) {
+    rogue.restTurnsSinceInsight++;
+    const unsigned long threshold = POLARITY_INSIGHT_BASE_TURNS
+                                  + (unsigned long)POLARITY_INSIGHT_TURNS_PER_KIND * knownPolarityKindCount();
+    if (rogue.restTurnsSinceInsight < threshold) {
+        return;
+    }
+
+    // First pack item (deterministic top-of-pack order) whose good/bad polarity is still hidden.
+    // Neutral items are skipped: their polarity never resolves to good/bad, so they would be picked
+    // every milestone and mislabeled.
+    item *target = NULL;
+    for (item *theItem = packItems->nextItem; theItem != NULL; theItem = theItem->nextItem) {
+        if ((theItem->category & HAS_INTRINSIC_POLARITY)
+            && !(theItem->flags & ITEM_IDENTIFIED)
+            && itemMagicPolarity(theItem) != MAGIC_POLARITY_NEUTRAL
+            && !itemMagicPolarityIsKnown(theItem, MAGIC_POLARITY_BENEVOLENT)
+            && !itemMagicPolarityIsKnown(theItem, MAGIC_POLARITY_MALEVOLENT)) {
+
+            target = theItem;
+            break;
+        }
+    }
+    if (target == NULL) {
+        return; // nothing eligible yet; hold the milestone until an unknown item appears
+    }
+
+    detectMagicOnItem(target);
+    tryIdentifyLastItemKinds(HAS_INTRINSIC_POLARITY);
+
+    char theName[COLS * 3], buf[COLS * 3];
+    const boolean benevolent = (itemMagicPolarity(target) == MAGIC_POLARITY_BENEVOLENT);
+    itemName(target, theName, false, true, NULL);
+    sprintf(buf, "while resting, you sense the %s aura of %s.",
+            (benevolent ? "benevolent" : "malevolent"), theName);
+    messageWithColor(buf, (benevolent ? &goodMessageColor : &badMessageColor), 0);
+
+    rogue.restTurnsSinceInsight = 0;
+    rogue.disturbed = true; // interrupt any auto-rest so the discovery is noticed
+}
+
 // iOS port (iBrogue): apply a thrown good potion's effect to the creature it shatters on.
 // Returns true only when a player-visible tell was produced (drives autoIdentify). The mechanical
 // effect always applies; visibility just gates the tell + ID. Telepathy/detect-magic and bad

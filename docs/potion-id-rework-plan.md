@@ -7,6 +7,7 @@
   - Phase 2 — potion of Life bursts into a healing cloud on shatter. (fork: `potion-throw-good-effects`, combined PR with P1)
   - Phase 3 — fire/lightning bolts detonate dropped bad potions. (fork: `potion-bolt-detonation`)
   - Phase 6 — candidate-narrowing inspect line for unidentified potions + scrolls. (fork: `potion-candidate-ui`)
+  - Phase 8 — passive polarity insight while resting (+ iOS-only debug rest-count readout). (fork: `rest-polarity-insight`)
   - All commits authored as a human (no AI-attribution trailer); upstream PRs are drafted (see `docs/pr-notes-*`) but **not opened**.
 - **Deferred** (not started): Phase 4 (carried-potion volatility); Phase 7 (insight altar — itself a
   polarity reveal, in tension with the "ID is a gamble" goal).
@@ -262,6 +263,45 @@ reward room (unavoidable for new content; document it, breaks shared seed catalo
 
 **Test:** reach 13+ (seed/debug spawn), drop an unidentified potion → whole-pack polarity revealed, altar inert,
 sacrifice consumed; drop an identified/non-consumable → no-op.
+
+---
+
+## Phase 8 — Passive polarity insight while resting (shipped on iOS)
+
+**Idea.** Resting slowly chips away at identification. Every rested turn accrues toward a threshold; on
+reaching it, the polarity (benevolent/malevolent) of the **first still-unknown good/bad item in the pack**
+is revealed — the same effect detect-magic has on one item — with a colored "while resting, you sense the
+… aura of …" message, and any in-progress auto-rest is interrupted. **Polarity only, never a full ID.**
+
+**Rarer as you progress.** `threshold = BASE + STEP * knownPolarityKindCount()` where `knownPolarityKindCount`
+counts kinds already `identified || magicPolarityRevealed` across potions/scrolls/rings/wands/staffs.
+Start `BASE = 120`, `STEP = 30` rested turns — tunable. The taper is the anti-triviality guard: late game
+(most kinds known) reveals nearly stop, so it never becomes riskless elimination (the P5 concern).
+
+**Counted in rested turns, not commands — for replay.** `autoRest` (`Z`) re-records each rested turn as
+`REST_KEY`, so one `Z` replays as N rests. The only chokepoint that tallies identically live and on
+replay is inside `playerTurnEnded` gated on `rogue.justRested`. The reveal cascade is RNG-free.
+
+**Item selection** is deterministic (top-of-pack order); neutral-polarity items (0-enchant ring, empty
+wand) are skipped so nothing is picked-forever / mislabeled.
+
+**Reuse.** `detectMagicOnItem`, `tryIdentifyLastItemKinds`, `itemMagicPolarity`, `itemMagicPolarityIsKnown`,
+`itemKindCount`, `tableForItemCategory`, `itemName`, `messageWithColor` — all vanilla. New: `playerCharacter.restTurnsSinceInsight`
+field + `gainPolarityInsightFromRest()` in `Items.c` + one call in `Time.c`. **No Phase 1/2/3/6 symbols → ports to master verbatim.**
+
+**iOS-only debug (NOT upstreamed).** A `[rests/lvl: 1:12 3:40 …]` readout (rested turns per depth) is
+appended to the on-screen death/quit recap in `gameOver` (after the high-score text is captured, so the
+saved record is untouched). Backed by a `levelData.restTurnsOnLevel` field. Its purpose is to tune
+`BASE`/`STEP` from real runs.
+
+**Determinism / saves.** Saves are recordings → new fields add no serialized format to break. Within a
+version there's no desync (RNG-free, replay-identical chokepoint). It *is* a deterministic gameplay-rule
+change, so pre-feature recordings will diverge on replay; a `recordingVersionString` bump (per-variant) is
+warranted at release and left to the maintainers — the diff does not bump it.
+
+**Test.** Rest from early game → after ~`BASE` turns a polarity reveal fires on the first unknown item,
+colored, auto-rest interrupts. ID more kinds → the gap lengthens. Never full-IDs. Die → recap shows the
+`[rests/lvl: …]` tally, and the saved high-score description does not. Record→replay a resting session → no desync.
 
 ---
 
