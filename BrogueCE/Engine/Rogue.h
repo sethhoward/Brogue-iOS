@@ -1787,6 +1787,9 @@ enum dungeonFeatureTypes {
     DF_STENCH_BURN,
     DF_STENCH_SMOLDER,
 
+    // iOS port (iBrogue): healing-spore cloud burst from a thrown potion of life
+    DF_LIFE_POTION_CLOUD,
+
     NUMBER_DUNGEON_FEATURES,
 };
 

@@ -39,7 +39,9 @@ always applies the mechanical effect, but returns `true` only when a *player-vis
 produced — which is what drives `autoIdentify`:
 - strength → permanent +maxHP/+currentHP buff (≈half a life potion; "muscles bulge"),
 - haste → "speeds up"; levitation → "floats into the air",
-- life → full panacea heal of the struck creature,
+- life → full panacea heal of the struck creature **and**, on shatter, a healing-spore gas cloud
+  (a new `DF_LIFE_POTION_CLOUD` that spawns the existing bloodwort `HEALING_CLOUD`); life auto-IDs
+  unconditionally on shatter, like the gas potions,
 - invisibility → reuses `imbueInvisibility` (its own flash + visibility-gated auto-ID),
 - fire-immunity → sets `STATUS_IMMUNE_TO_FIRE`, but only IDs by *visibly snuffing flames* on a
   burning, not-already-immune, non-`MONST_FIERY` creature (no invented flavor text),
@@ -58,14 +60,21 @@ iOS divergence.
 
 **Where.** `Items.c` — forward prototype above `throwItem`; `applyPotionEffectToCreature` defined
 between `detectMagicOnItem` and `drinkPotion`; a new block at the top of the potion-shatter `if` in
-`throwItem`. Reuses `heal`, `haste`, `imbueInvisibility`, `extinguishFireOnCreature`.
+`throwItem` (the good-potion effect, plus a `POTION_LIFE` case that spawns the cloud). Reuses `heal`,
+`haste`, `imbueInvisibility`, `extinguishFireOnCreature`, `spawnDungeonFeature`. `Rogue.h` —
+`DF_LIFE_POTION_CLOUD` appended to the `dungeonFeatureType` enum before `NUMBER_DUNGEON_FEATURES`.
+`Globals.c` — a matching `{HEALING_CLOUD, GAS, 350, 0, 0}` row appended to `dungeonFeatureCatalog`
+(clone of the bloodwort pod-burst). The catalog and enum are shared across the Brogue/Rapid/Bullet
+variants; appending at the tail keeps every existing index aligned.
 
 **Determinism.** No RNG on the common path: fixed magnitude via `potionTable[kind].range.upperBound`
-(every good potion has `lowerBound == upperBound`), and the helper draws no RNG. One action-triggered
-substantive-RNG divergence: thrown fire-immunity early-extinguishing a burning creature removes that
-creature's remaining per-turn `rand_range(1,3)` burn draws (the `STATUS_BURNING` case in
-`decrementMonsterStatus`, Monsters.c, draws unconditionally per burning turn; fire immunity gates only
-the damage, not the draw). That stems from the player's action, not from added bookkeeping.
+(every good potion has `lowerBound == upperBound`), the helper draws no RNG, and `spawnDungeonFeature`
+on a GAS layer is a pure volume/tile write (no RNG). Two action-triggered substantive-RNG divergences,
+both stemming from the player's throw rather than from added bookkeeping: (1) thrown fire-immunity
+early-extinguishing a burning creature removes that creature's remaining per-turn `rand_range(1,3)`
+burn draws (the `STATUS_BURNING` case in `decrementMonsterStatus`, Monsters.c, draws unconditionally
+per burning turn; fire immunity gates only the damage, not the draw); (2) the life cloud's gas changes
+the gas map, so subsequent gas-dissipation rolls diverge from upstream seeds.
 
 ### 2026-06-08 — Rethrow falls through to a normal throw prompt
 

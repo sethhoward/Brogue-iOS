@@ -6212,6 +6212,20 @@ static void throwItem(item *theItem, creature *thrower, pos targetLoc, short max
         // bad-potion shatter / harmless-splash paths below when there's no tell.
         creature *struck = (pmap[x][y].flags & (HAS_MONSTER | HAS_PLAYER)) ? monsterAtLoc((pos){ x, y }) : NULL;
         short potionMag = potionTable[theItem->kind].range.upperBound; // fixed magnitude (good potions: lo==hi)
+        // iOS port (iBrogue): a thrown potion of life bursts into a healing-spore cloud (its signature)
+        // and IDs unconditionally on shatter, like the gas potions. A direct hit also gets the instant
+        // panacea heal from the helper; the cloud adds the lingering area heal.
+        if (theItem->kind == POTION_LIFE) {
+            if (struck) {
+                applyPotionEffectToCreature(struck, POTION_LIFE, potionMag);
+            }
+            spawnDungeonFeature(x, y, &dungeonFeatureCatalog[DF_LIFE_POTION_CLOUD], true, false);
+            message("the flask shatters and a cloud of healing spores bursts out!", 0);
+            autoIdentify(theItem);
+            refreshDungeonCell((pos){ x, y });
+            deleteItem(theItem);
+            return;
+        }
         if (struck
             && theItem->kind < gameConst->numberGoodPotionKinds
             && applyPotionEffectToCreature(struck, theItem->kind, potionMag)) {

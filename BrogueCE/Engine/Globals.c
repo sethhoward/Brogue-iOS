@@ -929,6 +929,9 @@ dungeonFeature dungeonFeatureCatalog[NUMBER_DUNGEON_FEATURES] = {
     // goblin warren:
     {STENCH_SMOKE_GAS,          GAS,        50,     0,      0, "", 0, 0, 0, 0, DF_PLAIN_FIRE},
     {STENCH_SMOKE_GAS,          GAS,        50,     0,      0, "", 0, 0, 0, 0, DF_EMBERS},
+
+    // iOS port (iBrogue): thrown potion of life bursts into the bloodwort healing gas (HEALING_CLOUD)
+    {HEALING_CLOUD,             GAS,        350,    0,      0},
 };
 
 const dungeonProfile dungeonProfileCatalog[NUMBER_DUNGEON_PROFILES] = {
