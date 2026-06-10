@@ -28,6 +28,25 @@ covers the separate Classic engine that ships in the app target).
 
 ## Change log
 
+### 2026-06-10 — Auto-identify a worn ring deducible by elimination (upstream issue #683)
+
+**What.** When a ring is equipped and reveals no obvious effect, and it is the only still-unidentified ring
+kind that stays hidden on equip, its kind is now deduced and identified. (Only clairvoyance, light, and
+stealth reveal themselves on equip; the other five — regeneration, transference, awareness, wisdom, reaping
+— stay hidden, so once four of those five are known, equipping the fifth identifies it.)
+
+**Why.** Implements [BrogueCE issue #683](https://github.com/tmewett/BrogueCE/issues/683) ("Auto-ID ring
+kind based on whether all remaining rings ID on equip"), a flagged good-first-issue: the deduction is one a
+player can already make by hand, so the game does the bookkeeping.
+
+**Where.** `Items.c` — two small static helpers above `equipItem` (`ringIdentifiesOnEquip(short)` factors out
+the clairvoyance/light/stealth set; `unidentifiedRingKindsHiddenOnEquip(void)` counts the unidentified hidden
+kinds), and the ring branch of `equipItem` now uses the helper for the existing self-ID path and adds the
+elimination deduction. Reuses `identifyItemKind`, `ringTable`. All vanilla symbols.
+
+**Determinism.** Pure identification bookkeeping — no RNG, no serialized state. ID state isn't part of the
+recording stream, so seeds and replays are unaffected.
+
 ### 2026-06-10 — Altars of insight: sacrifice one item to reveal another (new content)
 
 **What.** A new guaranteed reward room — a pair of linked altars (an "altar of insight" + an "altar of
