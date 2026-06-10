@@ -28,6 +28,39 @@ covers the separate Classic engine that ships in the app target).
 
 ## Change log
 
+### 2026-06-10 — Fire/lightning bolts detonate dropped bad potions
+
+**What.** A fire or lightning bolt (`BF_FIERY` / `BF_ELECTRIC`) passing over a *dropped* potion now
+detonates it in place, turning the potion into a placeable trap / ranged identifier. Only the seven
+bad/cloud kinds react (poison, confusion, paralysis, incineration, darkness, descent, creeping death) —
+the same set the thrown-potion shatter switch handles; good potions and hallucination get no bolt
+signature. Fire is **violent** and lightning is **gentle** as an *emergent* property: detonation spawns
+the potion's ordinary shatter dungeon feature, and the fire bolt's own per-cell `exposeTileToFire` then
+ignites the flammable gas (poison/confusion/paralysis gas carry `T_IS_FLAMMABLE`); lightning has no fire
+step, so the gas lingers as a cloud. The bad-potion switch was extracted from `throwItem` into a new
+`static boolean shatterPotionAtLoc(item*, short x, short y)` (spawns DF + message + auto-ID + cell
+refresh; returns true for the seven kinds) and is now shared between `throwItem` and the bolt hook.
+
+**Why.** A dropped potion is otherwise inert until walked into. Letting a bolt set it off makes a dropped
+bad potion a deliberate tool — lay a gas trap in a doorway, or ignite one on a chasing pack — and gives
+fire/lightning staffs a second, terrain-driven use. Kept independent of the earlier potion-rework phases
+so the change ports to upstream BrogueCE master verbatim (no creature effects or life cloud on bolt).
+
+**Where.** `Items.c` only. (1) Forward prototype of `shatterPotionAtLoc` above `updateBolt`. (2) A new
+hook in `updateBolt`, after the `pathDF` spawn and before the `BF_FIERY` `exposeTileToFire` block, so fire
+ignites the gas the hook just spawned; it calls `shatterPotionAtLoc` on a `POTION` at the cell and tears
+the floor item down exactly like `burnItem` (`removeItemFromChain(floorItems)` → `deleteItem` → clear
+`HAS_ITEM | ITEM_DETECTED`), then sets `*lightingChanged` / `*autoID`. (3) `shatterPotionAtLoc` defined
+above `throwItem`, extracted from the old inline switch. (4) `throwItem`'s bad-potion block replaced with
+`if (shatterPotionAtLoc(...)) { } else { <existing harmless-splash + hallucination-ID> }`. Reuses only
+upstream symbols.
+
+**Determinism.** No RNG on the common bolt path (the hook is an `itemAtLoc` lookup + category test;
+`spawnDungeonFeature` on a GAS-layer DF is a pure write). Action-triggered divergence only: detonating a
+potion via a bolt diverges the seed exactly as *throwing* it would (same DFs; fire ignition via
+`exposeTileToFire` is forced with `alwaysIgnite`, drawing no `rand_percent` of its own). No new RNG
+primitive.
+
 ### 2026-06-10 — Thrown good potions affect the struck creature
 
 **What.** Throwing an unidentified *good* potion (the first `numberGoodPotionKinds` of the potion

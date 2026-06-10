@@ -4364,6 +4364,9 @@ enum boltType boltForItem(item *theItem) {
 // *autoID will be set to true. (AutoID can be null.)
 // If the effect causes the level's lighting or vision to change, *lightingChanged
 // will be set to true. (LightingChanged can be null.)
+// iOS port (iBrogue): a fire/lightning bolt crossing a dropped bad potion detonates it (helper defined near throwItem)
+static boolean shatterPotionAtLoc(item *theItem, short x, short y);
+
 static boolean updateBolt(bolt *theBolt, creature *caster, short x, short y,
                    boolean boltInView, boolean alreadyReflected,
                    boolean *autoID, boolean *lightingChanged) {
@@ -4690,6 +4693,25 @@ static boolean updateBolt(bolt *theBolt, creature *caster, short x, short y,
 
     if (theBolt->pathDF) {
         spawnDungeonFeature(x, y, &dungeonFeatureCatalog[theBolt->pathDF], true, false);
+    }
+
+    // iOS port (iBrogue): a fire/lightning bolt crossing a DROPPED bad potion detonates it in place,
+    // spawning the potion's normal shatter signature. Placed before the BF_FIERY exposeTileToFire below
+    // so a fire bolt ignites the freshly-spawned flammable gas (violent), while lightning leaves it as a
+    // gas cloud (gentle). Item teardown mirrors burnItem (Time.c).
+    if (theBolt->flags & (BF_FIERY | BF_ELECTRIC)) {
+        item *floorPotion = itemAtLoc((pos){ x, y });
+        if (floorPotion && (floorPotion->category & POTION) && shatterPotionAtLoc(floorPotion, x, y)) {
+            removeItemFromChain(floorPotion, floorItems);
+            deleteItem(floorPotion);
+            pmap[x][y].flags &= ~(HAS_ITEM | ITEM_DETECTED);
+            if (lightingChanged) {
+                *lightingChanged = true; // relight darkness/descent this turn
+            }
+            if (autoID) {
+                *autoID = true; // staff/wand identifies from the visible detonation
+            }
+        }
     }
 
     if ((theBolt->flags & BF_FIERY)
@@ -6091,6 +6113,47 @@ static boolean hitMonsterWithProjectileWeapon(creature *thrower, creature *monst
     }
 }
 
+// iOS port (iBrogue): spawn a bad/cloud potion's shatter signature at (x,y), auto-identify the flask,
+// refresh the cell. Returns true for the 7 cloud/explosion kinds, false otherwise. Shared by throwItem
+// and the bolt-detonation hook in updateBolt so the kind->DF mapping lives in one place.
+static boolean shatterPotionAtLoc(item *theItem, short x, short y) {
+    switch (theItem->kind) {
+        case POTION_POISON:
+            spawnDungeonFeature(x, y, &dungeonFeatureCatalog[DF_POISON_GAS_CLOUD_POTION], true, false);
+            message("the flask shatters and a deadly purple cloud billows out!", 0);
+            break;
+        case POTION_CONFUSION:
+            spawnDungeonFeature(x, y, &dungeonFeatureCatalog[DF_CONFUSION_GAS_CLOUD_POTION], true, false);
+            message("the flask shatters and a multi-hued cloud billows out!", 0);
+            break;
+        case POTION_PARALYSIS:
+            spawnDungeonFeature(x, y, &dungeonFeatureCatalog[DF_PARALYSIS_GAS_CLOUD_POTION], true, false);
+            message("the flask shatters and a cloud of pink gas billows out!", 0);
+            break;
+        case POTION_INCINERATION:
+            message("the flask shatters and its contents burst violently into flame!", 0);
+            spawnDungeonFeature(x, y, &dungeonFeatureCatalog[DF_INCINERATION_POTION], true, false);
+            break;
+        case POTION_DARKNESS:
+            spawnDungeonFeature(x, y, &dungeonFeatureCatalog[DF_DARKNESS_POTION], true, false);
+            message("the flask shatters and the lights in the area start fading.", 0);
+            break;
+        case POTION_DESCENT:
+            message("as the flask shatters, the ground vanishes!", 0);
+            spawnDungeonFeature(x, y, &dungeonFeatureCatalog[DF_HOLE_POTION], true, false);
+            break;
+        case POTION_LICHEN:
+            message("the flask shatters and deadly spores spill out!", 0);
+            spawnDungeonFeature(x, y, &dungeonFeatureCatalog[DF_LICHEN_PLANTED], true, false);
+            break;
+        default:
+            return false;
+    }
+    autoIdentify(theItem);
+    refreshDungeonCell((pos){ x, y });
+    return true;
+}
+
 // iOS port (iBrogue): thrown good potions apply their effect to the struck creature (helper defined below)
 static boolean applyPotionEffectToCreature(creature *monst, short potionKind, short magnitude);
 
@@ -6235,56 +6298,11 @@ static void throwItem(item *theItem, creature *thrower, pos targetLoc, short max
             deleteItem(theItem);
             return;
         }
-        if (theItem->kind == POTION_CONFUSION || theItem->kind == POTION_POISON
-            || theItem->kind == POTION_PARALYSIS || theItem->kind == POTION_INCINERATION
-            || theItem->kind == POTION_DARKNESS || theItem->kind == POTION_LICHEN
-            || theItem->kind == POTION_DESCENT) {
-            switch (theItem->kind) {
-                case POTION_POISON:
-                    strcpy(buf, "the flask shatters and a deadly purple cloud billows out!");
-                    spawnDungeonFeature(x, y, &dungeonFeatureCatalog[DF_POISON_GAS_CLOUD_POTION], true, false);
-                    message(buf, 0);
-                    break;
-                case POTION_CONFUSION:
-                    strcpy(buf, "the flask shatters and a multi-hued cloud billows out!");
-                    spawnDungeonFeature(x, y, &dungeonFeatureCatalog[DF_CONFUSION_GAS_CLOUD_POTION], true, false);
-                    message(buf, 0);
-                    break;
-                case POTION_PARALYSIS:
-                    strcpy(buf, "the flask shatters and a cloud of pink gas billows out!");
-                    spawnDungeonFeature(x, y, &dungeonFeatureCatalog[DF_PARALYSIS_GAS_CLOUD_POTION], true, false);
-                    message(buf, 0);
-                    break;
-                case POTION_INCINERATION:
-                    strcpy(buf, "the flask shatters and its contents burst violently into flame!");
-                    message(buf, 0);
-                    spawnDungeonFeature(x, y, &dungeonFeatureCatalog[DF_INCINERATION_POTION], true, false);
-                    break;
-                case POTION_DARKNESS:
-                    strcpy(buf, "the flask shatters and the lights in the area start fading.");
-                    spawnDungeonFeature(x, y, &dungeonFeatureCatalog[DF_DARKNESS_POTION], true, false);
-                    message(buf, 0);
-                    break;
-                case POTION_DESCENT:
-                    strcpy(buf, "as the flask shatters, the ground vanishes!");
-                    message(buf, 0);
-                    spawnDungeonFeature(x, y, &dungeonFeatureCatalog[DF_HOLE_POTION], true, false);
-                    break;
-                case POTION_LICHEN:
-                    strcpy(buf, "the flask shatters and deadly spores spill out!");
-                    message(buf, 0);
-                    spawnDungeonFeature(x, y, &dungeonFeatureCatalog[DF_LICHEN_PLANTED], true, false);
-                    break;
-            }
-
-            autoIdentify(theItem);
-
-            refreshDungeonCell((pos){ x, y });
-
-            //if (pmap[x][y].flags & (HAS_MONSTER | HAS_PLAYER)) {
-            //  monst = monsterAtLoc((pos){ x, y });
-            //  applyInstantTileEffectsToCreature(monst);
-            //}
+        // iOS port (iBrogue): bad/cloud-potion shatter extracted to shatterPotionAtLoc (shared with the
+        // bolt-detonation hook in updateBolt). Returns true (signature spawned + flask auto-identified)
+        // for the 7 cloud/explosion kinds; otherwise falls through to the harmless-splash branch.
+        if (shatterPotionAtLoc(theItem, x, y)) {
+            // bad/cloud potion: its shatter signature was spawned and the flask auto-identified
         } else {
             if (cellHasTerrainFlag((pos){ x, y }, T_OBSTRUCTS_PASSABILITY)) {
                 strcpy(buf2, "against");
