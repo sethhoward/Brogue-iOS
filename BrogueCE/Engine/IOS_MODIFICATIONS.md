@@ -28,6 +28,45 @@ covers the separate Classic engine that ships in the app target).
 
 ## Change log
 
+### 2026-06-10 — Thrown good potions affect the struck creature
+
+**What.** Throwing an unidentified *good* potion (the first `numberGoodPotionKinds` of the potion
+table: life, strength, telepathy, levitation, detect-magic, haste, fire-immunity, invisibility) at a
+creature now applies that potion's effect to the creature it shatters on. A new
+`static boolean applyPotionEffectToCreature(creature*, short potionKind, short magnitude)` (`Items.c`,
+defined just above `drinkPotion`, forward-declared above `throwItem`) carries the per-kind logic. It
+always applies the mechanical effect, but returns `true` only when a *player-visible* tell was
+produced — which is what drives `autoIdentify`:
+- strength → permanent +maxHP/+currentHP buff (≈half a life potion; "muscles bulge"),
+- haste → "speeds up"; levitation → "floats into the air",
+- life → full panacea heal of the struck creature,
+- invisibility → reuses `imbueInvisibility` (its own flash + visibility-gated auto-ID),
+- fire-immunity → sets `STATUS_IMMUNE_TO_FIRE`, but only IDs by *visibly snuffing flames* on a
+  burning, not-already-immune, non-`MONST_FIERY` creature (no invented flavor text),
+- telepathy / detect-magic and any bad potion → no effect, no ID.
+The player is never the target (a thrown good potion shouldn't self-buff). The hook is a block at the
+top of the potion-shatter branch in `throwItem`, before the bad-potion switch; when there is no tell
+it falls through unchanged to the existing harmless-splash / hallucination-ID path. `drinkPotion`'s
+own switch is untouched.
+
+**Why.** Brogue's residual identification slog is discriminating the *good* potion cluster (life vs
+strength vs haste…), which today can only be done by drinking in a safe corner. Making a thrown good
+potion affect — and visibly tell on — the struck creature turns identification into a risky ranged
+diagnostic. Effect-always / tell-gated keeps an unseen creature mechanically affected without leaking
+information the player couldn't perceive. Upstream has no thrown-good-potion effect, so this is an
+iOS divergence.
+
+**Where.** `Items.c` — forward prototype above `throwItem`; `applyPotionEffectToCreature` defined
+between `detectMagicOnItem` and `drinkPotion`; a new block at the top of the potion-shatter `if` in
+`throwItem`. Reuses `heal`, `haste`, `imbueInvisibility`, `extinguishFireOnCreature`.
+
+**Determinism.** No RNG on the common path: fixed magnitude via `potionTable[kind].range.upperBound`
+(every good potion has `lowerBound == upperBound`), and the helper draws no RNG. One action-triggered
+substantive-RNG divergence: thrown fire-immunity early-extinguishing a burning creature removes that
+creature's remaining per-turn `rand_range(1,3)` burn draws (the `STATUS_BURNING` case in
+`decrementMonsterStatus`, Monsters.c, draws unconditionally per burning turn; fire immunity gates only
+the damage, not the draw). That stems from the player's action, not from added bookkeeping.
+
 ### 2026-06-08 — Rethrow falls through to a normal throw prompt
 
 **What.** The rethrow command (`RETHROW_KEY`, Shift+T) used to no-op when there was no

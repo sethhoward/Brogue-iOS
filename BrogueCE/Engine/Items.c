@@ -6091,6 +6091,9 @@ static boolean hitMonsterWithProjectileWeapon(creature *thrower, creature *monst
     }
 }
 
+// iOS port (iBrogue): thrown good potions apply their effect to the struck creature (helper defined below)
+static boolean applyPotionEffectToCreature(creature *monst, short potionKind, short magnitude);
+
 static void throwItem(item *theItem, creature *thrower, pos targetLoc, short maxDistance) {
     short i, numCells;
     creature *monst = NULL;
@@ -6204,6 +6207,20 @@ static void throwItem(item *theItem, creature *thrower, pos targetLoc, short max
     }
 
     if ((theItem->category & POTION) && (hitSomethingSolid || !cellHasTerrainFlag((pos){ x, y }, T_AUTO_DESCENT))) {
+        // iOS port (iBrogue): a thrown good potion applies its effect to the struck creature, and a
+        // visible tell auto-identifies it. Effect-always / tell-gated; falls through to the existing
+        // bad-potion shatter / harmless-splash paths below when there's no tell.
+        creature *struck = (pmap[x][y].flags & (HAS_MONSTER | HAS_PLAYER)) ? monsterAtLoc((pos){ x, y }) : NULL;
+        short potionMag = potionTable[theItem->kind].range.upperBound; // fixed magnitude (good potions: lo==hi)
+        if (struck
+            && theItem->kind < gameConst->numberGoodPotionKinds
+            && applyPotionEffectToCreature(struck, theItem->kind, potionMag)) {
+
+            autoIdentify(theItem);
+            refreshDungeonCell((pos){ x, y });
+            deleteItem(theItem);
+            return;
+        }
         if (theItem->kind == POTION_CONFUSION || theItem->kind == POTION_POISON
             || theItem->kind == POTION_PARALYSIS || theItem->kind == POTION_INCINERATION
             || theItem->kind == POTION_DARKNESS || theItem->kind == POTION_LICHEN
@@ -7247,6 +7264,71 @@ static void detectMagicOnItem(item *theItem) {
         && !(theItem->flags & ITEM_RUNIC)) {
 
         identify(theItem);
+    }
+}
+
+// iOS port (iBrogue): apply a thrown good potion's effect to the creature it shatters on.
+// Returns true only when a player-visible tell was produced (drives autoIdentify). The mechanical
+// effect always applies; visibility just gates the tell + ID. Telepathy/detect-magic and bad
+// potions return false. The player is never targeted (a thrown good potion shouldn't self-buff).
+static boolean applyPotionEffectToCreature(creature *monst, short potionKind, short magnitude) {
+    char buf[COLS], mName[COLS];
+    if (monst == &player) {
+        return false;
+    }
+    boolean visible = canSeeMonster(monst); // line-of-sight or telepathy
+    monsterName(mName, monst, true);
+    switch (potionKind) {
+        case POTION_LIFE:
+            // Silent here: when thrown, the healing-spore cloud message is the tell (see throwItem).
+            heal(monst, 100, true); // full panacea; heal() prints nothing when panacea is true
+            return visible;
+        case POTION_STRENGTH: {
+            // No monster strength stat: stand in a permanent durability buff (~half a life potion).
+            short buff = potionTable[POTION_LIFE].range.upperBound / 2; // info is a per-creature copy
+            monst->info.maxHP += buff;
+            monst->currentHP += buff;
+            if (visible) {
+                sprintf(buf, "%s's muscles bulge.", mName);
+                combatMessage(buf, NULL);
+            }
+            return visible;
+        }
+        case POTION_HASTE_SELF:
+            haste(monst, magnitude); // silent for monsters
+            if (visible) {
+                sprintf(buf, "%s speeds up.", mName);
+                combatMessage(buf, NULL);
+            }
+            return visible;
+        case POTION_LEVITATION:
+            monst->status[STATUS_LEVITATING] = monst->maxStatus[STATUS_LEVITATING] = magnitude;
+            if (visible) {
+                sprintf(buf, "%s floats into the air.", mName);
+                combatMessage(buf, NULL);
+            }
+            return visible;
+        case POTION_INVISIBILITY:
+            // imbueInvisibility flashes the monster and returns its own visibility-gated auto-ID.
+            return imbueInvisibility(monst, magnitude); // duration = potion magnitude, not the bolt's
+        case POTION_FIRE_IMMUNITY: {
+            boolean alreadyImmune = monst->status[STATUS_IMMUNE_TO_FIRE]
+                                    || (monst->info.flags & MONST_IMMUNE_TO_FIRE); // capture before set
+            monst->status[STATUS_IMMUNE_TO_FIRE] = monst->maxStatus[STATUS_IMMUNE_TO_FIRE] = magnitude;
+            // Only a visible signature if we actually snuff flames the player can see, on a creature
+            // that wasn't already immune (otherwise the potion changed nothing observable -> no ID).
+            if (!alreadyImmune
+                && monst->status[STATUS_BURNING]
+                && !(monst->info.flags & MONST_FIERY)
+                && visible) {
+                extinguishFireOnCreature(monst); // no monster-side visual on its own, so refresh here
+                refreshDungeonCell(monst->loc);
+                return true;
+            }
+            return false;
+        }
+        default: // POTION_TELEPATHY, POTION_DETECT_MAGIC (player-only) and any bad potion
+            return false;
     }
 }
 
