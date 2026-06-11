@@ -28,6 +28,30 @@ covers the separate Classic engine that ships in the app target).
 
 ## Change log
 
+### 2026-06-10 — Deductive thievery: monkeys and imps steal by preference (upstream PR #849)
+
+**What.** Thieving monsters no longer steal a uniformly random item. 90% of the time they pick by a
+weighted desirability score, 10% of the time they fall back to the old uniform pick. **Monkeys** favor
+food and potions of life/strength; **imps** favor scrolls of enchanting, positively-enchanted gear, and
+runics (and shy away from food). Because the thief "knows" an item's true nature, what it grabs is a hint
+toward that item's identity (e.g., a monkey snatching an unidentified potion suggests life or strength).
+
+**Why.** Ports [BrogueCE PR #849](https://github.com/tmewett/BrogueCE/pull/849) ("Deductive Thievery"),
+which fits the broader potion-ID theme by turning theft into an identification signal. **iOS-only — not
+contributed to a fork branch** (PR #849 is itself the upstream contribution).
+
+**Where.** `Combat.c` — a new `static short rateItemStealDesirability(creature *thief, item *theItem)`
+defined just above `specialHit`, and the theft item-selection in `specialHit` (the `MA_HIT_STEAL_FLEE`
+block) replaced with the 10%-uniform / 90%-weighted-roulette scheme. `Globals.c` — monkey and imp monster
+descriptions reworded to hint at their new preferences. (`choiceRoll` is declared `long` to match
+`rand_range`'s return type and avoid an Xcode 64→32 narrowing warning; the upstream PR used `int`.)
+
+**Determinism.** No new common-path RNG and no serialized state. The theft draw changes (an extra
+`rand_percent(10)`, and the weighted `rand_range` over scores instead of a flat `rand_range` over
+candidates), but theft is an action-triggered combat event — it diverges the RNG stream only when a
+monkey/imp actually steals, not on every turn — so it's a self-consistent action-triggered divergence,
+like the thrown-potion and bolt-detonation changes.
+
 ### 2026-06-10 — Thrown hallucination potions bloom a fungal forest, and bolts detonate them (upstream PR #842 + bolt extension)
 
 **What.** A thrown potion of hallucination now spawns a **luminescent fungal forest** at the impact tile

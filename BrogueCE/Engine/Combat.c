@@ -384,6 +384,41 @@ static boolean playerImmuneToMonster(creature *monst) {
     }
 }
 
+// iOS port (iBrogue): port of upstream PR #849 ("Deductive Thievery"). Scores how much a given thief wants
+// to steal a given item, turning theft into an identification hint: monkeys favor food and potions of life
+// or strength; imps favor scrolls of enchanting, positively-enchanted gear, and runics (and dislike food).
+// Pure scoring (no RNG); the weighted draw happens at the call site in specialHit.
+static short rateItemStealDesirability(creature *thief, item *theItem) {
+    if (!theItem) {
+        return 0;
+    }
+    short score = 10; // base desirability for any item
+    if (thief->info.monsterID == MK_MONKEY) {
+        if (theItem->category & FOOD) {
+            score += 50;
+        } else if (theItem->category & POTION) {
+            if (theItem->kind == POTION_LIFE || theItem->kind == POTION_STRENGTH) {
+                score += 50;
+            }
+        }
+    } else if (thief->info.monsterID == MK_IMP) {
+        if ((theItem->category & SCROLL) && theItem->kind == SCROLL_ENCHANTING) {
+            score += 50;
+        } else if (theItem->category & (RING | CHARM | STAFF | WEAPON | ARMOR)) {
+            if (theItem->enchant1 > 0) { // imps sense positive enchantment even when the player can't
+                score += theItem->enchant1 * 5;
+            }
+            if (theItem->flags & ITEM_RUNIC) {
+                score += 25;
+            }
+        }
+        if (theItem->category & FOOD) {
+            score -= 8;
+        }
+    }
+    return max(1, score);
+}
+
 static void specialHit(creature *attacker, creature *defender, short damage) {
     short itemCandidates, randItemIndex, stolenQuantity;
     item *theItem = NULL, *itemFromTopOfStack;
@@ -437,13 +472,34 @@ static void specialHit(creature *attacker, creature *defender, short damage) {
 
             itemCandidates = numberOfMatchingPackItems(ALL_ITEMS, 0, (ITEM_EQUIPPED), false);
             if (itemCandidates) {
-                randItemIndex = rand_range(1, itemCandidates);
-                for (theItem = packItems->nextItem; theItem != NULL; theItem = theItem->nextItem) {
-                    if (!(theItem->flags & (ITEM_EQUIPPED))) {
-                        if (randItemIndex == 1) {
-                            break;
-                        } else {
-                            randItemIndex--;
+                // iOS port (iBrogue): PR #849 — 10% of the time pick uniformly at random (legacy); 90% of
+                // the time pick by weighted steal-desirability, so theft hints at item identity.
+                if (rand_percent(10)) {
+                    randItemIndex = rand_range(1, itemCandidates);
+                    for (theItem = packItems->nextItem; theItem != NULL; theItem = theItem->nextItem) {
+                        if (!(theItem->flags & (ITEM_EQUIPPED))) {
+                            if (randItemIndex == 1) {
+                                break;
+                            } else {
+                                randItemIndex--;
+                            }
+                        }
+                    }
+                } else {
+                    int totalScoreSum = 0;
+                    for (theItem = packItems->nextItem; theItem != NULL; theItem = theItem->nextItem) {
+                        if (!(theItem->flags & (ITEM_EQUIPPED))) {
+                            totalScoreSum += rateItemStealDesirability(attacker, theItem);
+                        }
+                    }
+                    long choiceRoll = rand_range(1, totalScoreSum); // totalScoreSum >= 1 (itemCandidates > 0)
+                    int runningSum = 0;
+                    for (theItem = packItems->nextItem; theItem != NULL; theItem = theItem->nextItem) {
+                        if (!(theItem->flags & (ITEM_EQUIPPED))) {
+                            runningSum += rateItemStealDesirability(attacker, theItem);
+                            if (runningSum >= choiceRoll) {
+                                break;
+                            }
                         }
                     }
                 }
