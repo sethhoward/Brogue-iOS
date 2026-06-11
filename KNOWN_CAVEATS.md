@@ -6,10 +6,9 @@ it's listed, it's a documented decision, not a regression. When you fix one, mov
 to a "Resolved" note or delete it. When you accept a new tradeoff, add it.
 
 Most entries below are from the iPhone touch/zoom work (pinch-to-zoom, the bottom
-button tap-band, both-landscape support, d-pad notch avoidance). Pinch-to-zoom is a
-toggle (title → Options → "Pinch zoom (experimental)"), now **on by default** — an
-explicit prior choice is respected (see `RogueScene.isPinchZoomEnabledSetting`). The
-zoom-related caveats apply whenever it's enabled, i.e. by default.
+button tap-band, both-landscape support, d-pad notch avoidance). Pinch-to-zoom is
+**always on** on iPhone (no user toggle) and the zoom-related caveats apply on every
+iPhone run.
 
 ## Pinch-to-zoom (iPhone)
 
@@ -17,8 +16,8 @@ zoom-related caveats apply whenever it's enabled, i.e. by default.
   zoom container scales them up, so at ~2.5× they look fuzzy. Re-rendering textures per
   zoom level is out of scope.
 - **`SKCropNode` adds an offscreen pass.** The zoom layer composites the dungeon cells
-  through a crop node; on older iPhones watch the frame rate. Only active when the
-  experimental zoom is on (the layer is built lazily).
+  through a crop node; on older iPhones watch the frame rate. iPhone only (the layer is
+  built on scene setup; iPad keeps the flat grid).
 - **Zoom transform can be briefly off after a mid-game rotation.** If you're zoomed and
   rotate between landscapes, the pan/clamp may be momentarily wrong until the next pan or
   player move re-clamps it. There is no zoom reset on rotation (self-correcting).
@@ -41,8 +40,8 @@ zoom-related caveats apply whenever it's enabled, i.e. by default.
   tap does. Also cleared when the box ends or on a competing input (map tap, bottom-bar
   button). So boxes that auto-appear — auto-explore stopping on an item, a tap-to-move over
   a monster — and map-tap / long-press examines do **not** zoom out. The whole behavior is
-  an Options toggle, **"Zoom out on examine" (default on)**, shown only when pinch zoom is
-  on (`RogueScene.isExamineZoomEnabledSetting`). Side effect of the defer: the zoom-out
+  an Options toggle, **"Zoom out on examine" (default on)**
+  (`RogueScene.isExamineZoomEnabledSetting`). Side effect of the defer: the zoom-out
   begins ~0.3s after the tap (the box itself still appears immediately).
 - **While the zoom layer is up, engine-thread draws are buffered and flushed in
   `RogueScene.update(_:)`.** The engine runs `rogueMain()` on a background thread and, in

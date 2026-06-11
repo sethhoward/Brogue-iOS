@@ -404,13 +404,10 @@ final class BrogueViewController: UIViewController {
     private var leftHandMagnifier: Bool =
         UserDefaults.standard.bool(forKey: leftHandMagnifierDefaultsKey) // default off (right-handed)
 
-    /// iPhone pinch-to-zoom (dungeon map). Persisted, **default on** (an explicit
-    /// prior choice is respected — see RogueScene.isPinchZoomEnabledSetting).
-    /// Gates the zoom gestures, the multi-touch handling, and the scene's zoom
-    /// layer — when off, everything behaves exactly as before the feature shipped.
-    private var pinchZoomEnabled: Bool = RogueScene.isPinchZoomEnabledSetting
-    /// True only when the feature is both available (iPhone) and switched on.
-    private var pinchZoomActive: Bool { isPhoneIdiom && pinchZoomEnabled }
+    /// iPhone pinch-to-zoom (dungeon map) is always on; there is no user toggle.
+    /// True only on the iPhone idiom, where the zoomable scene exists (iPad keeps
+    /// the flat, un-zoomable grid).
+    private var pinchZoomActive: Bool { isPhoneIdiom }
 
     /// When on (default), single-tapping a sidebar entity zooms out to 1× so its
     /// description box isn't clipped while zoomed. Toggleable in Options.
@@ -960,6 +957,15 @@ final class BrogueViewController: UIViewController {
         }
     }
 
+    /// Invoked from the BrogueCE engine's title menu (View > "Game Center" item).
+    /// Opens the CE-specific leaderboard, separate from Classic's.
+    @objc func presentGameCenterScreenForCE() {
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self, self.presentedViewController == nil else { return }
+            GameCenter.shared.showLeaderboard(id: GameCenter.ceHighScoreLeaderboardID, from: self)
+        }
+    }
+
     /// Sets each button's face to the SF Symbol for its bound command.
     private func refreshActionButtonTitles() {
         for (slot, button) in actionButtons.enumerated() where slot < sideButtonKeys.count {
@@ -1414,23 +1420,15 @@ final class BrogueViewController: UIViewController {
                                          image: UIImage(systemName: "magnifyingglass")) { [weak self] _ in
                 self?.toggleLeftHandMagnifier()
             }
-            // Experimental: pinch-to-zoom the dungeon map. Default off.
-            let pinchZoom = UIAction(title: "Pinch zoom (experimental)",
-                                     image: UIImage(systemName: "arrow.up.left.and.arrow.down.right"),
-                                     state: pinchZoomEnabled ? .on : .off) { [weak self] _ in
-                self?.togglePinchZoom()
+            children.append(contentsOf: [haptics, magnifierSide])
+            // Pinch-to-zoom is always on; this sub-option zooms out to show a tapped
+            // sidebar entity's description box so it isn't clipped while zoomed.
+            let examineZoom = UIAction(title: "Zoom out on examine",
+                                       image: UIImage(systemName: "sidebar.left"),
+                                       state: examineZoomEnabled ? .on : .off) { [weak self] _ in
+                self?.toggleExamineZoom()
             }
-            children.append(contentsOf: [haptics, magnifierSide, pinchZoom])
-            // Sub-option of pinch zoom: zoom out to show a tapped sidebar entity's
-            // description. Only relevant (and only shown) when pinch zoom is on.
-            if pinchZoomEnabled {
-                let examineZoom = UIAction(title: "Zoom out on examine",
-                                           image: UIImage(systemName: "sidebar.left"),
-                                           state: examineZoomEnabled ? .on : .off) { [weak self] _ in
-                    self?.toggleExamineZoom()
-                }
-                children.append(examineZoom)
-            }
+            children.append(examineZoom)
         }
 
         children.append(resetDirections)
@@ -1443,16 +1441,6 @@ final class BrogueViewController: UIViewController {
         leftHandMagnifier.toggle()
         UserDefaults.standard.set(leftHandMagnifier, forKey: BrogueViewController.leftHandMagnifierDefaultsKey)
         magView.leftHandMode = leftHandMagnifier
-        fireHaptic()
-        optionsButton?.menu = optionsMenu()
-    }
-
-    /// Flips the experimental pinch-zoom setting, persists it, builds/tears down
-    /// the scene's zoom layer and recognizers, and rebuilds the menu.
-    private func togglePinchZoom() {
-        pinchZoomEnabled.toggle()
-        UserDefaults.standard.set(pinchZoomEnabled, forKey: RogueScene.pinchZoomEnabledDefaultsKey)
-        applyPinchZoomEnabled()
         fireHaptic()
         optionsButton?.menu = optionsMenu()
     }
@@ -1613,7 +1601,7 @@ final class BrogueViewController: UIViewController {
         return [
             .note("How BrogueCE differs from the original Brogue (\"Classic\"). Switch engines from the title screen to compare."),
             .heading("Gameplay Differences"),
-            .note("The changes below have some impact on game difficulty."),
+            .note("The changes below have some impact on game difficulty and is not a comprehensive list."),
             .section("Monsters"),
             .bullets([
                 "Dar priestesses are now included in the 'Mage' monster class. A weapon of mage slaying will instantly kill them, and armor of mage immunity will provide invulnerability to their feeble attacks.",
@@ -1648,8 +1636,7 @@ final class BrogueViewController: UIViewController {
             .section("Mechanics"),
             .bullets([
                 "Fixed a bug which caused hunting monsters to have a 97% chance to lose track of the player for each turn they spend outside of the player's stealth range, instead of the intended 3% chance.",
-                "Revamped the searching system. Instead of performing a strong search only after five consecutive turns of pressing 's', you now perform a weaker, single-turn search every time you press 's', with a stronger one on the fifth.",
-                "(Control+s will perform five searches, stopping if interrupted, just like the old 'S'.)",
+                "Revamped the searching system. Instead of performing a strong search only after five consecutive turns of pressing 's', you now perform a weaker, single-turn search every time you press 's', with a stronger one on the fifth."
             ]),
             .section("Informational"),
             .bullets([
@@ -1665,7 +1652,6 @@ final class BrogueViewController: UIViewController {
             .section("Notable Enhancements"),
             .bullets([
                 "Improved stability. Game crashes and out-of-sync errors are rare.",
-                "Improved performance and decreased CPU usage.",
                 "Added support for Oryx's graphical tiles (toggle in-game with the 'G' key). Your text/tiles choice is remembered for future runs.",
             ]),
         ]
@@ -2040,31 +2026,12 @@ extension BrogueViewController: UIGestureRecognizerDelegate {
         toggle.numberOfTouchesRequired = 2
         toggle.numberOfTapsRequired = 2
         toggle.delegate = self
-        pinch.isEnabled = pinchZoomEnabled
-        pan.isEnabled = pinchZoomEnabled
-        toggle.isEnabled = pinchZoomEnabled
         skViewPort.addGestureRecognizer(pinch)
         skViewPort.addGestureRecognizer(pan)
         skViewPort.addGestureRecognizer(toggle)
         zoomPinch = pinch
         zoomPan = pan
         zoomToggle = toggle
-    }
-
-    /// Applies the experimental pinch-zoom toggle: builds/tears down the scene's
-    /// zoom layer and enables/disables the recognizers. Title-screen only, so a
-    /// mid-game scene rebuild is never in play.
-    private func applyPinchZoomEnabled() {
-        guard isPhoneIdiom else { return }
-        if pinchZoomEnabled {
-            skViewPort.rogueScene.enableZoomLayer()
-        } else {
-            resetZoom()
-            skViewPort.rogueScene.disableZoomLayer()
-        }
-        zoomPinch?.isEnabled = pinchZoomEnabled
-        zoomPan?.isEnabled = pinchZoomEnabled
-        zoomToggle?.isEnabled = pinchZoomEnabled
     }
 
     // Pinch + two-finger pan + the two-finger double-tap toggle must run together,

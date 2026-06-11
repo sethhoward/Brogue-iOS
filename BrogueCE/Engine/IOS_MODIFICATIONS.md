@@ -197,8 +197,22 @@ the eighth, `brogue_untempted` (FEAT_TONE / "Untempted"), is CE-only and must be
 App Store Connect.
 
 **Gating.** Standard Brogue only (`gameVariant == VARIANT_BROGUE`); wizard runs never
-report. On death only non-`initialValue` feats count; on victory/supervictory all set feats
-count; quit reports score only — mirroring Classic's death()/victory().
+report. Only completed runs report to the leaderboard — `GAMEOVER_QUIT` (quit/abandon) and
+`GAMEOVER_RECORDING` (playback) are not forwarded, so giving up never posts a score. On
+death only non-`initialValue` feats count; on victory/supervictory all set feats count.
+(Note: the engine's *local* high-scores list still records quits via its own
+`saveHighScore()`, matching upstream — only the online leaderboard excludes them.)
+
+**Title-menu entry.** Added a "Game Center" item to the title screen's **main menu**
+(after File Management), opening the `BrogueCE_High_Score` leaderboard. New
+`NG_GAME_CENTER` command in the `NGCommands` enum (`Rogue.h`); the button + dispatch case
+live in `MainMenu.c` (`initializeMainMenuButtons`, with `MAIN_MENU_BUTTON_COUNT` bumped to
+5 tablet / 6 desktop; the `NG_GAME_CENTER` case calls `extern void ceShowGameCenter(void)`).
+The bridge's
+`ceShowGameCenter()` → `BrogueCEHost.presentGameCenter` → `CEHost` →
+`BrogueViewController.presentGameCenterScreenForCE()`. Mirrors the existing
+`NG_FILE_MANAGEMENT` / `ceShowFileManagement` plumbing; the leaderboard is presented as a
+modal on the main thread while the engine stays at the title.
 
 ---
 

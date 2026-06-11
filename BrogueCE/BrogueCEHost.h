@@ -62,6 +62,10 @@ NS_ASSUME_NONNULL_BEGIN
 // scoped to the CE save directory.
 - (void)presentFileManagement;
 
+// Present the Game Center leaderboard (CE title menu's View > "Game Center"
+// entry), scoped to the CE leaderboard (BrogueCE_High_Score).
+- (void)presentGameCenter;
+
 // Fire a haptic when the player takes damage, scaled by severity (0 = ordinary
 // hit, 1 = now under 40% health, 2 = fatal). The host gates this on its own
 // haptics setting and device support, so the engine can call it freely.
