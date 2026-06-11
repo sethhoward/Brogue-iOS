@@ -28,6 +28,26 @@ covers the separate Classic engine that ships in the app target).
 
 ## Change log
 
+### 2026-06-10 — Halve the detect-magic potion's generation frequency (Brogue)
+
+**What.** The potion of detect magic now appears about half as often: its `frequency` in
+`potionTable_Brogue` drops from **20 to 10**.
+
+**Why.** Tuning request — detect magic was showing up too readily, undercutting the deliberate,
+costed identification the potion-ID rework is built around.
+
+**Where.** `GlobalsBrogue.c` — the `"detect magic"` row of `potionTable_Brogue`. In the Brogue variant
+detect magic is **not metered and not guaranteed** (its `meteredItemsGenerationTable_Brogue` entry is bare
+defaults with `incrementFrequency == 0`, so the metered system never overrides its frequency — Items.c:683
+— and it has no `levelGuarantee`). Its appearance is therefore driven purely by this static `frequency`,
+which feeds the weighted pick in `chooseKind` (Items.c:417-421). Halving it halves detect magic's share of
+potion generation. **Brogue variant only / iOS-only — not contributed to a fork branch.** (Rapid and Bullet
+guarantee detect magic via `levelGuarantee`, so frequency matters far less there; left untouched.)
+
+**Determinism.** This changes item generation, so the weighted pick consumes RNG differently and pre-change
+recordings diverge on replay — a per-variant `recordingVersionString` bump at release is warranted (the diff
+does not bump it). No new state or RNG call sites; it's a table-value change.
+
 ### 2026-06-10 — Benevolent potions glow harmlessly when a bolt crosses them
 
 **What.** A fire or lightning bolt that crosses a dropped **benevolent** potion (the eight good kinds —
