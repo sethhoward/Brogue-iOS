@@ -79,6 +79,13 @@ NS_ASSUME_NONNULL_BEGIN
 // screen refresh, so the host's iPhone pinch-zoom can keep the player centered.
 - (void)setPlayerWindowX:(short)x y:(short)y;
 
+// --- Game Center ------------------------------------------------------------
+// Invoked at game over with the final score, for the CE leaderboard. The bridge
+// has already filtered out non-standard variants and wizard runs before calling.
+- (void)reportCEScore:(long)score;
+// Unlock a Game Center achievement by its App Store Connect identifier.
+- (void)submitCEAchievementWithID:(NSString *)identifier;
+
 @end
 
 #ifdef __cplusplus

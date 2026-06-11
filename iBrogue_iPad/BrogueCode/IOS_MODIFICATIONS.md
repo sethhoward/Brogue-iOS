@@ -23,6 +23,33 @@ future maintainers (human or AI) don't mistake an intentional port change for a 
 
 ## Change log
 
+### 2026-06-11 — Port BrogueCE's rethrow command
+
+**What.** Added the rethrow command (`RETHROW_KEY`, Shift+T): repeat the last thrown
+item, auto-aiming at the last target. Classic did not have this command at all.
+
+**Why.** A keyboard shortcut bound to `RETHROW_KEY` carries over when a player plays
+BrogueCE and then switches to Classic. Classic's `executeKeystroke` had no case for it,
+so the key silently no-opped. Porting CE's behavior makes the shortcut work instead of
+appearing broken.
+
+**Where.**
+- `Rogue.h` — `#define RETHROW_KEY 'T'`; `item *lastItemThrown;` added to the `rogue`
+  struct (after `lastTarget`); `throwCommand` gains a `boolean autoThrow` parameter.
+- `Items.c` — `throwCommand(item *theItem, boolean autoThrow)`: when `autoThrow` and
+  `rogue.lastTarget` is a valid, visible, reachable enemy on this depth, skip the
+  targeting prompt and aim there directly (predicate matches `chooseTarget`'s own
+  auto-target gate). After a successful throw, save `rogue.lastItemThrown` (the carried
+  stack) or clear it when the last one was thrown. The inventory-action caller passes
+  `false`.
+- `IO.c` — `executeKeystroke` gains a `RETHROW_KEY` case: rethrow when
+  `lastItemThrown != NULL && itemIsCarried(...)`, else fall through to a normal throw
+  prompt (`throwCommand(NULL, false)`) — same no-op-avoidance as the CE side.
+
+This doesn't affect the save/recording format: rethrow expands to the same recorded
+keystroke sequence as a normal throw (`THROW_KEY` + item letter + target click), so
+playback is unchanged.
+
 ### 2026-06-06 — Suspend pinch-zoom while an entity description box is shown
 
 **What.** When a creature/item description box lingers in the cursor loop (e.g. the

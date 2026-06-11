@@ -174,6 +174,34 @@ in-game safe-area insets and the view visibly shrank before any game had loaded.
 
 ---
 
+### 2026-06-11 — Game Center leaderboard & achievements
+
+**What.** Implemented the `notifyEvent` platform hook in `CEBridge.mm` so CE reports its
+final score to a new `BrogueCE_High_Score` leaderboard and unlocks Game Center
+achievements for earned feats. Added two `BrogueCEHost` methods — `reportCEScore:` and
+`submitCEAchievementWithID:` — forwarded by `CEHost.swift` to the shared `GameCenter`
+singleton (`ceHighScoreLeaderboardID` / `submitAchievement`). The on-screen leaderboard
+button (`BrogueViewController.showLeaderBoardButtonPressed`) now picks the board by the
+active engine.
+
+**Why.** Classic already reports to Game Center (directly from `RogueMain.mm`); CE's
+score/feats were local-only. CE lives in a framework that can't see the app's classes, so
+it must route through the host protocol instead of calling `GameCenter` directly.
+
+**Where.** No vendored `Engine/` C was changed — the engine already calls
+`notifyEvent(GAMEOVER_*, score, …)` at game over. `CEBridge.mm`'s `ceReportGameOver()`
+reads the engine globals `rogue.featRecord` / `featTable` / `gameConst` / `gameVariant`
+and maps the `featTypes` enum to achievement IDs via `kCEAchievementIDForFeat[]`. Seven
+feats reuse the Classic engine's achievement IDs (Game Center achievements are app-global);
+the eighth, `brogue_untempted` (FEAT_TONE / "Untempted"), is CE-only and must be created in
+App Store Connect.
+
+**Gating.** Standard Brogue only (`gameVariant == VARIANT_BROGUE`); wizard runs never
+report. On death only non-`initialValue` feats count; on victory/supervictory all set feats
+count; quit reports score only — mirroring Classic's death()/victory().
+
+---
+
 ## Platform functions implemented in `CEBridge.mm`
 
 These engine-declared platform functions were upstream stubs in this port and are now
@@ -183,9 +211,11 @@ implemented in the bridge (not the engine C, but listed here for orientation):
 - `getHighScoresList` / `saveHighScore` — local high scores (NSUserDefaults, CE keys).
 - `saveRunHistory` / `saveResetRun` / `loadRunHistory` — the lifetime game-stats
   history (NSUserDefaults, CE keys; `seed == 0` is the "reset recent stats" sentinel).
+- `notifyEvent` — CE → Game Center score/achievement reporting at game over (see the
+  2026-06-11 entry above). Local high scores remain in NSUserDefaults; this adds the
+  online leaderboard/achievements on top.
 
-Still stubbed: `takeScreenshot`, `notifyEvent` (the latter is where CE → Game Center
-score/achievement reporting would hook in; CE high scores are currently local-only).
+Still stubbed: `takeScreenshot`.
 
 ---
 
