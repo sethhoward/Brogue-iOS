@@ -979,6 +979,10 @@ typedef struct machineData {
     short sCols[DCOLS];
 } machineData;
 
+// iOS port (iBrogue): defined below; places a linked altar pair (used by the transference altar, which is
+// raffle-built and so can't be hooked from addMachines the way the force-built insight altars are).
+static void placeAltarPairInRoom(short minMachineNumber, enum tileType westAltar, enum tileType eastAltar, boolean statueAbove);
+
 // Returns true if the machine got built; false if it was aborted.
 // If empty array parentSpawnedItems or parentSpawnedMonsters is given, will pass those back for deletion if necessary.
 boolean buildAMachine(enum machineTypes bp,
@@ -1712,6 +1716,16 @@ boolean buildAMachine(enum machineTypes bp,
     freeGrid(distanceMap);
     if (D_MESSAGE_MACHINE_GENERATION) printf("\nDepth %i: Built a machine from blueprint %i:%s with an origin at (%i, %i).", rogue.depthLevel, bp, blueprintCatalog[bp].name, originX, originY);
 
+    // iOS port (iBrogue): the transference-altar blueprint builds only the room; place its donor/recipient
+    // pair here in a fixed "s . o" layout (donor west, recipient east), the same way the insight altars are
+    // placed in addMachines. We do it here rather than in addMachines because this machine enters the random
+    // reward raffle -- buildAMachine(-1, ..., BP_REWARD, ...) picks the blueprint internally, so addMachines
+    // never learns which blueprint it built. Passing machineNumber - 1 selects this machine's cells (those
+    // with machineNumber == machineNumber). Brogue-only: this blueprint index exists only in Brogue's catalog.
+    if (gameVariant == VARIANT_BROGUE && bp == MT_TRANSFER_ALTAR) {
+        placeAltarPairInRoom(machineNumber - 1, TRANSFER_ALTAR_DONOR, TRANSFER_ALTAR_RECIPIENT, true);
+    }
+
     //Pass created items and monsters to parent where they will be deleted on failure to place parent machine
     if (parentSpawnedItems) {
         for (int i=0; i<itemCount; i++) {
@@ -1729,8 +1743,8 @@ boolean buildAMachine(enum machineTypes bp,
 }
 
 // iOS port (iBrogue): true if (x, y) is an open carpeted interior cell of a machine built after
-// minMachineNumber (i.e. the altars-of-insight room we just built) and free to receive an altar.
-static boolean insightAltarCellIsOpen(short x, short y, short minMachineNumber) {
+// minMachineNumber (i.e. the paired-altar room we just built) and free to receive an altar.
+static boolean altarPairCellIsOpen(short x, short y, short minMachineNumber) {
     return coordinatesAreInMap(x, y)
         && pmap[x][y].machineNumber > minMachineNumber
         && (pmap[x][y].flags & IS_IN_ROOM_MACHINE)
@@ -1738,22 +1752,30 @@ static boolean insightAltarCellIsOpen(short x, short y, short minMachineNumber) 
         && !(pmap[x][y].flags & (HAS_ITEM | HAS_MONSTER));
 }
 
-static void setInsightAltar(short x, short y, enum tileType altar) {
+static void setAltarTile(short x, short y, enum tileType altar, short minMachineNumber, boolean statueAbove) {
     pmap[x][y].layers[DUNGEON] = altar;
     refreshDungeonCell((pos){ x, y });
+    // iOS port (iBrogue): the transference altars each wear a statue directly to the north, so the room
+    // reads differently at a glance from the bare altar/gap/altar arrangement of the other altar rooms.
+    // Skipped if the cell to the north isn't open interior carpet (e.g. the altar abuts the north wall).
+    if (statueAbove && altarPairCellIsOpen(x, y - 1, minMachineNumber)) {
+        pmap[x][y - 1].layers[DUNGEON] = STATUE_INERT;
+        refreshDungeonCell((pos){ x, y - 1 });
+    }
 }
 
-// iOS port (iBrogue): place the two insight altars in a fixed, readable layout -- the sacrifice (payment)
-// altar to the west, a one-tile gap, then the insight altar to the east (#....s.o....#). The generic
-// machine builder picks random interior cells and spreads features apart with personalSpace, so it can't
-// produce an ordered adjacent pair; we place them here instead. Deterministic (no RNG, so replay is
-// unaffected). minMachineNumber is rogue.machineNumber captured before the build, so any cell with a
-// greater machineNumber belongs to the room we just built.
-static void placeInsightAltarsInRoom(short minMachineNumber) {
+// iOS port (iBrogue): place a linked altar pair in a fixed, readable layout -- the west altar, a one-tile
+// gap, then the east altar (#....w.e....#). Used by the altars of insight (payment west, insight east) and
+// the altars of transference (donor west, recipient east). The generic machine builder picks random
+// interior cells and spreads features apart with personalSpace, so it can't produce an ordered adjacent
+// pair; we place them here instead. Deterministic (no RNG, so replay is unaffected). minMachineNumber is
+// rogue.machineNumber captured before the build, so any cell with a greater machineNumber belongs to the
+// room we just built.
+static void placeAltarPairInRoom(short minMachineNumber, enum tileType westAltar, enum tileType eastAltar, boolean statueAbove) {
     int cx = 0, cy = 0, count = 0;
     for (short i = 0; i < DCOLS; i++) {
         for (short j = 0; j < DROWS; j++) {
-            if (insightAltarCellIsOpen(i, j, minMachineNumber)) {
+            if (altarPairCellIsOpen(i, j, minMachineNumber)) {
                 cx += i;
                 cy += j;
                 count++;
@@ -1766,15 +1788,15 @@ static void placeInsightAltarsInRoom(short minMachineNumber) {
     cx /= count;
     cy /= count;
 
-    // Preferred: a horizontal run of three open cells (s, gap, o), centered as close to the room
+    // Preferred: a horizontal run of three open cells (w, gap, e), centered as close to the room
     // center as possible.
     short bestX = -1, bestY = -1;
     int bestDist = -1;
     for (short j = 0; j < DROWS; j++) {
         for (short i = 0; i < DCOLS - 2; i++) {
-            if (insightAltarCellIsOpen(i, j, minMachineNumber)
-                && insightAltarCellIsOpen(i + 1, j, minMachineNumber)
-                && insightAltarCellIsOpen(i + 2, j, minMachineNumber)) {
+            if (altarPairCellIsOpen(i, j, minMachineNumber)
+                && altarPairCellIsOpen(i + 1, j, minMachineNumber)
+                && altarPairCellIsOpen(i + 2, j, minMachineNumber)) {
 
                 const int dist = abs((i + 1) - cx) + abs(j - cy);
                 if (bestDist < 0 || dist < bestDist) {
@@ -1786,34 +1808,34 @@ static void placeInsightAltarsInRoom(short minMachineNumber) {
         }
     }
     if (bestX >= 0) {
-        setInsightAltar(bestX, bestY, INSIGHT_ALTAR_PAYMENT);         // sacrifice (s), west
-        setInsightAltar(bestX + 2, bestY, INSIGHT_ALTAR_INSIGHT);     // offering (o), east, one-tile gap
+        setAltarTile(bestX, bestY, westAltar, minMachineNumber, statueAbove);             // west
+        setAltarTile(bestX + 2, bestY, eastAltar, minMachineNumber, statueAbove);         // east, one-tile gap
         return;
     }
 
-    // Fallback 1: two horizontally adjacent open cells (s o, no gap).
+    // Fallback 1: two horizontally adjacent open cells (w e, no gap).
     for (short j = 0; j < DROWS; j++) {
         for (short i = 0; i < DCOLS - 1; i++) {
-            if (insightAltarCellIsOpen(i, j, minMachineNumber)
-                && insightAltarCellIsOpen(i + 1, j, minMachineNumber)) {
+            if (altarPairCellIsOpen(i, j, minMachineNumber)
+                && altarPairCellIsOpen(i + 1, j, minMachineNumber)) {
 
-                setInsightAltar(i, j, INSIGHT_ALTAR_PAYMENT);
-                setInsightAltar(i + 1, j, INSIGHT_ALTAR_INSIGHT);
+                setAltarTile(i, j, westAltar, minMachineNumber, statueAbove);
+                setAltarTile(i + 1, j, eastAltar, minMachineNumber, statueAbove);
                 return;
             }
         }
     }
 
     // Fallback 2: any two open cells, so the altars always exist.
-    boolean placedPayment = false;
+    boolean placedWest = false;
     for (short i = 0; i < DCOLS; i++) {
         for (short j = 0; j < DROWS; j++) {
-            if (insightAltarCellIsOpen(i, j, minMachineNumber)) {
-                if (!placedPayment) {
-                    setInsightAltar(i, j, INSIGHT_ALTAR_PAYMENT);
-                    placedPayment = true;
+            if (altarPairCellIsOpen(i, j, minMachineNumber)) {
+                if (!placedWest) {
+                    setAltarTile(i, j, westAltar, minMachineNumber, statueAbove);
+                    placedWest = true;
                 } else {
-                    setInsightAltar(i, j, INSIGHT_ALTAR_INSIGHT);
+                    setAltarTile(i, j, eastAltar, minMachineNumber, statueAbove);
                     return;
                 }
             }
@@ -1855,7 +1877,7 @@ static void addMachines() {
             if (buildAMachine(MT_INSIGHT_ALTAR, -1, -1, 0, NULL, NULL, NULL)) {
                 // iOS port (iBrogue): the blueprint built only the room; place the altar pair here in a
                 // fixed s . o layout (the builder won't do ordered/adjacent placement itself).
-                placeInsightAltarsInRoom(preInsightMachineNumber);
+                placeAltarPairInRoom(preInsightMachineNumber, INSIGHT_ALTAR_PAYMENT, INSIGHT_ALTAR_INSIGHT, false);
                 break;
             }
         }

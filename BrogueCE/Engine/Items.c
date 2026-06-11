@@ -411,13 +411,38 @@ item *makeItemInto(item *theItem, unsigned long itemCategory, short itemKind) {
     return theItem;
 }
 
+// iOS port (iBrogue): which potion kinds are absent this run (the inactive themed set). Set in
+// shuffleFlavors from rogue.activePotionSet; consulted by generation (chooseKind below) and the
+// Discoveries screen (IO.c, via potionKindAbsentThisSeed). Not serialized -- recomputed each game/
+// replay from the seed, so it stays deterministic.
+static boolean potionAbsentThisSeed[64];
+
+boolean potionKindAbsentThisSeed(short kind) {
+    if (kind < 0 || kind >= (short)(sizeof(potionAbsentThisSeed) / sizeof(potionAbsentThisSeed[0]))) {
+        return false;
+    }
+    return potionAbsentThisSeed[kind];
+}
+
 short chooseKind(const itemTable *theTable, short numKinds) {
     short i, totalFrequencies = 0, randomFrequency;
+    // iOS port (iBrogue): the inactive themed set's potions never generate, even though their table
+    // frequency stays 10. Skip them here so they're excluded from the weighted draw.
+    const boolean isPotion = (theTable == potionTable);
     for (i=0; i<numKinds; i++) {
+        if (isPotion && potionAbsentThisSeed[i]) {
+            continue;
+        }
         totalFrequencies += max(0, theTable[i].frequency);
     }
     randomFrequency = rand_range(1, totalFrequencies);
-    for (i=0; randomFrequency > theTable[i].frequency; i++) {
+    for (i=0; ; i++) {
+        if (isPotion && potionAbsentThisSeed[i]) {
+            continue;
+        }
+        if (randomFrequency <= theTable[i].frequency) {
+            break;
+        }
         randomFrequency -= max(0, theTable[i].frequency);
     }
     return i;
@@ -1197,6 +1222,9 @@ static boolean swapItemEnchants(const short machineNumber) {
 // iOS port (iBrogue): the altars-of-insight machine; defined below near detectMagicOnItem.
 static boolean performInsightSacrifice(short machineNumber);
 
+// iOS port (iBrogue): the altars-of-transference machine; defined below near performInsightSacrifice.
+static boolean performEnchantTransfer(short machineNumber);
+
 void updateFloorItems() {
     short x, y;
     char buf[DCOLS*3], buf2[DCOLS*3];
@@ -1309,6 +1337,25 @@ void updateFloorItems() {
 
             if (!circuitBreakersPreventActivation(pmap[x][y].machineNumber)
                 && performInsightSacrifice(pmap[x][y].machineNumber)) {
+
+                activateMachine(pmap[x][y].machineNumber);
+            }
+        }
+
+        // iOS port (iBrogue): sibling of the commutation block — the altars-of-transference machine.
+        if (cellHasTMFlag((pos){ x, y }, TM_TRANSFER_ENCHANT_ACTIVATION)
+            && pmap[x][y].machineNumber) {
+
+            while (nextItem != NULL
+                   && pmap[x][y].machineNumber == pmapAt(nextItem->loc)->machineNumber
+                   && cellHasTMFlag(nextItem->loc, TM_TRANSFER_ENCHANT_ACTIVATION)) {
+
+                // Skip future items in this machine so we don't update the consumed donor.
+                nextItem = nextItem->nextItem;
+            }
+
+            if (!circuitBreakersPreventActivation(pmap[x][y].machineNumber)
+                && performEnchantTransfer(pmap[x][y].machineNumber)) {
 
                 activateMachine(pmap[x][y].machineNumber);
             }
@@ -1567,7 +1614,12 @@ void itemName(item *theItem, char *root, boolean includeDetails, boolean include
             break;
         case POTION:
             if (potionTable[theItem->kind].identified || rogue.playbackOmniscience) {
-                sprintf(root, "potion%s of %s", pluralization, potionTable[theItem->kind].name);
+                if (theItem->kind == POTION_DETECT_MAGIC) {
+                    // iOS port (iBrogue): the empty bottle reads as just "empty bottle(s)", not "potion of empty bottle".
+                    sprintf(root, "empty bottle%s", pluralization);
+                } else {
+                    sprintf(root, "potion%s of %s", pluralization, potionTable[theItem->kind].name);
+                }
             } else if (potionTable[theItem->kind].called) {
                 sprintf(root, "potion%s called %s%s%s",
                         pluralization,
@@ -1903,9 +1955,6 @@ static boolean monsterClassHasAcidicMonster(const short classID) {
     return false;
 }
 
-// iOS port (iBrogue): count of still-possible kinds for an unidentified potion/scroll (defined below)
-static short candidateKindCount(item *theItem, boolean *knownGood, boolean *knownBad);
-
 void itemDetails(char *buf, item *theItem) {
     char buf2[1000], buf3[1000], theName[500], goodColorEscape[20], badColorEscape[20], whiteColorEscape[20];
     boolean singular, carried;
@@ -2016,23 +2065,6 @@ void itemDetails(char *buf, item *theItem) {
                 break;
         }
         strcat(buf, buf2);
-
-        // iOS port (iBrogue): candidate-narrowing — surface how far ID has come for an unidentified
-        // potion/scroll. No new info (the engine already auto-IDs the last kind); shown only at >=2 so
-        // it can never reveal a free identification, and it never names a candidate.
-        if (theItem->category & (POTION | SCROLL)) {
-            boolean knownGood = false, knownBad = false;
-            short candidates = candidateKindCount(theItem, &knownGood, &knownBad);
-            if (candidates >= 2) {
-                char *polColor = knownGood ? goodColorEscape : (knownBad ? badColorEscape : whiteColorEscape);
-                const char *polWord = knownGood ? " beneficial" : (knownBad ? " malevolent" : "");
-                sprintf(buf2, " You have narrowed %s down to one of %s%i%s remaining%s %s.",
-                        (singular ? "it" : "them"),
-                        polColor, candidates, whiteColorEscape, polWord,
-                        (theItem->category & POTION) ? "potions" : "scrolls");
-                strcat(buf, buf2);
-            }
-        }
     }
 
     if (carried && theItem->originDepth > 0) {
@@ -5293,26 +5325,6 @@ static boolean itemMagicPolarityIsKnown(const item *theItem, int magicPolarity) 
     return false;
 }
 
-// iOS port (iBrogue): how many kinds an unidentified potion/scroll could still be — unidentified kinds
-// of its category, narrowed to its polarity if known. Pure derivation of what the player already knows
-// (no new info; the engine already auto-IDs the last kind), used by the candidate line in itemDetails.
-static short candidateKindCount(item *theItem, boolean *knownGood, boolean *knownBad) {
-    itemTable *table = tableForItemCategory(theItem->category);
-    short total = itemKindCount(theItem->category, 0);
-    boolean kg = itemMagicPolarityIsKnown(theItem, MAGIC_POLARITY_BENEVOLENT);
-    boolean kb = itemMagicPolarityIsKnown(theItem, MAGIC_POLARITY_MALEVOLENT);
-    short count = 0;
-    for (short i = 0; i < total; i++) {
-        if (table[i].identified) continue;                                   // a known kind can't be this flask
-        if (kg && table[i].magicPolarity != MAGIC_POLARITY_BENEVOLENT) continue;
-        if (kb && table[i].magicPolarity != MAGIC_POLARITY_MALEVOLENT) continue;
-        count++;
-    }
-    if (knownGood) *knownGood = kg;
-    if (knownBad)  *knownBad = kb;
-    return count;
-}
-
 /// @brief Checks if a monster is a valid auto-target when the player is using a staff/wand or throwing something.
 /// @param monst The monster
 /// @param theItem The staff, wand, throwing weapon, or bad/unknown potion
@@ -6252,6 +6264,19 @@ static boolean shatterPotionAtLoc(item *theItem, short x, short y) {
             message("the flask shatters and a luminescent fungal forest blooms forth!", 0);
             spawnDungeonFeature(x, y, &dungeonFeatureCatalog[DF_FUNGUS_FOREST], true, false);
             break;
+        // iOS port (iBrogue): themed-set potions that leave a tile signature when thrown or bolt-hit.
+        case POTION_HONEY:
+            message("the flask shatters into a sticky golden mire!", 0);
+            spawnDungeonFeature(x, y, &dungeonFeatureCatalog[DF_NET], true, false);
+            break;
+        case POTION_VOMIT:
+            message("the flask shatters and a reeking cloud of nausea billows out!", 0);
+            spawnDungeonFeature(x, y, &dungeonFeatureCatalog[DF_ROT_GAS_PUFF], true, false);
+            break;
+        case POTION_WORT:
+            message("the flask shatters and a cloud of healing spores bursts out!", 0);
+            spawnDungeonFeature(x, y, &dungeonFeatureCatalog[DF_LIFE_POTION_CLOUD], true, false);
+            break;
         default:
             return false;
     }
@@ -6269,6 +6294,11 @@ boolean fillEmptyBottle(item *bottle, short newPotionKind, const char *flavorTex
         return false;
     }
     bottle->kind = newPotionKind;
+    // iOS port (iBrogue): a captured potion is real and known now, so un-hide its kind (matters for wort,
+    // which is producible by capture even in runs where its themed set is otherwise absent).
+    if (newPotionKind >= 0 && newPotionKind < (short)(sizeof(potionAbsentThisSeed) / sizeof(potionAbsentThisSeed[0]))) {
+        potionAbsentThisSeed[newPotionKind] = false;
+    }
     if (flavorText) {
         messageWithColor(flavorText, &itemMessageColor, 0);
     }
@@ -6299,8 +6329,10 @@ static short emptyBottleCaptureKindForTile(short x, short y, const char **flavor
                 *flavorText = "the bottle swallows a wisp of darkness; light bends around the stopper.";
                 return POTION_DARKNESS;
             case HEALING_CLOUD:
-                *flavorText = "luminous spores swirl into the bottle and settle into a warm golden draught.";
-                return POTION_LIFE;
+                // iOS port (iBrogue): capturing wort always yields the wort cloud potion (even in runs
+                // where its themed set is otherwise absent); fillEmptyBottle un-hides the kind.
+                *flavorText = "luminous wort spores swirl into the bottle and settle into a glowing draught.";
+                return POTION_WORT;
             default:
                 break;
         }
@@ -6448,8 +6480,23 @@ static void throwItem(item *theItem, creature *thrower, pos targetLoc, short max
             deleteItem(theItem);
             return;
         }
+        // iOS port (iBrogue): a thrown venom potion poisons the creature it strikes; on empty ground it
+        // shatters harmlessly (venom has no shatterPotionAtLoc signature, so it falls through below).
+        if (theItem->kind == POTION_VENOM && struck) {
+            addPoison(struck, potionMag, 1);
+            monsterName(buf3, struck, true);
+            sprintf(buf, "the flask shatters and douses %s in searing venom!", buf3);
+            message(buf, 0);
+            autoIdentify(theItem);
+            refreshDungeonCell((pos){ x, y });
+            deleteItem(theItem);
+            return;
+        }
+        // iOS port (iBrogue): gate on actual benevolent polarity rather than a kind-index boundary, since
+        // good potions are no longer contiguous at the front of the enum. Good potions with no creature
+        // effect (e.g. honey/wort/detect-magic/empty bottle) return false here and fall through to shatter.
         if (struck
-            && theItem->kind < gameConst->numberGoodPotionKinds
+            && potionTable[theItem->kind].magicPolarity == MAGIC_POLARITY_BENEVOLENT
             && applyPotionEffectToCreature(struck, theItem->kind, potionMag)) {
 
             autoIdentify(theItem);
@@ -7454,35 +7501,24 @@ static void detectMagicOnItem(item *theItem) {
 }
 
 // iOS port (iBrogue): passive polarity insight while resting. Each rested turn accrues toward a
-// threshold that grows with the number of polarity kinds already known, so it eases the early-game
-// ID burden without trivializing the late game. On reaching the threshold it reveals the polarity of
-// the first still-unknown (good/bad) item in the pack. Pure flag-flipping via detectMagicOnItem — no
+// threshold that escalates with the number of reveals already earned this game (a flat step), so early
+// reveals come quickly and later ones cost more rest. On reaching the threshold it reveals the polarity
+// of the first still-unknown (good/bad) item in the pack. Pure flag-flipping via detectMagicOnItem — no
 // RNG — so the counter and the reveal are reconstructed identically on replay (Brogue saves are
 // recordings; see gainPolarityInsightFromRest's call site in playerTurnEnded).
-#define POLARITY_INSIGHT_BASE_TURNS       90
-#define POLARITY_INSIGHT_TURNS_PER_KIND   30
-
-static int knownPolarityKindCount(void) {
-    // kinds whose polarity the player already knows (identified or polarity-revealed), across all
-    // intrinsic-polarity categories
-    static const enum itemCategory polarityCategories[] = {POTION, SCROLL, RING, WAND, STAFF};
-    int known = 0;
-    for (int c = 0; c < 5; c++) {
-        itemTable *table = tableForItemCategory(polarityCategories[c]);
-        const int total = itemKindCount(polarityCategories[c], 0);
-        for (int i = 0; i < total; i++) {
-            if (table[i].identified || table[i].magicPolarityRevealed) {
-                known++;
-            }
-        }
-    }
-    return known;
-}
+//
+// Schedule (step = 100): reveal N needs 100*N consecutive rested turns since the last reveal, i.e.
+// intervals 100, 200, 300, 400, ... (cumulative 100, 300, 600, 1000, ...). Keyed off reveals earned, not
+// kinds known, so the always-identified empty bottle / hidden themed-set potions can't skew the pacing.
+#define REST_INSIGHT_STEP_TURNS   100
 
 void gainPolarityInsightFromRest(void) {
     rogue.restTurnsSinceInsight++;
-    const unsigned long threshold = POLARITY_INSIGHT_BASE_TURNS
-                                  + (unsigned long)POLARITY_INSIGHT_TURNS_PER_KIND * knownPolarityKindCount();
+    unsigned long revealsSoFar = 0; // total polarity reveals earned by resting this game
+    for (short d = 1; d <= rogue.deepestLevel; d++) {
+        revealsSoFar += levels[d].restRevealsOnLevel;
+    }
+    const unsigned long threshold = (unsigned long)REST_INSIGHT_STEP_TURNS * (revealsSoFar + 1);
     if (rogue.restTurnsSinceInsight < threshold) {
         return;
     }
@@ -7508,6 +7544,7 @@ void gainPolarityInsightFromRest(void) {
 
     detectMagicOnItem(target);
     tryIdentifyLastItemKinds(HAS_INTRINSIC_POLARITY);
+    levels[rogue.depthLevel].restRevealsOnLevel++; // iOS port (iBrogue): debug death-recap tally
 
     char theName[COLS * 3], buf[COLS * 3];
     const boolean benevolent = (itemMagicPolarity(target) == MAGIC_POLARITY_BENEVOLENT);
@@ -7556,6 +7593,47 @@ void gainScrollInsightFromEating(void) {
                      ? "you study a scroll intently while eating; it radiates a benevolent aura."
                      : "you study a scroll intently while eating; it radiates a malevolent aura.",
                      (benevolent ? &goodMessageColor : &badMessageColor), 0);
+}
+
+// iOS port (iBrogue): the returning potion of detect magic. Reveals the good/bad polarity of 1-2
+// (random) still-unknown, polarity-bearing items in the pack (excluding the potion being drunk),
+// chosen at random -- a weaker, fleeting version of the old whole-pack reveal. The random pick is a
+// substantive action-triggered draw, reproduced identically on replay.
+static void quaffDetectMagic(item *exclude) {
+    item *eligible[32];
+    int count = 0;
+    for (item *theItem = packItems->nextItem; theItem != NULL; theItem = theItem->nextItem) {
+        if (theItem != exclude
+            && (theItem->category & HAS_INTRINSIC_POLARITY)
+            && !(theItem->flags & ITEM_IDENTIFIED)
+            && itemMagicPolarity(theItem) != MAGIC_POLARITY_NEUTRAL
+            && !itemMagicPolarityIsKnown(theItem, MAGIC_POLARITY_BENEVOLENT)
+            && !itemMagicPolarityIsKnown(theItem, MAGIC_POLARITY_MALEVOLENT)
+            && count < (int)(sizeof(eligible) / sizeof(eligible[0]))) {
+
+            eligible[count++] = theItem;
+        }
+    }
+    if (count == 0) {
+        message("you sense no unknown magic among your possessions.", 0);
+        return;
+    }
+    const int toReveal = min(rand_range(1, 2), count);
+    // Partial Fisher-Yates: pick `toReveal` distinct eligible items.
+    for (int i = 0; i < toReveal; i++) {
+        const int j = rand_range(i, count - 1);
+        item *tmp = eligible[i]; eligible[i] = eligible[j]; eligible[j] = tmp;
+        detectMagicOnItem(eligible[i]);
+    }
+    tryIdentifyLastItemKinds(HAS_INTRINSIC_POLARITY);
+
+    char theName[COLS * 3], buf[COLS * 3];
+    for (int i = 0; i < toReveal; i++) {
+        const boolean benevolent = (itemMagicPolarity(eligible[i]) == MAGIC_POLARITY_BENEVOLENT);
+        itemName(eligible[i], theName, false, true, NULL);
+        sprintf(buf, "you sense the %s aura of %s.", (benevolent ? "benevolent" : "malevolent"), theName);
+        messageWithColor(buf, (benevolent ? &goodMessageColor : &badMessageColor), 0);
+    }
 }
 
 // iOS port (iBrogue): the altars-of-insight machine. When both linked altars hold items, reveal the item
@@ -7619,6 +7697,96 @@ static boolean performInsightSacrifice(short machineNumber) {
     pmap[paymentLoc.x][paymentLoc.y].flags &= ~(HAS_ITEM | ITEM_DETECTED);
     deleteItem(paymentItem);
     refreshDungeonCell(paymentLoc);
+    return true;
+}
+
+// iOS port (iBrogue): the altars-of-transference machine. When both linked altars hold items, drain the
+// donor's enchantment and add it to the recipient (additive concentration -- net enchantment is conserved),
+// then consume the donor. The recipient's enchant only ever moves up, and the donor vanishes entirely, so
+// none of swapItemToEnchantLevel's shatter cases (staff < 2, charm < 1, wand < 0) can apply. Rules:
+//   - both items must be present and swappable (same eligibility as the commutation altar);
+//   - the recipient's enchant level must be KNOWN -- otherwise stay primed (you always understand the item
+//     you are improving, and can read the result on it afterward);
+//   - sacrificing a donor with an unknown enchant is the gamble -- it might be cursed -- and the donor is
+//     identified as it is consumed so the gamble resolves visibly;
+//   - a donor whose enchant is KNOWN and non-positive is refused (pure-downside misclick guard): only the
+//     unknown donor can ever lower the recipient.
+// "Fire only if it helps" (except the deliberate unknown-donor gamble). RNG-free.
+static boolean performEnchantTransfer(short machineNumber) {
+    item *recipientItem = NULL, *donorItem = NULL;
+    pos donorLoc = INVALID_POS;
+
+    for (short i = 0; i < DCOLS; i++) {
+        for (short j = 0; j < DROWS; j++) {
+            if (pmap[i][j].machineNumber != machineNumber
+                || !cellHasTMFlag((pos){ i, j }, TM_TRANSFER_ENCHANT_ACTIVATION)) {
+                continue;
+            }
+            item *theItem = itemAtLoc((pos){ i, j });
+            if (theItem == NULL) {
+                continue;
+            }
+            if (pmap[i][j].layers[DUNGEON] == TRANSFER_ALTAR_RECIPIENT) {
+                recipientItem = theItem;
+            } else if (pmap[i][j].layers[DUNGEON] == TRANSFER_ALTAR_DONOR) {
+                donorItem = theItem;
+                donorLoc = (pos){ i, j };
+            }
+        }
+    }
+    if (recipientItem == NULL || donorItem == NULL) {
+        return false; // need an item on both altars
+    }
+    if (!itemIsSwappable(recipientItem) || !itemIsSwappable(donorItem)) {
+        return false; // only enchantable gear can take part; leave the items for the player to reclaim
+    }
+    if (!enchantLevelKnown(recipientItem)) {
+        return false; // must know the item being improved; stay primed
+    }
+    if (enchantLevelKnown(donorItem) && effectiveEnchantLevel(donorItem) <= 0) {
+        return false; // knowingly draining a +0 or cursed donor is pure downside; refuse the misclick
+    }
+
+    char donorName[COLS * 3], recipientName[COLS * 3], buf[COLS * 3];
+
+    // Resolve the gamble: reveal an unidentified donor as it is consumed, so the player learns what they
+    // sacrificed (and why the recipient changed the way it did).
+    const short delta = effectiveEnchantLevel(donorItem);
+    if (!enchantLevelKnown(donorItem)) {
+        identify(donorItem);
+    }
+    itemName(donorItem, donorName, true, true, NULL);
+
+    // A positive donor always raises the recipient. A gambled (unknown) donor can be negative, and a deep
+    // enough drop will shatter a staff/charm recipient -- predict that here, because swapItemToEnchantLevel
+    // unlinks the item when it shatters, so we must not name it afterward. (Recipients are never wands:
+    // CAN_BE_SWAPPED excludes them; only staffs and charms have a shatter floor.)
+    const short newEnchant = effectiveEnchantLevel(recipientItem) + delta;
+    const boolean recipientShatters = ((recipientItem->category & STAFF) && newEnchant < 2)
+                                   || ((recipientItem->category & CHARM) && newEnchant < 1);
+
+    if (recipientShatters) {
+        // The (negative) surge destroys the very item being empowered; swapItemToEnchantLevel emits the
+        // "shatters from the strain!" message itself.
+        sprintf(buf, "the altar consumes %s and forces its enchantment into the other item.", donorName);
+        messageWithColor(buf, &badMessageColor, 0);
+        swapItemToEnchantLevel(recipientItem, newEnchant, true);
+    } else {
+        // Add the donor's enchantment to the recipient (which stays identified afterward).
+        swapItemToEnchantLevel(recipientItem, newEnchant, true);
+        itemName(recipientItem, recipientName, true, true, NULL);
+
+        const color *resultColor = (delta > 0) ? &goodMessageColor
+                                 : (delta < 0) ? &badMessageColor : &itemMessageColor;
+        sprintf(buf, "the altar consumes %s and pours its enchantment into %s.", donorName, recipientName);
+        messageWithColor(buf, resultColor, 0);
+    }
+
+    // Consume the donor; leave the empowered recipient on its altar for pickup.
+    removeItemFromChain(donorItem, floorItems);
+    pmap[donorLoc.x][donorLoc.y].flags &= ~(HAS_ITEM | ITEM_DETECTED);
+    deleteItem(donorItem);
+    refreshDungeonCell(donorLoc);
     return true;
 }
 
@@ -7819,6 +7987,27 @@ boolean drinkPotion(item *theItem) {
             player.status[STATUS_INVISIBLE] = player.maxStatus[STATUS_INVISIBLE] = magnitude;
             message("you shiver as a chill runs up your spine.", 0);
             break;
+        // iOS port (iBrogue): themed-set potions + returning detect magic.
+        case POTION_HONEY:
+            // STATUS_REGENERATING lasts `magnitude` (~20) turns; Time.c meters ~20% of max HP across it.
+            player.status[STATUS_REGENERATING] = player.maxStatus[STATUS_REGENERATING] = magnitude;
+            message("the honey's warmth spreads through you, and your wounds slowly begin to close.", 0);
+            break;
+        case POTION_VOMIT:
+            spawnDungeonFeature(player.loc.x, player.loc.y, &dungeonFeatureCatalog[DF_ROT_GAS_PUFF], true, false);
+            message("you gag as a reeking cloud boils out of the open flask!", 0);
+            break;
+        case POTION_WORT:
+            spawnDungeonFeature(player.loc.x, player.loc.y, &dungeonFeatureCatalog[DF_LIFE_POTION_CLOUD], true, false);
+            message("you uncork the flask and a cloud of healing spores wells up around you.", 0);
+            break;
+        case POTION_VENOM:
+            addPoison(&player, magnitude, 1); // ~1 dmg/turn for ~15 turns
+            message("venom courses through your veins!", 0);
+            break;
+        case POTION_DETECT_MAGIC2:
+            quaffDetectMagic(theItem);
+            break;
         default:
             message("you feel very strange, as though your body doesn't know how to react!", REQUIRE_ACKNOWLEDGMENT);
     }
@@ -7858,9 +8047,11 @@ short magicCharDiscoverySuffix(short category, short kind) {
                 case POTION_CONFUSION:
                 case POTION_LICHEN:
                 case POTION_DARKNESS:
+                case POTION_VOMIT:  // iOS port (iBrogue)
+                case POTION_VENOM:  // iOS port (iBrogue)
                     result = -1;
                     break;
-                default:
+                default: // good potions, incl. honey/wort/detect-magic2 (iOS port)
                     result = 1;
                     break;
             }
@@ -8406,6 +8597,22 @@ void shuffleFlavors() {
     // identified so it never joins the potion-ID guessing pool and always reads as "empty bottle".
     potionTable[POTION_DETECT_MAGIC].identified = true;
     potionTable[POTION_DETECT_MAGIC].magicPolarityRevealed = true;
+    // iOS port (iBrogue): pick which themed potion set is live this run. Deterministic from the seed
+    // (shuffleFlavors runs after seedRandomGenerator and reruns identically on replay). The inactive
+    // set's two potions are marked absent -- skipped by generation (chooseKind) and the Discoveries
+    // screen -- and pre-identified so they cancel cleanly out of the good/bad polarity deduction (their
+    // counts appear on both the "total" and "revealed" sides of tryIdentifyLastItemKind).
+    for (i = 0; i < (short)(sizeof(potionAbsentThisSeed) / sizeof(potionAbsentThisSeed[0])); i++) {
+        potionAbsentThisSeed[i] = false;
+    }
+    rogue.activePotionSet = rand_range(0, 1);
+    {
+        const short inactiveA = (rogue.activePotionSet == 0) ? POTION_WORT  : POTION_HONEY;
+        const short inactiveB = (rogue.activePotionSet == 0) ? POTION_VENOM : POTION_VOMIT;
+        potionAbsentThisSeed[inactiveA] = potionAbsentThisSeed[inactiveB] = true;
+        potionTable[inactiveA].identified = potionTable[inactiveB].identified = true;
+        potionTable[inactiveA].magicPolarityRevealed = potionTable[inactiveB].magicPolarityRevealed = true;
+    }
     for (i=0; i<NUMBER_STAFF_KINDS; i++) {
         resetItemTableEntry(staffTable+ i);
     }

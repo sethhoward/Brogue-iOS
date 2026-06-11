@@ -28,6 +28,138 @@ covers the separate Classic engine that ships in the app target).
 
 ## Change log
 
+### 2026-06-11 — Debug death-recap: count polarity reveals earned by resting
+
+**What.** The on-screen death recap's debug rest readout now shows, per level, `turns/IDs` (rested turns and
+the number of polarity reveals resting produced) plus a `rest IDs total`. Verified both rest paths feed the
+insight: single rest (`REST_KEY`, IO.c) and long rest (`autoRest`, Time.c) each set `rogue.justRested` and
+call `playerTurnEnded`, which calls `gainPolarityInsightFromRest` — so neither path is missing the reveal.
+
+**Why.** Diagnostic — make the passive rest-reveal observable.
+
+**Reworked the threshold.** Replaced the old `90 + 30 × knownPolarityKindCount()` (which counted the
+always-identified empty bottle and hidden themed-set potions as "known", skewing pacing) with a flat,
+escalating schedule keyed off **reveals already earned this game**: reveal N needs `100 × N` consecutive
+rested turns since the last reveal — intervals 100, 200, 300, 400… (cumulative 100, 300, 600, 1000…).
+`knownPolarityKindCount` is removed entirely.
+
+**Where.** `Rogue.h` — `levelData.restRevealsOnLevel`. `Items.c` — `gainPolarityInsightFromRest` sums
+`restRevealsOnLevel` for the escalating threshold and increments it on each reveal (`knownPolarityKindCount`
+deleted). `RogueMain.c` — death-recap readout prints per-level `turns/IDs` and a total. Debug display + a
+pacing change; no determinism impact (recomputed identically on replay, like the rest-turn tally).
+
+### 2026-06-11 — Altars of transference: sacrifice an item to pour its enchantment into another (new content)
+
+**What.** A new **random reward vault** (Brogue only), the dangerous sibling of the commutation altar. A linked
+pair of altars: place the item you want to empower on the **recipient** altar (west↔east: donor west, recipient
+east, one-tile gap — `#....s.o....#`, the same layout as the insight altars) and the item to sacrifice on the
+**donor** altar. When both hold items, the donor's enchant level (`+N`) is **added** to the recipient
+(*additive concentration* — net enchantment is conserved but pooled onto one item), then the donor is consumed
+and both altars go inert.
+
+Where commutation **swaps** two items you keep, this one **consumes one to power up another**. Rules:
+- Eligibility matches commutation exactly (`CAN_BE_SWAPPED` = weapon/armor/staff/charm/ring; wands excluded);
+  **cross-category is allowed** (feed a junk staff's `+3` into your plate armor).
+- The **recipient must have a known enchant level**, else the altar stays primed — you always understand and can
+  read the item you're improving.
+- Sacrificing a donor with an **unknown** enchant is the gamble: it might be cursed (a negative donor *lowers*
+  the recipient). The donor is `identify()`d as it's consumed, so the gamble resolves visibly.
+- A donor whose enchant is **known and ≤ 0** is refused (pure-downside misclick guard) — only an *unknown* donor
+  can ever hurt the recipient.
+- Because the recipient normally only moves *up* and the donor vanishes, the usual `swapItemToEnchantLevel`
+  shatter cases don't apply — **except** a deep negative gamble onto a staff/charm recipient, which is detected
+  up front (predict-then-branch) so the now-unlinked item is never named after it shatters.
+
+"Fire only if it helps" (except the deliberate unknown-donor gamble). RNG-free, so replays are unaffected.
+
+**Where.** Modeled throughout on the altars-of-insight content (2026-06-10 entry):
+- `Rogue.h`: `tileType` — `TRANSFER_ALTAR_DONOR` / `TRANSFER_ALTAR_RECIPIENT` / `TRANSFER_ALTAR_INERT`;
+  `dungeonFeatureType` — `DF_ALTAR_TRANSFER_INERT`; `TM_TRANSFER_ENCHANT_ACTIVATION = Fl(27)`; `machineTypes` —
+  a **genuine new index** `MT_TRANSFER_ALTAR` appended after `MT_REWARD_HEAVY_OR_RUNIC_WEAPON`. It exists only in
+  Brogue's `blueprintCatalog` (which gains one entry, so `numberBlueprints` 73 → 74); the Bullet/Rapid catalogs
+  stop at the variant weapon slot, so their reward raffle never reaches the index and it's never built there.
+- `Globals.c`: `violetAltarBackColor`; three `tileCatalog` rows (model on `INSIGHT_ALTAR_*`); a
+  `DF_ALTAR_TRANSFER_INERT` `dungeonFeatureCatalog` row (empty message — the result text is emitted once by the
+  handler, not per promoted altar).
+- `GlobalsBrogue.c`: the transference blueprint, appended last (depth 11–`AMULET_LEVEL`, freq 30, `BP_REWARD`).
+  Like the insight blueprint it builds **only** the carpeted room; the altar pair is placed afterward.
+- `Architect.c`: the insight placement helpers were **generalized** — `insightAltarCellIsOpen` →
+  `altarPairCellIsOpen`, `setInsightAltar` → `setAltarTile`, `placeInsightAltarsInRoom(min)` →
+  `placeAltarPairInRoom(min, westAltar, eastAltar, statueAbove)` (insight call site updated to pass its two
+  tiles and `statueAbove = false`). The transference altar is **raffle-built**, so it can't be hooked from
+  `addMachines` (which doesn't learn which blueprint the raffle picked); instead `buildAMachine` calls
+  `placeAltarPairInRoom` on its success path when `bp == MT_TRANSFER_ALTAR` (Brogue-guarded), passing
+  `machineNumber - 1` and `statueAbove = true`. The `statueAbove` flag drops a `STATUE_INERT` on the open
+  carpet cell directly **north of each altar** (so the room reads `S . S` / `d . r`), making it
+  unmistakable at a glance from the bare altar/gap/altar layout of the insight and commutation rooms; it's
+  skipped per-altar if the north cell isn't open interior carpet.
+- `Items.c`: `static boolean performEnchantTransfer(short)` (defined just after `performInsightSacrifice`,
+  forward-declared beside it) + a sibling block in `updateFloorItems`, modeled on the commutation/insight blocks.
+
+**Determinism / saves.** The handler and placement are RNG-free; the only RNG impact is that adding one
+`BP_REWARD` blueprint to the raffle changes which reward room a given seed rolls at depth 11+ (a content change,
+like adding the insight altars). No serialized-state change. **Bump `recordingVersionString` at release.**
+
+### 2026-06-11 — Remove candidate-narrowing readout; render the empty bottle without "potion of"
+
+**What.**
+- Removed the "You have narrowed it down to one of N remaining…" inspect line for unidentified
+  potions/scrolls (reverts the 2026-06-10 candidate-narrowing entry below). It added no value and read
+  confusingly next to the themed potion sets. The silent last-kind auto-ID (`tryIdentifyLastItemKinds`)
+  is left intact.
+- The empty bottle now renders as just **"empty bottle" / "empty bottles"** instead of "potion of empty
+  bottle".
+
+**Why.** Player request — the narrowing readout wasn't fully thought through; and the empty bottle isn't a
+"potion of" anything.
+
+**Where.** `Items.c` — deleted `candidateKindCount` (and its forward prototype) and the render block in
+`itemDetails`; special-cased `POTION_DETECT_MAGIC` in `itemName` to print "empty bottle%s" rather than
+"potion%s of %s". Display only; no RNG, no determinism impact.
+
+### 2026-06-11 — Themed potion sets + returning detect magic
+
+**What.** Five new potions (enum grows 16 → 21, all frequency 10), in two mutually-exclusive themed
+sets plus an always-present reworked detect magic:
+
+- **Set 1** — **honey** (good): drinking grants `STATUS_REGENERATING`, metering ~20% of max HP over
+  ~20 turns; thrown or bolt-hit it shatters into a `DF_NET` (`NETTING`) sticky patch that entangles.
+  **vomit** (bad): thrown/bolt-hit → `DF_ROT_GAS_PUFF` nausea cloud; drunk → that cloud at your feet.
+- **Set 2** — **wort** (good): drink/throw spawn `DF_LIFE_POTION_CLOUD` (healing cloud); this is also
+  what the empty bottle's wort capture now yields (was potion of life). **venom** (bad): drink poisons
+  the player (`addPoison(&player, ~15, 1)`); thrown it poisons the creature it strikes, else shatters
+  harmlessly.
+- **detect magic** (good, new kind `POTION_DETECT_MAGIC2` — the old slot is the empty bottle): drinking
+  reveals the polarity of 1–2 random still-unknown polarity-bearing items in the pack.
+
+**One set per run.** `shuffleFlavors` draws `rogue.activePotionSet = rand_range(0,1)` (deterministic from
+the seed, reproduced on replay). The inactive set's two potions are marked **absent this seed** (a static
+`potionAbsentThisSeed[]` in Items.c): skipped by generation (`chooseKind`) and the Discoveries screen
+(`IO.c`), and pre-identified so they cancel out of the good/bad polarity deduction. **Exception:** wort is
+always producible by empty-bottle capture; `fillEmptyBottle` clears its absent flag when minted.
+
+**Why.** Expands the potion pool and makes the lineup vary run to run, while bringing back detect magic in
+a weaker RNG form. Decisions settled via design grilling. **iOS-only, all three variants.**
+
+**Where.**
+- `Rogue.h` — 5 new `POTION_*` kinds; `STATUS_REGENERATING`; `rogue.activePotionSet`; proto
+  `potionKindAbsentThisSeed`.
+- `GlobalsBrogue.c` / `GlobalsRapidBrogue.c` / `GlobalsBulletBrogue.c` — 5 rows in each `potionTable_*`
+  (colors `itemColors[17..20]` + `[0]`), 5 index-parallel `meteredItemsGenerationTable_*` entries, and
+  `numberGoodPotionKinds` 8 → **11** (count only — good kinds are no longer contiguous).
+- `Items.c` — `drinkPotion` (5 cases); `shatterPotionAtLoc` (honey/vomit/wort); `throwItem` venom-on-strike
+  and a **polarity-based** good-potion gate (replaces the `kind < numberGoodPotionKinds` index boundary,
+  which assumed contiguous good kinds); `magicCharDiscoverySuffix` (vomit/venom → bad); `quaffDetectMagic`;
+  `emptyBottleCaptureKindForTile` (`HEALING_CLOUD` → `POTION_WORT`); `shuffleFlavors` set selection;
+  `chooseKind` + `fillEmptyBottle` honor `potionAbsentThisSeed`.
+- `Time.c` — `STATUS_REGENERATING` per-turn heal (stateless elapsed-fraction metering) + expiry.
+- `IO.c` — `printDiscoveries` skips absent potion kinds (separate display-row counter, no gap).
+
+**Determinism.** `shuffleFlavors` now draws an extra `rand_range` (set selection), `quaffDetectMagic` and
+venom throws draw, and there are new potion kinds — so item-generation/ID RNG diverges from old recordings.
+**Bump `recordingVersionString` at release.** Set selection and absence are recomputed deterministically
+from the seed each load; no new serialized state (`rogue.activePotionSet` is derived, not saved).
+
 ### 2026-06-11 — Insight altars: place the pair side by side in a fixed s . o layout
 
 **What.** The two altars-of-insight no longer land at random spots in the reward room. They are placed in
@@ -42,9 +174,11 @@ more easily.
 - `GlobalsBrogue.c` — the insight blueprint (`blueprintCatalog_Brogue`, the `MT_INSIGHT_ALTAR` slot) now
   builds **only** the carpeted room: the two altar `machineFeature` rows were removed (featureCount 5 → 3)
   and `roomSize` shrank from `{7, 30}` to `{7, 14}`.
-- `Architect.c` — a new `placeInsightAltarsInRoom()` (with helpers `insightAltarCellIsOpen` /
-  `setInsightAltar`) places the pair after the room is built, called from the `addMachines` force-build
-  right after `buildAMachine(MT_INSIGHT_ALTAR, …)` succeeds. It finds the just-built room's carpet cells
+- `Architect.c` — a `placeAltarPairInRoom(min, westAltar, eastAltar)` (with helpers `altarPairCellIsOpen` /
+  `setAltarTile`) places the pair after the room is built, called from the `addMachines` force-build
+  right after `buildAMachine(MT_INSIGHT_ALTAR, …)` succeeds with `INSIGHT_ALTAR_PAYMENT` (west) +
+  `INSIGHT_ALTAR_INSIGHT` (east). (Originally named `placeInsightAltarsInRoom` / `insightAltarCellIsOpen` /
+  `setInsightAltar`; generalized 2026-06-11 to be shared with the altars of transference.) It finds the just-built room's carpet cells
   (machineNumber greater than the value captured before the build), picks the horizontal run of three open
   cells nearest the room center, and drops `INSIGHT_ALTAR_PAYMENT` (west) + `INSIGHT_ALTAR_INSIGHT` (east,
   one gap). Fallbacks: an adjacent pair, then any two open cells, so the altars always exist.
@@ -369,6 +503,10 @@ before it will diverge on replay, so a `recordingVersionString` bump is warrante
 left to the maintainers — the diff does not bump it).
 
 ### 2026-06-10 — Candidate-narrowing inspect line for unidentified potions/scrolls
+
+> **Reverted 2026-06-11** (see the "Remove candidate-narrowing readout" entry above): the readout added
+> no value and read confusingly alongside the themed potion sets. The `candidateKindCount` helper, its
+> forward prototype, and the `itemDetails` render block were removed.
 
 **What.** An unidentified potion's or scroll's inspect text now ends with a line like "You have narrowed
 it down to one of 3 remaining beneficial potions." — the count of kinds it could still be, narrowed to

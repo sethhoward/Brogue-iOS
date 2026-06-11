@@ -4219,17 +4219,22 @@ static void printDiscoveries(short category, short count, unsigned short itemCha
         }
     }
 
+    short row = 0; // iOS port (iBrogue): display row, separate from kind index, so hidden kinds leave no gap
     for (i = 0; i < count; i++) {
+        // iOS port (iBrogue): the inactive themed set's potions don't exist this run -- omit them entirely.
+        if (category == POTION && potionKindAbsentThisSeed(i)) {
+            continue;
+        }
         if (theTable[i].identified) {
             theColor = &white;
-            plotCharToBuffer(itemCharacter, (windowpos){ x, y + i }, &itemColor, &black, dbuf);
+            plotCharToBuffer(itemCharacter, (windowpos){ x, y + row }, &itemColor, &black, dbuf);
         } else {
             theColor = &darkGray;
             magic = magicCharDiscoverySuffix(category, i);
             if (magic == 1) {
-                plotCharToBuffer(G_GOOD_MAGIC, (windowpos){ x, y + i }, &goodColor, &black, dbuf);
+                plotCharToBuffer(G_GOOD_MAGIC, (windowpos){ x, y + row }, &goodColor, &black, dbuf);
             } else if (magic == -1) {
-                plotCharToBuffer(G_BAD_MAGIC, (windowpos){ x, y + i }, &badColor, &black, dbuf);
+                plotCharToBuffer(G_BAD_MAGIC, (windowpos){ x, y + row }, &badColor, &black, dbuf);
             }
         }
         strcpy(buf, theTable[i].name);
@@ -4244,7 +4249,8 @@ static void printDiscoveries(short category, short count, unsigned short itemCha
 
         upperCase(buf);
         strcat(buf, " ");
-        printString(buf, x + 2, y + i, theColor, &black, dbuf);
+        printString(buf, x + 2, y + row, theColor, &black, dbuf);
+        row++;
     }
 }
 

@@ -629,6 +629,16 @@ const blueprint blueprintCatalog_Brogue[] = {
         {0,         CARPET,     DUNGEON,        {0,0},      0,          0,          -1,         0,              0,              0,          0,          (MF_EVERYWHERE)},
         {0,         STATUE_INERT,DUNGEON,       {1,3},      0,          0,          -1,         0,              2,              0,          0,          (MF_TREAT_AS_BLOCKING | MF_BUILD_IN_WALLS)},
         {0,         0,          0,              {1,1},      1,          0,          0,          0,              2,              0,          0,          (MF_BUILD_AT_ORIGIN | MF_PERMIT_BLOCKING | MF_BUILD_VESTIBULE)}}},
+    // iOS port (iBrogue): altars of transference -- a random reward vault (depth 11+, not guaranteed) that
+    // sacrifices a donor item to pour its enchantment into a recipient. Occupies a genuine new machine index
+    // (MT_TRANSFER_ALTAR), appended after the insight altar; this index exists only in Brogue's catalog. Like
+    // the insight altars, the blueprint builds ONLY the carpeted room; the donor/recipient pair is placed in a
+    // fixed "s . o" layout by buildAMachine (the generic builder can't produce an ordered adjacent pair).
+    {"Altars of transference -- sacrifice an item to pour its enchantment into another",
+    {11, AMULET_LEVEL},{10, 30},   30,     3,          0,                  (BP_ROOM | BP_PURGE_INTERIOR | BP_SURROUND_WITH_WALLS | BP_OPEN_INTERIOR | BP_IMPREGNABLE | BP_REWARD), {
+        {0,         CARPET,     DUNGEON,        {0,0},      0,          0,          -1,         0,              0,              0,          0,          (MF_EVERYWHERE)},
+        {0,         STATUE_INERT,DUNGEON,       {1,3},      0,          0,          -1,         0,              2,              0,          0,          (MF_TREAT_AS_BLOCKING | MF_BUILD_IN_WALLS | MF_IMPREGNABLE)},
+        {0,         0,          0,              {1,1},      1,          0,          0,          0,              2,              0,          0,          (MF_BUILD_AT_ORIGIN | MF_PERMIT_BLOCKING | MF_BUILD_VESTIBULE)}}},
 };
 
 // To meter item generation (on level generation):
@@ -664,7 +674,13 @@ const meteredItemGenerationTable meteredItemsGenerationTable_Brogue[] = {
     { .category = POTION, .kind = POTION_INCINERATION },
     { .category = POTION, .kind = POTION_DARKNESS },
     { .category = POTION, .kind = POTION_DESCENT },
-    { .category = POTION, .kind = POTION_LICHEN }
+    { .category = POTION, .kind = POTION_LICHEN },
+    // iOS port (iBrogue): keep this potion section index-parallel with potionTable_Brogue.
+    { .category = POTION, .kind = POTION_HONEY },
+    { .category = POTION, .kind = POTION_VOMIT },
+    { .category = POTION, .kind = POTION_WORT },
+    { .category = POTION, .kind = POTION_VENOM },
+    { .category = POTION, .kind = POTION_DETECT_MAGIC2 }
 };
 
 // levelFeelings[0] -> AMULET_LEVEL, levelFeelings[1] -> DEEPEST_LEVEL
@@ -690,6 +706,12 @@ itemTable potionTable_Brogue[] = {
     {"darkness",            itemColors[14], "", 7,  150,    0, 0, {400,400,0}, false, false, -1, false, "Drinking this potion will plunge you into darkness. At first, you will be completely blind to anything not illuminated by an independent light source, but over time your vision will regain its former strength. Throwing the potion will create a cloud of supernatural darkness, and enemies will have difficulty seeing or following you if you take refuge under its cover."},
     {"descent",             itemColors[15], "", 15, 500,    0, 0, {0,0,0}, false, false, -1, false, "When this flask is uncorked by hand or shattered by being thrown, the fog that seeps out will temporarily cause the ground in the vicinity to vanish."},
     {"creeping death",      itemColors[16], "", 7,  450,    0, 0, {0,0,0}, false, false, -1, false, "When the cork is popped or the flask is thrown, tiny spores will spill across the ground and begin to grow a deadly lichen. Anything that touches the lichen will be poisoned by its clinging tendrils, and the lichen will slowly grow to fill the area. Fire will purge the infestation."},
+    // iOS port (iBrogue): themed potion sets (one set is live per run) + a returning detect magic. Frequency 10 each.
+    {"honey",               itemColors[17], "", 10, 400,    0, 0, {20,20,0}, false, false, 1,  false, "A heavy jar of thick golden honey. Swallowed, its slow sweetness mends the body over time. Dashed against the ground -- by your hand, or by a bolt of lightning or flame -- it spreads into a sticky golden mire that snares whatever is caught in it."},
+    {"vomit",               itemColors[18], "", 10, 150,    0, 0, {0,0,0}, false, false, -1, false, "A flask of foul, churning bile. Exposed to the open air it erupts into a reeking cloud that sickens any creature who breathes it, just as a zombie's stench does."},
+    {"wort",                itemColors[19], "", 10, 500,    0, 0, {0,0,0}, false, false, 1,  false, "A flask swirling with luminous medicinal spores -- wort. Uncorked or thrown, it bursts into a cloud of healing motes that knit the wounds of any who linger within it."},
+    {"venom",               itemColors[20], "", 10, 250,    0, 0, {15,15,0}, false, false, -1, false, "A vial of viscous green venom. Drinking it floods your veins with poison; hurled, it douses whatever it strikes in the same searing toxin."},
+    {"detect magic",        itemColors[0],  "", 10, 350,    0, 0, {0,0,0}, false, false, 1,  false, "This mysterious brew sensitizes your mind to the radiance of magic, but only fleetingly: it reveals the helpful or harmful nature of one or two items in your pack, chosen at random."},
 };
 
 itemTable scrollTable_Brogue[] = {
@@ -1059,7 +1081,7 @@ const gameConstants brogueGameConst = {
     .numberBoltKinds = sizeof(boltCatalog_Brogue) / sizeof(bolt),
     .numberBlueprints = sizeof(blueprintCatalog_Brogue) / sizeof(blueprint),
     .numberPotionKinds = sizeof(potionTable_Brogue) / sizeof(itemTable),
-    .numberGoodPotionKinds = 8,
+    .numberGoodPotionKinds = 11, // iOS port (iBrogue): 8 original good + honey, wort, detect-magic2 (count only; good kinds are no longer contiguous)
     .numberScrollKinds = sizeof(scrollTable_Brogue) / sizeof(itemTable),
     .numberGoodScrollKinds = 12,
     .numberWandKinds = sizeof(wandTable_Brogue) / sizeof(itemTable),

@@ -2068,6 +2068,23 @@ static void decrementPlayerStatus() {
         message("you are no longer invisible.", 0);
     }
 
+    // iOS port (iBrogue): honey potion's heal-over-time. Mete ~20% of max HP evenly across the status's
+    // duration, carrying the rounding remainder via a stateless elapsed-fraction difference (so the total
+    // lands exactly and replays deterministically without a stored accumulator).
+    if (player.status[STATUS_REGENERATING] > 0) {
+        const short dur = max(1, player.maxStatus[STATUS_REGENERATING]);
+        const short total = player.info.maxHP * 20 / 100;
+        const short elapsed = dur - player.status[STATUS_REGENERATING] + 1; // 1..dur this turn
+        const short healNow = total * elapsed / dur - total * (elapsed - 1) / dur;
+        if (healNow > 0 && player.currentHP < player.info.maxHP) {
+            player.currentHP = min(player.currentHP + healNow, player.info.maxHP);
+            player.previousHealthPoints = min(player.currentHP, player.previousHealthPoints + healNow);
+        }
+        if (!--player.status[STATUS_REGENERATING]) {
+            message("the honey's nourishment fades.", 0);
+        }
+    }
+
     if (rogue.monsterSpawnFuse <= 0) {
         spawnPeriodicHorde();
         rogue.monsterSpawnFuse = rand_range(125, 175);

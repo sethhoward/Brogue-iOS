@@ -687,6 +687,11 @@ enum tileType {
     INSIGHT_ALTAR_PAYMENT,
     INSIGHT_ALTAR_INERT,
 
+    // iOS port (iBrogue): altars of transference (sacrifice one item to pour its enchantment into another)
+    TRANSFER_ALTAR_DONOR,
+    TRANSFER_ALTAR_RECIPIENT,
+    TRANSFER_ALTAR_INERT,
+
     NUMBER_TILETYPES,
 };
 
@@ -819,6 +824,13 @@ enum potionKind {
     POTION_DARKNESS,
     POTION_DESCENT,
     POTION_LICHEN,
+    // iOS port (iBrogue): new potions in two mutually-exclusive themed sets plus a returning
+    // detect magic (the old POTION_DETECT_MAGIC slot is now the empty bottle). See IOS_MODIFICATIONS.md.
+    POTION_HONEY,           // Set 1 (good): regen over time; thrown leaves a sticky net patch
+    POTION_VOMIT,           // Set 1 (bad): rot-gas nausea cloud
+    POTION_WORT,            // Set 2 (good): healing/wort cloud; the empty bottle's wort capture
+    POTION_VENOM,           // Set 2 (bad): inflicts poison (DoT)
+    POTION_DETECT_MAGIC2,   // always present (good): reveals polarity of 1-2 random pack items
 };
 
 enum weaponKind {
@@ -1798,6 +1810,9 @@ enum dungeonFeatureTypes {
     // iOS port (iBrogue): an insight altar promotes to its inert form after a sacrifice
     DF_ALTAR_INSIGHT_INERT,
 
+    // iOS port (iBrogue): a transference altar promotes to its inert form after a transfer
+    DF_ALTAR_TRANSFER_INERT,
+
     NUMBER_DUNGEON_FEATURES,
 };
 
@@ -2004,6 +2019,7 @@ enum terrainMechanicalFlagCatalog {
     TM_INVERT_WHEN_HIGHLIGHTED      = Fl(24),       // will flip fore and back colors when highlighted with pathing
     TM_SWAP_ENCHANTS_ACTIVATION     = Fl(25),       // in machine, swap item enchantments when two suitable items are on this terrain, and activate the machine when that happens
     TM_INSIGHT_ACTIVATION           = Fl(26),       // iOS port (iBrogue): in machine, when the insight + payment altars both hold items, reveal the insight item and consume the payment, then activate
+    TM_TRANSFER_ENCHANT_ACTIVATION  = Fl(27),       // iOS port (iBrogue): in machine, when the donor + recipient altars both hold items, pour the donor's enchantment into the recipient, consume the donor, then activate
 
     TM_PROMOTES_ON_STEP             = (TM_PROMOTES_ON_CREATURE | TM_PROMOTES_ON_ITEM),
 };
@@ -2036,6 +2052,7 @@ enum statusEffects {
     STATUS_SHIELDED,
     STATUS_INVISIBLE,
     STATUS_AGGRAVATING,
+    STATUS_REGENERATING, // iOS port (iBrogue): honey potion's heal-over-time
     NUMBER_OF_STATUS_EFFECTS,
 };
 
@@ -2487,6 +2504,7 @@ typedef struct playerCharacter {
     boolean quit;                       // to skip the typical end-game theatrics when the player quits
     uint64_t seed;                      // the master seed for generating the entire dungeon
     short RNG;                          // which RNG are we currently using?
+    short activePotionSet;              // iOS port (iBrogue): which themed potion set is live this run (0 or 1); chosen deterministically in shuffleFlavors, not serialized
     unsigned long gold;                 // how much gold we have
     unsigned long goldGenerated;        // how much gold has been generated on the levels, not counting gold held by monsters
     short strength;
@@ -2604,6 +2622,7 @@ typedef struct levelData {
     pos playerExitedVia;
     unsigned long awaySince;
     unsigned long restTurnsOnLevel; // iOS port (iBrogue): debug per-level rest tally (death-recap readout)
+    unsigned long restRevealsOnLevel; // iOS port (iBrogue): debug per-level count of polarity reveals earned by resting
 } levelData;
 
 enum machineFeatureFlags {
@@ -2774,6 +2793,13 @@ enum machineTypes {
 
     // Variant-specific machines
     MT_REWARD_HEAVY_OR_RUNIC_WEAPON,
+
+    // iOS port (iBrogue): the altars of transference (Brogue only). A genuine new machine index that
+    // exists only in Brogue's blueprintCatalog (appended after the insight altar); the Bullet/Rapid
+    // catalogs stop at MT_REWARD_HEAVY_OR_RUNIC_WEAPON, so their reward raffle never reaches this index
+    // and it is never force-built outside Brogue. Enters Brogue's random reward raffle via BP_REWARD.
+    MT_TRANSFER_ALTAR,
+
     // iOS port (iBrogue): Brogue fills this variant-specific reward slot with the altars of insight
     // (force-built at fixed depths in addMachines; never collides with the Bullet weapon vault, which
     // occupies the same index only in BulletBrogue's catalog).
@@ -3326,6 +3352,7 @@ extern "C" {
     void identifyItemKind(item *theItem);
     void autoIdentify(item *theItem);
     boolean fillEmptyBottle(item *bottle, short newPotionKind, const char *flavorText); // iOS port (iBrogue): empty-bottle capture
+    boolean potionKindAbsentThisSeed(short kind); // iOS port (iBrogue): inactive themed-set potions are hidden this run
     short numberOfItemsInPack(void);
     char nextAvailableInventoryCharacter(void);
     void checkForDisenchantment(item *theItem);

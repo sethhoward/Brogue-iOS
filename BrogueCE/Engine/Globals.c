@@ -165,6 +165,8 @@ const color greenAltarBackColor =   {18,    25,     18,     0,      0,          
 const color goldAltarBackColor =    {25,    24,     12,     0,      0,          0,          0,      false};
 // iOS port (iBrogue): backdrop for the altars of insight
 const color blueAltarBackColor =    {15,    18,     28,     0,      0,          0,          0,      false};
+// iOS port (iBrogue): backdrop for the altars of transference
+const color violetAltarBackColor =  {24,    14,     28,     0,      0,          0,          0,      false};
 const color pedestalBackColor =     {10,    5,      20,     0,      0,          0,          0,      false};
 
 // monster colors
@@ -585,6 +587,14 @@ const floorTileType tileCatalog[NUMBER_TILETYPES] = {
  /*INSIGHT_ALTAR_INSIGHT*/      {G_ORB_ALTAR,&altarForeColor,       &blueAltarBackColor,17, 0,  0,0,DF_ALTAR_INSIGHT_INERT, 0,  CANDLE_LIGHT,   (T_OBSTRUCTS_SURFACE_EFFECTS), (TM_VANISHES_UPON_PROMOTION | TM_IS_WIRED | TM_INSIGHT_ACTIVATION | TM_LIST_IN_SIDEBAR | TM_VISUALLY_DISTINCT), "an altar of insight",  "place an item here, and an offering on its twin, to divine the item's nature."},
  /*INSIGHT_ALTAR_PAYMENT*/      {G_ALTAR,    &altarForeColor,       &blueAltarBackColor,17, 0,  0,0,DF_ALTAR_INSIGHT_INERT, 0,  CANDLE_LIGHT,   (T_OBSTRUCTS_SURFACE_EFFECTS), (TM_VANISHES_UPON_PROMOTION | TM_IS_WIRED | TM_INSIGHT_ACTIVATION | TM_LIST_IN_SIDEBAR | TM_VISUALLY_DISTINCT), "an altar of offering", "place an offering here, and an item on its twin; the offering will be consumed."},
  /*INSIGHT_ALTAR_INERT*/        {G_ORB_ALTAR,&black,                &blueAltarBackColor,17, 0,  0,0,0,                      0,  NO_LIGHT,       (T_OBSTRUCTS_SURFACE_EFFECTS), (TM_LIST_IN_SIDEBAR | TM_VISUALLY_DISTINCT),                  "a scorched altar",     "scorch marks cover the surface of the altar, but it is cold to the touch."},
+
+ // iOS port (iBrogue): altars of transference — a linked pair. Drop the item to empower on the recipient
+ // altar and the item to sacrifice on the donor altar; the donor is consumed and its enchantment is added
+ // to the recipient (which must have a known enchant level). Sacrificing an unidentified donor is a gamble
+ // — it might be cursed — and is revealed as it is consumed (see performEnchantTransfer in Items.c).
+ /*TRANSFER_ALTAR_DONOR*/      {G_ALTAR,     &altarForeColor,     &violetAltarBackColor,17, 0,  0,0,DF_ALTAR_TRANSFER_INERT,0,  CANDLE_LIGHT,   (T_OBSTRUCTS_SURFACE_EFFECTS), (TM_VANISHES_UPON_PROMOTION | TM_IS_WIRED | TM_TRANSFER_ENCHANT_ACTIVATION | TM_LIST_IN_SIDEBAR | TM_VISUALLY_DISTINCT), "an altar of sacrifice", "place an item to sacrifice here, and the item to empower on its twin; the sacrifice will be consumed."},
+ /*TRANSFER_ALTAR_RECIPIENT*/ {G_ORB_ALTAR,  &altarForeColor,     &violetAltarBackColor,17, 0,  0,0,DF_ALTAR_TRANSFER_INERT,0,  CANDLE_LIGHT,   (T_OBSTRUCTS_SURFACE_EFFECTS), (TM_VANISHES_UPON_PROMOTION | TM_IS_WIRED | TM_TRANSFER_ENCHANT_ACTIVATION | TM_LIST_IN_SIDEBAR | TM_VISUALLY_DISTINCT), "an altar of transference", "place an identified item here to empower, and a sacrifice on its twin; this item absorbs its enchantment."},
+ /*TRANSFER_ALTAR_INERT*/     {G_ORB_ALTAR,  &black,              &violetAltarBackColor,17, 0,  0,0,0,                      0,  NO_LIGHT,       (T_OBSTRUCTS_SURFACE_EFFECTS), (TM_LIST_IN_SIDEBAR | TM_VISUALLY_DISTINCT),                  "a scorched altar",     "scorch marks cover the surface of the altar, but it is cold to the touch."},
 };
 
 unsigned long terrainFlags(pos p) {
@@ -945,6 +955,10 @@ dungeonFeature dungeonFeatureCatalog[NUMBER_DUNGEON_FEATURES] = {
     // iOS port (iBrogue): an insight altar promotes to its inert form after a sacrifice (visual flash;
     // the reveal message is emitted by performInsightSacrifice so it appears once, not once per altar)
     {INSIGHT_ALTAR_INERT,       DUNGEON,    0,      0,      0,  "", SCROLL_ENCHANTMENT_LIGHT},
+
+    // iOS port (iBrogue): a transference altar promotes to its inert form after a transfer (visual flash;
+    // the message is emitted by performEnchantTransfer so it appears once, not once per altar)
+    {TRANSFER_ALTAR_INERT,      DUNGEON,    0,      0,      0,  "", SCROLL_ENCHANTMENT_LIGHT},
 };
 
 const dungeonProfile dungeonProfileCatalog[NUMBER_DUNGEON_PROFILES] = {

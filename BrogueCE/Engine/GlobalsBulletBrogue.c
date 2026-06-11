@@ -663,7 +663,13 @@ const meteredItemGenerationTable meteredItemsGenerationTable_BulletBrogue[] = {
     { .category = POTION, .kind = POTION_INCINERATION },
     { .category = POTION, .kind = POTION_DARKNESS },
     { .category = POTION, .kind = POTION_DESCENT },
-    { .category = POTION, .kind = POTION_LICHEN }
+    { .category = POTION, .kind = POTION_LICHEN },
+    // iOS port (iBrogue): keep this potion section index-parallel with potionTable_BulletBrogue.
+    { .category = POTION, .kind = POTION_HONEY },
+    { .category = POTION, .kind = POTION_VOMIT },
+    { .category = POTION, .kind = POTION_WORT },
+    { .category = POTION, .kind = POTION_VENOM },
+    { .category = POTION, .kind = POTION_DETECT_MAGIC2 }
 };
 
 // levelFeelings[0] -> AMULET_LEVEL, levelFeelings[1] -> DEEPEST_LEVEL
@@ -689,6 +695,12 @@ itemTable potionTable_BulletBrogue[] = {
     {"darkness",            itemColors[14], "", 7,  150,    0, 0, {75,75,0}, false, false, -1, false, "Drinking this potion will plunge you into darkness. At first, you will be completely blind to anything not illuminated by an independent light source, but over time your vision will regain its former strength. Throwing the potion will create a cloud of supernatural darkness, and enemies will have difficulty seeing or following you if you take refuge under its cover."},
     {"descent",             itemColors[15], "", 15, 500,    0, 0, {0,0,0}, false, false, -1, false, "When this flask is uncorked by hand or shattered by being thrown, the fog that seeps out will temporarily cause the ground in the vicinity to vanish."},
     {"creeping death",      itemColors[16], "", 7,  450,    0, 0, {0,0,0}, false, false, -1, false, "When the cork is popped or the flask is thrown, tiny spores will spill across the ground and begin to grow a deadly lichen. Anything that touches the lichen will be poisoned by its clinging tendrils, and the lichen will slowly grow to fill the area. Fire will purge the infestation."},
+    // iOS port (iBrogue): themed potion sets (one set is live per run) + a returning detect magic. Frequency 10 each.
+    {"honey",               itemColors[17], "", 10, 400,    0, 0, {20,20,0}, false, false, 1,  false, "A heavy jar of thick golden honey. Swallowed, its slow sweetness mends the body over time. Dashed against the ground -- by your hand, or by a bolt of lightning or flame -- it spreads into a sticky golden mire that snares whatever is caught in it."},
+    {"vomit",               itemColors[18], "", 10, 150,    0, 0, {0,0,0}, false, false, -1, false, "A flask of foul, churning bile. Exposed to the open air it erupts into a reeking cloud that sickens any creature who breathes it, just as a zombie's stench does."},
+    {"wort",                itemColors[19], "", 10, 500,    0, 0, {0,0,0}, false, false, 1,  false, "A flask swirling with luminous medicinal spores -- wort. Uncorked or thrown, it bursts into a cloud of healing motes that knit the wounds of any who linger within it."},
+    {"venom",               itemColors[20], "", 10, 250,    0, 0, {15,15,0}, false, false, -1, false, "A vial of viscous green venom. Drinking it floods your veins with poison; hurled, it douses whatever it strikes in the same searing toxin."},
+    {"detect magic",        itemColors[0],  "", 10, 350,    0, 0, {0,0,0}, false, false, 1,  false, "This mysterious brew sensitizes your mind to the radiance of magic, but only fleetingly: it reveals the helpful or harmful nature of one or two items in your pack, chosen at random."},
 };
 
 itemTable scrollTable_BulletBrogue[] = {
@@ -1062,7 +1074,7 @@ const gameConstants bulletBrogueGameConst = {
     .numberBoltKinds = sizeof(boltCatalog_BulletBrogue) / sizeof(bolt),
     .numberBlueprints = sizeof(blueprintCatalog_BulletBrogue) / sizeof(blueprint),
     .numberPotionKinds = sizeof(potionTable_BulletBrogue) / sizeof(itemTable),
-    .numberGoodPotionKinds = 8,
+    .numberGoodPotionKinds = 11, // iOS port (iBrogue): 8 original good + honey, wort, detect-magic2 (count only; good kinds are no longer contiguous)
     .numberScrollKinds = sizeof(scrollTable_BulletBrogue) / sizeof(itemTable),
     .numberGoodScrollKinds = 12,
     .numberWandKinds = sizeof(wandTable_BulletBrogue) / sizeof(itemTable),
