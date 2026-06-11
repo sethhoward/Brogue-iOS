@@ -60,8 +60,12 @@ warranted (the diff doesn't bump it). **Brogue variant only / iOS-only — not c
 captures dungeon elements and becomes the matching potion (already known, which also identifies any
 matching unidentified potions in the pack):
 
-- **Stand-in capture** (gases / deep water): caustic→caustic gas, confusion→confusion, paralysis→paralysis,
-  rot→creeping death, darkness cloud→darkness, healing spores→life, deep water→fire immunity.
+- **Apply capture** (gases / deep water): *applying* (drinking) the empty bottle while standing on a
+  catchable gas or deep water transforms it into the mapped potion — caustic→caustic gas,
+  confusion→confusion, paralysis→paralysis, rot→creeping death, darkness cloud→darkness, healing
+  spores→life, deep water→fire immunity. A turn passes and the bottle becomes that potion (not consumed).
+  With nothing catchable underfoot it stays a benign empty bottle and no turn is spent. (Capture is on
+  apply, by player choice — never automatic.)
 - **Bolt capture** (drop the bottle, zap it): a lightning bolt → speed, a fire bolt → incineration. This
   reuses the existing bolt-through-potion hook in `updateBolt` and absorbs the bolt exactly as a detonating
   bad potion does.
@@ -78,19 +82,38 @@ identification role but makes it active — you learn a potion type by harvestin
 - `Items.c` `shuffleFlavors` — force `potionTable[POTION_DETECT_MAGIC].identified` (and
   `magicPolarityRevealed`) true each game so the bottle is always known and never joins the ID pool.
 - `Items.c` new `fillEmptyBottle()` (near `shatterPotionAtLoc`) — shared transform→message→`autoIdentify`
-  helper; prototype in `Rogue.h`.
+  helper; prototype in `Rogue.h`. New static `emptyBottleCaptureKindForTile()` maps the gas/liquid on a
+  tile to the captured potion kind + flavor.
 - `Items.c` `updateBolt` — empty-bottle branch *before* `shatterPotionAtLoc`, keyed on `BF_ELECTRIC`/`BF_FIERY`,
   sets `terminateBolt = true`.
-- `Items.c` `drinkPotion` — the `POTION_DETECT_MAGIC` case is now inert ("the bottle is empty…") and returns
-  `false` so it is neither consumed nor costs a turn (replaces the old detect-magic quaff effect).
-- `Time.c` new `captureElementIntoEmptyBottle()`, called once per player turn from
-  `applyGradualTileEffectsToCreature`.
+- `Items.c` `drinkPotion` — the `POTION_DETECT_MAGIC` case is the **apply capture**: if the player's tile
+  holds a catchable element it records the apply command, calls `fillEmptyBottle`, then re-adds the item
+  via `removeItemFromChain` + `addItemToPack` so the new potion **stacks** into an existing same-kind stack
+  instead of taking a bespoke inventory slot, and returns `true` (a turn passes, bottle not consumed);
+  otherwise it prints "the bottle is empty…" and returns `false` (benign, no turn). The bolt-capture path
+  leaves its bottle on the floor, where normal pickup already stacks it. Replaces the old detect-magic quaff
+  effect.
 
 **Determinism.** Generation behavior changes (frequency, and the kind is now always-identified), so the
 weighted pick / ID bookkeeping diverge from pre-change recordings — a `recordingVersionString` bump at
 release is warranted. Capture mutates only existing item/level state (no new RNG call sites). Removing
 detect magic from the unidentified-potion pool slightly shifts the `tryIdentifyLastItemKinds` deduction
 counts (one fewer good potion to deduce) — intended.
+
+### 2026-06-11 — Sharpen monkey theft preference (tunes PR #849)
+
+**What.** Strengthened the monkey's deductive-theft bias from the PR #849 entry above: the favored-item
+bonus in `rateItemStealDesirability` goes **+50 → +290** (food and potions of life/strength), and the
+uniform-pick hedge in `specialHit` drops **10% → 5%**.
+
+**Why.** At +50 (a 6:1 weight) a single favored item still lost to the summed base weight of a full pack,
+so monkeys rarely visibly favored food/life/strength in play. +290 (~30:1) makes food the steal ~70%+ of
+the time when carried, matching the monkey's flavor text. Note this can't change how often life/strength
+are taken — those are simply seldom in the pack. The lower hedge also slightly sharpens **imp** theft,
+consistent with the deductive-thievery intent.
+
+**Where.** `Combat.c` — `rateItemStealDesirability` (monkey branch) and the `rand_percent` hedge in
+`specialHit`. Pure value tweak; same determinism characterisation as the PR #849 entry below.
 
 ### 2026-06-10 — Halve the detect-magic potion's generation frequency (Brogue)
 

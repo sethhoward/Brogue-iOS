@@ -394,11 +394,17 @@ static short rateItemStealDesirability(creature *thief, item *theItem) {
     }
     short score = 10; // base desirability for any item
     if (thief->info.monsterID == MK_MONKEY) {
+        // iOS port (iBrogue): tuned the monkey's favored-item bonus up from PR #849's +50 to +290 so the
+        // preference for food / life / strength actually shows in play. At +50 (a 6:1 weight) a single
+        // favored item still lost to the summed weight of a full pack of mundane items; +290 (~30:1) makes
+        // food the steal ~70%+ of the time when carried, matching the monkey's "snatch familiar foods and
+        // drafts of health or strength" flavor. (Life/strength remain rarely observed simply because they
+        // are rarely in the pack.)
         if (theItem->category & FOOD) {
-            score += 50;
+            score += 290;
         } else if (theItem->category & POTION) {
             if (theItem->kind == POTION_LIFE || theItem->kind == POTION_STRENGTH) {
-                score += 50;
+                score += 290;
             }
         }
     } else if (thief->info.monsterID == MK_IMP) {
@@ -472,9 +478,12 @@ static void specialHit(creature *attacker, creature *defender, short damage) {
 
             itemCandidates = numberOfMatchingPackItems(ALL_ITEMS, 0, (ITEM_EQUIPPED), false);
             if (itemCandidates) {
-                // iOS port (iBrogue): PR #849 — 10% of the time pick uniformly at random (legacy); 90% of
-                // the time pick by weighted steal-desirability, so theft hints at item identity.
-                if (rand_percent(10)) {
+                // iOS port (iBrogue): PR #849 — pick uniformly at random part of the time (legacy hedge);
+                // otherwise pick by weighted steal-desirability, so theft hints at item identity. Lowered
+                // the hedge from 10% to 5% so the deductive weighting (and the monkey's sharpened food /
+                // life / strength bias) dominates more visibly. Affects imp theft too, which is consistent
+                // with the deductive-thievery intent.
+                if (rand_percent(5)) {
                     randItemIndex = rand_range(1, itemCandidates);
                     for (theItem = packItems->nextItem; theItem != NULL; theItem = theItem->nextItem) {
                         if (!(theItem->flags & (ITEM_EQUIPPED))) {

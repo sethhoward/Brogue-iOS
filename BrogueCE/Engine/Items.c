@@ -6276,6 +6276,43 @@ boolean fillEmptyBottle(item *bottle, short newPotionKind, const char *flavorTex
     return true;
 }
 
+// iOS port (iBrogue): maps the catchable gas/liquid on a tile to the potion an empty bottle becomes
+// when applied there. Returns the potion kind (and sets *flavorText) if the tile holds a catchable
+// element, else -1. Used by the empty-bottle apply path in drinkPotion.
+static short emptyBottleCaptureKindForTile(short x, short y, const char **flavorText) {
+    // Gas on the tile takes priority (a more deliberate hazard); otherwise deep water.
+    if (pmap[x][y].layers[GAS] != NOTHING && pmap[x][y].volume > 0) {
+        switch (pmap[x][y].layers[GAS]) {
+            case POISON_GAS:
+                *flavorText = "acrid purple vapor curls into the bottle and stains the glass.";
+                return POTION_POISON;
+            case CONFUSION_GAS:
+                *flavorText = "a shifting iridescent haze pours into the bottle until your eyes swim.";
+                return POTION_CONFUSION;
+            case PARALYSIS_GAS:
+                *flavorText = "a sluggish grey gas seeps into the bottle and goes still.";
+                return POTION_PARALYSIS;
+            case ROT_GAS:
+                *flavorText = "fetid spores drift into the bottle, already furring the glass with lichen.";
+                return POTION_LICHEN;
+            case DARKNESS_CLOUD:
+                *flavorText = "the bottle swallows a wisp of darkness; light bends around the stopper.";
+                return POTION_DARKNESS;
+            case HEALING_CLOUD:
+                *flavorText = "luminous spores swirl into the bottle and settle into a warm golden draught.";
+                return POTION_LIFE;
+            default:
+                break;
+        }
+    }
+    if (!player.status[STATUS_LEVITATING]
+        && cellHasTerrainFlag((pos){ x, y }, T_IS_DEEP_WATER)) {
+        *flavorText = "you dip the bottle until cool water beads on the glass.";
+        return POTION_FIRE_IMMUNITY;
+    }
+    return -1;
+}
+
 // iOS port (iBrogue): thrown good potions apply their effect to the struck creature (helper defined below)
 static boolean applyPotionEffectToCreature(creature *monst, short potionKind, short magnitude);
 
@@ -7745,13 +7782,29 @@ boolean drinkPotion(item *theItem) {
             message("a handful of tiny spores burst out of the open flask!", 0);
             spawnDungeonFeature(player.loc.x, player.loc.y, &dungeonFeatureCatalog[DF_LICHEN_PLANTED], true, false);
             break;
-        case POTION_DETECT_MAGIC:
-            // iOS port (iBrogue): the empty bottle (which replaces potion of detect magic) has no
-            // contents to drink. Don't consume it or spend a turn — capturing a gas by standing in it,
-            // or a bolt by zapping the dropped bottle, is how it's meant to be used. Returning false
-            // here leaves the bottle in the pack and ends the apply command without a turn elapsing.
-            message("the bottle is empty; there is nothing to drink.", 0);
-            return false;
+        case POTION_DETECT_MAGIC: {
+            // iOS port (iBrogue): applying the empty bottle (which replaces potion of detect magic)
+            // captures the catchable gas/liquid on the player's tile, transforming the bottle into the
+            // matching identified potion (a turn passes; the bottle is NOT consumed — it becomes that
+            // potion). With nothing here to capture it stays a benign empty bottle and no turn is spent.
+            // (Lightning/fire are captured separately by zapping a dropped bottle — see updateBolt.)
+            const char *captureFlavor = NULL;
+            short captureKind = emptyBottleCaptureKindForTile(player.loc.x, player.loc.y, &captureFlavor);
+            if (captureKind >= 0) {
+                recordApplyItemCommand(theItem);
+                fillEmptyBottle(theItem, captureKind, captureFlavor);
+                // The bottle mutates in place, so it never went through the pickup/stack path: re-add it
+                // via addItemToPack so the new potion merges into an existing same-kind stack instead of
+                // taking a bespoke inventory slot. (Unlink first, or addItemToPack would match it to
+                // itself.) addItemToPack either stacks-and-frees theItem or re-adds it under its now-free
+                // letter, so the slot count never grows.
+                removeItemFromChain(theItem, packItems);
+                addItemToPack(theItem);
+                return true; // turn passes; theItem is now the captured potion, merged into the pack
+            }
+            message("the bottle is empty, and there is nothing here to capture.", 0);
+            return false; // benign — stays in your pack, no turn spent
+        }
         case POTION_HASTE_SELF:
             haste(&player, magnitude);
             break;
