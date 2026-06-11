@@ -28,6 +28,40 @@ covers the separate Classic engine that ships in the app target).
 
 ## Change log
 
+### 2026-06-10 — Potion-ID tuning: faster first rest-reveal, and detonating potions absorb the bolt
+
+**What.** Two small balance tweaks to features added earlier in this branch:
+
+1. **Rest-based polarity insight now fires sooner.** The first reveal lands after **90** rested turns
+   instead of 120 (`POLARITY_INSIGHT_BASE_TURNS`); the per-known-kind ramp (`+30` turns each) is unchanged,
+   so it still gets harder as the player learns more polarities.
+2. **A detonating dropped potion now absorbs the bolt.** When a fire or lightning bolt detonates a dropped
+   bad/cloud potion (the Phase 3 / PR #842 hook), the bolt **halts at that tile** rather than continuing
+   down its path. Each bolt can therefore detonate at most one potion.
+
+**Why.** (1) Player tuning request — 120 felt too slow for the first hint. (2) Closes an exploit: a player
+could drop every unidentified potion in a straight line and clear/identify the whole row with a single
+lightning (or fire) staff charge, since lightning pierces everything via `BF_PASSES_THRU_CREATURES`. Making
+the shattering flask "absorb" the bolt caps each charge at one detonation, so mass-detonation costs one
+charge per potion — the intended price. Thematically, the violent explosion disrupts the arc.
+
+**Where.** `Items.c` only.
+- Tweak 1: the `POLARITY_INSIGHT_BASE_TURNS` macro (above `gainPolarityInsightFromRest`).
+- Tweak 2: the bolt-detonation hook in `updateBolt` — inside the `if (… shatterPotionAtLoc(…))` block, a
+  `terminateBolt = true;` after the existing item teardown. It is set *before* the function's trailing
+  `exposeTileToFire` / `exposeTileToElectricity` calls, which still run for this tile, so a fire bolt
+  ignites the freshly-spawned flammable terrain (gas cloud / fungal forest) before the bolt stops; only
+  then does the caller's `if (updateBolt(...)) break;` halt the bolt. `shatterPotionAtLoc` returns `true`
+  only for the eight bad/cloud potions, so good potions (which fall through `default: return false`) never
+  halt a bolt.
+
+**Determinism.** No new RNG and no serialized state. The bolt simply traverses fewer cells once it
+detonates a potion; like the Phase 3 / #842 detonation it diverges only as a direct consequence of the
+player's action (zapping a location that holds a dropped bad potion), so it replays identically. Saves are
+recordings. See `KNOWN_CAVEATS.md` for the accepted side effect (a dropped bad potion can now shield a
+monster directly behind it from that bolt). Both tweaks are tuning refinements of existing fork-branch
+features and should be backported to those branches — see `docs/fork-backport-tweaks.md`.
+
 ### 2026-06-10 — Deductive thievery: monkeys and imps steal by preference (upstream PR #849)
 
 **What.** Thieving monsters no longer steal a uniformly random item. 90% of the time they pick by a

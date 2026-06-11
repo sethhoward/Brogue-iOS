@@ -4754,6 +4754,13 @@ static boolean updateBolt(bolt *theBolt, creature *caster, short x, short y,
             if (autoID) {
                 *autoID = true; // staff/wand identifies from the visible detonation
             }
+            // iOS port (iBrogue): the violent detonation absorbs the bolt — it halts here instead of
+            // piercing onward (lightning normally passes through everything via BF_PASSES_THRU_CREATURES).
+            // This caps each bolt at a single detonation, closing the "drop every bad potion in a row and
+            // clear the whole line with one zap" exploit. We only flag termination; updateBolt still falls
+            // through to the exposeTileToFire/exposeTileToElectricity calls below before returning, so a
+            // fire bolt ignites the freshly-spawned flammable terrain at this tile before the bolt stops.
+            terminateBolt = true;
         }
     }
 
@@ -7372,7 +7379,7 @@ static void detectMagicOnItem(item *theItem) {
 // the first still-unknown (good/bad) item in the pack. Pure flag-flipping via detectMagicOnItem — no
 // RNG — so the counter and the reveal are reconstructed identically on replay (Brogue saves are
 // recordings; see gainPolarityInsightFromRest's call site in playerTurnEnded).
-#define POLARITY_INSIGHT_BASE_TURNS       120
+#define POLARITY_INSIGHT_BASE_TURNS       90
 #define POLARITY_INSIGHT_TURNS_PER_KIND   30
 
 static int knownPolarityKindCount(void) {
