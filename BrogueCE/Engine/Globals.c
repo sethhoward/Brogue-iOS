@@ -1591,8 +1591,8 @@ itemTable keyTable[NUMBER_KEY_TYPES] = {
 };
 
 itemTable foodTable[NUMBER_FOOD_KINDS] = {
-    {"ration of food",      "", "", 3, 25,  0, 1800, {0,0,0}, true, false, 0, false, "A ration of food. Was it left by former adventurers? Is it a curious byproduct of the subterranean ecosystem?"},
-    {"mango",               "", "", 1, 15,  0, 1550, {0,0,0}, true, false, 0, false, "An odd fruit to be found so deep beneath the surface of the earth, but only slightly less filling than a ration of food."}
+    {"ration of food",      "", "", 3, 25,  0, 1800, {0,0,0}, true, false, 0, false, "A ration of food. Was it left by former adventurers? Is it a curious byproduct of the subterranean ecosystem? A meal taken in peace, with nothing on the hunt for you, settles the mind enough to study an unidentified scroll and sense whether its magic is benevolent or malevolent."},
+    {"mango",               "", "", 1, 15,  0, 1550, {0,0,0}, true, false, 0, false, "An odd fruit to be found so deep beneath the surface of the earth, but only slightly less filling than a ration of food. Like any meal, it feeds the mind as well as the body when eaten undisturbed, affording a quiet moment to divine the nature of an unknown scroll."}
 };
 
 itemTable weaponTable[NUMBER_WEAPON_KINDS] = {

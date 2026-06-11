@@ -215,6 +215,13 @@ unknown-polarity scroll; reuses `detectMagicOnItem` + `tryIdentifyLastItemKinds(
 + `itemMagicPolarityIsKnown`), called from `eat()` just before its `return true`. Prototype in `Rogue.h`.
 All vanilla symbols.
 
+**Flavor (added 2026-06-10).** Both `foodTable` descriptions in `Globals.c` (the shared catalog — the
+feature is not variant-gated, so the hint is accurate in every variant) now hint at this: the ration of
+food notes that "a meal taken in peace, with nothing on the hunt for you, settles the mind enough to study
+an unidentified scroll…", and the mango that eating "undisturbed" affords "a quiet moment to divine the
+nature of an unknown scroll." Description-only; no logic change. Backport with the feature — see
+`docs/fork-backport-tweaks.md` (branch `eat-scroll-insight`).
+
 **Determinism.** `eat()` is one command per keystroke (no `autoRest`-style per-turn re-recording), the
 reveal is RNG-free, and there's no new stored state — so it's reconstructed identically on replay (saves
 are recordings). Like the rest feature it's a deterministic gameplay-rule change, so pre-feature recordings
