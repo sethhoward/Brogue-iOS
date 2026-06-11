@@ -28,6 +28,34 @@ covers the separate Classic engine that ships in the app target).
 
 ## Change log
 
+### 2026-06-10 — Thrown hallucination potions bloom a fungal forest, and bolts detonate them (upstream PR #842 + bolt extension)
+
+**What.** A thrown potion of hallucination now spawns a **luminescent fungal forest** at the impact tile
+(the existing `FUNGUS_FOREST` terrain: flammable, a light source, and a line-of-sight blocker) instead of
+splashing harmlessly. Additionally, fire and lightning bolts now detonate a **dropped** hallucination
+potion the same way Phase 3 detonates the bad/cloud potions: a lightning bolt simply blooms the forest,
+while a fire bolt blooms it and then **ignites** it.
+
+**Why.** Ports [BrogueCE PR #842](https://github.com/tmewett/BrogueCE/pull/842) ("Give hallucination potions
+a use"), which reframes hallucination as a "magic-mushroom" potion. The bolt extension was requested to keep
+it consistent with the Phase 3 bolt-detonation mechanic now that thrown hallucination has a real effect.
+**iOS-only — not contributed to a fork branch.** (Note: this changes the Phase 3 potion×bolt matrix —
+hallucination, previously inert to bolts, now reacts: fire ignites the forest, lightning just spawns it.)
+
+**Where.** `Items.c` — a `case POTION_HALLUCINATION` added to `shatterPotionAtLoc` (spawns
+`DF_FUNGUS_FOREST`). Because that helper is shared by both `throwItem` and the bolt-detonation hook in
+`updateBolt`, this single case covers the throw effect (PR #842) and the bolt-detonation; the fire-vs-
+lightning behavior falls out of the existing ordering (the detonation runs immediately before the bolt's
+`exposeTileToFire`, so a fire bolt ignites the freshly-spawned flammable forest). The now-dead
+harmless-splash branch for hallucination in `throwItem` was removed. `GlobalsBrogue.c` /
+`GlobalsRapidBrogue.c` / `GlobalsBulletBrogue.c` — the hallucination potion description now mentions the
+thrown fungal-forest effect.
+
+**Determinism.** No new RNG and no serialized state; reuses existing terrain/DF (`FUNGUS_FOREST` /
+`DF_FUNGUS_FOREST`). Like the rest of Phase 3, throwing or bolt-detonating a hallucination potion is an
+action-triggered divergence (the spawned forest and any fire it draws), acceptable and self-consistent on
+replay; nothing changes on the common path.
+
 ### 2026-06-10 — Auto-identify a worn ring deducible by elimination (upstream issue #683)
 
 **What.** When a ring is equipped and reveals no obvious effect, and it is the only still-unidentified ring

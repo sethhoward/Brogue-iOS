@@ -4739,8 +4739,9 @@ static boolean updateBolt(bolt *theBolt, creature *caster, short x, short y,
 
     // iOS port (iBrogue): a fire/lightning bolt crossing a DROPPED bad potion detonates it in place,
     // spawning the potion's normal shatter signature. Placed before the BF_FIERY exposeTileToFire below
-    // so a fire bolt ignites the freshly-spawned flammable gas (violent), while lightning leaves it as a
-    // gas cloud (gentle). Item teardown mirrors burnItem (Time.c).
+    // so a fire bolt ignites the freshly-spawned flammable terrain — a gas cloud, or the fungal forest
+    // from a hallucination potion (violent) — while lightning leaves it unignited (gentle). Item teardown
+    // mirrors burnItem (Time.c).
     if (theBolt->flags & (BF_FIERY | BF_ELECTRIC)) {
         item *floorPotion = itemAtLoc((pos){ x, y });
         if (floorPotion && (floorPotion->category & POTION) && shatterPotionAtLoc(floorPotion, x, y)) {
@@ -6208,6 +6209,15 @@ static boolean shatterPotionAtLoc(item *theItem, short x, short y) {
             message("the flask shatters and deadly spores spill out!", 0);
             spawnDungeonFeature(x, y, &dungeonFeatureCatalog[DF_LICHEN_PLANTED], true, false);
             break;
+        case POTION_HALLUCINATION:
+            // iOS port (iBrogue): port of upstream PR #842 — a thrown hallucination potion blooms a
+            // luminescent fungal forest (flammable, a light source, and a line-of-sight blocker). Sharing
+            // this with the bolt-detonation hook means a lightning bolt over a dropped hallucination potion
+            // simply spawns the forest, while a fire bolt's exposeTileToFire (in updateBolt, run right after
+            // this) ignites the flammable growth.
+            message("the flask shatters and a luminescent fungal forest blooms forth!", 0);
+            spawnDungeonFeature(x, y, &dungeonFeatureCatalog[DF_FUNGUS_FOREST], true, false);
+            break;
         default:
             return false;
     }
@@ -6362,7 +6372,8 @@ static void throwItem(item *theItem, creature *thrower, pos targetLoc, short max
         }
         // iOS port (iBrogue): bad/cloud-potion shatter extracted to shatterPotionAtLoc (shared with the
         // bolt-detonation hook in updateBolt). Returns true (signature spawned + flask auto-identified)
-        // for the 7 cloud/explosion kinds; otherwise falls through to the harmless-splash branch.
+        // for the cloud/explosion kinds and hallucination's fungal forest; otherwise falls through to the
+        // harmless-splash branch.
         if (shatterPotionAtLoc(theItem, x, y)) {
             // bad/cloud potion: its shatter signature was spawned and the flask auto-identified
         } else {
@@ -6376,13 +6387,6 @@ static void throwItem(item *theItem, creature *thrower, pos targetLoc, short max
             sprintf(buf, "the flask shatters and %s liquid splashes harmlessly %s %s.",
                     potionTable[theItem->kind].flavor, buf2, tileText(x, y));
             message(buf, 0);
-            // hallucination is the only malevolent potion that splashes harmlessly when thrown
-            if (theItem->kind == POTION_HALLUCINATION) {
-                if (theItem->flags & ITEM_MAGIC_DETECTED
-                    || (magicPolarityRevealedItemKindCount(theItem->category, 1) == gameConst->numberGoodPotionKinds)) {
-                    autoIdentify(theItem);
-                }
-            }
         }
         deleteItem(theItem);
         return; // potions disappear when they break
