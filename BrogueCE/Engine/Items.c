@@ -4744,23 +4744,33 @@ static boolean updateBolt(bolt *theBolt, creature *caster, short x, short y,
     // mirrors burnItem (Time.c).
     if (theBolt->flags & (BF_FIERY | BF_ELECTRIC)) {
         item *floorPotion = itemAtLoc((pos){ x, y });
-        if (floorPotion && (floorPotion->category & POTION) && shatterPotionAtLoc(floorPotion, x, y)) {
-            removeItemFromChain(floorPotion, floorItems);
-            deleteItem(floorPotion);
-            pmap[x][y].flags &= ~(HAS_ITEM | ITEM_DETECTED);
-            if (lightingChanged) {
-                *lightingChanged = true; // relight darkness/descent this turn
+        if (floorPotion && (floorPotion->category & POTION)) {
+            if (shatterPotionAtLoc(floorPotion, x, y)) {
+                removeItemFromChain(floorPotion, floorItems);
+                deleteItem(floorPotion);
+                pmap[x][y].flags &= ~(HAS_ITEM | ITEM_DETECTED);
+                if (lightingChanged) {
+                    *lightingChanged = true; // relight darkness/descent this turn
+                }
+                if (autoID) {
+                    *autoID = true; // staff/wand identifies from the visible detonation
+                }
+                // iOS port (iBrogue): the violent detonation absorbs the bolt — it halts here instead of
+                // piercing onward (lightning normally passes through everything via BF_PASSES_THRU_CREATURES).
+                // This caps each bolt at a single detonation, closing the "drop every bad potion in a row and
+                // clear the whole line with one zap" exploit. We only flag termination; updateBolt still falls
+                // through to the exposeTileToFire/exposeTileToElectricity calls below before returning, so a
+                // fire bolt ignites the freshly-spawned flammable terrain at this tile before the bolt stops.
+                terminateBolt = true;
+            } else if (playerCanSee(x, y)) {
+                // iOS port (iBrogue): the eight benevolent potions have no shatter signature, so a bolt
+                // passes through the flask harmlessly — it is neither destroyed nor does it halt the bolt.
+                // Give that inert reaction a line of feedback instead of a silent no-op. (Accepted tradeoff:
+                // bad potions detonate-and-halt while good ones glow-and-pass, so a zap is a costed polarity
+                // probe rather than a free mass-ID — see KNOWN_CAVEATS.md. Gated on visibility so an
+                // off-screen monster bolt crossing a dropped potion doesn't print a phantom message.)
+                message("the bolt passes through the flask and its fluid glows warmly.", 0);
             }
-            if (autoID) {
-                *autoID = true; // staff/wand identifies from the visible detonation
-            }
-            // iOS port (iBrogue): the violent detonation absorbs the bolt — it halts here instead of
-            // piercing onward (lightning normally passes through everything via BF_PASSES_THRU_CREATURES).
-            // This caps each bolt at a single detonation, closing the "drop every bad potion in a row and
-            // clear the whole line with one zap" exploit. We only flag termination; updateBolt still falls
-            // through to the exposeTileToFire/exposeTileToElectricity calls below before returning, so a
-            // fire bolt ignites the freshly-spawned flammable terrain at this tile before the bolt stops.
-            terminateBolt = true;
         }
     }
 

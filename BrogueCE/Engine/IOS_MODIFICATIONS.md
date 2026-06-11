@@ -28,6 +28,30 @@ covers the separate Classic engine that ships in the app target).
 
 ## Change log
 
+### 2026-06-10 — Benevolent potions glow harmlessly when a bolt crosses them
+
+**What.** A fire or lightning bolt that crosses a dropped **benevolent** potion (the eight good kinds —
+life, strength, telepathy, levitation, detect magic, haste self, fire immunity, invisibility) now prints
+"the bolt passes through the flask and its fluid glows warmly." instead of doing nothing visible. The flask
+is **not** destroyed and the bolt **continues** (it does not halt, unlike a bad potion, which detonates and
+absorbs the bolt).
+
+**Why.** Player request — a bolt over a good potion used to be a silent no-op, which read as a bug. The
+benevolent potions are exactly the kinds `shatterPotionAtLoc` returns `false` for (they have no shatter
+signature), so they were inert to bolts. The glow gives that inertness visible feedback.
+
+**Where.** `Items.c` — the bolt-detonation hook in `updateBolt`. The `if (… shatterPotionAtLoc(…))` was
+split into an `if/else`: the detonate-and-halt branch is unchanged; a new `else if (playerCanSee(x, y))`
+branch prints the glow message for the inert (good) potions. Gated on visibility so an off-screen monster
+bolt crossing a dropped potion doesn't print a phantom message. No item teardown, no `terminateBolt`, no
+identify — purely a message.
+
+**Determinism / balance.** No RNG and no serialized state (a deterministic `message()` keyed on game state).
+Because bad potions detonate-and-halt while good ones glow-and-pass, a zap becomes a *costed polarity probe*:
+one charge reveals (by observation) the leading run of benevolent potions up to the first bad one, which
+detonates dangerously and is consumed. Bounded and expensive, not the old free mass-ID. Recorded in
+`KNOWN_CAVEATS.md`. Backport note in `docs/fork-backport-tweaks.md` (branch `potion-bolt-detonation`).
+
 ### 2026-06-10 — Potion-ID tuning: faster first rest-reveal, and detonating potions absorb the bolt
 
 **What.** Two small balance tweaks to features added earlier in this branch:
