@@ -300,9 +300,9 @@ static void initializeMainMenuButton(brogueButton *button, char *textWithHotkey,
 }
 
 #ifdef BROGUE_TABLET
-#define MAIN_MENU_BUTTON_COUNT 4   // iOS port (iBrogue): New Game, Play, View, File Management (no Quit)
+#define MAIN_MENU_BUTTON_COUNT 5   // iOS port (iBrogue): New Game, Play, View, File Management, Game Center (no Quit)
 #else
-#define MAIN_MENU_BUTTON_COUNT 5
+#define MAIN_MENU_BUTTON_COUNT 6
 #endif
 
 /// @brief Initializes the main menu buttons
@@ -319,9 +319,12 @@ static void initializeMainMenuButtons(brogueButton *buttons) {
     initializeMainMenuButton(&(buttons[2]), " <     %sV%siew       ", 'v', 'V', NG_FLYOUT_VIEW);
     // iOS port (iBrogue): native file manager, like the Classic title menu.
     initializeMainMenuButton(&(buttons[3]), "  %sF%sile Management  ", 'f', 'F', NG_FILE_MANAGEMENT);
+    // iOS port (iBrogue): Game Center leaderboard (BrogueCE_High_Score). Hotkey 'C'
+    // avoids the N/P/V/F/Q already used by the other main-menu buttons.
+    initializeMainMenuButton(&(buttons[4]), "    Game %sC%senter    ", 'c', 'C', NG_GAME_CENTER);
 
 #ifndef BROGUE_TABLET
-    initializeMainMenuButton(&(buttons[4]), "       %sQ%suit       ", 'q', 'Q', NG_QUIT);
+    initializeMainMenuButton(&(buttons[5]), "       %sQ%suit       ", 'q', 'Q', NG_QUIT);
 #endif
 
 }
@@ -1153,6 +1156,10 @@ static void viewGameStats(void) {
 // the native file manager scoped to the CE save directory.
 extern void ceShowFileManagement(void);
 
+// iOS port (iBrogue): implemented in the framework bridge (CEBridge.mm); presents
+// the Game Center leaderboard (BrogueCE_High_Score).
+extern void ceShowGameCenter(void);
+
 // iOS port (iBrogue): true only while the title screen is showing (read by the
 // bridge to gate the version chooser). Defined in CEBridge.mm.
 extern volatile boolean brogueCEAtTitle;
@@ -1352,6 +1359,10 @@ void mainBrogueJunction() {
             case NG_FILE_MANAGEMENT:
                 rogue.nextGame = NG_NOTHING;
                 ceShowFileManagement(); // opens the native file manager; stay at title
+                break;
+            case NG_GAME_CENTER:
+                rogue.nextGame = NG_NOTHING;
+                ceShowGameCenter(); // opens the Game Center leaderboard; stay at title
                 break;
             case NG_QUIT:
                 // No need to do anything.

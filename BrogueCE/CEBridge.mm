@@ -510,16 +510,16 @@ static NSString * const kCEAchievementIDForFeat[] = {
     @"brogue_untempted",    // FEAT_TONE (Untempted)
 };
 
-// Posts the final score and any earned feats to Game Center. Mirrors Classic's
-// death()/victory() logic (RogueMain.mm): on death only non-initialValue feats count (the
-// "ascend without..." feats require a win); on victory/supervictory all set feats count;
-// quit reports score only. Restricted to standard Brogue, non-wizard runs.
-static void ceReportGameOver(long score, boolean isVictory, boolean isQuit) {
+// Posts the final score and any earned feats to Game Center. Only completed runs reach
+// here — quit/abandon (GAMEOVER_QUIT) and playback (GAMEOVER_RECORDING) are not forwarded,
+// so a player can't pad the leaderboard by giving up. On death only non-initialValue feats
+// count (the "ascend without..." feats require a win); on victory/supervictory all set
+// feats count. Restricted to standard Brogue, non-wizard runs.
+static void ceReportGameOver(long score, boolean isVictory) {
     if (gameVariant != VARIANT_BROGUE) return;     // Rapid/Bullet score differently
     if (rogue.mode == GAME_MODE_WIZARD) return;    // never report cheat runs
 
     if (score > 0 && gHost) [gHost reportCEScore:score];
-    if (isQuit) return; // matches Classic: no achievements on quit
 
     const short n = (short)(sizeof(kCEAchievementIDForFeat) / sizeof(kCEAchievementIDForFeat[0]));
     for (short i = 0; i < gameConst->numberFeats && i < n; i++) {
@@ -531,11 +531,11 @@ static void ceReportGameOver(long score, boolean isVictory, boolean isQuit) {
 
 void notifyEvent(short eventId, int data1, int data2, const char *str1, const char *str2) {
     switch (eventId) {
-        case GAMEOVER_DEATH:        ceReportGameOver((long)data1, false, false); break;
-        case GAMEOVER_QUIT:         ceReportGameOver((long)data1, false, true);  break;
+        case GAMEOVER_DEATH:        ceReportGameOver((long)data1, false); break;
         case GAMEOVER_VICTORY:
-        case GAMEOVER_SUPERVICTORY: ceReportGameOver((long)data1, true,  false); break;
-        default: break; // GAMEOVER_RECORDING etc. — ignore
+        case GAMEOVER_SUPERVICTORY: ceReportGameOver((long)data1, true);  break;
+        // GAMEOVER_QUIT (quit/abandon) and GAMEOVER_RECORDING (playback) report nothing.
+        default: break;
     }
 }
 
@@ -586,6 +586,12 @@ boolean shiftKeyIsDown(void) {
 // iOS port (iBrogue): the CE title menu's "File Management" entry routes here.
 void ceShowFileManagement(void) {
     [gHost presentFileManagement];
+}
+
+// iOS port (iBrogue): the CE title menu's View > "Game Center" entry routes here;
+// presents the BrogueCE_High_Score leaderboard.
+void ceShowGameCenter(void) {
+    [gHost presentGameCenter];
 }
 
 // iOS port (iBrogue): Combat.c calls this when the player takes damage.

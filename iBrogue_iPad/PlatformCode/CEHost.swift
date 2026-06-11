@@ -69,6 +69,10 @@ final class CEHost: NSObject, BrogueCEHost {
         viewController?.presentFileManagementScreenForCE()
     }
 
+    func presentGameCenter() {
+        viewController?.presentGameCenterScreenForCE()
+    }
+
     func playDamageHaptic(_ severity: Int) {
         viewController?.playerTookDamage(severity)
     }
