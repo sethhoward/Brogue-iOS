@@ -3325,6 +3325,7 @@ extern "C" {
                        boolean targetCanLeaveMap);
     void identifyItemKind(item *theItem);
     void autoIdentify(item *theItem);
+    boolean fillEmptyBottle(item *bottle, short newPotionKind, const char *flavorText); // iOS port (iBrogue): empty-bottle capture
     short numberOfItemsInPack(void);
     char nextAvailableInventoryCharacter(void);
     void checkForDisenchantment(item *theItem);

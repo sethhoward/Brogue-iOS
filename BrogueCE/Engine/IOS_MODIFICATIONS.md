@@ -28,6 +28,70 @@ covers the separate Classic engine that ships in the app target).
 
 ## Change log
 
+### 2026-06-11 — Insight altars: place the pair side by side in a fixed s . o layout
+
+**What.** The two altars-of-insight no longer land at random spots in the reward room. They are placed in
+a consistent arrangement: the **sacrifice/payment** altar to the west, a one-tile walkable gap, then the
+**insight** (offered-item) altar to the east — `#....s.o....#`. The room is also smaller now.
+
+**Why.** The pair read as inconsistent and scattered, making the mechanic hard to parse. A fixed,
+adjacent s→o layout makes the room instantly legible. The smaller room also fits into level generation
+more easily.
+
+**Where.**
+- `GlobalsBrogue.c` — the insight blueprint (`blueprintCatalog_Brogue`, the `MT_INSIGHT_ALTAR` slot) now
+  builds **only** the carpeted room: the two altar `machineFeature` rows were removed (featureCount 5 → 3)
+  and `roomSize` shrank from `{7, 30}` to `{7, 14}`.
+- `Architect.c` — a new `placeInsightAltarsInRoom()` (with helpers `insightAltarCellIsOpen` /
+  `setInsightAltar`) places the pair after the room is built, called from the `addMachines` force-build
+  right after `buildAMachine(MT_INSIGHT_ALTAR, …)` succeeds. It finds the just-built room's carpet cells
+  (machineNumber greater than the value captured before the build), picks the horizontal run of three open
+  cells nearest the room center, and drops `INSIGHT_ALTAR_PAYMENT` (west) + `INSIGHT_ALTAR_INSIGHT` (east,
+  one gap). Fallbacks: an adjacent pair, then any two open cells, so the altars always exist.
+
+**Determinism.** The placement helper uses **no RNG** (a deterministic scan), so it doesn't perturb the
+seed stream. But removing the two altar features and shrinking `roomSize` changes what `buildAMachine`
+draws, so generation diverges from pre-change recordings — a `recordingVersionString` bump at release is
+warranted (the diff doesn't bump it). **Brogue variant only / iOS-only — not contributed to a fork branch.**
+
+### 2026-06-11 — Replace potion of detect magic with the Empty Bottle
+
+**What.** The `POTION_DETECT_MAGIC` slot is repurposed into an always-identified **empty bottle** that
+captures dungeon elements and becomes the matching potion (already known, which also identifies any
+matching unidentified potions in the pack):
+
+- **Stand-in capture** (gases / deep water): caustic→caustic gas, confusion→confusion, paralysis→paralysis,
+  rot→creeping death, darkness cloud→darkness, healing spores→life, deep water→fire immunity.
+- **Bolt capture** (drop the bottle, zap it): a lightning bolt → speed, a fire bolt → incineration. This
+  reuses the existing bolt-through-potion hook in `updateBolt` and absorbs the bolt exactly as a detonating
+  bad potion does.
+
+**Why.** Design/testing request: detect magic was a weak, passive pick. The empty bottle keeps its
+identification role but makes it active — you learn a potion type by harvesting a hazard. The enum
+`POTION_DETECT_MAGIC` is kept as the internal kind (a rename would be high-churn); it is relabeled
+"empty bottle" in the item tables. **iOS-only, all three variants** (Brogue/Rapid/Bullet).
+
+**Where.**
+- `GlobalsBrogue.c` / `GlobalsRapidBrogue.c` / `GlobalsBulletBrogue.c` — the `"detect magic"` row becomes
+  `"empty bottle"` with a new description; Brogue's `frequency` is restored **10 → 20** (Rapid/Bullet were
+  already 20).
+- `Items.c` `shuffleFlavors` — force `potionTable[POTION_DETECT_MAGIC].identified` (and
+  `magicPolarityRevealed`) true each game so the bottle is always known and never joins the ID pool.
+- `Items.c` new `fillEmptyBottle()` (near `shatterPotionAtLoc`) — shared transform→message→`autoIdentify`
+  helper; prototype in `Rogue.h`.
+- `Items.c` `updateBolt` — empty-bottle branch *before* `shatterPotionAtLoc`, keyed on `BF_ELECTRIC`/`BF_FIERY`,
+  sets `terminateBolt = true`.
+- `Items.c` `drinkPotion` — the `POTION_DETECT_MAGIC` case is now inert ("the bottle is empty…") and returns
+  `false` so it is neither consumed nor costs a turn (replaces the old detect-magic quaff effect).
+- `Time.c` new `captureElementIntoEmptyBottle()`, called once per player turn from
+  `applyGradualTileEffectsToCreature`.
+
+**Determinism.** Generation behavior changes (frequency, and the kind is now always-identified), so the
+weighted pick / ID bookkeeping diverge from pre-change recordings — a `recordingVersionString` bump at
+release is warranted. Capture mutates only existing item/level state (no new RNG call sites). Removing
+detect magic from the unidentified-potion pool slightly shifts the `tryIdentifyLastItemKinds` deduction
+counts (one fewer good potion to deduce) — intended.
+
 ### 2026-06-10 — Halve the detect-magic potion's generation frequency (Brogue)
 
 **What.** The potion of detect magic now appears about half as often: its `frequency` in

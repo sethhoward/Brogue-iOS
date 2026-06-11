@@ -4745,7 +4745,24 @@ static boolean updateBolt(bolt *theBolt, creature *caster, short x, short y,
     if (theBolt->flags & (BF_FIERY | BF_ELECTRIC)) {
         item *floorPotion = itemAtLoc((pos){ x, y });
         if (floorPotion && (floorPotion->category & POTION)) {
-            if (shatterPotionAtLoc(floorPotion, x, y)) {
+            if (floorPotion->kind == POTION_DETECT_MAGIC) {
+                // iOS port (iBrogue): a fired lightning/fire bolt crossing a DROPPED empty bottle is
+                // caught by it — the bottle fills with that essence (lightning -> speed, fire ->
+                // incineration), becoming an identified potion, and the bolt is absorbed exactly as a
+                // detonation absorbs it. Checked before shatterPotionAtLoc so the bottle captures
+                // rather than being treated as an inert (benevolent) flask the bolt passes through.
+                if (theBolt->flags & BF_ELECTRIC) {
+                    fillEmptyBottle(floorPotion, POTION_HASTE_SELF,
+                        "the bottle snares the crackling arc -- caged lightning fizzes against the glass.");
+                } else {
+                    fillEmptyBottle(floorPotion, POTION_INCINERATION,
+                        "flame roars into the bottle and coils there, straining at the stopper.");
+                }
+                if (autoID) {
+                    *autoID = true; // the visible capture identifies the firing staff/wand
+                }
+                terminateBolt = true; // the bottle drinks the bolt, just as a detonation absorbs it
+            } else if (shatterPotionAtLoc(floorPotion, x, y)) {
                 removeItemFromChain(floorPotion, floorItems);
                 deleteItem(floorPotion);
                 pmap[x][y].flags &= ~(HAS_ITEM | ITEM_DETECTED);
@@ -6243,6 +6260,22 @@ static boolean shatterPotionAtLoc(item *theItem, short x, short y) {
     return true;
 }
 
+// iOS port (iBrogue): the empty bottle (POTION_DETECT_MAGIC slot) captures a dungeon element and
+// becomes the matching, already-identified potion. Shared by the stand-in capture (Time.c) and the
+// bolt capture (updateBolt). Prints the supplied flavor line, then auto-identifies the new kind so
+// any matching unidentified potions in the pack become known too. Returns true if the bottle filled.
+boolean fillEmptyBottle(item *bottle, short newPotionKind, const char *flavorText) {
+    if (!bottle || !(bottle->category & POTION) || bottle->kind != POTION_DETECT_MAGIC) {
+        return false;
+    }
+    bottle->kind = newPotionKind;
+    if (flavorText) {
+        messageWithColor(flavorText, &itemMessageColor, 0);
+    }
+    autoIdentify(bottle); // identify the new kind + fold matching pack potions into the known count
+    return true;
+}
+
 // iOS port (iBrogue): thrown good potions apply their effect to the struck creature (helper defined below)
 static boolean applyPotionEffectToCreature(creature *monst, short potionKind, short magnitude);
 
@@ -7618,7 +7651,6 @@ static boolean applyPotionEffectToCreature(creature *monst, short potionKind, sh
 }
 
 boolean drinkPotion(item *theItem) {
-    item *tempItem = NULL;
     char buf[1000] = "";
     int magnitude;
 
@@ -7713,54 +7745,13 @@ boolean drinkPotion(item *theItem) {
             message("a handful of tiny spores burst out of the open flask!", 0);
             spawnDungeonFeature(player.loc.x, player.loc.y, &dungeonFeatureCatalog[DF_LICHEN_PLANTED], true, false);
             break;
-        case POTION_DETECT_MAGIC: {
-            boolean hadEffectOnLevel = false;
-            boolean hadEffectOnPack = false;
-            for (tempItem = floorItems->nextItem; tempItem != NULL; tempItem = tempItem->nextItem) {
-                if (tempItem->category & CAN_BE_DETECTED) {
-                    detectMagicOnItem(tempItem);
-                    if (itemMagicPolarity(tempItem)) {
-                        pmapAt(tempItem->loc)->flags |= ITEM_DETECTED;
-                        hadEffectOnLevel = true;
-                        refreshDungeonCell(tempItem->loc);
-                    }
-                }
-            }
-            for (creatureIterator it = iterateCreatures(monsters); hasNextCreature(it);) {
-                creature *monst = nextCreature(&it);
-                if (monst->carriedItem && (monst->carriedItem->category & CAN_BE_DETECTED)) {
-                    detectMagicOnItem(monst->carriedItem);
-                    if (itemMagicPolarity(monst->carriedItem)) {
-                        hadEffectOnLevel = true;
-                        refreshDungeonCell(monst->loc);
-                    }
-                }
-            }
-            for (tempItem = packItems->nextItem; tempItem != NULL; tempItem = tempItem->nextItem) {
-                if (tempItem->category & CAN_BE_DETECTED) {
-                    detectMagicOnItem(tempItem);
-                    if (itemMagicPolarity(tempItem)) {
-                        if (tempItem != theItem && (tempItem->flags & ITEM_MAGIC_DETECTED)) {
-                            // Don't allow the potion of detect magic to detect itself.
-                            hadEffectOnPack = true;
-                        }
-                    }
-                }
-            }
-            if (hadEffectOnLevel || hadEffectOnPack) {
-                tryIdentifyLastItemKinds(HAS_INTRINSIC_POLARITY);
-                if (hadEffectOnLevel && hadEffectOnPack) {
-                    message("you can somehow feel the presence of magic on the level and in your pack.", 0);
-                } else if (hadEffectOnLevel) {
-                    message("you can somehow feel the presence of magic on the level.", 0);
-                } else {
-                    message("you can somehow feel the presence of magic in your pack.", 0);
-                }
-            } else {
-                message("you can somehow feel the absence of magic on the level and in your pack.", 0);
-            }
-            break;
-        }
+        case POTION_DETECT_MAGIC:
+            // iOS port (iBrogue): the empty bottle (which replaces potion of detect magic) has no
+            // contents to drink. Don't consume it or spend a turn — capturing a gas by standing in it,
+            // or a bolt by zapping the dropped bottle, is how it's meant to be used. Returning false
+            // here leaves the bottle in the pack and ends the apply command without a turn elapsing.
+            message("the bottle is empty; there is nothing to drink.", 0);
+            return false;
         case POTION_HASTE_SELF:
             haste(&player, magnitude);
             break;
@@ -8357,6 +8348,11 @@ void shuffleFlavors() {
     for (i=0; i<gameConst->numberPotionKinds; i++) {
         resetItemTableEntry(potionTable + i);
     }
+    // iOS port (iBrogue): the empty bottle (POTION_DETECT_MAGIC slot, which replaces potion of
+    // detect magic) is a plain glass flask, not a mystery potion. Keep its kind permanently
+    // identified so it never joins the potion-ID guessing pool and always reads as "empty bottle".
+    potionTable[POTION_DETECT_MAGIC].identified = true;
+    potionTable[POTION_DETECT_MAGIC].magicPolarityRevealed = true;
     for (i=0; i<NUMBER_STAFF_KINDS; i++) {
         resetItemTableEntry(staffTable+ i);
     }

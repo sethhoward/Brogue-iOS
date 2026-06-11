@@ -454,6 +454,68 @@ void applyInstantTileEffectsToCreature(creature *monst) {
     }
 }
 
+// iOS port (iBrogue): empty-bottle "stand-in" capture. If the player carries an empty bottle (the
+// POTION_DETECT_MAGIC slot, which replaces potion of detect magic) and occupies a catchable gas or
+// deep water, the bottle fills with that essence and becomes the matching identified potion. Called
+// once per player turn from applyGradualTileEffectsToCreature, so a single bottle is spent per turn.
+static void captureElementIntoEmptyBottle(short x, short y) {
+    item *bottle = NULL;
+    short potionKind = -1;
+    const char *flavor = NULL;
+
+    for (item *p = packItems->nextItem; p != NULL; p = p->nextItem) {
+        if ((p->category & POTION) && p->kind == POTION_DETECT_MAGIC) {
+            bottle = p;
+            break;
+        }
+    }
+    if (!bottle) {
+        return;
+    }
+
+    // Gas on the tile takes priority (a more deliberate hazard); otherwise deep water.
+    if (pmap[x][y].layers[GAS] != NOTHING && pmap[x][y].volume > 0) {
+        switch (pmap[x][y].layers[GAS]) {
+            case POISON_GAS:
+                potionKind = POTION_POISON;
+                flavor = "acrid purple vapor curls into the bottle and stains the glass.";
+                break;
+            case CONFUSION_GAS:
+                potionKind = POTION_CONFUSION;
+                flavor = "a shifting iridescent haze pours into the bottle until your eyes swim.";
+                break;
+            case PARALYSIS_GAS:
+                potionKind = POTION_PARALYSIS;
+                flavor = "a sluggish grey gas seeps into the bottle and goes still.";
+                break;
+            case ROT_GAS:
+                potionKind = POTION_LICHEN;
+                flavor = "fetid spores drift into the bottle, already furring the glass with lichen.";
+                break;
+            case DARKNESS_CLOUD:
+                potionKind = POTION_DARKNESS;
+                flavor = "the bottle swallows a wisp of darkness; light bends around the stopper.";
+                break;
+            case HEALING_CLOUD:
+                potionKind = POTION_LIFE;
+                flavor = "luminous spores swirl into the bottle and settle into a warm golden draught.";
+                break;
+            default:
+                break;
+        }
+    }
+    if (potionKind < 0
+        && !player.status[STATUS_LEVITATING]
+        && cellHasTerrainFlag((pos){ x, y }, T_IS_DEEP_WATER)) {
+        potionKind = POTION_FIRE_IMMUNITY;
+        flavor = "you dip the bottle until cool water beads on the glass.";
+    }
+
+    if (potionKind >= 0) {
+        fillEmptyBottle(bottle, potionKind, flavor);
+    }
+}
+
 static void applyGradualTileEffectsToCreature(creature *monst, short ticks) {
     short itemCandidates, randItemIndex;
     short x = monst->loc.x, y = monst->loc.y, damage;
@@ -546,6 +608,11 @@ static void applyGradualTileEffectsToCreature(creature *monst, short ticks) {
                 messageWithColor("you feel much better.", &goodMessageColor, 0);
             }
         }
+    }
+
+    // iOS port (iBrogue): the empty bottle scoops up a catchable gas / deep water on the player's tile.
+    if (monst == &player) {
+        captureElementIntoEmptyBottle(x, y);
     }
 }
 

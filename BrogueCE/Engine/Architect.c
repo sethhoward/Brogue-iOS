@@ -1728,6 +1728,99 @@ boolean buildAMachine(enum machineTypes bp,
     return true;
 }
 
+// iOS port (iBrogue): true if (x, y) is an open carpeted interior cell of a machine built after
+// minMachineNumber (i.e. the altars-of-insight room we just built) and free to receive an altar.
+static boolean insightAltarCellIsOpen(short x, short y, short minMachineNumber) {
+    return coordinatesAreInMap(x, y)
+        && pmap[x][y].machineNumber > minMachineNumber
+        && (pmap[x][y].flags & IS_IN_ROOM_MACHINE)
+        && pmap[x][y].layers[DUNGEON] == CARPET
+        && !(pmap[x][y].flags & (HAS_ITEM | HAS_MONSTER));
+}
+
+static void setInsightAltar(short x, short y, enum tileType altar) {
+    pmap[x][y].layers[DUNGEON] = altar;
+    refreshDungeonCell((pos){ x, y });
+}
+
+// iOS port (iBrogue): place the two insight altars in a fixed, readable layout -- the sacrifice (payment)
+// altar to the west, a one-tile gap, then the insight altar to the east (#....s.o....#). The generic
+// machine builder picks random interior cells and spreads features apart with personalSpace, so it can't
+// produce an ordered adjacent pair; we place them here instead. Deterministic (no RNG, so replay is
+// unaffected). minMachineNumber is rogue.machineNumber captured before the build, so any cell with a
+// greater machineNumber belongs to the room we just built.
+static void placeInsightAltarsInRoom(short minMachineNumber) {
+    int cx = 0, cy = 0, count = 0;
+    for (short i = 0; i < DCOLS; i++) {
+        for (short j = 0; j < DROWS; j++) {
+            if (insightAltarCellIsOpen(i, j, minMachineNumber)) {
+                cx += i;
+                cy += j;
+                count++;
+            }
+        }
+    }
+    if (count == 0) {
+        return; // no interior found (shouldn't happen); leave the room rather than corrupt it
+    }
+    cx /= count;
+    cy /= count;
+
+    // Preferred: a horizontal run of three open cells (s, gap, o), centered as close to the room
+    // center as possible.
+    short bestX = -1, bestY = -1;
+    int bestDist = -1;
+    for (short j = 0; j < DROWS; j++) {
+        for (short i = 0; i < DCOLS - 2; i++) {
+            if (insightAltarCellIsOpen(i, j, minMachineNumber)
+                && insightAltarCellIsOpen(i + 1, j, minMachineNumber)
+                && insightAltarCellIsOpen(i + 2, j, minMachineNumber)) {
+
+                const int dist = abs((i + 1) - cx) + abs(j - cy);
+                if (bestDist < 0 || dist < bestDist) {
+                    bestDist = dist;
+                    bestX = i;
+                    bestY = j;
+                }
+            }
+        }
+    }
+    if (bestX >= 0) {
+        setInsightAltar(bestX, bestY, INSIGHT_ALTAR_PAYMENT);         // sacrifice (s), west
+        setInsightAltar(bestX + 2, bestY, INSIGHT_ALTAR_INSIGHT);     // offering (o), east, one-tile gap
+        return;
+    }
+
+    // Fallback 1: two horizontally adjacent open cells (s o, no gap).
+    for (short j = 0; j < DROWS; j++) {
+        for (short i = 0; i < DCOLS - 1; i++) {
+            if (insightAltarCellIsOpen(i, j, minMachineNumber)
+                && insightAltarCellIsOpen(i + 1, j, minMachineNumber)) {
+
+                setInsightAltar(i, j, INSIGHT_ALTAR_PAYMENT);
+                setInsightAltar(i + 1, j, INSIGHT_ALTAR_INSIGHT);
+                return;
+            }
+        }
+    }
+
+    // Fallback 2: any two open cells, so the altars always exist.
+    boolean placedPayment = false;
+    for (short i = 0; i < DCOLS; i++) {
+        for (short j = 0; j < DROWS; j++) {
+            if (insightAltarCellIsOpen(i, j, minMachineNumber)) {
+                if (!placedPayment) {
+                    setInsightAltar(i, j, INSIGHT_ALTAR_PAYMENT);
+                    placedPayment = true;
+                } else {
+                    setInsightAltar(i, j, INSIGHT_ALTAR_INSIGHT);
+                    return;
+                }
+            }
+        }
+    }
+}
+
 // add machines to the dungeon.
 static void addMachines() {
     short machineCount, failsafe;
@@ -1758,7 +1851,11 @@ static void addMachines() {
     if (gameVariant == VARIANT_BROGUE
         && rogue.depthLevel >= 5 && (rogue.depthLevel - 5) % 10 == 0) {
         for (failsafe = 50; failsafe; failsafe--) {
+            const short preInsightMachineNumber = rogue.machineNumber;
             if (buildAMachine(MT_INSIGHT_ALTAR, -1, -1, 0, NULL, NULL, NULL)) {
+                // iOS port (iBrogue): the blueprint built only the room; place the altar pair here in a
+                // fixed s . o layout (the builder won't do ordered/adjacent placement itself).
+                placeInsightAltarsInRoom(preInsightMachineNumber);
                 break;
             }
         }
