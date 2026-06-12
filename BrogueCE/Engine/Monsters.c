@@ -3075,22 +3075,26 @@ void unAlly(creature *monst) {
 }
 
 boolean monsterFleesFrom(creature *monst, creature *defender) {
-    const short x = monst->loc.x;
-    const short y = monst->loc.y;
+    // iOS port (iBrogue): cherry-picked from upstream BrogueCE PR #803 (unmerged as of 2026-06) --
+    // allies keep their distance from invulnerable monsters out to 6 tiles (was effectively 4), so a
+    // following party isn't decimated charging revenants/stone guardians. Drop this hunk if/when the
+    // PR lands upstream and the vendored engine is refreshed.
+    const short dist = distanceBetween(monst->loc, defender->loc);
 
     if (!monsterWillAttackTarget(defender, monst)) {
         return false;
     }
 
-    if (distanceBetween((pos){x, y}, defender->loc) >= 4) {
-        return false;
-    }
-
-    if ((defender->info.flags & (MONST_IMMUNE_TO_WEAPONS | MONST_INVULNERABLE))
+    if (dist <= 6 // Stay farther away from invulnerable monsters
+        && (defender->info.flags & (MONST_IMMUNE_TO_WEAPONS | MONST_INVULNERABLE))
         && !(defender->info.flags & MONST_IMMOBILE)) {
         // Don't charge if the monster is damage-immune and is NOT immobile;
         // i.e., keep distance from revenants and stone guardians but not mirror totems.
         return true;
+    }
+
+    if (dist >= 4) {
+        return false;
     }
 
     if (monst->creatureState == MONSTER_ALLY && !monst->status[STATUS_DISCORDANT]
@@ -3127,10 +3131,6 @@ static boolean allyFlees(creature *ally, creature *closestEnemy) {
         return false;
     }
 
-    // iOS port (iBrogue): ring of light. Emboldened allies hold the line and never flee.
-    if (ally->status[STATUS_EMBOLDENED] && rogue.lightRingBonus > 0) {
-        return false;
-    }
     // iOS port (iBrogue): a cursed ring of light unsettles nearby allies, who break sooner (inversion-lite).
     if (ally->status[STATUS_EMBOLDENED] && rogue.lightRingBonus < 0
         && distanceBetween((pos){x, y}, closestEnemy->loc) < 10
@@ -3138,7 +3138,11 @@ static boolean allyFlees(creature *ally, creature *closestEnemy) {
         return true;
     }
 
-    if (distanceBetween((pos){x, y}, closestEnemy->loc) < 10
+    // iOS port (iBrogue): ring of light. An emboldened ally doesn't panic at low HP and holds the line --
+    // but it still keeps its distance from invulnerable/kamikaze/sacrifice targets via monsterFleesFrom()
+    // below, so courage never becomes suicide (e.g. it won't charge a revenant).
+    if (!(ally->status[STATUS_EMBOLDENED] && rogue.lightRingBonus > 0)
+        && distanceBetween((pos){x, y}, closestEnemy->loc) < 10
         && (100 * ally->currentHP / ally->info.maxHP <= 33)
         && ally->info.turnsBetweenRegen > 0
         && !ally->carriedMonster
@@ -3330,6 +3334,7 @@ static void moveAlly(creature *monst) {
                     && distanceBetween((pos){x, y}, target->loc) < shortestDistance
                     && traversiblePathBetween(monst, target->loc.x, target->loc.y)
                     && (!monsterAvoids(monst, target->loc) || (target->info.flags & MONST_ATTACKABLE_THRU_WALLS))
+                    && (!attackWouldBeFutile(monst, target)) // iOS port (iBrogue): cherry-picked from upstream PR #803 -- don't blink toward a target it can't hurt
                     && (!target->status[STATUS_INVISIBLE] || playerLightRevealsMonster(target) || ((monst->info.flags & MONST_ALWAYS_USE_ABILITY) || rand_percent(33)))) { // iOS port (iBrogue): light-revealed invisibles are reliably engaged
 
                     enemyMap[target->loc.x][target->loc.y] = 0;

@@ -28,6 +28,32 @@ covers the separate Classic engine that ships in the app target).
 
 ## Change log
 
+### 2026-06-12 — Allies keep their distance from invulnerable monsters (cherry-pick: upstream PR #803)
+
+**What.** Cherry-picked the two-part change from upstream BrogueCE **PR #803** (open/unmerged as of
+2026-06): allies no longer charge to their deaths against invulnerable enemies (revenants, stone
+guardians).
+- `monsterFleesFrom()` restructured so the damage-immune-and-mobile avoidance triggers out to **6 tiles**
+  (previously the `dist >= 4` early-out fired first, capping it at 4). The `dist >= 4` short-circuit now
+  runs *after* the invulnerable check.
+- `moveAlly()` blink-to-enemy target scan gains `!attackWouldBeFutile(monst, target)`, so an ally won't
+  blink toward a target it can't actually hurt.
+
+**Why.** Requested while reworking allies for the ring of light. Pairs naturally with that feature's
+"keep your party alive" theme. Kept faithful to the upstream diff so it can be dropped cleanly if/when
+the PR lands and the vendored engine is refreshed — both hunks are marked `// iOS port (iBrogue):
+cherry-picked from upstream PR #803`.
+
+**Interaction with the ring of light (same-day change below).** The ring's "courage" makes emboldened
+allies hold the line, but that must **not** turn into suicide against a revenant. So `allyFlees()` was
+written so emboldenment suppresses only the *low-HP panic* flee; the tactical `monsterFleesFrom()` check
+(invulnerable / kamikaze / sacrifice / maintains-distance / poison) still runs for emboldened allies.
+Net: an emboldened ally fights beatable enemies to the last, but still keeps its distance from the
+unkillable ones.
+
+**Where.** `Monsters.c` — `monsterFleesFrom()` and the second enemy scan in `moveAlly()`. CE-only.
+Gameplay/behavior change, so it diverges replay from pre-change recordings (no new RNG draws).
+
 ### 2026-06-12 — Ring of light becomes an ally-build cornerstone (new content)
 
 **What.** A worn **ring of light** now does far more than widen your view — its lit radius becomes a
