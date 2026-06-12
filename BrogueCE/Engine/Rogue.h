@@ -71,9 +71,15 @@
 #define D_MESSAGE_ITEM_GENERATION       (WIZARD_MODE && 0)
 #define D_MESSAGE_MACHINE_GENERATION    (WIZARD_MODE && 0)
 
-// iOS port (iBrogue): guarantee a gold goblin on the shallowest eligible level (depth 5), bypassing the
-// random spawn roll, so the encounter is easy to reach and debug. Flip to 0 to restore normal behavior.
-#define D_ALWAYS_SPAWN_GOLD_GOBLIN      (WIZARD_MODE && 1)
+// iOS port (iBrogue): standalone debug toggle (NOT gated on wizard mode -- works in a normal game).
+// When 1, guarantees a single gold goblin on the shallowest eligible level (depth 5), bypassing the
+// random spawn roll, and telepathically reveals it so it can be tracked on the map while it flees.
+// Set to 0 for normal random behavior.
+#define D_ALWAYS_SPAWN_GOLD_GOBLIN      1
+
+// iOS port (iBrogue): start with a high-enchant staff of frost for playtesting (freeze/slow/ice bridges/
+// frozen foliage/push). Granted deterministically in initializeRogue, so it is recording-safe. Flip to 0 to ship.
+#define D_FROST_STAFF_START             1//(WIZARD_MODE && 0)
 
 // If enabled, runs a benchmark for the performance of repeatedly updating the screen at the start of the game.
 // #define SCREEN_UPDATE_BENCHMARK
@@ -696,6 +702,10 @@ enum tileType {
     TRANSFER_ALTAR_RECIPIENT,
     TRANSFER_ALTAR_INERT,
 
+    // iOS port (iBrogue): staff of frost — foliage frozen into a brittle, impassable barrier that thaws back
+    FROZEN_FOLIAGE,
+    FROZEN_FOLIAGE_MELT,
+
     NUMBER_TILETYPES,
 };
 
@@ -924,6 +934,7 @@ enum staffKind {
     STAFF_OBSTRUCTION,
     STAFF_DISCORD,
     STAFF_CONJURATION,
+    STAFF_FREEZE, // iOS port (iBrogue): staff of frost (good staff, positive polarity)
     STAFF_HEALING,
     NUMBER_GOOD_STAFF_KINDS = STAFF_HEALING,
     STAFF_HASTE,
@@ -962,7 +973,8 @@ enum boltType {
     BOLT_DISTANCE_ATTACK,
     BOLT_POISON_DART,
     BOLT_ANCIENT_SPIRIT_VINES,
-    BOLT_WHIP
+    BOLT_WHIP,
+    BOLT_FREEZE // iOS port (iBrogue): staff of frost
 };
 
 enum ringKind {
@@ -1651,6 +1663,11 @@ enum dungeonFeatureTypes {
     DF_SHALLOW_WATER_MELTING,
     DF_SHALLOW_WATER_THAW,
 
+    // iOS port (iBrogue): staff of frost — freeze dense foliage into a brittle barrier, then thaw it back
+    DF_FROZEN_FOLIAGE,
+    DF_FROZEN_FOLIAGE_MELTING,
+    DF_FROZEN_FOLIAGE_THAW,
+
     DF_POISON_GAS_CLOUD,
     DF_CONFUSION_GAS_TRAP_CLOUD,
     DF_NET,
@@ -1887,6 +1904,7 @@ enum boltEffects {
     BE_HEALING,
     BE_HASTE,
     BE_SHIELDING,
+    BE_FREEZE, // iOS port (iBrogue): staff of frost — freeze (or, if burning/fiery, just extinguish + slow)
 };
 
 enum boltFlags {
@@ -2062,6 +2080,7 @@ enum statusEffects {
     STATUS_AGGRAVATING,
     STATUS_REGENERATING, // iOS port (iBrogue): honey potion's heal-over-time
     STATUS_EMBOLDENED, // iOS port (iBrogue): ally standing in the light of a worn ring of light
+    STATUS_FROZEN, // iOS port (iBrogue): staff of frost — encased in ice (acts like paralysis); thaws into STATUS_SLOWED
     NUMBER_OF_STATUS_EFFECTS,
 };
 
@@ -3340,6 +3359,7 @@ extern "C" {
     fixpt netEnchant(item *theItem);
     short hitProbability(creature *attacker, creature *defender);
     boolean attackHit(creature *attacker, creature *defender);
+    void pushFrozenCreature(creature *defender, short dx, short dy); // iOS port (iBrogue): staff of frost — bump-to-push
     void applyArmorRunicEffect(char returnString[DCOLS], creature *attacker, short *damage, boolean melee);
     void processStaggerHit(creature *attacker, creature *defender);
     boolean attack(creature *attacker, creature *defender, boolean lungeAttack);
@@ -3578,6 +3598,8 @@ extern "C" {
     short staffDiscordDuration(fixpt enchant);
     int staffProtection(fixpt enchant);
     short staffEntrancementDuration(fixpt enchant);
+    short staffFreezeDuration(fixpt enchant); // iOS port (iBrogue): staff of frost — hard-freeze turns
+    short staffFreezeSlowDuration(fixpt enchant); // iOS port (iBrogue): staff of frost — slow tail on thaw
     fixpt ringWisdomMultiplier(fixpt enchant);
     short charmHealing(fixpt enchant);
     int charmProtection(fixpt enchant);

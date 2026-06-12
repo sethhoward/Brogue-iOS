@@ -36,6 +36,11 @@ void exposeCreatureToFire(creature *monst) {
         || ((!monst->status[STATUS_LEVITATING]) && cellHasTMFlag(monst->loc, TM_EXTINGUISHES_FIRE))) {
         return;
     }
+    // iOS port (iBrogue): staff of frost — fire melts ice. Catching fire instantly thaws a frozen creature
+    // (the slow tail layered underneath at freeze time remains). Symmetric with the bolt's "too hot to freeze".
+    if (monst->status[STATUS_FROZEN]) {
+        monst->status[STATUS_FROZEN] = 0;
+    }
     if (monst->status[STATUS_BURNING] == 0) {
         if (monst == &player) {
             rogue.minersLight.lightColor = &fireForeColor;
@@ -2006,7 +2011,7 @@ static void monstersApproachStairs() {
 
 static void decrementPlayerStatus() {
     // Handle hunger.
-    if (!player.status[STATUS_PARALYZED]) {
+    if (!player.status[STATUS_PARALYZED] && !player.status[STATUS_FROZEN]) { // iOS port (iBrogue): no metabolism while frozen, as with paralysis
         // No nutrition is expended while paralyzed.
         if (player.status[STATUS_NUTRITION] > 0) {
             if (!numberOfMatchingPackItems(AMULET, 0, 0, false) || rand_percent(20)) {
@@ -2048,6 +2053,12 @@ static void decrementPlayerStatus() {
 
     if (player.status[STATUS_PARALYZED] > 0 && !--player.status[STATUS_PARALYZED]) {
         message("you can move again.", 0);
+    }
+
+    // iOS port (iBrogue): staff of frost. Frozen incapacitates exactly like paralysis; the STATUS_SLOWED that
+    // was layered underneath at freeze time keeps ticking, so a slow tail lingers after the ice breaks.
+    if (player.status[STATUS_FROZEN] > 0 && !--player.status[STATUS_FROZEN]) {
+        message("the ice encasing you breaks apart.", 0);
     }
 
     if (player.status[STATUS_HASTED] > 0 && !--player.status[STATUS_HASTED]) {
@@ -2302,7 +2313,7 @@ void playerTurnEnded() {
             return;
         }
 
-        if (!player.status[STATUS_PARALYZED]) {
+        if (!player.status[STATUS_PARALYZED] && !player.status[STATUS_FROZEN]) { // iOS port (iBrogue): frozen, like paralysis, costs no player turn
             rogue.playerTurnNumber++; // So recordings don't register more turns than you actually have.
         }
         rogue.absoluteTurnNumber++;
@@ -2500,6 +2511,7 @@ void playerTurnEnded() {
 
                     if ((monst->info.flags & MONST_GETS_TURN_ON_ACTIVATION)
                         || monst->status[STATUS_PARALYZED]
+                        || monst->status[STATUS_FROZEN] // iOS port (iBrogue): staff of frost — frozen monsters skip their turn
                         || monst->status[STATUS_ENTRANCED]
                         || (monst->bookkeepingFlags & MB_CAPTIVE)) {
 
@@ -2602,7 +2614,7 @@ void playerTurnEnded() {
 
         displayCombatText();
 
-        if (player.status[STATUS_PARALYZED]) {
+        if (player.status[STATUS_PARALYZED] || player.status[STATUS_FROZEN]) { // iOS port (iBrogue): frozen loses turns like paralysis
             if (!fastForward) {
                 fastForward = rogue.playbackFastForward || pauseAnimation(25, PAUSE_BEHAVIOR_DEFAULT);
             }
@@ -2632,7 +2644,7 @@ void playerTurnEnded() {
             return;
         }
 
-    } while (player.status[STATUS_PARALYZED]);
+    } while (player.status[STATUS_PARALYZED] || player.status[STATUS_FROZEN]); // iOS port (iBrogue): staff of frost
 
     // iOS port (iBrogue): passive rest-polarity insight — counted here (not at command dispatch)
     // because autoRest re-records each rested turn as REST_KEY, so this is the one chokepoint that

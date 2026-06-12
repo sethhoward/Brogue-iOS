@@ -144,6 +144,7 @@ boolean attackHit(creature *attacker, creature *defender) {
     // automatically hit if the monster is sleeping or captive or stuck in a web
     if (defender->status[STATUS_STUCK]
         || defender->status[STATUS_PARALYZED]
+        || defender->status[STATUS_FROZEN] // iOS port (iBrogue): staff of frost — a frozen creature can't dodge
         || (defender->bookkeepingFlags & MB_CAPTIVE)) {
 
         return true;
@@ -325,8 +326,9 @@ void moralAttack(creature *attacker, creature *defender) {
     if (defender->currentHP > 0
         && !(defender->bookkeepingFlags & MB_IS_DYING)) {
 
-        if (defender->status[STATUS_PARALYZED]) {
+        if (defender->status[STATUS_PARALYZED] || defender->status[STATUS_FROZEN]) {
             defender->status[STATUS_PARALYZED] = 0;
+            defender->status[STATUS_FROZEN] = 0; // iOS port (iBrogue): a blow shatters the ice (the layered slow tail remains)
              // Paralyzed creature gets a turn to react before the attacker moves again.
             defender->ticksUntilTurn = min(attacker->attackSpeed, 100) - 1;
         }
@@ -658,6 +660,66 @@ static boolean forceWeaponHit(creature *defender, item *theItem) {
         }
     }
     return autoID;
+}
+
+// iOS port (iBrogue): staff of frost. Bumping a frozen creature shoves it like a statue, reusing the W_FORCE
+// blinking-slide. The frozen block takes NO damage; whatever it slams into takes momentum damage (= the
+// distance the block travelled) and, being struck by ice, is doused if it was on fire. Sliding the block onto
+// lava / a chasm / deep water deposits it there to its usual fate (contact with fire also thaws it). (dx,dy)
+// is the one-tile push direction (away from the shover).
+void pushFrozenCreature(creature *defender, short dx, short dy) {
+    char buf[DCOLS*3], buf2[COLS], monstName[DCOLS];
+    creature *otherMonster;
+    short forceDamage;
+    bolt theBolt;
+
+    monsterName(monstName, defender, false); // bare name; we supply "the frozen ..." ourselves
+
+    pos oldLoc = defender->loc;
+    pos beyondFinal;
+
+    if (canDirectlySeeMonster(defender)) {
+        sprintf(buf, "you send the frozen %s skidding away", monstName);
+        buf[DCOLS] = '\0';
+        combatMessage(buf, messageColorFromVictim(defender));
+    }
+
+    theBolt = boltCatalog[BOLT_BLINKING];
+    theBolt.magnitude = 2; // up to ~10 tiles; halts before walls, but slides onto hazards
+    zap(oldLoc, (pos){ oldLoc.x + dx, oldLoc.y + dy }, &theBolt, false, false);
+
+    forceDamage = distanceBetween(oldLoc, defender->loc);
+    if (!(defender->bookkeepingFlags & MB_IS_DYING) && forceDamage > 0) {
+        // If something occupies the cell just beyond where the block stopped, the block slammed into it.
+        beyondFinal = (pos){ defender->loc.x + dx, defender->loc.y + dy };
+        if (coordinatesAreInMap(beyondFinal.x, beyondFinal.y)
+            && (pmapAt(beyondFinal)->flags & (HAS_MONSTER | HAS_PLAYER))) {
+
+            otherMonster = monsterAtLoc(beyondFinal);
+            monsterName(buf2, otherMonster, true);
+            if (otherMonster->status[STATUS_BURNING]) {
+                extinguishFireOnCreature(otherMonster); // the icy block douses what it strikes
+            }
+            if (!(otherMonster->info.flags & (MONST_IMMUNE_TO_WEAPONS | MONST_INVULNERABLE))) {
+                if (inflictDamage(NULL, otherMonster, forceDamage, &lightBlue, false)) {
+                    if (canDirectlySeeMonster(otherMonster)) {
+                        sprintf(buf, "%s %s when the frozen %s slams into $HIMHER",
+                                buf2,
+                                (otherMonster->info.flags & MONST_INANIMATE) ? "is destroyed" : "dies",
+                                monstName);
+                        resolvePronounEscapes(buf, otherMonster);
+                        buf[DCOLS] = '\0';
+                        combatMessage(buf, messageColorFromVictim(otherMonster));
+                    }
+                    killCreature(otherMonster, false);
+                }
+                if (otherMonster->creatureState != MONSTER_ALLY) {
+                    moralAttack(&player, otherMonster);
+                    splitMonster(otherMonster, &player);
+                }
+            }
+        }
+    }
 }
 
 void magicWeaponHit(creature *defender, item *theItem, boolean backstabbed) {
@@ -1137,7 +1199,7 @@ boolean attack(creature *attacker, creature *defender, boolean lungeAttack) {
     } else {
         sneakAttack = (defender != &player && attacker == &player && (defender->creatureState == MONSTER_WANDERING) ? true : false);
         defenderWasAsleep = (defender != &player && (defender->creatureState == MONSTER_SLEEPING) ? true : false);
-        defenderWasParalyzed = defender->status[STATUS_PARALYZED] > 0;
+        defenderWasParalyzed = defender->status[STATUS_PARALYZED] > 0 || defender->status[STATUS_FROZEN] > 0; // iOS port (iBrogue): frozen counts as helpless for backstab
     }
 
     monsterName(attackerName, attacker, true);

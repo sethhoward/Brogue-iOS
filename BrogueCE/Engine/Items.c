@@ -4664,6 +4664,36 @@ static boolean updateBolt(bolt *theBolt, creature *caster, short x, short y,
                     *autoID = true;
                 }
                 break;
+            case BE_FREEZE:
+                // iOS port (iBrogue): staff of frost. Anything fiery or currently ablaze is too hot to freeze
+                // solid -- the cold merely douses it and leaves it sluggish. Otherwise it freezes solid (a
+                // paralysis-like lock) and thaws into STATUS_SLOWED (see decrementMonsterStatus / player status).
+                if (!(monst->info.flags & (MONST_INANIMATE | MONST_INVULNERABLE))) {
+                    if ((monst->info.flags & MONST_FIERY) || monst->status[STATUS_BURNING]) {
+                        if (monst->status[STATUS_BURNING]) {
+                            extinguishFireOnCreature(monst);
+                        }
+                        slow(monst, staffFreezeSlowDuration(theBolt->magnitude * FP_FACTOR));
+                    } else {
+                        short freezeTurns = staffFreezeDuration(theBolt->magnitude * FP_FACTOR);
+                        short slowTurns = staffFreezeSlowDuration(theBolt->magnitude * FP_FACTOR);
+                        monst->status[STATUS_FROZEN] = monst->maxStatus[STATUS_FROZEN] =
+                            max(monst->status[STATUS_FROZEN], freezeTurns);
+                        // Layer the thaw-slow underneath the freeze: both tick down together, so when the ice
+                        // breaks exactly slowTurns of STATUS_SLOWED remain -- no need to recall the enchant at thaw.
+                        slow(monst, max(monst->status[STATUS_SLOWED], freezeTurns + slowTurns));
+                        if (monst == &player) {
+                            message("the cold encases you in ice!", 0);
+                        }
+                    }
+                    if (boltCatalog[BOLT_FREEZE].backColor) {
+                        flashMonster(monst, boltCatalog[BOLT_FREEZE].backColor, 100);
+                    }
+                    if (autoID) {
+                        *autoID = true;
+                    }
+                }
+                break;
             case BE_HASTE:
                 haste(monst, staffHasteDuration(theBolt->magnitude * FP_FACTOR));
                 if (boltCatalog[BOLT_HASTE].backColor) {

@@ -1293,6 +1293,16 @@ void getCellAppearance(pos loc, enum displayGlyph *returnChar, color *returnFore
                             applyColorAverage(&cellForeColor, &pink, 50);
                         }
                     }
+                    // iOS port (iBrogue): staff of frost. Persistent state tint -- a strong icy cast while
+                    // frozen solid, a fainter chill while merely slowed (slowed tint is game-wide, any source).
+                    // Frozen takes precedence, since a creature is also slowed underneath while encased in ice.
+                    if (monst->status[STATUS_FROZEN]) {
+                        applyColorAverage(&cellForeColor, &white, 25);
+                        applyColorAverage(&cellForeColor, &lightBlue, 60);
+                        applyColorAverage(&cellBackColor, &lightBlue, 40);
+                    } else if (monst->status[STATUS_SLOWED]) {
+                        applyColorAverage(&cellForeColor, &lightBlue, 30);
+                    }
                 }
                 //DEBUG if (monst->bookkeepingFlags & MB_LEADER) applyColorAverage(&cellBackColor, &purple, 50);
             }

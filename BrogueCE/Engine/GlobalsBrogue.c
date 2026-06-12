@@ -87,6 +87,8 @@ const bolt boltCatalog_Brogue[] = {
     {"poisoned dart",           "fires a dart",                 "fires strength-sapping darts",             G_WEAPON,&centipedeColor_Brogue,NULL,              BE_ATTACK,      1,              0,          0,          0,                          (BF_TARGET_ENEMIES | BF_NEVER_REFLECTS | BF_NOT_LEARNABLE)},
     {"growing vines",           "releases carnivorous vines into the ground", "conjures carnivorous vines", G_GRASS,&tanColor,      NULL,               BE_NONE,        5,              DF_ANCIENT_SPIRIT_GRASS, DF_ANCIENT_SPIRIT_VINES, (MONST_INANIMATE | MONST_IMMUNE_TO_WEBS),   (BF_TARGET_ENEMIES | BF_NEVER_REFLECTS)},
     {"whip",                    "whips",                        "wields a whip",                            '*',    &tanColor,      NULL,               BE_ATTACK,      1,              0,          0,          MONST_IMMUNE_TO_WEAPONS,    (BF_TARGET_ENEMIES | BF_NEVER_REFLECTS | BF_NOT_LEARNABLE | BF_DISPLAY_CHAR_ALONG_LENGTH)},
+    // iOS port (iBrogue): staff of frost — piercing freeze ray; pathDF freezes deep water/foliage it crosses
+    {"frost",                   "casts a bolt of frost",        "can freeze $HISHER enemies",               0,      NULL,           &lightBlue,         BE_FREEZE,      5,              DF_DEEP_WATER_FREEZE, 0,    MONST_INANIMATE,            (BF_PASSES_THRU_CREATURES | BF_TARGET_ENEMIES | BF_NOT_LEARNABLE)},
 };
 
     //name              feat description                                        initial value

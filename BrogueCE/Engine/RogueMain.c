@@ -449,6 +449,17 @@ void initializeRogue(uint64_t seed) {
         rogue.playbackOmniscience = 1;
     }
 
+    if (D_FROST_STAFF_START) {
+        // iOS port (iBrogue): playtest grant for the staff of frost. Added deterministically here (not as a
+        // recorded input), so it reconstructs identically on replay. The staff table is shared across variants,
+        // so STAFF_FREEZE is always valid. Combine with its normal frequency for ordinary drops too.
+        theItem = generateItem(STAFF, STAFF_FREEZE);
+        theItem->enchant1 = theItem->charges = 10;
+        theItem->flags |= (ITEM_IDENTIFIED | ITEM_MAX_CHARGES_KNOWN);
+        identify(theItem);
+        theItem = addItemToPack(theItem);
+    }
+
     DEBUG {
         theItem = generateItem(RING, RING_CLAIRVOYANCE);
         theItem->enchant1 = max(DROWS, DCOLS);
@@ -625,6 +636,7 @@ void startLevel(short oldLevelNumber, short stairDirection) {
                     && !(cellHasTerrainFlag((pos){ x, y }, T_OBSTRUCTS_PASSABILITY))
                     && !monst->status[STATUS_ENTRANCED]
                     && !monst->status[STATUS_PARALYZED]
+                    && !monst->status[STATUS_FROZEN] // iOS port (iBrogue): staff of frost — a frozen monster can't follow you up/down stairs
                     && (mapToStairs[monst->loc.x][monst->loc.y] < 30000 || monst->creatureState == MONSTER_ALLY || monst == rogue.yendorWarden)) {
 
                     monst->status[STATUS_ENTERS_LEVEL_IN] = clamp(mapToStairs[monst->loc.x][monst->loc.y] * monst->movementSpeed / 100 + 1, 1, 150);

@@ -596,6 +596,10 @@ const floorTileType tileCatalog[NUMBER_TILETYPES] = {
  /*TRANSFER_ALTAR_DONOR*/      {G_ALTAR,     &altarForeColor,     &violetAltarBackColor,17, 0,  0,0,DF_ALTAR_TRANSFER_INERT,0,  CANDLE_LIGHT,   (T_OBSTRUCTS_SURFACE_EFFECTS), (TM_VANISHES_UPON_PROMOTION | TM_IS_WIRED | TM_TRANSFER_ENCHANT_ACTIVATION | TM_LIST_IN_SIDEBAR | TM_VISUALLY_DISTINCT), "an altar of sacrifice", "place an item to sacrifice here, and the item to empower on its twin; the sacrifice will be consumed."},
  /*TRANSFER_ALTAR_RECIPIENT*/ {G_ORB_ALTAR,  &altarForeColor,     &violetAltarBackColor,17, 0,  0,0,DF_ALTAR_TRANSFER_INERT,0,  CANDLE_LIGHT,   (T_OBSTRUCTS_SURFACE_EFFECTS), (TM_VANISHES_UPON_PROMOTION | TM_IS_WIRED | TM_TRANSFER_ENCHANT_ACTIVATION | TM_LIST_IN_SIDEBAR | TM_VISUALLY_DISTINCT), "an altar of transference", "place an identified item here to empower, and a sacrifice on its twin; this item absorbs its enchantment."},
  /*TRANSFER_ALTAR_INERT*/     {G_ORB_ALTAR,  &black,              &violetAltarBackColor,17, 0,  0,0,0,                      0,  NO_LIGHT,       (T_OBSTRUCTS_SURFACE_EFFECTS), (TM_LIST_IN_SIDEBAR | TM_VISUALLY_DISTINCT),                  "a scorched altar",     "scorch marks cover the surface of the altar, but it is cold to the touch."},
+    // iOS port (iBrogue): staff of frost — foliage frozen into a brittle, impassable barrier. Like ICE_DEEP it
+    // melts from exposed edges inward (negative promoteChance) and fire thaws it instantly (T_IS_FLAMMABLE -> thaw).
+ /*FROZEN_FOLIAGE*/            {G_FOLIAGE, &white,                 &lightBlue,         45, 100,DF_FROZEN_FOLIAGE_THAW,0,DF_FROZEN_FOLIAGE_MELTING,           -100,  NO_LIGHT,   (T_OBSTRUCTS_PASSABILITY | T_OBSTRUCTS_VISION | T_IS_FLAMMABLE), (TM_VANISHES_UPON_PROMOTION),       "frozen foliage",       "the dense foliage has frozen solid into a brittle, glittering thicket."},
+ /*FROZEN_FOLIAGE_MELT*/       {G_FOLIAGE, &black,                 &lightBlue,         45, 100,DF_FROZEN_FOLIAGE_THAW,0,DF_FROZEN_FOLIAGE_THAW,              10000,  NO_LIGHT,   (T_OBSTRUCTS_PASSABILITY | T_OBSTRUCTS_VISION | T_IS_FLAMMABLE), (TM_VANISHES_UPON_PROMOTION),       "thawing foliage",      "the ice sheathing the foliage cracks and sloughs away."},
 };
 
 unsigned long terrainFlags(pos p) {
@@ -782,9 +786,17 @@ dungeonFeature dungeonFeatureCatalog[NUMBER_DUNGEON_FEATURES] = {
     {ICE_DEEP,                  LIQUID,     150,    50,     DFF_EVACUATE_CREATURES_FIRST,   "", 0,  0,  0,      DEEP_WATER_ALGAE_2, DF_SHALLOW_WATER_FREEZE},
     {ICE_DEEP_MELT,             LIQUID,     0,      0,      0},
     {DEEP_WATER,                LIQUID,     0,      0,      0},
-    {ICE_SHALLOW,               LIQUID,     100,    50,     DFF_EVACUATE_CREATURES_FIRST,   "", 0,  0,  0,      SHALLOW_WATER},
+    // iOS port (iBrogue): staff of frost chains foliage-freezing onto the end of the water-freeze cascade,
+    // so one pathDF (DF_DEEP_WATER_FREEZE) freezes deep water, shallow water, and dense foliage it crosses.
+    {ICE_SHALLOW,               LIQUID,     100,    50,     DFF_EVACUATE_CREATURES_FIRST,   "", 0,  0,  0,      SHALLOW_WATER,      DF_FROZEN_FOLIAGE},
     {ICE_SHALLOW_MELT,          LIQUID,     0,      0,      0},
     {SHALLOW_WATER,             LIQUID,     0,      0,      0},
+
+    // iOS port (iBrogue): staff of frost — dense foliage frozen into a brittle, impassable barrier.
+    // Melts edge-inward (FROZEN_FOLIAGE promoteChance -100) like lake ice; fire thaws it instantly.
+    {FROZEN_FOLIAGE,            SURFACE,    100,    100,    DFF_EVACUATE_CREATURES_FIRST,   "", 0,  0,  0,      FOLIAGE},
+    {FROZEN_FOLIAGE_MELT,       SURFACE,    0,      0,      0},
+    {FOLIAGE,                   SURFACE,    0,      0,      0},
 
     // gas trap effects
     {POISON_GAS,                GAS,        1000,   0,      0,  "a cloud of caustic gas sprays upward from the floor!"},
@@ -1687,6 +1699,8 @@ itemTable staffTable[NUMBER_STAFF_KINDS] = {
     {"obstruction",     itemWoods[7], "",   10, 1000,   0, BOLT_OBSTRUCTION,   {2,4,1}, false, false, 1,  false, "This staff will conjure a mass of impenetrable green crystal, preventing anything from moving through the affected area and temporarily entombing anything that is already there. The crystal will dissolve into the air as time passes. Higher level staffs will create larger obstructions."},
     {"discord",         itemWoods[8], "",   10, 1000,   0, BOLT_DISCORD,       {2,4,1}, false, false, 1,  false, "This staff will alter the perception of a creature and cause it to lash out indiscriminately. Strangers and allies alike will turn on the victim."},
     {"conjuration",     itemWoods[9], "",   8,  1000,   0, BOLT_CONJURATION,   {2,4,1}, false, false, 1,  false, "A flick of this staff will summon a number of phantom blades to fight on your behalf."},
+    // iOS port (iBrogue): staff of frost
+    {"frost",           itemWoods[13], "",  8,  1200,   0, BOLT_FREEZE,        {2,4,1}, false, false, 1,  false, "A flick of this frozen staff unleashes a piercing bolt of cold. Creatures caught in its path are encased in ice, frozen helpless for a short time before thawing into a sluggish chill -- though anything already ablaze is merely doused and slowed, never frozen. The cold sweeps across deep water, freezing a temporary walkable sheet over the depths, and stiffens dense foliage into brittle, impassable thickets. A frozen creature can be shoved aside like a statue, shattering anything it slams into. Fire melts the staff's ice wherever the two meet."},
     {"healing",         itemWoods[10], "",  5,  1100,   0, BOLT_HEALING,       {2,4,1}, false, false, -1, false, "This staff will heal any creature, friend or foe. Unfortunately, you cannot use this or any staff on yourself except by reflecting the bolt."},
     {"haste",           itemWoods[11], "",  5,  900,    0, BOLT_HASTE,         {2,4,1}, false, false, -1, false, "This staff will temporarily double the speed of any creature, friend or foe. Unfortunately, you cannot use this or any staff on yourself except by reflecting the bolt."},
     {"protection",      itemWoods[12], "",  5,  900,    0, BOLT_SHIELDING,     {2,4,1}, false, false, -1, false, "This staff will bathe a creature in a protective light that will absorb all damage until it is depleted. Unfortunately, you cannot use this or any staff on yourself except by reflecting the bolt."},
@@ -1860,4 +1874,5 @@ const statusEffect statusEffectCatalog[NUMBER_OF_STATUS_EFFECTS] = {
     {"",                false, 0}, // STATUS_AGGRAVATING
     {"",                false, 0}, // STATUS_REGENERATING (iOS port (iBrogue): honey potion heal-over-time)
     {"Emboldened",      true,  0}, // STATUS_EMBOLDENED (iOS port (iBrogue): ring of light ally aura)
+    {"Frozen",          false, 0}, // STATUS_FROZEN (iOS port (iBrogue): staff of frost; paralysis-like, not negatable)
 };

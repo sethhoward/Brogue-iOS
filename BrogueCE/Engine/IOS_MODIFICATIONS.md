@@ -28,6 +28,51 @@ covers the separate Classic engine that ships in the app target).
 
 ## Change log
 
+### 2026-06-12 — Staff of frost: freeze, slow, ice bridges, frozen-foliage walls, and shoving (new content)
+
+**What.** A new good staff, the **staff of frost** (`STAFF_FREEZE`, positive polarity, freq 8, value 1200,
+inserted before `STAFF_HEALING` so it falls inside `NUMBER_GOOD_STAFF_KINDS`). It fires a new piercing,
+indiscriminate but enemy-targeting bolt (`BOLT_FREEZE` / `BE_FREEZE`, `BF_PASSES_THRU_CREATURES |
+BF_TARGET_ENEMIES | BF_NOT_LEARNABLE`, `forbiddenMonsterFlags MONST_INANIMATE`, deals no direct damage):
+
+- **Freeze → slow.** A struck creature is encased in ice via a new first-class status `STATUS_FROZEN`
+  (added before `NUMBER_OF_STATUS_EFFECTS`; "Frozen", not negatable). Frozen gates actions exactly like
+  `STATUS_PARALYZED` (every paralysis gate gained a `|| STATUS_FROZEN`: the player turn-loss loop and
+  turn-counter and no-metabolism check in `Time.c`; the monster turn gate in `Time.c` and the per-monster
+  turn-ender in `Monsters.c`; `attackHit` auto-hit, the helpless-defender backstab flag, and the
+  shatter-on-hit clear in `Combat.c`; swarm eligibility and blocker-displacement in `Monsters.c`; stair-
+  following in `RogueMain.c`; entrancement mirror-move in `Movement.c`). Freeze decrements via the
+  `decrementMonsterStatus` default case / `decrementPlayerStatus`. Durations: new
+  `staffFreezeDuration = max(2, 2 + enchant/2)` (hard lock, ~3–7 turns) and
+  `staffFreezeSlowDuration = min(20, max(10, enchant·3))` (slow tail, capped under the slowness wand's 30),
+  both in `PowerTables.c`. The slow tail is **layered underneath the freeze at cast time**
+  (`STATUS_SLOWED = freeze + slow`) so it lingers after the ice breaks without remembering the enchant.
+- **Fire beats freeze (both directions).** Casting on a `MONST_FIERY` or currently-burning creature only
+  extinguishes + slows it (never freezes); catching fire later (`exposeCreatureToFire`, `Time.c`) instantly
+  thaws a frozen creature; a blow shatters the freeze (`Combat.c`, leaving the slow tail).
+- **Ice bridges over deep water.** The bolt's `pathDF` is the previously-dead `DF_DEEP_WATER_FREEZE`
+  cascade, which now does something: deep water it crosses becomes the latent **`ICE_DEEP`** walkable floor
+  (white "glossy ice", safe), melting edge-inward (negative `promoteChance`) back to water through the black
+  "melting ice" warning tile. (Foundation-gated, so the pathDF is a no-op over floor/lava/chasm.)
+- **Frozen foliage walls.** New terrain `FROZEN_FOLIAGE` / `FROZEN_FOLIAGE_MELT` (tiles + `DF_FROZEN_FOLIAGE`
+  / `_MELTING` / `_THAW`), chained onto the end of the water-freeze cascade so the one ray also freezes dense
+  foliage it crosses into a brittle, impassable barrier (`T_OBSTRUCTS_PASSABILITY | T_OBSTRUCTS_VISION`),
+  melting edge-inward back to foliage; `T_IS_FLAMMABLE` + `fireType` = thaw, so fire melts it like lake ice.
+- **Bump-to-push.** Walking into a frozen creature shoves it like a statue (`pushFrozenCreature`, `Combat.c`,
+  reusing the `W_FORCE` blinking-slide), intercepted in `playerMoves` (`Movement.c`) before the attack. The
+  block takes no damage; whatever it slams into takes momentum damage (= distance travelled) and is doused if
+  burning. A block wedged against an obstruction won't budge (and costs no turn). Sliding it onto a hazard
+  deposits it there to its usual fate.
+- **Colour state.** Persistent tints in `getCellAppearance` (`IO.c`): a strong icy cast while `STATUS_FROZEN`,
+  a fainter chill while `STATUS_SLOWED` (the slow tint is **game-wide, any source**, not just this staff), plus
+  the icy `flashMonster` at the moment of freezing. Ice terrain reads via its own tile colours.
+
+**Gating.** Debug grant `D_FROST_STAFF_START` (`Rogue.h`, `WIZARD_MODE && 0`) starts you with a +10
+identified staff in `initializeRogue` (`RogueMain.c`), added deterministically (recording-safe). Bolt rows
+were appended to all three variant catalogs (`GlobalsBrogue.c` / `GlobalsRapidBrogue.c` /
+`GlobalsBulletBrogue.c`); the staff/status/tile/DF tables are shared in `Globals.c`. `BOLT_FREEZE` is
+appended (not inserted) since the staff→bolt link is the `power` field, not positional.
+
 ### 2026-06-12 — Gold goblin: a passive treasure-hoarder you chase down (new content)
 
 **What.** A new monster, the **gold goblin** (`MK_GOLD_GOBLIN`), a passive "treasure goblin": it spawns
@@ -69,9 +114,10 @@ it's a pure skill test rather than a luck swing.
 
 **Where.** `Rogue.h` — `MK_GOLD_GOBLIN` (appended last so kind indices don't shift); `creature` fields
 `goldGoblinBurstTiles`/`goldGoblinTriggered`/`goldGoblinHasHoard`; `rogue.goldGoblinSpawned`; decls for
-`goldGoblinReactToDamage`/`goldGoblinDropHoard`; debug flag `D_ALWAYS_SPAWN_GOLD_GOBLIN` (wizard-mode
-only) which forces a guaranteed spawn on depth 5 and, in `spawnGoldGoblin`, also flags that goblin
-`MB_TELEPATHICALLY_REVEALED` so it can be tracked on the map (even out of sight) while debugging. `Globals.c` — `goldGoblinColor`, `monsterCatalog` and
+`goldGoblinReactToDamage`/`goldGoblinDropHoard`; debug flag `D_ALWAYS_SPAWN_GOLD_GOBLIN` (a standalone
+toggle, *not* gated on wizard mode, so it works in a normal game) which forces a guaranteed spawn on
+depth 5 and, in `spawnGoldGoblin`, also flags that goblin `MB_TELEPATHICALLY_REVEALED` so it can be
+tracked on the map (even out of sight) while debugging. `Globals.c` — `goldGoblinColor`, `monsterCatalog` and
 `monsterText` entries (all appended last, parallel to the enum). `RogueMain.c` — reset
 `rogue.goldGoblinSpawned` in `initializeRogue`. `Architect.c` — `spawnGoldGoblin()` + its call in
 `initializeLevel`. `Monsters.c` — `goldGoblinEscapes`/`goldGoblinTakesTurn`/`goldGoblinReactToDamage`/

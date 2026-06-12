@@ -503,6 +503,7 @@ static void moveEntrancedMonsters(enum directions dir) {
         if (monst->status[STATUS_ENTRANCED]
             && !monst->status[STATUS_STUCK]
             && !monst->status[STATUS_PARALYZED]
+            && !monst->status[STATUS_FROZEN] // iOS port (iBrogue): staff of frost — a frozen monster can't mirror your moves
             && !(monst->bookkeepingFlags & MB_CAPTIVE)) {
 
             moveMonster(monst, nbDirs[dir][0], nbDirs[dir][1]);
@@ -968,6 +969,33 @@ boolean playerMoves(short direction) {
                     cancelKeystroke();
                     return false;
                 }
+            }
+
+            // iOS port (iBrogue): staff of frost. Bumping a frozen creature shoves it like a statue instead of
+            // attacking it. If it is wedged against an obstruction (wall, another creature, off-map) it won't
+            // budge, and the bump costs no turn -- as with walking into a wall.
+            if (defender->status[STATUS_FROZEN]) {
+                short pushX = newX - x, pushY = newY - y;
+                pos pushDest = (pos){ newX + pushX, newY + pushY };
+                if (!coordinatesAreInMap(pushDest.x, pushDest.y)
+                    || cellHasTerrainFlag(pushDest, T_OBSTRUCTS_PASSABILITY)
+                    || diagonalBlocked(newX, newY, pushDest.x, pushDest.y, false)
+                    || (pmapAt(pushDest)->flags & (HAS_MONSTER | HAS_PLAYER))) {
+
+                    if (canSeeMonster(defender)) {
+                        monsterName(monstName, defender, false);
+                        sprintf(buf, "the frozen %s is wedged tight and won't budge.", monstName);
+                        message(buf, 0);
+                    }
+                    cancelKeystroke();
+                    return false;
+                }
+                committed = true;
+                pushFrozenCreature(defender, pushX, pushY);
+                player.ticksUntilTurn += player.attackSpeed;
+                moveEntrancedMonsters(direction);
+                playerTurnEnded();
+                return true;
             }
 
             if (defender->creatureState != MONSTER_ALLY || defender->status[STATUS_DISCORDANT]) {
