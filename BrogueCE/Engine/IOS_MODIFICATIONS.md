@@ -28,6 +28,22 @@ covers the separate Classic engine that ships in the app target).
 
 ## Change log
 
+### 2026-06-11 — Button-drag highlight follows the finger
+
+**What.** While dragging a touch across a menu/inventory (`MOUSE_ENTERED_CELL` with a
+button already pressed), `processButtonInput` now moves `buttonDepressed` to the button
+under the finger, instead of only setting it on `MOUSE_DOWN`.
+
+**Why.** `drawButtonsInState` paints `buttonFocused` as `BUTTON_HOVER` and
+`buttonDepressed` as `BUTTON_PRESSED`. On a drag, focus follows the finger but the
+depressed index stayed on the originally-pressed button, so two rows lit up at once (e.g.
+press "Autopilot", drag to "Feats" → both highlighted). On touch you want exactly one
+highlight tracking the finger. The Classic engine already carries this fix
+(`iBrogue_iPad/BrogueCode/Buttons.c`); this brings CE in line.
+
+**Where.** `Buttons.c` — `processButtonInput()`, the focus-found branch now also sets
+`buttonDepressed` when `event->eventType == MOUSE_ENTERED_CELL && buttonDepressed >= 0`.
+
 ### 2026-06-08 — Rethrow falls through to a normal throw prompt
 
 **What.** The rethrow command (`RETHROW_KEY`, Shift+T) used to no-op when there was no
