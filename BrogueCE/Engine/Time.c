@@ -653,22 +653,52 @@ short scentDistance(short x1, short y1, short x2, short y2) {
     }
 }
 
+// iOS port (iBrogue): wading through water washes away the player's scent, so a
+// pursuer that has lost line of sight can be shaken by crossing water. Deep water
+// (when actually submerged) emits no scent at all, so the trail dead-ends at the
+// water's edge; shallow water emits a faint trail that a tracker may still follow
+// but is liable to lose (the existing per-turn scent-loss roll in awareOfTarget()
+// does the rest). Levitating over the water keeps the player dry, so scent is
+// unaffected. Returns a penalty in scentDistance() units (~2 per tile), or -1 to
+// mean "lay no scent this turn". SCENT_SHALLOW_WATER_PENALTY is tunable: larger
+// makes shallow water a more reliable way to break a trail.
+#define SCENT_SHALLOW_WATER_PENALTY 16
+static short playerScentWaterPenalty() {
+    if (player.status[STATUS_LEVITATING]) {
+        return 0; // hovering above the water, staying dry
+    }
+    if (cellHasTerrainFlag(player.loc, T_IS_DEEP_WATER)) {
+        return -1; // submerged: lay no scent, so the trail goes cold
+    }
+    if (cellHasTMFlag(player.loc, TM_ALLOWS_SUBMERGING)
+        && cellHasTMFlag(player.loc, TM_EXTINGUISHES_FIRE)) {
+        return SCENT_SHALLOW_WATER_PENALTY; // wading through shallow water
+    }
+    return 0;
+}
+
 static void updateScent() {
-    short i, j;
+    short i, j, scentPenalty;
     char grid[DCOLS][DROWS];
 
     zeroOutGrid(grid);
+
+    // iOS port (iBrogue): water washes away the player's scent (see playerScentWaterPenalty).
+    scentPenalty = playerScentWaterPenalty();
+    if (scentPenalty < 0) {
+        return; // submerged in deep water: lay no scent this turn.
+    }
 
     getFOVMask(grid, player.loc.x, player.loc.y, DCOLS * FP_FACTOR, T_OBSTRUCTS_SCENT, 0, false);
 
     for (i=0; i<DCOLS; i++) {
         for (j=0; j<DROWS; j++) {
             if (grid[i][j]) {
-                addScentToCell(i, j, scentDistance(player.loc.x, player.loc.y, i, j));
+                addScentToCell(i, j, scentDistance(player.loc.x, player.loc.y, i, j) + scentPenalty);
             }
         }
     }
-    addScentToCell(player.loc.x, player.loc.y, 0);
+    addScentToCell(player.loc.x, player.loc.y, scentPenalty);
 }
 
 short armorStealthAdjustment(item *theArmor) {

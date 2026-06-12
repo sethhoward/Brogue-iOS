@@ -28,6 +28,71 @@ covers the separate Classic engine that ships in the app target).
 
 ## Change log
 
+### 2026-06-11 — Sense when a pursuer gives up the chase (new content)
+
+**What.** When a monster loses the player's trail and reverts from hunting to wandering
+(`MONSTER_TRACKING_SCENT -> MONSTER_WANDERING` in `updateMonsterState()`), the player gets a chance to
+sense it: `"you sense that <the monster> has lost your trail."` **No line of sight is required** — it's
+a pure awareness roll. The chance is `SENSE_LOST_TRAIL_BASE_CHANCE` (50) `+ rogue.awarenessBonus`,
+clamped to `[0,100]`. The base is deliberately high so the typical character — who invests nothing in
+awareness — still notices about half the time; a **ring of awareness** (`+20`/enchant) pushes it toward
+certainty (`+1` → 70%, `+2` → 90%, `+3` → 100%), and a cursed ring suppresses it. Pairs with the
+water/scent change: duck out of sight, cross water, and you'll usually learn the coast is clear.
+
+**Why.** Requested — tie "did I shake it?" feedback to the player's awareness, with a low enough bar
+that it's useful without an awareness build. Line-of-sight gating was dropped on request (so it also
+confirms in text even when the monster is visible and its sidebar already reads `(Wandering)`). Rolled
+only at the transition (not per turn), so it doesn't spam; it can re-fire only if the monster
+re-acquires and loses the player again.
+
+**Where.** `Monsters.c` — `SENSE_LOST_TRAIL_BASE_CHANCE` define + a block in the
+`TRACKING_SCENT && !awareOfPlayer` branch of `updateMonsterState()`. Draws `rand_percent` **only** when
+a monster actually loses the trail, keeping RNG-stream perturbation small; deterministic and
+reproducible, but like any gameplay/RNG change it diverges replay from pre-change recordings. Minor
+caveat: it can name a monster the player never actually saw (it was hunting by scent off-screen);
+acceptable as "you sense" flavor, and hallucination still scrambles the name via `monsterName()`. CE-only.
+
+### 2026-06-11 — Water washes away the player's scent trail (new content)
+
+**What.** `updateScent()` now gates the player's per-turn scent emission on the terrain the player is
+standing in (new `playerScentWaterPenalty()` helper in `Time.c`):
+- **Deep water** (`T_IS_DEEP_WATER`, when not levitating) — emits **no scent at all** that turn, so the
+  scent trail dead-ends at the water's edge. A pursuer that has lost line of sight reverts to wandering
+  toward where it last saw the player (the near shore).
+- **Shallow water** (`TM_ALLOWS_SUBMERGING && TM_EXTINGUISHES_FIRE`, i.e. any shallow-water variant but
+  not deep water; mud/lava excluded since they lack `TM_EXTINGUISHES_FIRE`) — emits a **faint** trail:
+  every deposit (the FOV spread and the player's own tile) takes a `SCENT_SHALLOW_WATER_PENALTY` (16,
+  in `scentDistance` units ≈ 8 tiles) bump to its `distance`, lowering the stored scent value. The
+  trail is followable but liable to be lost via the existing per-turn loss roll in `awareOfTarget()`.
+- **Levitating** over either keeps the player dry, so scent is unaffected.
+
+**Why.** Requested — let the player shake pursuers by crossing water, deeper = more reliable. Monsters
+hunt by both scent and line of sight (`awarenessDistance()` takes the *min* of scent-on-own-tile and
+direct distance when the player is in the monster's FOV), so this only sheds a tracker that **can't see
+you** — break line of sight with terrain first, then break the scent with water. `SCENT_SHALLOW_WATER_PENALTY`
+is a tunable `#define`.
+
+**Where.** `Time.c` — new `playerScentWaterPenalty()` + `SCENT_SHALLOW_WATER_PENALTY` define, and the
+deposit loop in `updateScent()` now adds the penalty / early-returns. No RNG drawn here; deterministic.
+Like any gameplay change it diverges replay from pre-change recordings, but draws no new RNG itself.
+CE-only.
+
+**Limits / current behavior.** This does **not** guarantee a shed. A monster's awareness is the *min*
+of scent-on-its-own-tile and (when the player is in its FOV) direct line-of-sight distance
+(`awarenessDistance()`), and water blocks neither vision nor the scent you already laid. So a close
+pursuer stays locked: it can see you across the open water, and/or it camps the still-fresh breadcrumb
+at the water's edge. Shedding requires *both* breaking line of sight (terrain) *and* enough lead that
+the freshest pre-water scent has aged past `stealthRange*2` (~10-turn lead at default stealth via the
++3/turn fade and the 3%/turn loss roll in `awareOfTarget()`; reliable nearer `stealthRange*6`).
+
+**Possible follow-ups (not implemented — noted as options).**
+- *Active scent decay while submerged:* have deep water also lower the stored `scentMap` value on the
+  monster's tile / at the water's edge over time, so a nearby tracker's lock erodes instead of only
+  the trail ceasing to extend. Would let a swim shed a closer pursuer.
+- *Degrade the FOV-based lock in/over deep water:* treat a submerged player as harder to see (e.g.
+  reduce the sight contribution to `awarenessDistance`), so crossing open water can break a sightline
+  lock and not just the scent. Bigger change — touches the vision/awareness path, not just scent.
+
 ### 2026-06-11 — Catching fire confuses for 3 turns (new content)
 
 **What.** Any creature (the player included) is confused for `FIRE_CONFUSION_DURATION` (3) turns the
