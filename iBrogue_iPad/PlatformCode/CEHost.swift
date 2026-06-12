@@ -69,6 +69,10 @@ final class CEHost: NSObject, BrogueCEHost {
         viewController?.presentFileManagementScreenForCE()
     }
 
+    func presentGameCenter() {
+        viewController?.presentGameCenterScreenForCE()
+    }
+
     func playDamageHaptic(_ severity: Int) {
         viewController?.playerTookDamage(severity)
     }
@@ -83,5 +87,21 @@ final class CEHost: NSObject, BrogueCEHost {
 
     func setPlayerWindowX(_ x: Int16, y: Int16) {
         viewController?.setPlayerWindowX(Int(x), y: Int(y))
+    }
+
+    // MARK: Game Center
+    // These fire on the CE engine's background thread, so hop to main before
+    // touching GameKit. The bridge has already gated on variant + wizard mode.
+
+    func reportCEScore(_ score: Int) {
+        DispatchQueue.main.async {
+            GameCenter.shared.reportScore(Int64(score), leaderboardID: GameCenter.ceHighScoreLeaderboardID)
+        }
+    }
+
+    func submitCEAchievement(withID identifier: String) {
+        DispatchQueue.main.async {
+            GameCenter.shared.submitAchievement(identifier, percentComplete: 100)
+        }
     }
 }

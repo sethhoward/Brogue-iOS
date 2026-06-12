@@ -110,6 +110,9 @@ boolean nonInteractivePlayback = false;
 boolean hasGraphics = true;
 enum graphicsModes graphicsMode = TEXT_GRAPHICS;
 
+// iOS port (iBrogue): reads the persisted text/tiles/hybrid choice (see below).
+static enum graphicsModes ceLoadPersistedGraphicsMode(void);
+
 // ---------------------------------------------------------------------------
 // glyphToUnicode: CE separates the logical display glyph (an enum, to support
 // tile graphics) from the rendered character. We render in text mode, so the
@@ -318,6 +321,9 @@ static void initializeBrogueCESaveLocation(void) {
 
 extern "C" __attribute__((visibility("default"))) void ce_start(id<BrogueCEHost> host) {
     gHost = host;
+    // iOS port (iBrogue): restore the player's last-chosen graphics mode so the
+    // text/tiles/hybrid selection persists across launches and future runs.
+    graphicsMode = ceLoadPersistedGraphicsMode();
     brogueCETerminationRequested = false;
     brogueCEAtTitle = false;
     gNeedsFullRedraw = true; // resync the shared scene on (re)entry
@@ -480,20 +486,92 @@ void nextKeyOrMouseEvent(rogueEvent *returnEvent, boolean textInput, boolean col
     }
 }
 
+// iOS port (iBrogue): the engine's game-over notification hook drives Game Center.
+// Classic reports scores/feats by calling [[GameCenter shared] ...] directly from
+// RogueMain.mm (compiled into the app target); the CE engine lives in a framework that
+// can't see the app's classes, so it routes through the BrogueCEHost protocol instead.
+// These engine globals are consulted here to gate reporting and read the feat record.
+extern playerCharacter rogue;
+extern const feat *featTable;
+extern const gameConstants *gameConst;
+extern int gameVariant;
+
+// Maps the featTypes enum order (Engine/Rogue.h) to App Store Connect achievement IDs.
+// Game Center achievements are app-global, so these reuse the Classic engine's IDs; only
+// brogue_untempted (FEAT_TONE / "Untempted") is CE-only and must be created in ASC.
+static NSString * const kCEAchievementIDForFeat[] = {
+    @"brogue_pure_mage",    // FEAT_PURE_MAGE
+    @"pure_warrior",        // FEAT_PURE_WARRIOR
+    @"brogue_companion",    // FEAT_COMPANION
+    @"brogue_specialist",   // FEAT_SPECIALIST
+    @"brogue_jellymancer",  // FEAT_JELLYMANCER
+    @"brogue_dragonslayer", // FEAT_DRAGONSLAYER
+    @"brogue_paladin",      // FEAT_PALADIN
+    @"brogue_untempted",    // FEAT_TONE (Untempted)
+};
+
+// Posts the final score and any earned feats to Game Center. Only completed runs reach
+// here — quit/abandon (GAMEOVER_QUIT) and playback (GAMEOVER_RECORDING) are not forwarded,
+// so a player can't pad the leaderboard by giving up. On death only non-initialValue feats
+// count (the "ascend without..." feats require a win); on victory/supervictory all set
+// feats count. Restricted to standard Brogue, non-wizard runs.
+static void ceReportGameOver(long score, boolean isVictory) {
+    if (gameVariant != VARIANT_BROGUE) return;     // Rapid/Bullet score differently
+    if (rogue.mode == GAME_MODE_WIZARD) return;    // never report cheat runs
+
+    if (score > 0 && gHost) [gHost reportCEScore:score];
+
+    const short n = (short)(sizeof(kCEAchievementIDForFeat) / sizeof(kCEAchievementIDForFeat[0]));
+    for (short i = 0; i < gameConst->numberFeats && i < n; i++) {
+        if (!rogue.featRecord[i]) continue;
+        if (!isVictory && featTable[i].initialValue) continue; // ascend-only feats need a win
+        if (gHost) [gHost submitCEAchievementWithID:kCEAchievementIDForFeat[i]];
+    }
+}
+
 void notifyEvent(short eventId, int data1, int data2, const char *str1, const char *str2) {
+    switch (eventId) {
+        case GAMEOVER_DEATH:        ceReportGameOver((long)data1, false); break;
+        case GAMEOVER_VICTORY:
+        case GAMEOVER_SUPERVICTORY: ceReportGameOver((long)data1, true);  break;
+        // GAMEOVER_QUIT (quit/abandon) and GAMEOVER_RECORDING (playback) report nothing.
+        default: break;
+    }
 }
 
 boolean takeScreenshot(void) {
     return false;
 }
 
+// iOS port (iBrogue): the chosen graphics mode (text / tiles / hybrid) is
+// persisted in NSUserDefaults so it carries across app launches and future runs,
+// rather than resetting to TEXT_GRAPHICS each launch. Stored as the raw enum
+// integer under a CE-specific key.
+static NSString * const kCEGraphicsModeKey = @"ce graphics mode";
+
+// Read the persisted graphics mode, clamped to the valid enum range. Defaults to
+// TEXT_GRAPHICS when absent or out of range (matching the engine's own default).
+static enum graphicsModes ceLoadPersistedGraphicsMode(void) {
+    NSUserDefaults *d = [NSUserDefaults standardUserDefaults];
+    if ([d objectForKey:kCEGraphicsModeKey] == nil) {
+        return TEXT_GRAPHICS;
+    }
+    NSInteger stored = [d integerForKey:kCEGraphicsModeKey];
+    if (stored < TEXT_GRAPHICS || stored > HYBRID_GRAPHICS) {
+        return TEXT_GRAPHICS;
+    }
+    return (enum graphicsModes)stored;
+}
+
 // Called by the engine's "Enable graphics" menu action (IO.c GRAPHICS_KEY),
 // which cycles TEXT -> TILES -> HYBRID. We track the requested mode in the
 // graphicsMode global and echo it back; plotChar reads it to decide whether to
 // emit tile codes. A full redraw is forced so the switch takes effect at once.
+// The choice is persisted so it sticks for future runs (iOS port).
 enum graphicsModes setGraphicsMode(enum graphicsModes mode) {
     graphicsMode = mode;
     gNeedsFullRedraw = true;
+    [[NSUserDefaults standardUserDefaults] setInteger:(NSInteger)mode forKey:kCEGraphicsModeKey];
     return graphicsMode;
 }
 
@@ -508,6 +586,12 @@ boolean shiftKeyIsDown(void) {
 // iOS port (iBrogue): the CE title menu's "File Management" entry routes here.
 void ceShowFileManagement(void) {
     [gHost presentFileManagement];
+}
+
+// iOS port (iBrogue): the CE title menu's View > "Game Center" entry routes here;
+// presents the BrogueCE_High_Score leaderboard.
+void ceShowGameCenter(void) {
+    [gHost presentGameCenter];
 }
 
 // iOS port (iBrogue): Combat.c calls this when the player takes damage.

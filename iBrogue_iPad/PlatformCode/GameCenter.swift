@@ -16,6 +16,9 @@ import UIKit
     /// Matches the leaderboard ID configured in App Store Connect.
     @objc public static let highScoreLeaderboardID = "iBrogue_High_Score"
 
+    /// Separate leaderboard for the BrogueCE engine (CE scores independently of Classic).
+    @objc public static let ceHighScoreLeaderboardID = "BrogueCE_High_Score"
+
     /// Held weakly so the auth handler can re-present the sign-in sheet if needed.
     private weak var presenter: UIViewController?
 

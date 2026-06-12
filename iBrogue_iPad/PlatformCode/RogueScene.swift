@@ -89,28 +89,12 @@ extension CGSize {
     // 1× "bottom wall" when zoomed. Rows 32 (flavor) and 33 (buttons) stay chrome.
     private static let zoomRowMin = 3,  zoomRowMax = 31
 
-    /// UserDefaults key for the pinch-zoom toggle. Single source of truth, also
-    /// read by BrogueViewController's options menu.
-    @objc public static let pinchZoomEnabledDefaultsKey = "pinchZoomEnabledExperimental"
-
-    /// Whether pinch-zoom is enabled. **Default ON**, but only when the user
-    /// hasn't made an explicit choice: an absent key (never toggled) returns the
-    /// default, while a stored value (on OR off) is respected. This is why the
-    /// default can be flipped in a later release without overriding anyone who
-    /// deliberately set it — `bool(forKey:)` alone can't tell "absent" from
-    /// "explicitly false", so we check for the key's presence first.
-    @objc public static var isPinchZoomEnabledSetting: Bool {
-        let defaults = UserDefaults.standard
-        if defaults.object(forKey: pinchZoomEnabledDefaultsKey) == nil { return true }
-        return defaults.bool(forKey: pinchZoomEnabledDefaultsKey)
-    }
-
     /// UserDefaults key for "zoom out to show a tapped sidebar entity's description".
     @objc public static let examineZoomEnabledDefaultsKey = "examineZoomOutEnabled"
 
     /// Whether tapping a sidebar entity zooms out to 1× so its description box isn't
     /// clipped. **Default ON**; absent key → default, stored value (on/off) respected
-    /// (same presence-check pattern as isPinchZoomEnabledSetting).
+    /// (an absent key returns the default while a stored value, on or off, is kept).
     @objc public static var isExamineZoomEnabledSetting: Bool {
         let defaults = UserDefaults.standard
         if defaults.object(forKey: examineZoomEnabledDefaultsKey) == nil { return true }
@@ -300,9 +284,9 @@ extension RogueScene {
                 addChild(cell.foreground)
             }
         }
-        // Build the zoom layer only if the experimental flag is on (iPhone). When
-        // off, the scene stays a flat 1× grid with no crop / offscreen pass.
-        if zoomEnabled, RogueScene.isPinchZoomEnabledSetting {
+        // Build the zoom layer on iPhone (pinch-to-zoom is always on). iPad keeps a
+        // flat 1× grid with no crop / offscreen pass.
+        if zoomEnabled {
             enableZoomLayer()
         }
         // paddingEnabled's didSet only fires on change, and updatePadding early-returns

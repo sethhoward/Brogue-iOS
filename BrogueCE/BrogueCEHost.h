@@ -62,6 +62,10 @@ NS_ASSUME_NONNULL_BEGIN
 // scoped to the CE save directory.
 - (void)presentFileManagement;
 
+// Present the Game Center leaderboard (CE title menu's View > "Game Center"
+// entry), scoped to the CE leaderboard (BrogueCE_High_Score).
+- (void)presentGameCenter;
+
 // Fire a haptic when the player takes damage, scaled by severity (0 = ordinary
 // hit, 1 = now under 40% health, 2 = fatal). The host gates this on its own
 // haptics setting and device support, so the engine can call it freely.
@@ -78,6 +82,13 @@ NS_ASSUME_NONNULL_BEGIN
 // Reports the player's WINDOW cell (already mapToWindow-converted) after each
 // screen refresh, so the host's iPhone pinch-zoom can keep the player centered.
 - (void)setPlayerWindowX:(short)x y:(short)y;
+
+// --- Game Center ------------------------------------------------------------
+// Invoked at game over with the final score, for the CE leaderboard. The bridge
+// has already filtered out non-standard variants and wizard runs before calling.
+- (void)reportCEScore:(long)score;
+// Unlock a Game Center achievement by its App Store Connect identifier.
+- (void)submitCEAchievementWithID:(NSString *)identifier;
 
 @end
 

@@ -167,6 +167,9 @@ final class BrogueViewController: UIViewController {
     private var versionChooserFadeTimer: Timer?
     /// Title-screen options button (lower-left). Universal across Classic and CE.
     private var optionsButton: UIButton?
+    /// Title-screen info button, beside the options button. Pops an engine-aware
+    /// description of the selected engine's key features.
+    private var infoButton: UIButton?
     /// True while the active engine is showing its title screen (chooser visible).
     private var atTitle = false { didSet { updateVersionChooserVisibility(); updateTitleOptionsVisibility() } }
     fileprivate var touchEvents = [UIBrogueTouchEvent]()
@@ -401,13 +404,10 @@ final class BrogueViewController: UIViewController {
     private var leftHandMagnifier: Bool =
         UserDefaults.standard.bool(forKey: leftHandMagnifierDefaultsKey) // default off (right-handed)
 
-    /// iPhone pinch-to-zoom (dungeon map). Persisted, **default on** (an explicit
-    /// prior choice is respected — see RogueScene.isPinchZoomEnabledSetting).
-    /// Gates the zoom gestures, the multi-touch handling, and the scene's zoom
-    /// layer — when off, everything behaves exactly as before the feature shipped.
-    private var pinchZoomEnabled: Bool = RogueScene.isPinchZoomEnabledSetting
-    /// True only when the feature is both available (iPhone) and switched on.
-    private var pinchZoomActive: Bool { isPhoneIdiom && pinchZoomEnabled }
+    /// iPhone pinch-to-zoom (dungeon map) is always on; there is no user toggle.
+    /// True only on the iPhone idiom, where the zoomable scene exists (iPad keeps
+    /// the flat, un-zoomable grid).
+    private var pinchZoomActive: Bool { isPhoneIdiom }
 
     /// When on (default), single-tapping a sidebar entity zooms out to 1× so its
     /// description box isn't clipped while zoomed. Toggleable in Options.
@@ -655,6 +655,7 @@ final class BrogueViewController: UIViewController {
         currentEngine = BrogueViewController.persistedEngine()
         setupVersionChooser()
         setupOptionsButton()
+        setupInfoButton()
         startEngine()
 
         magView.viewToMagnify = skViewPort
@@ -953,6 +954,15 @@ final class BrogueViewController: UIViewController {
         DispatchQueue.main.async { [weak self] in
             guard let self = self, self.presentedViewController == nil else { return }
             GameCenter.shared.showLeaderboard(id: GameCenter.highScoreLeaderboardID, from: self)
+        }
+    }
+
+    /// Invoked from the BrogueCE engine's title menu (View > "Game Center" item).
+    /// Opens the CE-specific leaderboard, separate from Classic's.
+    @objc func presentGameCenterScreenForCE() {
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self, self.presentedViewController == nil else { return }
+            GameCenter.shared.showLeaderboard(id: GameCenter.ceHighScoreLeaderboardID, from: self)
         }
     }
 
@@ -1357,6 +1367,36 @@ final class BrogueViewController: UIViewController {
         optionsButton = button
     }
 
+    /// Info button, placed just to the right of the options button. Matches the
+    /// options button's styling. Tapping it presents a description of the
+    /// currently selected engine's key features.
+    private func setupInfoButton() {
+        guard let optionsButton = optionsButton else { return }
+        let button = UIButton(type: .system)
+        button.translatesAutoresizingMaskIntoConstraints = false
+        button.tintColor = UIColor(white: 0.85, alpha: 1.0)
+        button.backgroundColor = UIColor.black.withAlphaComponent(0.55)
+        button.layer.cornerRadius = 22
+        button.setImage(UIImage(systemName: "info.circle.fill",
+                                withConfiguration: UIImage.SymbolConfiguration(pointSize: 20, weight: .semibold)),
+                        for: .normal)
+        button.isHidden = true
+        button.addTarget(self, action: #selector(infoButtonPressed), for: .touchUpInside)
+
+        view.addSubview(button)
+        NSLayoutConstraint.activate([
+            button.leadingAnchor.constraint(equalTo: optionsButton.trailingAnchor, constant: 12),
+            button.centerYAnchor.constraint(equalTo: optionsButton.centerYAnchor),
+            button.widthAnchor.constraint(equalToConstant: 44),
+            button.heightAnchor.constraint(equalToConstant: 44),
+        ])
+        infoButton = button
+    }
+
+    @objc private func infoButtonPressed() {
+        presentEngineInfo()
+    }
+
     /// The options menu. Universal across engines; add new entries here.
     private func optionsMenu() -> UIMenu {
         let resetDirections = UIAction(title: "Default d-pad position",
@@ -1380,23 +1420,15 @@ final class BrogueViewController: UIViewController {
                                          image: UIImage(systemName: "magnifyingglass")) { [weak self] _ in
                 self?.toggleLeftHandMagnifier()
             }
-            // Experimental: pinch-to-zoom the dungeon map. Default off.
-            let pinchZoom = UIAction(title: "Pinch zoom (experimental)",
-                                     image: UIImage(systemName: "arrow.up.left.and.arrow.down.right"),
-                                     state: pinchZoomEnabled ? .on : .off) { [weak self] _ in
-                self?.togglePinchZoom()
+            children.append(contentsOf: [haptics, magnifierSide])
+            // Pinch-to-zoom is always on; this sub-option zooms out to show a tapped
+            // sidebar entity's description box so it isn't clipped while zoomed.
+            let examineZoom = UIAction(title: "Zoom out on examine",
+                                       image: UIImage(systemName: "sidebar.left"),
+                                       state: examineZoomEnabled ? .on : .off) { [weak self] _ in
+                self?.toggleExamineZoom()
             }
-            children.append(contentsOf: [haptics, magnifierSide, pinchZoom])
-            // Sub-option of pinch zoom: zoom out to show a tapped sidebar entity's
-            // description. Only relevant (and only shown) when pinch zoom is on.
-            if pinchZoomEnabled {
-                let examineZoom = UIAction(title: "Zoom out on examine",
-                                           image: UIImage(systemName: "sidebar.left"),
-                                           state: examineZoomEnabled ? .on : .off) { [weak self] _ in
-                    self?.toggleExamineZoom()
-                }
-                children.append(examineZoom)
-            }
+            children.append(examineZoom)
         }
 
         children.append(resetDirections)
@@ -1409,16 +1441,6 @@ final class BrogueViewController: UIViewController {
         leftHandMagnifier.toggle()
         UserDefaults.standard.set(leftHandMagnifier, forKey: BrogueViewController.leftHandMagnifierDefaultsKey)
         magView.leftHandMode = leftHandMagnifier
-        fireHaptic()
-        optionsButton?.menu = optionsMenu()
-    }
-
-    /// Flips the experimental pinch-zoom setting, persists it, builds/tears down
-    /// the scene's zoom layer and recognizers, and rebuilds the menu.
-    private func togglePinchZoom() {
-        pinchZoomEnabled.toggle()
-        UserDefaults.standard.set(pinchZoomEnabled, forKey: RogueScene.pinchZoomEnabledDefaultsKey)
-        applyPinchZoomEnabled()
         fireHaptic()
         optionsButton?.menu = optionsMenu()
     }
@@ -1459,6 +1481,194 @@ final class BrogueViewController: UIViewController {
 
     private func updateTitleOptionsVisibility() {
         optionsButton?.isHidden = !atTitle
+        infoButton?.isHidden = !atTitle
+    }
+
+    // MARK: - Engine info panel
+
+    /// Returns a bold variant of the font, preserving its (Dynamic Type) size.
+    private static func boldFont(_ font: UIFont) -> UIFont {
+        guard let descriptor = font.fontDescriptor.withSymbolicTraits(.traitBold) else { return font }
+        return UIFont(descriptor: descriptor, size: 0)
+    }
+
+    /// Returns an italic variant of the font, preserving its (Dynamic Type) size.
+    private static func italicFont(_ font: UIFont) -> UIFont {
+        guard let descriptor = font.fontDescriptor.withSymbolicTraits(.traitItalic) else { return font }
+        return UIFont(descriptor: descriptor, size: 0)
+    }
+
+    /// A line in the info panel. The renderer styles each kind differently.
+    private enum InfoBlock {
+        case heading(String)   // top-level group heading
+        case note(String)      // italic descriptor beneath a heading
+        case section(String)   // sub-section heading
+        case bullets([String]) // bullet list
+    }
+
+    /// Presents a scrollable description of the currently selected engine's key
+    /// features. Content is engine-aware: CE summarizes how it differs from the
+    /// original Brogue; Classic gives a short description of the original game.
+    private func presentEngineInfo() {
+        guard presentedViewController == nil else { return }
+
+        let isCE = (currentEngine == .ce)
+
+        let content = UIViewController()
+        content.view.backgroundColor = .systemBackground
+        content.title = isCE ? "About BrogueCE" : "About Brogue"
+        content.navigationItem.rightBarButtonItem =
+            UIBarButtonItem(barButtonSystemItem: .done, target: self, action: #selector(dismissEngineInfo))
+
+        let textView = UITextView()
+        textView.translatesAutoresizingMaskIntoConstraints = false
+        textView.isEditable = false
+        textView.alwaysBounceVertical = true
+        textView.backgroundColor = .clear
+        textView.textContainerInset = UIEdgeInsets(top: 8, left: 12, bottom: 24, right: 12)
+        textView.attributedText = BrogueViewController.infoAttributedText(isCE ? Self.ceInfoBlocks() : Self.classicInfoBlocks())
+        content.view.addSubview(textView)
+        NSLayoutConstraint.activate([
+            textView.topAnchor.constraint(equalTo: content.view.safeAreaLayoutGuide.topAnchor),
+            textView.bottomAnchor.constraint(equalTo: content.view.bottomAnchor),
+            textView.leadingAnchor.constraint(equalTo: content.view.safeAreaLayoutGuide.leadingAnchor),
+            textView.trailingAnchor.constraint(equalTo: content.view.safeAreaLayoutGuide.trailingAnchor),
+        ])
+
+        let nav = UINavigationController(rootViewController: content)
+        present(nav, animated: true)
+    }
+
+    @objc private func dismissEngineInfo() {
+        dismiss(animated: true)
+    }
+
+    /// Renders the structured info blocks into a styled attributed string,
+    /// scaling with the user's Dynamic Type setting.
+    private static func infoAttributedText(_ blocks: [InfoBlock]) -> NSAttributedString {
+        let out = NSMutableAttributedString()
+
+        let bulletStyle = NSMutableParagraphStyle()
+        bulletStyle.headIndent = 16
+        bulletStyle.firstLineHeadIndent = 0
+        bulletStyle.paragraphSpacing = 7
+        bulletStyle.lineBreakMode = .byWordWrapping
+        bulletStyle.tabStops = [NSTextTab(textAlignment: .left, location: 16)]
+
+        let headingStyle = NSMutableParagraphStyle()
+        headingStyle.paragraphSpacingBefore = 18
+        headingStyle.paragraphSpacing = 4
+
+        let sectionStyle = NSMutableParagraphStyle()
+        sectionStyle.paragraphSpacingBefore = 12
+        sectionStyle.paragraphSpacing = 4
+
+        for block in blocks {
+            switch block {
+            case .heading(let text):
+                out.append(NSAttributedString(string: text + "\n", attributes: [
+                    .font: boldFont(UIFont.preferredFont(forTextStyle: .title2)),
+                    .foregroundColor: UIColor.label,
+                    .paragraphStyle: headingStyle,
+                ]))
+            case .note(let text):
+                out.append(NSAttributedString(string: text + "\n", attributes: [
+                    .font: italicFont(UIFont.preferredFont(forTextStyle: .subheadline)),
+                    .foregroundColor: UIColor.secondaryLabel,
+                ]))
+            case .section(let text):
+                out.append(NSAttributedString(string: text + "\n", attributes: [
+                    .font: UIFont.preferredFont(forTextStyle: .headline),
+                    .foregroundColor: UIColor.label,
+                    .paragraphStyle: sectionStyle,
+                ]))
+            case .bullets(let items):
+                for item in items {
+                    out.append(NSAttributedString(string: "•\t" + item + "\n", attributes: [
+                        .font: UIFont.preferredFont(forTextStyle: .body),
+                        .foregroundColor: UIColor.label,
+                        .paragraphStyle: bulletStyle,
+                    ]))
+                }
+            }
+        }
+        return out
+    }
+
+    /// Key BrogueCE features and differences from the original Brogue. Curated
+    /// for the iOS port — desktop/command-line-only items are omitted.
+    private static func ceInfoBlocks() -> [InfoBlock] {
+        return [
+            .note("How BrogueCE differs from the original Brogue (\"Classic\"). Switch engines from the title screen to compare."),
+            .heading("Gameplay Differences"),
+            .note("The changes below have some impact on game difficulty and is not a comprehensive list."),
+            .section("Monsters"),
+            .bullets([
+                "Dar priestesses are now included in the 'Mage' monster class. A weapon of mage slaying will instantly kill them, and armor of mage immunity will provide invulnerability to their feeble attacks.",
+                "Goblin conjurers no longer have the spear attack pattern in contradiction with their attack message.",
+                "Liches/phoenixes polymorphed into other creatures no longer spawn phylacteries/eggs on death.",
+                "Allies can no longer learn abilities from the spectral clones created by armor of multiplicity.",
+            ]),
+            .section("Items"),
+            .bullets([
+                "Fixed a bug which caused staffs of firebolt and lightning to deal a fixed amount of damage instead of a variable amount.",
+                "Wands of plenty now reduce the maximum health of the target and its clone by 50%.",
+                "Wands of empowerment no longer increase the target's health regeneration rate.",
+                "Wands of empowerment have been strengthened to a middle-ground between their 1.7.4 and 1.7.5 versions.",
+                "Nerfed charm of teleportation recharge time. At +1 it starts at the same value, but becomes 1 turn at +13 instead of +11.",
+                "Buffed staff of protection duration. At /N max charges, the duration is now 13 × 1.4^(N-2) instead of 5 × 1.53^(N-2).",
+                "Fixed a bug which caused the bolt name from unidentified staffs or wands to be revealed when reflected.",
+                "Fixed a bug which caused some staffs to appear in treasure vaults without their max charges being shown.",
+                "Fixed a bug which caused unidentified rings to be revealed as negative in the ring description after reading a scroll of remove curse.",
+            ]),
+            .section("Combat"),
+            .bullets([
+                "Changed the creatures hit as collateral from a spear attack to be the same as those hit by the sweep of an axe attack. (This reincludes hitting hidden monsters.)",
+                "Fixed a bug which allowed fast-attacking monsters to attack the player before falling down a chasm or hole.",
+                "Fixed a bug which prevented discordant allies from attacking the player diagonally.",
+                "Fixed a bug which caused ranged-melee attackers (e.g. goblins, salamanders) with the grappling mutation to attempt to seize non-adjacent targets. Now they only seize adjacent targets and perform normal, damage-dealing, ranged attacks on non-adjacent targets.",
+            ]),
+            .section("Dungeon Generation"),
+            .bullets([
+                "Captive and shackled allies are more common.",
+                "Fixed a bug which caused some traps to be generated on cells with foliage, leading to odd behavior.",
+            ]),
+            .section("Mechanics"),
+            .bullets([
+                "Fixed a bug which caused hunting monsters to have a 97% chance to lose track of the player for each turn they spend outside of the player's stealth range, instead of the intended 3% chance.",
+                "Revamped the searching system. Instead of performing a strong search only after five consecutive turns of pressing 's', you now perform a weaker, single-turn search every time you press 's', with a stronger one on the fifth."
+            ]),
+            .section("Informational"),
+            .bullets([
+                "The \"blue\" player-to-monster combat information is now displayed in ally tooltips (so you can more easily assess how much health they have).",
+                "The sidebar now displays whether a monster is carrying an item.",
+                "Magic-detected cells are now described with \"you remember seeing here\" when the item has been seen.",
+                "Fixed a bug where inspecting an out-of-sight lumenstone would say \"you remember seeing a lumenstone from depth 0\" instead of the depth it was found.",
+                "Fixed a bug where some item quantities were remembered incorrectly on leaving and revisiting a level.",
+                "Fixed incorrect descriptions of remembered items when hallucinating.",
+            ]),
+            .heading("Non-Gameplay Differences"),
+            .note("The changes below have no impact on game difficulty."),
+            .section("Notable Enhancements"),
+            .bullets([
+                "Improved stability. Game crashes and out-of-sync errors are rare.",
+                "Added support for Oryx's graphical tiles (toggle in-game with the 'G' key). Your text/tiles choice is remembered for future runs.",
+            ]),
+        ]
+    }
+
+    /// Short description of the original Brogue (the "Classic" engine).
+    private static func classicInfoBlocks() -> [InfoBlock] {
+        return [
+            .heading("Brogue"),
+            .note("The original roguelike by Brian Walker (version 1.7.5)."),
+            .section("About"),
+            .bullets([
+                "A clean, deterministic dungeon crawl that prizes tactical depth over character building — every monster, item, and trap interacts through a small set of consistent rules.",
+                "Descend 26 floors to retrieve the Amulet of Yendor. Light, stealth, and terrain are as important as combat.",
+                "This is the classic engine BrogueCE is built upon. Switch to BrogueCE from the title screen for its bug fixes, balance changes, and graphical tiles — tap the info button there to see what's different.",
+            ]),
+        ]
     }
 
     private func updateVersionChooserLabel() {
@@ -1773,7 +1983,9 @@ extension BrogueViewController {
     
     @IBAction func showLeaderBoardButtonPressed(_ sender: Any) {
         NSLog("[GameCenter] leaderboard button pressed")
-        GameCenter.shared.showLeaderboard(id: GameCenter.highScoreLeaderboardID, from: self)
+        let boardID = (currentEngine == .ce) ? GameCenter.ceHighScoreLeaderboardID
+                                              : GameCenter.highScoreLeaderboardID
+        GameCenter.shared.showLeaderboard(id: boardID, from: self)
     }
     
     @IBAction func seedButtonPressed(_ sender: Any) {
@@ -1814,31 +2026,12 @@ extension BrogueViewController: UIGestureRecognizerDelegate {
         toggle.numberOfTouchesRequired = 2
         toggle.numberOfTapsRequired = 2
         toggle.delegate = self
-        pinch.isEnabled = pinchZoomEnabled
-        pan.isEnabled = pinchZoomEnabled
-        toggle.isEnabled = pinchZoomEnabled
         skViewPort.addGestureRecognizer(pinch)
         skViewPort.addGestureRecognizer(pan)
         skViewPort.addGestureRecognizer(toggle)
         zoomPinch = pinch
         zoomPan = pan
         zoomToggle = toggle
-    }
-
-    /// Applies the experimental pinch-zoom toggle: builds/tears down the scene's
-    /// zoom layer and enables/disables the recognizers. Title-screen only, so a
-    /// mid-game scene rebuild is never in play.
-    private func applyPinchZoomEnabled() {
-        guard isPhoneIdiom else { return }
-        if pinchZoomEnabled {
-            skViewPort.rogueScene.enableZoomLayer()
-        } else {
-            resetZoom()
-            skViewPort.rogueScene.disableZoomLayer()
-        }
-        zoomPinch?.isEnabled = pinchZoomEnabled
-        zoomPan?.isEnabled = pinchZoomEnabled
-        zoomToggle?.isEnabled = pinchZoomEnabled
     }
 
     // Pinch + two-finger pan + the two-finger double-tap toggle must run together,

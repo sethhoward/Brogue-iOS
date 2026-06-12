@@ -676,6 +676,22 @@ burn draws (the `STATUS_BURNING` case in `decrementMonsterStatus`, Monsters.c, d
 per burning turn; fire immunity gates only the damage, not the draw); (2) the life cloud's gas changes
 the gas map, so subsequent gas-dissipation rolls diverge from upstream seeds.
 
+### 2026-06-11 — Button-drag highlight follows the finger
+
+**What.** While dragging a touch across a menu/inventory (`MOUSE_ENTERED_CELL` with a
+button already pressed), `processButtonInput` now moves `buttonDepressed` to the button
+under the finger, instead of only setting it on `MOUSE_DOWN`.
+
+**Why.** `drawButtonsInState` paints `buttonFocused` as `BUTTON_HOVER` and
+`buttonDepressed` as `BUTTON_PRESSED`. On a drag, focus follows the finger but the
+depressed index stayed on the originally-pressed button, so two rows lit up at once (e.g.
+press "Autopilot", drag to "Feats" → both highlighted). On touch you want exactly one
+highlight tracking the finger. The Classic engine already carries this fix
+(`iBrogue_iPad/BrogueCode/Buttons.c`); this brings CE in line.
+
+**Where.** `Buttons.c` — `processButtonInput()`, the focus-found branch now also sets
+`buttonDepressed` when `event->eventType == MOUSE_ENTERED_CELL && buttonDepressed >= 0`.
+
 ### 2026-06-08 — Rethrow falls through to a normal throw prompt
 
 **What.** The rethrow command (`RETHROW_KEY`, Shift+T) used to no-op when there was no
@@ -822,6 +838,48 @@ in-game safe-area insets and the view visibly shrank before any game had loaded.
 
 ---
 
+### 2026-06-11 — Game Center leaderboard & achievements
+
+**What.** Implemented the `notifyEvent` platform hook in `CEBridge.mm` so CE reports its
+final score to a new `BrogueCE_High_Score` leaderboard and unlocks Game Center
+achievements for earned feats. Added two `BrogueCEHost` methods — `reportCEScore:` and
+`submitCEAchievementWithID:` — forwarded by `CEHost.swift` to the shared `GameCenter`
+singleton (`ceHighScoreLeaderboardID` / `submitAchievement`). The on-screen leaderboard
+button (`BrogueViewController.showLeaderBoardButtonPressed`) now picks the board by the
+active engine.
+
+**Why.** Classic already reports to Game Center (directly from `RogueMain.mm`); CE's
+score/feats were local-only. CE lives in a framework that can't see the app's classes, so
+it must route through the host protocol instead of calling `GameCenter` directly.
+
+**Where.** No vendored `Engine/` C was changed — the engine already calls
+`notifyEvent(GAMEOVER_*, score, …)` at game over. `CEBridge.mm`'s `ceReportGameOver()`
+reads the engine globals `rogue.featRecord` / `featTable` / `gameConst` / `gameVariant`
+and maps the `featTypes` enum to achievement IDs via `kCEAchievementIDForFeat[]`. Seven
+feats reuse the Classic engine's achievement IDs (Game Center achievements are app-global);
+the eighth, `brogue_untempted` (FEAT_TONE / "Untempted"), is CE-only and must be created in
+App Store Connect.
+
+**Gating.** Standard Brogue only (`gameVariant == VARIANT_BROGUE`); wizard runs never
+report. Only completed runs report to the leaderboard — `GAMEOVER_QUIT` (quit/abandon) and
+`GAMEOVER_RECORDING` (playback) are not forwarded, so giving up never posts a score. On
+death only non-`initialValue` feats count; on victory/supervictory all set feats count.
+(Note: the engine's *local* high-scores list still records quits via its own
+`saveHighScore()`, matching upstream — only the online leaderboard excludes them.)
+
+**Title-menu entry.** Added a "Game Center" item to the title screen's **main menu**
+(after File Management), opening the `BrogueCE_High_Score` leaderboard. New
+`NG_GAME_CENTER` command in the `NGCommands` enum (`Rogue.h`); the button + dispatch case
+live in `MainMenu.c` (`initializeMainMenuButtons`, with `MAIN_MENU_BUTTON_COUNT` bumped to
+5 tablet / 6 desktop; the `NG_GAME_CENTER` case calls `extern void ceShowGameCenter(void)`).
+The bridge's
+`ceShowGameCenter()` → `BrogueCEHost.presentGameCenter` → `CEHost` →
+`BrogueViewController.presentGameCenterScreenForCE()`. Mirrors the existing
+`NG_FILE_MANAGEMENT` / `ceShowFileManagement` plumbing; the leaderboard is presented as a
+modal on the main thread while the engine stays at the title.
+
+---
+
 ## Platform functions implemented in `CEBridge.mm`
 
 These engine-declared platform functions were upstream stubs in this port and are now
@@ -831,9 +889,11 @@ implemented in the bridge (not the engine C, but listed here for orientation):
 - `getHighScoresList` / `saveHighScore` — local high scores (NSUserDefaults, CE keys).
 - `saveRunHistory` / `saveResetRun` / `loadRunHistory` — the lifetime game-stats
   history (NSUserDefaults, CE keys; `seed == 0` is the "reset recent stats" sentinel).
+- `notifyEvent` — CE → Game Center score/achievement reporting at game over (see the
+  2026-06-11 entry above). Local high scores remain in NSUserDefaults; this adds the
+  online leaderboard/achievements on top.
 
-Still stubbed: `takeScreenshot`, `notifyEvent` (the latter is where CE → Game Center
-score/achievement reporting would hook in; CE high scores are currently local-only).
+Still stubbed: `takeScreenshot`.
 
 ---
 

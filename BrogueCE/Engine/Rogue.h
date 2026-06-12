@@ -2377,6 +2377,7 @@ enum NGCommands {
     NG_HIGH_SCORES,
     NG_GAME_STATS,
     NG_FILE_MANAGEMENT, // iOS port (iBrogue): opens the native file manager
+    NG_GAME_CENTER,     // iOS port (iBrogue): opens the Game Center leaderboard
     NG_QUIT,
 };
 

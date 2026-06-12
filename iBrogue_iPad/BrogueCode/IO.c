@@ -2511,7 +2511,19 @@ void executeKeystroke(signed long keystroke, boolean controlKey, boolean shiftKe
             apply(NULL, true);
             break;
         case THROW_KEY:
-            throwCommand(NULL);
+            throwCommand(NULL, false);
+            break;
+        case RETHROW_KEY:
+            // iOS port (iBrogue): rethrow the last thrown item, auto-aiming at the
+            // last target. Ported from BrogueCE so a shortcut bound to RETHROW_KEY
+            // (e.g. carried over from playing CE) works in Classic instead of no-opping.
+            // When there's no valid item to rethrow, fall through to a normal throw
+            // prompt rather than doing nothing.
+            if (rogue.lastItemThrown != NULL && itemIsCarried(rogue.lastItemThrown)) {
+                throwCommand(rogue.lastItemThrown, true);
+            } else {
+                throwCommand(NULL, false);
+            }
             break;
         case RELABEL_KEY:
             relabel(NULL);
