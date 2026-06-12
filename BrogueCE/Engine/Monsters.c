@@ -3138,11 +3138,10 @@ static boolean allyFlees(creature *ally, creature *closestEnemy) {
         return true;
     }
 
-    // iOS port (iBrogue): ring of light. An emboldened ally doesn't panic at low HP and holds the line --
-    // but it still keeps its distance from invulnerable/kamikaze/sacrifice targets via monsterFleesFrom()
-    // below, so courage never becomes suicide (e.g. it won't charge a revenant).
-    if (!(ally->status[STATUS_EMBOLDENED] && rogue.lightRingBonus > 0)
-        && distanceBetween((pos){x, y}, closestEnemy->loc) < 10
+    // iOS port (iBrogue): an emboldened ally still retreats at low HP, but moveAlly() redirects that
+    // retreat into a rally *behind* the player (using the player as a shield, where it heals in the light)
+    // rather than scattering to the generic safety map. So the trigger here is the vanilla one.
+    if (distanceBetween((pos){x, y}, closestEnemy->loc) < 10
         && (100 * ally->currentHP / ally->info.maxHP <= 33)
         && ally->info.turnsBetweenRegen > 0
         && !ally->carriedMonster
@@ -3177,6 +3176,43 @@ static void monsterMillAbout(creature *monst, short movementChance) {
             moveMonsterPassivelyTowards(monst, targetLoc, false);
         }
     }
+}
+
+// iOS port (iBrogue): ring of light. Picks the cell an emboldened ally should rally to when it would
+// otherwise flee: a passable tile adjacent to the player, on the far side from the threat, so the
+// player's body shields it while it heals in the light. "Farthest player-adjacent cell from the threat"
+// naturally resolves to directly behind the player, and degrades gracefully when the player isn't
+// between them (it just picks the safest nearby tile). Returns INVALID_POS if none is reachable, in
+// which case the caller falls back to a normal flee.
+static pos allyRallyShieldCell(creature *monst, creature *threat) {
+    pos best = INVALID_POS;
+    short bestDist = -1;
+    enum directions dir;
+
+    for (dir = 0; dir < DIRECTION_COUNT; dir++) {
+        const short nx = player.loc.x + nbDirs[dir][0];
+        const short ny = player.loc.y + nbDirs[dir][1];
+        const pos c = (pos){ nx, ny };
+        creature *occupant;
+        short d;
+
+        if (!coordinatesAreInMap(nx, ny)
+            || cellHasTerrainFlag(c, T_OBSTRUCTS_PASSABILITY)
+            || monsterAvoids(monst, c)
+            || diagonalBlocked(player.loc.x, player.loc.y, nx, ny, false)) {
+            continue;
+        }
+        occupant = monsterAtLoc(c);
+        if (occupant && occupant != monst && !canPass(monst, occupant)) {
+            continue;
+        }
+        d = distanceBetween(c, threat->loc);
+        if (d > bestDist) {
+            bestDist = d;
+            best = c;
+        }
+    }
+    return best;
 }
 
 /// @brief Handles the given allied monster's turn under normal circumstances
@@ -3243,6 +3279,23 @@ static void moveAlly(creature *monst) {
 
     // Weak allies in the presence of enemies seek safety;
     if (allyFlees(monst, closestMonster)) {
+        // iOS port (iBrogue): ring of light. Rather than scatter to the generic safety map (which leads
+        // an emboldened ally *out* of your light, abandoning the defense/regen keeping it alive), it
+        // rallies to a tile behind you -- shielded by your body and bathed in the light, where it heals
+        // and waits to re-engage. Falls through to a normal flee if no such tile is reachable.
+        if (monst->status[STATUS_EMBOLDENED] && rogue.lightRingBonus > 0) {
+            const pos shield = allyRallyShieldCell(monst, closestMonster);
+            if (isPosInMap(shield)) {
+                if (posEq(monst->loc, shield)) {
+                    return; // already tucked in behind the player; hold position and heal (turn already consumed)
+                }
+                // willingToAttackPlayer = false: route *around* the player to the sheltered cell, never into them.
+                if (moveMonsterPassivelyTowards(monst, shield, false)) {
+                    return;
+                }
+            }
+            // couldn't reach a sheltered cell (player surrounded or walled in); fall through to normal flee.
+        }
         if (monsterHasBoltEffect(monst, BE_BLINKING)
             && ((monst->info.flags & MONST_ALWAYS_USE_ABILITY) || rand_percent(30))
             && monsterBlinkToSafety(monst)) {

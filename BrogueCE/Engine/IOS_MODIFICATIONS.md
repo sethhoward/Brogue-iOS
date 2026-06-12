@@ -44,12 +44,12 @@ guardians).
 the PR lands and the vendored engine is refreshed — both hunks are marked `// iOS port (iBrogue):
 cherry-picked from upstream PR #803`.
 
-**Interaction with the ring of light (same-day change below).** The ring's "courage" makes emboldened
-allies hold the line, but that must **not** turn into suicide against a revenant. So `allyFlees()` was
-written so emboldenment suppresses only the *low-HP panic* flee; the tactical `monsterFleesFrom()` check
-(invulnerable / kamikaze / sacrifice / maintains-distance / poison) still runs for emboldened allies.
-Net: an emboldened ally fights beatable enemies to the last, but still keeps its distance from the
-unkillable ones.
+**Interaction with the ring of light (same-day change below).** Emboldened allies still flee at the
+vanilla low-HP threshold (so they self-preserve), but `moveAlly()` redirects that retreat into a rally
+*behind the player* rather than to the generic safety map -- and `monsterFleesFrom()` (this change) still
+runs for them, so they keep their distance from revenants/kamikaze/sacrifice targets. Net: an emboldened
+ally retreats to heal in your light when hurt and avoids the unkillable enemies, instead of either
+scattering or charging to its death.
 
 **Where.** `Monsters.c` — `monsterFleesFrom()` and the second enemy scan in `moveAlly()`. CE-only.
 Gameplay/behavior change, so it diverges replay from pre-change recordings (no new RNG draws).
@@ -70,8 +70,14 @@ adds, keyed off a new `rogue.lightRingBonus` (net enchant of worn rings of light
   - **Accuracy** small flat `EMBOLDEN_ACCURACY_BONUS` (8) — applied in `monsterAccuracyAdjusted()`.
     **No damage bonus, deliberately** — damage compounds with `empowerMonster` leveling into an
     unbeatable squad; the buff is survivability + presence only.
-  - **Courage** — `allyFlees()` returns false (holds the line); `moveAlly()` extends the attack leash to
-    the light radius (engages anything in your light).
+  - **Courage / rally** — `moveAlly()` extends the attack leash to the light radius (an emboldened ally
+    engages anything in your light). And when it *would* flee at low HP, it doesn't scatter to the generic
+    safety map (which would lead it *out* of the light, abandoning the defense/regen keeping it alive);
+    instead `allyRallyShieldCell()` sends it to a tile **behind you** -- shielded by your body, in the
+    light, where it heals and waits to re-engage. It falls back to a normal flee if no sheltered tile is
+    reachable. (Earlier drafts made emboldened allies simply *never* flee; that was rejected because our
+    own regen is tuned not to out-heal combat damage, so "never retreat" would have gotten allies killed --
+    the rally preserves self-preservation while keeping them in the buff aura.)
   - **Regeneration** — extra, capped `regenStep` in `decrementMonsterStatus()` (cap
     `EMBOLDEN_REGEN_PERCENT_CAP` 300%). Always-on but recovery-paced: tops off an ally between fights,
     never out-heals focused damage mid-fight (no combat-gating — the engine has no clean combat flag and
