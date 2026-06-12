@@ -28,6 +28,55 @@ covers the separate Classic engine that ships in the app target).
 
 ## Change log
 
+### 2026-06-11 — Catching fire confuses for 3 turns (new content)
+
+**What.** Any creature (the player included) is confused for `FIRE_CONFUSION_DURATION` (3) turns the
+moment it is *initially* set on fire. Applied inside `exposeCreatureToFire`'s `status[STATUS_BURNING]
+== 0` branch, so it triggers once on ignition rather than every burning turn, and only for things that
+actually catch (fire-immune / submerged / levitating-over-extinguishing-terrain creatures already
+early-return before this point). Uses the same `status`/`maxStatus[STATUS_CONFUSED]` path as the
+confusion weapon runic.
+
+**Why.** Requested — catching fire should be disorienting; pairs with the panic of needing to reach
+water. Note this also confuses the *player* on ignition (3 turns of randomized movement), which is a
+real difficulty bump when you're trying to flee to water; tunable via the `#define`.
+
+**Where.** `Time.c` — `FIRE_CONFUSION_DURATION` define + one assignment in `exposeCreatureToFire`. No
+RNG drawn here; deterministic, no save/replay impact. CE-only.
+
+### 2026-06-11 — Subtle progress bars behind inventory rows (new content)
+
+**What.** Each inventory row can now show a faint progress bar tinted into the cells *behind* the
+row text. Per category:
+- **Weapon / armor / ring** — a **count-down** bar showing use/turns remaining before auto-ID
+  (`charges` ÷ the `gameConst` threshold: `weaponKillsToAutoID` / `armorDelayToAutoID` /
+  `ringDelayToAutoID`). Shown **only while equipped/worn and still unidentified**; it depletes as ID
+  nears and is gone at ID (and for any identified item). Gradient runs light→dark (flipped).
+- **Staff** — current **charge level**, always shown. Pre-ID it's drawn as discrete **pips** (one per
+  current charge, `INVENTORY_BAR_PIP_WIDTH` cells each with a 1-cell gap) so the **hidden max capacity
+  is never revealed**; once identified it becomes a solid `charges ÷ enchant1` fraction. Gradient
+  dark→light.
+- **Charm** — **recharge progress** `(rechargeDelay − charges) ÷ rechargeDelay`, shown **only while on
+  cooldown** (`charges > 0`); hidden when ready. Gradient dark→light.
+- **Wands and everything else** — no bar.
+
+Colors: ID = `gray`, staff = `teal` (blue-cyan), charm = the item's own `foreColor` (charms have no
+per-kind color in this engine, so this is the generic item glyph color), each averaged faintly into the
+row background. The bar renders **only in the button's normal draw state**, so the focus/press/drag
+highlight always takes precedence.
+
+**Why.** Requested at-a-glance feedback on the otherwise-invisible auto-ID timers and staff/charm
+charge state, without revealing information the player shouldn't have yet (staff max capacity).
+
+**Where.** `Rogue.h` — three new `brogueButton` flags (`B_DRAW_PROGRESS_BAR`, `B_PROGRESS_BAR_FLIP`,
+`B_PROGRESS_BAR_PIPS`), two new `brogueButton` fields (`barColor`, `barFillCells`), and the
+`INVENTORY_BAR_*` tunables (pip width, tint strength, gradient darken). `Buttons.c` — `drawButton()`
+blends the gradient-darkened bar color into the per-cell background for the leading `barFillCells` cells
+(skipping pip gaps), guarded to `BUTTON_NORMAL`. `Items.c` — new static `setInventoryProgressBar()`
+computes the bar from item state and is called per row in `displayInventory()` (so it appears in the
+main inventory **and** every item-picker prompt). Purely cosmetic: reads item state only, no RNG or game
+state, so no save/replay impact. CE-only; the Classic engine is unchanged.
+
 ### 2026-06-11 — Electrified water: lightning struck into water shocks the whole connected body (new content)
 
 **What.** When an electric bolt (`BF_ELECTRIC` — both the staff's `BOLT_LIGHTNING` and the weaker
@@ -50,6 +99,9 @@ friendly-fire exception** — the player wading in the same pool gets zapped by 
   as **one shock per body, nearest source wins** (no double-dipping).
 - *Submerged creatures (eels) ARE shocked* — this deliberately overrides the usual rule that submerged
   monsters can't be bolt-targeted (`updateBolt`, `Items.c`), making lightning the hard counter to eels.
+- *Stun:* anything the shock actually damages is paralyzed for `WATER_SHOCK_STUN_DURATION` (3) turns —
+  the player included (set via `status`/`maxStatus[STATUS_PARALYZED]`, the same path as the paralysis
+  weapon runic). The directly-struck bolt target (ring 0) takes the normal hit and is not stunned.
 - *Levitation:* a creature hovering over water (`STATUS_LEVITATING` / `MONST_FLIES`) is not in contact —
   it neither triggers nor takes the shock. `MONST_INVULNERABLE` creatures are skipped.
 - *Feedback:* a cosmetic shockwave flashes the conducting tiles ring-by-ring (dimming with distance) plus

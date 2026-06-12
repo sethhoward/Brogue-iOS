@@ -90,6 +90,28 @@ void drawButton(brogueButton *button, enum buttonDrawStates highlight, screenDis
             applyColorAverage(&bColor, &bColorMid, midPercent);
         }
 
+        // iOS port (iBrogue): subtle inventory progress bar, drawn behind the text. Only in the
+        // button's normal (un-highlighted) state, so the focus/press highlight always wins. The bar
+        // color is gradient-darkened along its length (dark->light for count-up, flipped for
+        // count-down), then averaged faintly into the row background.
+        if (highlight == BUTTON_NORMAL
+            && (button->flags & B_DRAW_PROGRESS_BAR)
+            && i < button->barFillCells) {
+
+            const boolean isGap = (button->flags & B_PROGRESS_BAR_PIPS)
+                                  && (i % INVENTORY_BAR_PIP_WIDTH) == (INVENTORY_BAR_PIP_WIDTH - 1);
+            if (!isGap) {
+                const short span = max(1, button->barFillCells - 1);
+                short t = 100 * i / span; // 0 at left .. 100 at right
+                const short darken = (button->flags & B_PROGRESS_BAR_FLIP)
+                                     ? (t * INVENTORY_BAR_GRADIENT_DARKEN / 100)          // light->dark
+                                     : ((100 - t) * INVENTORY_BAR_GRADIENT_DARKEN / 100); // dark->light
+                color barCell = button->barColor;
+                applyColorAverage(&barCell, &black, darken);
+                applyColorAverage(&bColor, &barCell, INVENTORY_BAR_TINT_STRENGTH);
+            }
+        }
+
         if (highlight == BUTTON_PRESSED) {
             applyColorAverage(&fColor, &bColor, 30);
         }

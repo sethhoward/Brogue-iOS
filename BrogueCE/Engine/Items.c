@@ -2846,6 +2846,73 @@ static boolean displayMagicCharForItem(item *theItem) {
     }
 }
 
+// iOS port (iBrogue): compute the subtle progress bar drawn behind an inventory row, if any.
+// `rowWidth` is the drawn width of the row (cells). Purely cosmetic — reads item state only,
+// touches no RNG or game state. Sets B_DRAW_PROGRESS_BAR (+ flip/pips flags) on the button.
+//   - Weapon/armor/ring: countdown to auto-ID (charges/threshold), equipped & unidentified only.
+//   - Staff: current charge level — discrete pips pre-ID (never reveals max), charges/max after ID.
+//   - Charm: recharge progress, shown only while on cooldown.
+//   - Wands and everything else: no bar.
+static void setInventoryProgressBar(item *theItem, brogueButton *button, short rowWidth) {
+    short fillCells = 0;
+    boolean flip = false, pips = false;
+    const color *barColor = &gray;
+
+    if (rowWidth <= 0) {
+        return;
+    }
+
+    if (theItem->category & (WEAPON | ARMOR | RING)) {
+        // Countdown to auto-identification, only while equipped/worn and still unidentified.
+        if ((theItem->flags & ITEM_EQUIPPED)
+            && !(theItem->flags & ITEM_IDENTIFIED)
+            && theItem->charges > 0) {
+
+            short threshold = (theItem->category & WEAPON) ? gameConst->weaponKillsToAutoID
+                            : (theItem->category & ARMOR)  ? gameConst->armorDelayToAutoID
+                                                           : gameConst->ringDelayToAutoID;
+            if (threshold > 0) {
+                // Fraction of the countdown remaining; rounds up so it stays visible until ID.
+                fillCells = (theItem->charges * rowWidth + threshold - 1) / threshold;
+                flip = true; // count-down: gradient runs light->dark
+                barColor = &gray;
+            }
+        }
+    } else if (theItem->category & STAFF) {
+        barColor = &teal;
+        if (theItem->flags & ITEM_IDENTIFIED) {
+            // Max charges known: show current/max as a solid fraction.
+            if (theItem->enchant1 > 0 && theItem->charges > 0) {
+                fillCells = theItem->charges * rowWidth / theItem->enchant1;
+            }
+        } else {
+            // Max hidden: show current charges as discrete pips, never the capacity.
+            fillCells = theItem->charges * INVENTORY_BAR_PIP_WIDTH;
+            pips = true;
+        }
+    } else if (theItem->category & CHARM) {
+        // Recharge progress; shown only while on cooldown (charges counts down to 0 = ready).
+        short delay = charmRechargeDelay(theItem->kind, theItem->enchant1);
+        if (theItem->charges > 0 && delay > 0) {
+            fillCells = (delay - theItem->charges) * rowWidth / delay;
+            barColor = theItem->foreColor ? theItem->foreColor : &itemColor;
+        }
+    }
+
+    fillCells = clamp(fillCells, 0, rowWidth);
+    if (fillCells > 0) {
+        button->flags |= B_DRAW_PROGRESS_BAR;
+        if (flip) {
+            button->flags |= B_PROGRESS_BAR_FLIP;
+        }
+        if (pips) {
+            button->flags |= B_PROGRESS_BAR_PIPS;
+        }
+        button->barColor = *barColor;
+        button->barFillCells = fillCells;
+    }
+}
+
 char displayInventory(unsigned short categoryMask,
                       unsigned long requiredFlags,
                       unsigned long forbiddenFlags,
@@ -3015,6 +3082,9 @@ char displayInventory(unsigned short categoryMask,
 
         // Keep track of the maximum width needed:
         maxLength = max(maxLength, strLenWithoutEscapes(buttons[i].text));
+
+        // iOS port (iBrogue): add the subtle progress bar behind this row, if applicable.
+        setInventoryProgressBar(theItem, &buttons[i], strLenWithoutEscapes(buttons[i].text));
 
         //      itemList[itemNumber] = theItem;
         //
@@ -4953,6 +5023,7 @@ static void detonateBolt(bolt *theBolt, creature *caster, short x, short y, bool
 // See BrogueCE/Engine/IOS_MODIFICATIONS.md. The falloff fraction is the main tuning knob.
 #define WATER_SHOCK_FALLOFF_PERCENT 75  // per-ring multiplier applied to damage (geometric)
 #define WATER_SHOCK_MAX_RINGS       128 // safety cap on precomputed falloff table
+#define WATER_SHOCK_STUN_DURATION   3   // turns of paralysis inflicted on anything the shock damages
 
 // iOS port (iBrogue): a tile conducts the shock iff it is water (deep or shallow). Both deep
 // and shallow water carry TM_ALLOWS_SUBMERGING and TM_EXTINGUISHES_FIRE; bog, lava, cooling
@@ -5076,8 +5147,14 @@ static void electrifyWater(bolt *theBolt, creature *caster, const pos *sources, 
         d = dist[monst->loc.x][monst->loc.y];
         if (d >= 1 && creatureContactsWater(monst)) {
             short dmg = (short) ((long long) staffDamage(theBolt->magnitude * FP_FACTOR) * ringMult[d] / FP_FACTOR);
-            if (dmg >= 1 && inflictDamage(caster, monst, dmg, boltColor, false)) {
-                killCreature(monst, false);
+            if (dmg >= 1) {
+                if (inflictDamage(caster, monst, dmg, boltColor, false)) {
+                    killCreature(monst, false);
+                } else {
+                    // iOS port (iBrogue): the shock stuns anything it damages.
+                    monst->status[STATUS_PARALYZED] = monst->maxStatus[STATUS_PARALYZED] =
+                        max(monst->status[STATUS_PARALYZED], WATER_SHOCK_STUN_DURATION);
+                }
             }
         }
     }
@@ -5088,6 +5165,10 @@ static void electrifyWater(bolt *theBolt, creature *caster, const pos *sources, 
             inflictDamage(caster, &player, dmg, boltColor, false);
             if (player.currentHP <= 0) {
                 gameOver("Electrocuted in water", true);
+            } else {
+                // iOS port (iBrogue): the shock stuns anything it damages, the player included.
+                player.status[STATUS_PARALYZED] = player.maxStatus[STATUS_PARALYZED] =
+                    max(player.status[STATUS_PARALYZED], WATER_SHOCK_STUN_DURATION);
             }
         }
     }

@@ -25,6 +25,8 @@
 #include "GlobalsBase.h"
 #include "Globals.h"
 
+#define FIRE_CONFUSION_DURATION 3   // iOS port (iBrogue): turns of confusion inflicted on catching fire
+
 void exposeCreatureToFire(creature *monst) {
     char buf[COLS], buf2[COLS];
     if ((monst->bookkeepingFlags & MB_IS_DYING)
@@ -46,6 +48,11 @@ void exposeCreatureToFire(creature *monst) {
             sprintf(buf2, "%s catches fire", buf);
             combatMessage(buf2, messageColorFromVictim(monst));
         }
+        // iOS port (iBrogue): the shock of catching fire confuses for FIRE_CONFUSION_DURATION turns.
+        // Inside the "initially set on fire" branch, so it applies once on ignition (not every burning
+        // turn), to the player too. Same status path as the confusion weapon runic.
+        monst->status[STATUS_CONFUSED] = monst->maxStatus[STATUS_CONFUSED] =
+            max(monst->status[STATUS_CONFUSED], FIRE_CONFUSION_DURATION);
     }
     monst->status[STATUS_BURNING] = monst->maxStatus[STATUS_BURNING] = max(monst->status[STATUS_BURNING], 7);
 }

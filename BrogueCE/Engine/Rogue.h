@@ -2854,6 +2854,11 @@ typedef struct brogueButton {
                                 // (Primarily to display magic character and item symbols in the inventory display.)
     unsigned long flags;
     enum NGCommands command;
+    // iOS port (iBrogue): inventory progress bar. When B_DRAW_PROGRESS_BAR is set, the leading
+    // `barFillCells` cells of the row are tinted with `barColor` (behind the text), in the button's
+    // normal draw state only. See setInventoryProgressBar() and drawButton().
+    color barColor;
+    short barFillCells;
 } brogueButton;
 
 enum buttonDrawStates {
@@ -2869,7 +2874,16 @@ enum BUTTON_FLAGS {
     B_HOVER_ENABLED         = Fl(3),
     B_WIDE_CLICK_AREA       = Fl(4),
     B_KEYPRESS_HIGHLIGHT    = Fl(5),
+    // iOS port (iBrogue): inventory progress bars (see drawButton / setInventoryProgressBar).
+    B_DRAW_PROGRESS_BAR     = Fl(6),    // tint the leading `barFillCells` cells with `barColor`
+    B_PROGRESS_BAR_FLIP     = Fl(7),    // gradient runs light->dark (count-down) instead of dark->light
+    B_PROGRESS_BAR_PIPS     = Fl(8),    // render as discrete pips (gapped) rather than a solid fill
 };
+
+// iOS port (iBrogue): tunables for the subtle inventory progress bars.
+#define INVENTORY_BAR_PIP_WIDTH         3   // cells per staff charge pip (last cell of each group is a gap)
+#define INVENTORY_BAR_TINT_STRENGTH     40  // how strongly the bar color averages into the row background (0-100)
+#define INVENTORY_BAR_GRADIENT_DARKEN   60  // max darkening (toward black) at the dim end of the bar gradient (0-100)
 
 typedef struct buttonState {
     // Indices of the buttons that are doing stuff:
