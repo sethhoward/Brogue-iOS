@@ -4946,6 +4946,156 @@ static void detonateBolt(bolt *theBolt, creature *caster, short x, short y, bool
     }
 }
 
+// iOS port (iBrogue): "electrified water". When an electric bolt (lightning or spark)
+// directly strikes a creature standing in water, the charge spreads through the entire
+// connected body of water and shocks everything else standing in it (including submerged
+// eels and the player), with damage diminishing by flood-fill distance from the strike.
+// See BrogueCE/Engine/IOS_MODIFICATIONS.md. The falloff fraction is the main tuning knob.
+#define WATER_SHOCK_FALLOFF_PERCENT 75  // per-ring multiplier applied to damage (geometric)
+#define WATER_SHOCK_MAX_RINGS       128 // safety cap on precomputed falloff table
+
+// iOS port (iBrogue): a tile conducts the shock iff it is water (deep or shallow). Both deep
+// and shallow water carry TM_ALLOWS_SUBMERGING and TM_EXTINGUISHES_FIRE; bog, lava, cooling
+// lava and the sacrificial pit share TM_ALLOWS_SUBMERGING but not TM_EXTINGUISHES_FIRE, so the
+// pair of flags excludes them while matching deep/shallow/sloshing/luminescent water.
+static boolean isConductiveWater(pos loc) {
+    return cellHasTMFlag(loc, TM_ALLOWS_SUBMERGING) && cellHasTMFlag(loc, TM_EXTINGUISHES_FIRE);
+}
+
+// iOS port (iBrogue): a creature is in contact with the water (and therefore both able to
+// trigger and vulnerable to the shock) only if it is standing in conductive water and not
+// hovering above it. Mirrors the eel/kraken "in deep water" contact test in monstersAreEnemies().
+static boolean creatureContactsWater(creature *monst) {
+    return monst
+        && !(monst->status[STATUS_LEVITATING])
+        && !(monst->info.flags & MONST_FLIES)
+        && isConductiveWater(monst->loc);
+}
+
+// iOS port (iBrogue): spread an electric bolt's charge through the connected body of water and
+// shock every creature standing in it. `sources` are the in-water tiles the bolt directly struck.
+static void electrifyWater(bolt *theBolt, creature *caster, const pos *sources, short numSources) {
+    short i, j, r, d, nx, ny, qHead = 0, qTail = 0, maxRing = 0, cutoffRing = 0;
+    char buf[COLS];
+    fixpt ringMult[WATER_SHOCK_MAX_RINGS];
+    const color *boltColor = theBolt->backColor;
+    const short maxRoll = staffDamageHigh(theBolt->magnitude * FP_FACTOR);
+
+    if (numSources <= 0) {
+        return;
+    }
+
+    // Precompute the geometric falloff multiplier per ring, and find the furthest ring that can
+    // still deal at least 1 damage even on a maximum roll. Beyond that the spread (and flash) stop.
+    ringMult[0] = FP_FACTOR;
+    for (r = 1; r < WATER_SHOCK_MAX_RINGS; r++) {
+        ringMult[r] = ringMult[r - 1] * WATER_SHOCK_FALLOFF_PERCENT / 100;
+        if ((long long) maxRoll * ringMult[r] / FP_FACTOR >= 1) {
+            cutoffRing = r;
+        } else {
+            break;
+        }
+    }
+
+    // Multi-source breadth-first flood fill over connected water tiles (8-connected). The distance
+    // grid records each tile's ring distance to the nearest strike point ("nearest source wins").
+    short **dist = allocGrid();
+    pos *queue = malloc(sizeof(pos) * DCOLS * DROWS);
+    fillGrid(dist, -1);
+
+    for (i = 0; i < numSources; i++) {
+        if (isConductiveWater(sources[i]) && dist[sources[i].x][sources[i].y] < 0) {
+            dist[sources[i].x][sources[i].y] = 0;
+            queue[qTail++] = sources[i];
+        }
+    }
+
+    while (qHead < qTail) {
+        pos cur = queue[qHead++];
+        d = dist[cur.x][cur.y];
+        if (d >= cutoffRing) {
+            continue; // a creature one ring further out could not take >=1 damage; don't expand
+        }
+        for (nx = cur.x - 1; nx <= cur.x + 1; nx++) {
+            for (ny = cur.y - 1; ny <= cur.y + 1; ny++) {
+                if (coordinatesAreInMap(nx, ny)
+                    && dist[nx][ny] < 0
+                    && isConductiveWater((pos){ nx, ny })) {
+
+                    dist[nx][ny] = d + 1;
+                    if (d + 1 > maxRing) {
+                        maxRing = d + 1;
+                    }
+                    queue[qTail++] = (pos){ nx, ny };
+                }
+            }
+        }
+    }
+
+    // Cosmetic shockwave: flash the conducting tiles ring by ring, dimming with distance. Purely
+    // visual; it consumes no RNG and is decoupled from the (deterministic) damage resolution below.
+    boolean witnessed = false;
+    for (r = 1; r <= maxRing; r++) {
+        boolean ringInView = false;
+        for (i = 0; i < DCOLS; i++) {
+            for (j = 0; j < DROWS; j++) {
+                if (dist[i][j] == r && playerCanSee(i, j)) {
+                    short intensity = (short) ((long long) 70 * ringMult[r] / FP_FACTOR);
+                    hiliteCell(i, j, boltColor, max(15, intensity), false);
+                    ringInView = witnessed = true;
+                }
+            }
+        }
+        if (ringInView && !rogue.playbackFastForward) {
+            if (pauseAnimation(16, PAUSE_BEHAVIOR_DEFAULT)) {
+                break;
+            }
+        }
+    }
+    for (i = 0; i < DCOLS; i++) {
+        for (j = 0; j < DROWS; j++) {
+            if (dist[i][j] > 0 && playerCanSee(i, j)) {
+                refreshDungeonCell((pos){ i, j });
+            }
+        }
+    }
+
+    if (witnessed) {
+        sprintf(buf, "the water crackles with electricity");
+        combatMessage(buf, boltColor);
+    }
+
+    // Resolve damage. Iterate creatures in monster-list order (then the player) so the RNG draws
+    // are deterministic for save/replay. Each shocked creature rolls its own lightning damage,
+    // scaled by the falloff for its distance. Sources (ring 0) already took the direct bolt hit.
+    for (creatureIterator it = iterateCreatures(monsters); hasNextCreature(it);) {
+        creature *monst = nextCreature(&it);
+        if (monst->info.flags & MONST_INVULNERABLE) {
+            continue;
+        }
+        d = dist[monst->loc.x][monst->loc.y];
+        if (d >= 1 && creatureContactsWater(monst)) {
+            short dmg = (short) ((long long) staffDamage(theBolt->magnitude * FP_FACTOR) * ringMult[d] / FP_FACTOR);
+            if (dmg >= 1 && inflictDamage(caster, monst, dmg, boltColor, false)) {
+                killCreature(monst, false);
+            }
+        }
+    }
+    d = dist[player.loc.x][player.loc.y];
+    if (d >= 1 && creatureContactsWater(&player)) {
+        short dmg = (short) ((long long) staffDamage(theBolt->magnitude * FP_FACTOR) * ringMult[d] / FP_FACTOR);
+        if (dmg >= 1) {
+            inflictDamage(caster, &player, dmg, boltColor, false);
+            if (player.currentHP <= 0) {
+                gameOver("Electrocuted in water", true);
+            }
+        }
+    }
+
+    free(queue);
+    freeGrid(dist);
+}
+
 // returns whether the bolt effect should autoID any staff or wand it came from, if it came from a staff or wand
 boolean zap(pos originLoc, pos targetLoc, bolt *theBolt, boolean hideDetails, boolean reverseBoltDir) {
     pos listOfCoordinates[MAX_BOLT_LENGTH];
@@ -4959,6 +5109,10 @@ boolean zap(pos originLoc, pos targetLoc, bolt *theBolt, boolean hideDetails, bo
     boolean boltInView;
     const color *boltColor;
     fixpt boltLightRadius;
+    // iOS port (iBrogue): electrified water — tiles where this electric bolt directly struck a
+    // creature standing in water; seeds the post-bolt flood-fill shock. See electrifyWater().
+    pos electricStrikes[MAX_BOLT_LENGTH];
+    short numElectricStrikes = 0;
 
     enum displayGlyph theChar;
     color foreColor, backColor, multColor;
@@ -5084,6 +5238,23 @@ boolean zap(pos originLoc, pos targetLoc, bolt *theBolt, boolean hideDetails, bo
                 autoIdentify(rogue.armor);
             }
             continue;
+        }
+
+        // iOS port (iBrogue): electrified water — note when an electric damage bolt directly hits a
+        // creature standing in water, so the connected body can be shocked once the bolt resolves.
+        // Checked before updateBolt() (which may kill/remove the creature). Submerged creatures can't
+        // be struck directly here (they seed nothing), but they are still shocked by the flood below.
+        if ((theBolt->flags & BF_ELECTRIC)
+            && theBolt->boltEffect == BE_DAMAGE
+            && numElectricStrikes < MAX_BOLT_LENGTH) {
+
+            creature *waterMonst = monsterAtLoc((pos){ x, y });
+            if (waterMonst
+                && !(waterMonst->bookkeepingFlags & MB_SUBMERGED)
+                && creatureContactsWater(waterMonst)) {
+
+                electricStrikes[numElectricStrikes++] = (pos){ x, y };
+            }
         }
 
         if (updateBolt(theBolt, shootingMonst, x, y, boltInView, alreadyReflected, &autoID, &lightingChanged)) {
@@ -5307,6 +5478,13 @@ boolean zap(pos originLoc, pos targetLoc, bolt *theBolt, boolean hideDetails, bo
             }
         }
     }
+
+    // iOS port (iBrogue): electrified water — once the bolt has fully resolved, spread the charge
+    // through any body of water it struck and shock everything else standing in it.
+    if (numElectricStrikes > 0) {
+        electrifyWater(theBolt, shootingMonst, electricStrikes, numElectricStrikes);
+    }
+
     return autoID;
 }
 

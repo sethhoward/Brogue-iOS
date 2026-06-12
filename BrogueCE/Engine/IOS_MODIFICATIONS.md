@@ -28,6 +28,43 @@ covers the separate Classic engine that ships in the app target).
 
 ## Change log
 
+### 2026-06-11 — Electrified water: lightning struck into water shocks the whole connected body (new content)
+
+**What.** When an electric bolt (`BF_ELECTRIC` — both the staff's `BOLT_LIGHTNING` and the weaker
+`BOLT_SPARK` used by turrets, ogre shamans, dar priestesses and pixies) directly strikes a creature
+**standing in water**, the charge now floods the entire **connected body of water** and shocks
+everything else standing in it. Any caster triggers it (player, monster, turret), and there is **no
+friendly-fire exception** — the player wading in the same pool gets zapped by their own bolt.
+
+**Rules.**
+- *Trigger:* the bolt must directly hit a non-submerged, non-levitating creature on a water tile.
+  A bolt that merely crosses empty water does nothing.
+- *Body:* 8-connected flood-fill through connected **deep + shallow** water. Water is detected by
+  `TM_ALLOWS_SUBMERGING && TM_EXTINGUISHES_FIRE` — the pair matches deep/shallow/sloshing/luminescent
+  water but excludes bog, lava, cooling lava and the sacrificial pit (which share `TM_ALLOWS_SUBMERGING`).
+- *Damage:* each shocked creature rolls its own `staffDamage()` (so it scales with staff enchant; spark
+  stays weak), multiplied by a **geometric falloff** of `WATER_SHOCK_FALLOFF_PERCENT` (75%) per flood
+  ring from the nearest strike point. The spread (and flash) stop at the ring where even a maximum roll
+  rounds below 1 — radius scales with bolt strength, bounding huge lakes for free. The directly-struck
+  creature takes only its normal direct hit (ring 0 is excluded from the shock); multiple strikes resolve
+  as **one shock per body, nearest source wins** (no double-dipping).
+- *Submerged creatures (eels) ARE shocked* — this deliberately overrides the usual rule that submerged
+  monsters can't be bolt-targeted (`updateBolt`, `Items.c`), making lightning the hard counter to eels.
+- *Levitation:* a creature hovering over water (`STATUS_LEVITATING` / `MONST_FLIES`) is not in contact —
+  it neither triggers nor takes the shock. `MONST_INVULNERABLE` creatures are skipped.
+- *Feedback:* a cosmetic shockwave flashes the conducting tiles ring-by-ring (dimming with distance) plus
+  a one-time-per-bolt "the water crackles with electricity" combat message.
+
+**Why.** Requested content addition — makes water a double-edged tactical element and gives lightning a
+purpose against submerging eels.
+
+**Where.** `Items.c` — new statics `isConductiveWater`, `creatureContactsWater`, `electrifyWater`
+(multi-source BFS over a `short**` distance grid), the `WATER_SHOCK_*` `#define`s, and two hooks in
+`zap()`: the bolt loop records in-water strike tiles (`electricStrikes`), and after the bolt fully
+resolves it calls `electrifyWater()`. **Determinism:** damage is applied by iterating the monster list in
+fixed order (then the player), so the per-creature RNG draws replay identically; the ring animation is
+purely cosmetic and decoupled from damage. CE-only; the Classic engine is unchanged.
+
 ### 2026-06-11 — Debug death-recap: count polarity reveals earned by resting
 
 **What.** The on-screen death recap's debug rest readout now shows, per level, `turns/IDs` (rested turns and
