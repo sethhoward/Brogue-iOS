@@ -7500,12 +7500,73 @@ static void detectMagicOnItem(item *theItem) {
     }
 }
 
+// iOS port (iBrogue): act on one polarity-bearing item for an insight effect — reveal its good/bad
+// polarity if still hidden, or fully identify it if its polarity is already known. Returns true if it
+// was a full identification. Shared by resting/eating (applyPolarityInsightToRandomItem) and the potion
+// of detect magic (quaffDetectMagic).
+static boolean revealOrIdentifyPolarityItem(item *theItem) {
+    const boolean polarityKnown = itemMagicPolarityIsKnown(theItem, MAGIC_POLARITY_BENEVOLENT)
+                               || itemMagicPolarityIsKnown(theItem, MAGIC_POLARITY_MALEVOLENT);
+    if (polarityKnown) {
+        identify(theItem); // already sensed -> escalate to a full ID
+    } else {
+        detectMagicOnItem(theItem);
+    }
+    return polarityKnown;
+}
+
+// iOS port (iBrogue): shared selection for the passive insight events (resting, eating). Picks a RANDOM
+// eligible pack item -- unidentified, non-neutral, polarity-bearing, matching categoryMask -- and either
+// reveals its good/bad polarity (if still hidden) or, if its polarity is already known, fully identifies
+// it. The pool deliberately INCLUDES polarity-known items, so insight escalates "sensed" items into full
+// IDs. favorPotions restricts the pool to potions whenever any eligible potion exists (resting favors
+// potions first). Sets *outFullID; returns the affected item, or NULL if nothing was eligible. The random
+// pick is a substantive, action-triggered draw, reproduced identically on replay.
+static item *applyPolarityInsightToRandomItem(unsigned short categoryMask, boolean favorPotions, boolean *outFullID) {
+    item *eligible[32];
+    int count = 0;
+    boolean anyPotion = false;
+    for (item *it = packItems->nextItem; it != NULL; it = it->nextItem) {
+        if ((it->category & categoryMask)
+            && (it->category & HAS_INTRINSIC_POLARITY)
+            && !(it->flags & ITEM_IDENTIFIED)
+            && itemMagicPolarity(it) != MAGIC_POLARITY_NEUTRAL
+            && (it->category & POTION)) {
+            anyPotion = true;
+            break;
+        }
+    }
+    const boolean potionsOnly = (favorPotions && anyPotion);
+    for (item *it = packItems->nextItem;
+         it != NULL && count < (int)(sizeof(eligible) / sizeof(eligible[0]));
+         it = it->nextItem) {
+        if (!(it->category & categoryMask)
+            || !(it->category & HAS_INTRINSIC_POLARITY)
+            || (it->flags & ITEM_IDENTIFIED)
+            || itemMagicPolarity(it) == MAGIC_POLARITY_NEUTRAL
+            || (potionsOnly && !(it->category & POTION))) {
+            continue;
+        }
+        eligible[count++] = it;
+    }
+    if (count == 0) {
+        return NULL;
+    }
+    item *target = eligible[rand_range(0, count - 1)];
+    const boolean polarityKnown = revealOrIdentifyPolarityItem(target);
+    tryIdentifyLastItemKinds(HAS_INTRINSIC_POLARITY);
+    if (outFullID) {
+        *outFullID = polarityKnown;
+    }
+    return target;
+}
+
 // iOS port (iBrogue): passive polarity insight while resting. Each rested turn accrues toward a
 // threshold that escalates with the number of reveals already earned this game (a flat step), so early
-// reveals come quickly and later ones cost more rest. On reaching the threshold it reveals the polarity
-// of the first still-unknown (good/bad) item in the pack. Pure flag-flipping via detectMagicOnItem — no
-// RNG — so the counter and the reveal are reconstructed identically on replay (Brogue saves are
-// recordings; see gainPolarityInsightFromRest's call site in playerTurnEnded).
+// reveals come quickly and later ones cost more rest. On reaching the threshold, a random eligible pack
+// item (potions favored first) is revealed or, if already sensed, fully identified -- see
+// applyPolarityInsightToRandomItem. The random pick is action-triggered, reconstructed identically on
+// replay (Brogue saves are recordings; see the call site in playerTurnEnded).
 //
 // Schedule (step = 100): reveal N needs 100*N consecutive rested turns since the last reveal, i.e.
 // intervals 100, 200, 300, 400, ... (cumulative 100, 300, 600, 1000, ...). Keyed off reveals earned, not
@@ -7523,44 +7584,36 @@ void gainPolarityInsightFromRest(void) {
         return;
     }
 
-    // First pack item (deterministic top-of-pack order) whose good/bad polarity is still hidden.
-    // Neutral items are skipped: their polarity never resolves to good/bad, so they would be picked
-    // every milestone and mislabeled.
-    item *target = NULL;
-    for (item *theItem = packItems->nextItem; theItem != NULL; theItem = theItem->nextItem) {
-        if ((theItem->category & HAS_INTRINSIC_POLARITY)
-            && !(theItem->flags & ITEM_IDENTIFIED)
-            && itemMagicPolarity(theItem) != MAGIC_POLARITY_NEUTRAL
-            && !itemMagicPolarityIsKnown(theItem, MAGIC_POLARITY_BENEVOLENT)
-            && !itemMagicPolarityIsKnown(theItem, MAGIC_POLARITY_MALEVOLENT)) {
-
-            target = theItem;
-            break;
-        }
-    }
+    // Reveal/identify a random eligible pack item, favoring potions first.
+    boolean fullID = false;
+    item *target = applyPolarityInsightToRandomItem(HAS_INTRINSIC_POLARITY, true /* favor potions */, &fullID);
     if (target == NULL) {
         return; // nothing eligible yet; hold the milestone until an unknown item appears
     }
 
-    detectMagicOnItem(target);
-    tryIdentifyLastItemKinds(HAS_INTRINSIC_POLARITY);
-    levels[rogue.depthLevel].restRevealsOnLevel++; // iOS port (iBrogue): debug death-recap tally
-
     char theName[COLS * 3], buf[COLS * 3];
-    const boolean benevolent = (itemMagicPolarity(target) == MAGIC_POLARITY_BENEVOLENT);
-    itemName(target, theName, false, true, NULL);
-    sprintf(buf, "while resting, you sense the %s aura of %s.",
-            (benevolent ? "benevolent" : "malevolent"), theName);
-    messageWithColor(buf, (benevolent ? &goodMessageColor : &badMessageColor), 0);
+    if (fullID) {
+        itemName(target, theName, true, true, NULL);
+        sprintf(buf, "while resting, you finally identify %s.", theName);
+        messageWithColor(buf, &itemMessageColor, 0);
+    } else {
+        const boolean benevolent = (itemMagicPolarity(target) == MAGIC_POLARITY_BENEVOLENT);
+        itemName(target, theName, false, true, NULL);
+        sprintf(buf, "while resting, you sense the %s aura of %s.",
+                (benevolent ? "benevolent" : "malevolent"), theName);
+        messageWithColor(buf, (benevolent ? &goodMessageColor : &badMessageColor), 0);
+    }
+    levels[rogue.depthLevel].restRevealsOnLevel++; // iOS port (iBrogue): debug death-recap tally (reveal or full ID)
 
     rogue.restTurnsSinceInsight = 0;
     rogue.disturbed = true; // interrupt any auto-rest so the discovery is noticed
 }
 
-// iOS port (iBrogue): eating a meal with nothing hunting you is a calm moment to study a scroll —
-// it reveals the polarity of the first still-unknown scroll in the pack. Polarity only, never a full
-// ID. Gated on no creature in the (Hunting) state. Pure flag-flipping (detectMagicOnItem) — no RNG,
-// no stored state — so it's reconstructed identically on replay. Called from eat() on a successful meal.
+// iOS port (iBrogue): eating a meal with nothing hunting you is a calm moment to study a SCROLL — it
+// reveals the good/bad polarity of a random still-unknown scroll, or fully identifies a random scroll
+// whose polarity you already know (scrolls only; see applyPolarityInsightToRandomItem). Gated on no
+// creature in the (Hunting) state. The random pick is action-triggered (called from eat() on a successful
+// meal), reconstructed identically on replay.
 void gainScrollInsightFromEating(void) {
     // Only when nothing is hunting you — you need a calm moment to study.
     for (creatureIterator it = iterateCreatures(monsters); hasNextCreature(it);) {
@@ -7568,37 +7621,32 @@ void gainScrollInsightFromEating(void) {
             return;
         }
     }
-    // First unidentified scroll whose polarity is still unknown (deterministic top-of-pack order).
-    item *target = NULL;
-    for (item *theItem = packItems->nextItem; theItem != NULL; theItem = theItem->nextItem) {
-        if ((theItem->category & SCROLL)
-            && !(theItem->flags & ITEM_IDENTIFIED)
-            && itemMagicPolarity(theItem) != MAGIC_POLARITY_NEUTRAL
-            && !itemMagicPolarityIsKnown(theItem, MAGIC_POLARITY_BENEVOLENT)
-            && !itemMagicPolarityIsKnown(theItem, MAGIC_POLARITY_MALEVOLENT)) {
 
-            target = theItem;
-            break;
-        }
-    }
+    boolean fullID = false;
+    item *target = applyPolarityInsightToRandomItem(SCROLL, false /* scrolls only, no potion favoring */, &fullID);
     if (target == NULL) {
-        return; // no unknown scroll to study
+        return; // no eligible scroll to study
     }
 
-    detectMagicOnItem(target);
-    tryIdentifyLastItemKinds(SCROLL);
-
-    const boolean benevolent = (itemMagicPolarity(target) == MAGIC_POLARITY_BENEVOLENT);
-    messageWithColor(benevolent
-                     ? "you study a scroll intently while eating; it radiates a benevolent aura."
-                     : "you study a scroll intently while eating; it radiates a malevolent aura.",
-                     (benevolent ? &goodMessageColor : &badMessageColor), 0);
+    if (fullID) {
+        char theName[COLS * 3], buf[COLS * 3];
+        itemName(target, theName, true, true, NULL);
+        sprintf(buf, "you study a scroll intently while eating, and finally identify %s.", theName);
+        messageWithColor(buf, &itemMessageColor, 0);
+    } else {
+        const boolean benevolent = (itemMagicPolarity(target) == MAGIC_POLARITY_BENEVOLENT);
+        messageWithColor(benevolent
+                         ? "you study a scroll intently while eating; it radiates a benevolent aura."
+                         : "you study a scroll intently while eating; it radiates a malevolent aura.",
+                         (benevolent ? &goodMessageColor : &badMessageColor), 0);
+    }
 }
 
-// iOS port (iBrogue): the returning potion of detect magic. Reveals the good/bad polarity of 1-2
-// (random) still-unknown, polarity-bearing items in the pack (excluding the potion being drunk),
-// chosen at random -- a weaker, fleeting version of the old whole-pack reveal. The random pick is a
-// substantive action-triggered draw, reproduced identically on replay.
+// iOS port (iBrogue): the returning potion of detect magic. Acts on 1-2 (random) unidentified,
+// polarity-bearing items in the pack (excluding the potion being drunk), chosen at random -- revealing
+// each one's good/bad polarity, or fully identifying it if its polarity is already known (same
+// reveal-or-escalate rule as resting/eating). A weaker, fleeting version of the old whole-pack reveal.
+// The random pick is a substantive action-triggered draw, reproduced identically on replay.
 static void quaffDetectMagic(item *exclude) {
     item *eligible[32];
     int count = 0;
@@ -7607,39 +7655,47 @@ static void quaffDetectMagic(item *exclude) {
             && (theItem->category & HAS_INTRINSIC_POLARITY)
             && !(theItem->flags & ITEM_IDENTIFIED)
             && itemMagicPolarity(theItem) != MAGIC_POLARITY_NEUTRAL
-            && !itemMagicPolarityIsKnown(theItem, MAGIC_POLARITY_BENEVOLENT)
-            && !itemMagicPolarityIsKnown(theItem, MAGIC_POLARITY_MALEVOLENT)
             && count < (int)(sizeof(eligible) / sizeof(eligible[0]))) {
 
             eligible[count++] = theItem;
         }
     }
     if (count == 0) {
-        message("you sense no unknown magic among your possessions.", 0);
+        message("you sense no magic left to discern among your possessions.", 0);
         return;
     }
     const int toReveal = min(rand_range(1, 2), count);
-    // Partial Fisher-Yates: pick `toReveal` distinct eligible items.
+    boolean wasFullID[2] = { false, false };
+    // Partial Fisher-Yates: pick `toReveal` distinct eligible items; reveal each one's polarity, or fully
+    // identify it if already sensed.
     for (int i = 0; i < toReveal; i++) {
         const int j = rand_range(i, count - 1);
         item *tmp = eligible[i]; eligible[i] = eligible[j]; eligible[j] = tmp;
-        detectMagicOnItem(eligible[i]);
+        wasFullID[i] = revealOrIdentifyPolarityItem(eligible[i]);
     }
     tryIdentifyLastItemKinds(HAS_INTRINSIC_POLARITY);
 
     char theName[COLS * 3], buf[COLS * 3];
     for (int i = 0; i < toReveal; i++) {
-        const boolean benevolent = (itemMagicPolarity(eligible[i]) == MAGIC_POLARITY_BENEVOLENT);
-        itemName(eligible[i], theName, false, true, NULL);
-        sprintf(buf, "you sense the %s aura of %s.", (benevolent ? "benevolent" : "malevolent"), theName);
-        messageWithColor(buf, (benevolent ? &goodMessageColor : &badMessageColor), 0);
+        if (wasFullID[i]) {
+            itemName(eligible[i], theName, true, true, NULL);
+            sprintf(buf, "you recognize %s.", theName);
+            messageWithColor(buf, &itemMessageColor, 0);
+        } else {
+            const boolean benevolent = (itemMagicPolarity(eligible[i]) == MAGIC_POLARITY_BENEVOLENT);
+            itemName(eligible[i], theName, false, true, NULL);
+            sprintf(buf, "you sense the %s aura of %s.", (benevolent ? "benevolent" : "malevolent"), theName);
+            messageWithColor(buf, (benevolent ? &goodMessageColor : &badMessageColor), 0);
+        }
     }
 }
 
 // iOS port (iBrogue): the altars-of-insight machine. When both linked altars hold items, reveal the item
 // on the insight altar and consume the item on the offering altar. Sacrificing an UNidentified item fully
-// identifies the offering; an identified item only reveals its polarity/aura. "Fire only if it helps":
-// never consume the payment unless the offering would actually gain information. RNG-free.
+// identifies the insight item; paying with an identified item reveals the insight item's polarity, or (if
+// its good/bad polarity is already known) escalates to a full identification — matching the reveal-or-ID
+// rule used by resting/eating/detect magic. "Fire only if it helps": never consume the payment unless the
+// insight item would actually gain information. RNG-free.
 static boolean performInsightSacrifice(short machineNumber) {
     item *insightItem = NULL, *paymentItem = NULL;
     pos paymentLoc = INVALID_POS;
@@ -7677,19 +7733,31 @@ static boolean performInsightSacrifice(short machineNumber) {
         sprintf(buf, "the altar consumes your offering; the other item is revealed to be %s.", theName);
         messageWithColor(buf, &itemMessageColor, 0);
     } else {
-        // Paid with a known item -> reveal only the insight item's polarity/aura.
-        if (insightItem->flags & (ITEM_IDENTIFIED | ITEM_MAGIC_DETECTED)) {
-            return false; // aura already known; don't waste the sacrifice
+        // Paid with a known item -> reveal the insight item's polarity/aura, or (if its good/bad polarity
+        // is already known) escalate to a full identification, like resting/eating/detect magic.
+        const boolean polarityKnown = itemMagicPolarityIsKnown(insightItem, MAGIC_POLARITY_BENEVOLENT)
+                                   || itemMagicPolarityIsKnown(insightItem, MAGIC_POLARITY_MALEVOLENT);
+        if ((insightItem->flags & ITEM_IDENTIFIED)
+            || ((insightItem->flags & ITEM_MAGIC_DETECTED) && !polarityKnown)) {
+            // Fully known already, or already revealed as having no good/bad polarity -> nothing to gain.
+            return false;
         }
-        detectMagicOnItem(insightItem);
-        tryIdentifyLastItemKinds(insightItem->category);
-        const int polarity = itemMagicPolarity(insightItem);
-        const char *aura = (polarity == MAGIC_POLARITY_BENEVOLENT) ? "a benevolent"
-                         : (polarity == MAGIC_POLARITY_MALEVOLENT) ? "a malevolent" : "no magical";
-        const color *auraColor = (polarity == MAGIC_POLARITY_BENEVOLENT) ? &goodMessageColor
-                               : (polarity == MAGIC_POLARITY_MALEVOLENT) ? &badMessageColor : &itemMessageColor;
-        sprintf(buf, "the altar consumes your offering; you sense %s aura around the other item.", aura);
-        messageWithColor(buf, auraColor, 0);
+        if (revealOrIdentifyPolarityItem(insightItem)) {
+            // Polarity was already known -> the altar completes the identification.
+            tryIdentifyLastItemKinds(insightItem->category);
+            itemName(insightItem, theName, true, true, NULL);
+            sprintf(buf, "the altar consumes your offering; the other item is revealed to be %s.", theName);
+            messageWithColor(buf, &itemMessageColor, 0);
+        } else {
+            tryIdentifyLastItemKinds(insightItem->category);
+            const int polarity = itemMagicPolarity(insightItem);
+            const char *aura = (polarity == MAGIC_POLARITY_BENEVOLENT) ? "a benevolent"
+                             : (polarity == MAGIC_POLARITY_MALEVOLENT) ? "a malevolent" : "no magical";
+            const color *auraColor = (polarity == MAGIC_POLARITY_BENEVOLENT) ? &goodMessageColor
+                                   : (polarity == MAGIC_POLARITY_MALEVOLENT) ? &badMessageColor : &itemMessageColor;
+            sprintf(buf, "the altar consumes your offering; you sense %s aura around the other item.", aura);
+            messageWithColor(buf, auraColor, 0);
+        }
     }
 
     // Consume the payment; leave the revealed item on its altar for pickup.

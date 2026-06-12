@@ -43,6 +43,14 @@ escalating schedule keyed off **reveals already earned this game**: reveal N nee
 rested turns since the last reveal — intervals 100, 200, 300, 400… (cumulative 100, 300, 600, 1000…).
 `knownPolarityKindCount` is removed entirely.
 
+**Random target + escalation to full ID.** Both the rest check and the eat-a-meal scroll check now pick a
+**random** eligible pack item via a shared helper (`applyPolarityInsightToRandomItem`), and the eligible
+pool **includes items whose polarity is already known**: an unknown item gets its polarity revealed; an
+already-sensed item gets **fully identified** (`identify()`). Rest considers all polarity categories but
+**favors potions first** (restricts the pool to potions whenever any eligible potion is carried); eating
+considers **scrolls only**. The rest-turn counter/threshold treat a full-ID the same as a reveal. The
+random pick is action-triggered, so it replays deterministically.
+
 **Where.** `Rogue.h` — `levelData.restRevealsOnLevel`. `Items.c` — `gainPolarityInsightFromRest` sums
 `restRevealsOnLevel` for the escalating threshold and increments it on each reveal (`knownPolarityKindCount`
 deleted). `RogueMain.c` — death-recap readout prints per-level `turns/IDs` and a total. Debug display + a
@@ -130,7 +138,9 @@ sets plus an always-present reworked detect magic:
   the player (`addPoison(&player, ~15, 1)`); thrown it poisons the creature it strikes, else shatters
   harmlessly.
 - **detect magic** (good, new kind `POTION_DETECT_MAGIC2` — the old slot is the empty bottle): drinking
-  reveals the polarity of 1–2 random still-unknown polarity-bearing items in the pack.
+  acts on 1–2 random unidentified polarity-bearing pack items — revealing each one's polarity, or fully
+  identifying it if its polarity is already known (same reveal-or-escalate rule as resting/eating, via the
+  shared `revealOrIdentifyPolarityItem` helper).
 
 **One set per run.** `shuffleFlavors` draws `rogue.activePotionSet = rand_range(0,1)` (deterministic from
 the seed, reproduced on replay). The inactive set's two potions are marked **absent this seed** (a static
@@ -400,6 +410,12 @@ recording stream, so seeds and replays are unaffected.
 
 ### 2026-06-10 — Altars of insight: sacrifice one item to reveal another (new content)
 
+> **Updated 2026-06-11** (see the rest-insight entry above): paying with an *identified* item now reveals
+> the insight item's polarity, or — if its good/bad polarity is already known — **escalates to a full
+> identification** (via the shared `revealOrIdentifyPolarityItem` helper). The "fire only if it helps"
+> guard now refuses only when the insight item is fully identified or already revealed as having no
+> good/bad polarity.
+
 **What.** A new guaranteed reward room — a pair of linked altars (an "altar of insight" + an "altar of
 offering") that appears once every 10 levels starting at depth 5 (depths 5, 15, 25), Brogue variant only.
 Place the item you want to learn about on the insight altar and a payment item on the offering altar; when
@@ -440,6 +456,12 @@ per-variant `recordingVersionString` bump at release (left to maintainers; not b
 untouched.
 
 ### 2026-06-10 — Eating studies a scroll: reveal one scroll's polarity on a safe meal
+
+> **Updated 2026-06-11** (see the rest-insight entry above): the scroll is now chosen **at random** (not
+> top-of-pack), the eligible pool **includes scrolls whose polarity is already known**, and acting on such
+> a scroll **fully identifies** it instead of only revealing polarity. Reuses the shared
+> `applyPolarityInsightToRandomItem(SCROLL, …)` helper. The selection now consumes RNG (action-triggered,
+> replay-safe) — no longer "no RNG" as originally described below.
 
 **What.** Eating a meal (`eat` returning true) while **nothing is hunting you** reveals the polarity
 (benevolent/malevolent) of the first still-unknown scroll in your pack, with a colored message
