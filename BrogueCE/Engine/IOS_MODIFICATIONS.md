@@ -28,6 +28,39 @@ covers the separate Classic engine that ships in the app target).
 
 ## Change log
 
+### 2026-06-12 — Ring of awareness senses room machines on arrival (new content)
+
+**What.** On *first* arriving at a level, a character wearing a (non-cursed) ring of awareness may get a
+quiet hunch that the level holds a **room machine** — a hand-built set-piece (reward vault, altar,
+captive room, guardian puzzle, library, etc.), detected by scanning for any `IS_IN_ROOM_MACHINE` cell.
+The message is existence-only: *"you sense that something of significance lies hidden on this level."* It
+never reveals the location, nor whether it's reward or danger (a treasure vault and a sentinel ambush
+read identically), so the discovery itself is preserved.
+
+- **Positive-only & truthful.** It fires *only* when a room machine actually exists, so a hunch always
+  means "something's here" and silence is ambiguous (nothing, or you didn't pick up on it). It never lies.
+- **Scales with awareness, gated on the ring.** Chance = `AWARENESS_MACHINE_SENSE_BASE` (25) +
+  `rogue.awarenessBonus` (`20 × enchant`), clamped to 100 → roughly +1 ≈ 45%, +2 ≈ 65%, +3 ≈ 85%, +4 →
+  certain. A cursed (negative-bonus) ring senses nothing.
+- **First arrival only.** Rolled in `startLevel()` inside the freshly-generated branch (Brogue restores
+  visited levels from the `levels[]` cache, so "freshly generated" is a free "first time here" proxy).
+  This closes the bounce-the-stairs-to-re-roll exploit a per-entry roll would open.
+
+**Why.** Requested — a subtle reward for an awareness build, in the spirit of its existing
+"notice what others miss." Acknowledged seam: sensing a vault *across the level* is closer to divination
+than awareness's usual *immediate-surroundings* perception; accepted as heightened intuition. Detects any
+room machine (not just `BP_REWARD` vaults) because the cell flag is free to query and the reward-or-danger
+ambiguity is more interesting — and more "awareness" — than a loot radar.
+
+**Where.** `RogueMain.c` — `AWARENESS_MACHINE_SENSE_BASE`, `levelContainsRoomMachine()`, and a block after
+the `seedRandomGenerator(oldSeed)` re-seed in `startLevel()` (so the `rand_percent` draw is on the
+gameplay RNG stream). `Globals.c` — awareness `ringTable` description gains a sentence.
+
+**Determinism / RNG.** The `rand_percent` draw is gated behind *both* `awarenessBonus > 0` and a machine
+existing, so a player without the ring (or on a machine-less level) draws **no** RNG here and sees exactly
+vanilla behavior. For ring-wearers it perturbs the stream (their game already diverges), deterministically;
+like any gameplay change it diverges replays from pre-change recordings. CE-only; base chance tunable.
+
 ### 2026-06-12 — Allies keep their distance from invulnerable monsters (cherry-pick: upstream PR #803)
 
 **What.** Cherry-picked the two-part change from upstream BrogueCE **PR #803** (open/unmerged as of

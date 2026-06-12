@@ -544,6 +544,25 @@ static void updateColors() {
     }
 }
 
+// iOS port (iBrogue): ring of awareness. The base chance (before the +20/enchant awareness bonus) that a
+// ring-wearer senses a level's room machine on first arrival. Tunable; see IOS_MODIFICATIONS.md.
+#define AWARENESS_MACHINE_SENSE_BASE 25
+
+// iOS port (iBrogue): ring of awareness. Whether the current level holds a room machine -- a hand-built
+// set-piece (reward vault, altar, captive room, guardian puzzle, etc.), detected via the
+// IS_IN_ROOM_MACHINE cell flag, which persists for the life of the level.
+static boolean levelContainsRoomMachine(void) {
+    short i, j;
+    for (i = 0; i < DCOLS; i++) {
+        for (j = 0; j < DROWS; j++) {
+            if (pmap[i][j].flags & IS_IN_ROOM_MACHINE) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
 void startLevel(short oldLevelNumber, short stairDirection) {
     uint64_t oldSeed;
     item *theItem;
@@ -736,6 +755,20 @@ void startLevel(short oldLevelNumber, short stairDirection) {
 
         // re-seed the RNG
         seedRandomGenerator(oldSeed);
+
+        // iOS port (iBrogue): ring of awareness -- on first arriving at a level, a perceptive character may
+        // sense that it holds a room machine (a vault/altar/captive/guardian set-piece). Existence only:
+        // never reveals location, nor whether it's reward or danger. Positive-only and truthful (it never
+        // fires falsely, so silence is ambiguous). The rand_percent draw is gated on wearing the ring AND a
+        // machine existing, so players without the ring draw no RNG here and keep vanilla behavior. A cursed
+        // ring of awareness (negative bonus) senses nothing. Rolled here on the gameplay RNG stream so it's
+        // deterministic; like any gameplay change it diverges replays from pre-change recordings.
+        if (rogue.awarenessBonus > 0
+            && levelContainsRoomMachine()
+            && rand_percent(min(100, AWARENESS_MACHINE_SENSE_BASE + rogue.awarenessBonus))) {
+
+            messageWithColor("you sense that something of significance lies hidden on this level.", &backgroundMessageColor, 0);
+        }
 
         //logLevel();
 
