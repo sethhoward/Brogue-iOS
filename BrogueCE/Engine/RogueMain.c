@@ -460,6 +460,17 @@ void initializeRogue(uint64_t seed) {
         theItem = addItemToPack(theItem);
     }
 
+    if (D_LIGHT_RING_START) {
+        // iOS port (iBrogue): playtest grant for the reworked ring of light. Added deterministically here
+        // (not as a recorded input), so it reconstructs identically on replay. Equip it to activate the
+        // ally aura and invisible-reveal.
+        theItem = generateItem(RING, RING_LIGHT);
+        theItem->enchant1 = 3;
+        theItem->flags &= ~ITEM_CURSED;
+        identify(theItem);
+        theItem = addItemToPack(theItem);
+    }
+
     DEBUG {
         theItem = generateItem(RING, RING_CLAIRVOYANCE);
         theItem->enchant1 = max(DROWS, DCOLS);

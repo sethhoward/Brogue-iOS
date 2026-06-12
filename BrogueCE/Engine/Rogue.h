@@ -81,6 +81,11 @@
 // frozen foliage/push). Granted deterministically in initializeRogue, so it is recording-safe. Flip to 0 to ship.
 #define D_FROST_STAFF_START             1//(WIZARD_MODE && 0)
 
+// iOS port (iBrogue): start with a +3 ring of light for playtesting (ally emboldenment aura + invisible
+// reveal). Granted deterministically in initializeRogue, so it is recording-safe. Equip it to see the
+// effect. Flip to 0 to ship.
+#define D_LIGHT_RING_START              1//(WIZARD_MODE && 0)
+
 // If enabled, runs a benchmark for the performance of repeatedly updating the screen at the start of the game.
 // #define SCREEN_UPDATE_BENCHMARK
 
