@@ -2846,19 +2846,23 @@ static boolean displayMagicCharForItem(item *theItem) {
     }
 }
 
-// iOS port (iBrogue): compute the subtle progress bar drawn behind an inventory row, if any.
-// `rowWidth` is the drawn width of the row (cells). Purely cosmetic — reads item state only,
-// touches no RNG or game state. Sets B_DRAW_PROGRESS_BAR (+ flip/pips flags) on the button.
+// iOS port (iBrogue): compute the subtle progress bar drawn behind an inventory row, if any. The bar
+// spans the full row `track` width (the padded inventory width) so "full" is the same length on every
+// row and progress is directly comparable. Purely cosmetic — reads item state only, touches no RNG or
+// game state. Sets B_DRAW_PROGRESS_BAR on the button.
 //   - Weapon/armor/ring: countdown to auto-ID (charges/threshold), equipped & unidentified only.
-//   - Staff: current charge level — discrete pips pre-ID (never reveals max), charges/max after ID.
+//   - Staff: charge level including partial recharge. Pre-ID it tracks a single charge (full when one
+//     is ready, else the recharge progress toward it) so the true capacity is never revealed; once
+//     identified the bar is split into `enchant1` equal segments (one per charge) that fill in turn,
+//     each topped off by partial recharge.
 //   - Charm: recharge progress, shown only while on cooldown.
 //   - Wands and everything else: no bar.
-static void setInventoryProgressBar(item *theItem, brogueButton *button, short rowWidth) {
-    short fillCells = 0;
-    boolean flip = false, pips = false;
+static void setInventoryProgressBar(item *theItem, brogueButton *button, short track) {
+    short pct = -1; // -1 == no bar; otherwise 0..100 fill of the full-width track
+    short segCells = 0; // >= 2 divides the bar into segments (known staff charges)
     const color *barColor = &gray;
 
-    if (rowWidth <= 0) {
+    if (track <= 0) {
         return;
     }
 
@@ -2872,44 +2876,54 @@ static void setInventoryProgressBar(item *theItem, brogueButton *button, short r
                             : (theItem->category & ARMOR)  ? gameConst->armorDelayToAutoID
                                                            : gameConst->ringDelayToAutoID;
             if (threshold > 0) {
-                // Fraction of the countdown remaining; rounds up so it stays visible until ID.
-                fillCells = (theItem->charges * rowWidth + threshold - 1) / threshold;
-                flip = true; // count-down: gradient runs light->dark
+                pct = theItem->charges * 100 / threshold;
                 barColor = &gray;
             }
         }
     } else if (theItem->category & STAFF) {
-        barColor = &teal;
+        // Partial recharge progress toward the next charge, [0,99]. enchant2 counts down to 0 (= next
+        // charge gained); staffChargeDuration is the nominal per-charge interval.
+        const short dur = staffChargeDuration(theItem);
+        short partialPct = (theItem->charges < theItem->enchant1 && dur > 0)
+                           ? clamp((dur - theItem->enchant2) * 100 / dur, 0, 99)
+                           : 0;
         if (theItem->flags & ITEM_IDENTIFIED) {
-            // Max charges known: show current/max as a solid fraction.
-            if (theItem->enchant1 > 0 && theItem->charges > 0) {
-                fillCells = theItem->charges * rowWidth / theItem->enchant1;
+            // Max known: split the bar into one segment per charge; fill whole segments per charge,
+            // plus partial recharge into the next. pct = (whole charges + partial recharge) / max.
+            pct = (theItem->enchant1 > 0)
+                  ? (theItem->charges * 100 + partialPct) / theItem->enchant1
+                  : 0;
+            if (theItem->enchant1 >= 2) {
+                segCells = track / theItem->enchant1;
             }
+        } else if (theItem->charges >= 1) {
+            // Max hidden: track a single charge — a charge is ready -> full bar (never reveals how
+            // many are stockpiled).
+            pct = 100;
         } else {
-            // Max hidden: show current charges as discrete pips, never the capacity.
-            fillCells = theItem->charges * INVENTORY_BAR_PIP_WIDTH;
-            pips = true;
+            // Max hidden, no charge ready: show recharge progress toward the next (single) charge.
+            pct = partialPct;
         }
+        barColor = &teal;
     } else if (theItem->category & CHARM) {
         // Recharge progress; shown only while on cooldown (charges counts down to 0 = ready).
         short delay = charmRechargeDelay(theItem->kind, theItem->enchant1);
         if (theItem->charges > 0 && delay > 0) {
-            fillCells = (delay - theItem->charges) * rowWidth / delay;
+            pct = (delay - theItem->charges) * 100 / delay;
             barColor = theItem->foreColor ? theItem->foreColor : &itemColor;
         }
     }
 
-    fillCells = clamp(fillCells, 0, rowWidth);
-    if (fillCells > 0) {
-        button->flags |= B_DRAW_PROGRESS_BAR;
-        if (flip) {
-            button->flags |= B_PROGRESS_BAR_FLIP;
+    if (pct >= 0) {
+        pct = clamp(pct, 0, 100);
+        // Round up so any nonzero progress shows at least one cell, and a full bar fills the track.
+        short fillCells = clamp((pct * track + 99) / 100, 0, track);
+        if (fillCells > 0) {
+            button->flags |= B_DRAW_PROGRESS_BAR;
+            button->barColor = *barColor;
+            button->barFillCells = fillCells;
+            button->barSegmentCells = segCells;
         }
-        if (pips) {
-            button->flags |= B_PROGRESS_BAR_PIPS;
-        }
-        button->barColor = *barColor;
-        button->barFillCells = fillCells;
     }
 }
 
@@ -3083,9 +3097,6 @@ char displayInventory(unsigned short categoryMask,
         // Keep track of the maximum width needed:
         maxLength = max(maxLength, strLenWithoutEscapes(buttons[i].text));
 
-        // iOS port (iBrogue): add the subtle progress bar behind this row, if applicable.
-        setInventoryProgressBar(theItem, &buttons[i], strLenWithoutEscapes(buttons[i].text));
-
         //      itemList[itemNumber] = theItem;
         //
         //      itemNumber++;
@@ -3143,6 +3154,13 @@ char displayInventory(unsigned short categoryMask,
             m++;
         }
         buttons[i].text[m] = '\0';
+
+        // iOS port (iBrogue): add the subtle progress bar behind item rows now that they're padded to a
+        // uniform width (maxLength), so every bar shares the same full-length track. Item rows are
+        // indices [0, itemNumber); later indices are separators / info lines.
+        if (i < itemNumber) {
+            setInventoryProgressBar(itemList[i], &buttons[i], maxLength);
+        }
 
         // Display the button. This would be redundant with the button loop,
         // except that we want the display to stick around until we get rid of it.

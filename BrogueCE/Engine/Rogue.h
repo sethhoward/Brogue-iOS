@@ -2856,9 +2856,12 @@ typedef struct brogueButton {
     enum NGCommands command;
     // iOS port (iBrogue): inventory progress bar. When B_DRAW_PROGRESS_BAR is set, the leading
     // `barFillCells` cells of the row are tinted with `barColor` (behind the text), in the button's
-    // normal draw state only. See setInventoryProgressBar() and drawButton().
+    // normal draw state only. `barSegmentCells` >= 2 divides the bar into segments of that width with
+    // a 1-cell gap at each boundary (used to show a known staff's discrete charges). See
+    // setInventoryProgressBar() and drawButton().
     color barColor;
     short barFillCells;
+    short barSegmentCells;
 } brogueButton;
 
 enum buttonDrawStates {
@@ -2877,13 +2880,13 @@ enum BUTTON_FLAGS {
     // iOS port (iBrogue): inventory progress bars (see drawButton / setInventoryProgressBar).
     B_DRAW_PROGRESS_BAR     = Fl(6),    // tint the leading `barFillCells` cells with `barColor`
     B_PROGRESS_BAR_FLIP     = Fl(7),    // gradient runs light->dark (count-down) instead of dark->light
-    B_PROGRESS_BAR_PIPS     = Fl(8),    // render as discrete pips (gapped) rather than a solid fill
 };
 
-// iOS port (iBrogue): tunables for the subtle inventory progress bars.
-#define INVENTORY_BAR_PIP_WIDTH         3   // cells per staff charge pip (last cell of each group is a gap)
-#define INVENTORY_BAR_TINT_STRENGTH     40  // how strongly the bar color averages into the row background (0-100)
-#define INVENTORY_BAR_GRADIENT_DARKEN   60  // max darkening (toward black) at the dim end of the bar gradient (0-100)
+// iOS port (iBrogue): tunables for the subtle inventory progress bars. The bar spans the full inventory
+// row width (maxLength), so "full" is the same length on every row and progress is comparable.
+#define INVENTORY_BAR_CHUNK_WIDTH       4   // cells per gradient chunk (bigger = chunkier, blockier steps)
+#define INVENTORY_BAR_TINT_MIN          12  // bar-color strength at the dim end (0-100; >0 so it never vanishes)
+#define INVENTORY_BAR_TINT_MAX          28  // bar-color strength at the bright end (0-100; low so text stays readable)
 
 typedef struct buttonState {
     // Indices of the buttons that are doing stuff:

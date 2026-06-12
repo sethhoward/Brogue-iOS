@@ -116,31 +116,41 @@ row text. Per category:
 - **Weapon / armor / ring** — a **count-down** bar showing use/turns remaining before auto-ID
   (`charges` ÷ the `gameConst` threshold: `weaponKillsToAutoID` / `armorDelayToAutoID` /
   `ringDelayToAutoID`). Shown **only while equipped/worn and still unidentified**; it depletes as ID
-  nears and is gone at ID (and for any identified item). Gradient runs light→dark (flipped).
-- **Staff** — current **charge level**, always shown. Pre-ID it's drawn as discrete **pips** (one per
-  current charge, `INVENTORY_BAR_PIP_WIDTH` cells each with a 1-cell gap) so the **hidden max capacity
-  is never revealed**; once identified it becomes a solid `charges ÷ enchant1` fraction. Gradient
-  dark→light.
+  nears and is gone at ID (and for any identified item). Gradient runs dark→light, like the other bars.
+- **Staff** — current **charge level**, always shown, including **partial recharge progress** toward
+  the next charge (zap → wait → the bar visibly refills). Pre-ID it tracks **a single charge** as one
+  continuous bar — full whenever at least one charge is ready (never revealing how many are stockpiled),
+  otherwise the recharge progress toward the next charge. Once identified the bar is **split into
+  `enchant1` equal segments** (one per charge, separated by 1-cell gaps via `barSegmentCells`): whole
+  charges fill whole segments and partial recharge tops off the next, so a 2-charge staff reads 50/50,
+  3-charge in thirds, etc. Partial recharge is derived from `enchant2` (counts down to 0 = next charge)
+  over `staffChargeDuration()`. Gradient dark→light.
 - **Charm** — **recharge progress** `(rechargeDelay − charges) ÷ rechargeDelay`, shown **only while on
   cooldown** (`charges > 0`); hidden when ready. Gradient dark→light.
 - **Wands and everything else** — no bar.
 
+Every bar spans the **full inventory row width** (`maxLength`, the width all rows are padded to), so a
+"full" bar is the same physical length on every row and progress is directly comparable between items.
+
 Colors: ID = `gray`, staff = `teal` (blue-cyan), charm = the item's own `foreColor` (charms have no
-per-kind color in this engine, so this is the generic item glyph color), each averaged faintly into the
-row background. The bar renders **only in the button's normal draw state**, so the focus/press/drag
-highlight always takes precedence.
+per-kind color in this engine, so this is the generic item glyph color). The gradient is **chunky** —
+the bar-color strength steps up in fixed-width chunks (`INVENTORY_BAR_CHUNK_WIDTH`) rather than a smooth
+per-cell fade, mimicking the menu/inventory button gradients — and it blends **toward the bar color, never
+toward black** (`INVENTORY_BAR_TINT_MIN` floor), so the dim end is always a visible indication. Tints are
+kept low (`INVENTORY_BAR_TINT_MIN`/`MAX`, 12/28) so the row text stays readable on top. The bar renders
+**only in the button's normal draw state**, so the focus/press/drag highlight always takes precedence.
 
 **Why.** Requested at-a-glance feedback on the otherwise-invisible auto-ID timers and staff/charm
 charge state, without revealing information the player shouldn't have yet (staff max capacity).
 
-**Where.** `Rogue.h` — three new `brogueButton` flags (`B_DRAW_PROGRESS_BAR`, `B_PROGRESS_BAR_FLIP`,
-`B_PROGRESS_BAR_PIPS`), two new `brogueButton` fields (`barColor`, `barFillCells`), and the
-`INVENTORY_BAR_*` tunables (pip width, tint strength, gradient darken). `Buttons.c` — `drawButton()`
-blends the gradient-darkened bar color into the per-cell background for the leading `barFillCells` cells
-(skipping pip gaps), guarded to `BUTTON_NORMAL`. `Items.c` — new static `setInventoryProgressBar()`
-computes the bar from item state and is called per row in `displayInventory()` (so it appears in the
-main inventory **and** every item-picker prompt). Purely cosmetic: reads item state only, no RNG or game
-state, so no save/replay impact. CE-only; the Classic engine is unchanged.
+**Where.** `Rogue.h` — two new `brogueButton` flags (`B_DRAW_PROGRESS_BAR`, `B_PROGRESS_BAR_FLIP`),
+three new `brogueButton` fields (`barColor`, `barFillCells`, `barSegmentCells`), and the `INVENTORY_BAR_*`
+tunables (chunk width, tint min/max). `Buttons.c` — `drawButton()` blends the chunky bar color into the
+per-cell background for the leading `barFillCells` cells (skipping segment-boundary gaps), guarded to
+`BUTTON_NORMAL`. `Items.c` — new static `setInventoryProgressBar()` computes the bar from item state and
+is called per item row in `displayInventory()` after rows are padded to `maxLength` (so it appears in the
+main inventory **and** every item-picker prompt, with a uniform full-width track). Purely cosmetic: reads
+item state only, no RNG or game state, so no save/replay impact. CE-only; the Classic engine is unchanged.
 
 ### 2026-06-11 — Electrified water: lightning struck into water shocks the whole connected body (new content)
 
