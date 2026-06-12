@@ -97,11 +97,13 @@ short monsterDefenseAdjusted(const creature *monst) {
     } else {
         retval = monst->info.defense - 25 * monst->weaknessAmount;
     }
+    retval += emboldenmentDefenseBonus(monst); // iOS port (iBrogue): ring of light ally aura
     return max(retval, 0);
 }
 
 short monsterAccuracyAdjusted(const creature *monst) {
     short retval = monst->info.accuracy * accuracyFraction(monst->weaknessAmount * FP_FACTOR * -3/2) / FP_FACTOR;
+    retval += emboldenmentAccuracyBonus(monst); // iOS port (iBrogue): ring of light ally aura
     return max(retval, 0);
 }
 

@@ -172,6 +172,9 @@ boolean monsterRevealed(creature *monst) {
         return true;
     } else if (player.status[STATUS_TELEPATHIC] && !(monst->info.flags & MONST_INANIMATE)) {
         return true;
+    } else if (playerLightRevealsMonster(monst)) {
+        // iOS port (iBrogue): a worn ring of light exposes invisible enemies in its glow (dim -> flicker, bright -> full).
+        return true;
     }
     return false;
 }
@@ -206,6 +209,13 @@ boolean monsterIsHidden(const creature *monst, const creature *observer) {
     }
     if (observer && monstersAreTeammates(monst, observer)) {
         // Teammates can always see each other.
+        return false;
+    }
+    // iOS port (iBrogue): the player's ring of light fully exposes an invisible enemy standing in its bright core.
+    // Shared sight: the player and the player's allies benefit; an invisible player is never revealed to enemies.
+    if (observer
+        && (observer == &player || monstersAreTeammates(observer, &player))
+        && playerLightRevealsMonster(monst) >= 2) {
         return false;
     }
     if ((monst->status[STATUS_INVISIBLE] && !pmapAt(monst->loc)->layers[GAS])) {
@@ -250,6 +260,104 @@ boolean canDirectlySeeMonster(creature *monst) {
         return true;
     }
     return false;
+}
+
+// iOS port (iBrogue): Ring of light ally aura & invisible-creature reveal.
+// See BrogueCE/Engine/IOS_MODIFICATIONS.md. All magnitudes are intentionally tunable.
+#define EMBOLDEN_LINGER             3   // turns the "emboldened" status persists after an ally leaves the light
+#define EMBOLDEN_DEFENSE_CAP        20  // defense bonus asymptote (~2 ally empowerments; empowerMonster grants +10)
+#define EMBOLDEN_ACCURACY_BONUS     8   // small flat accuracy nudge (consistency, never damage)
+#define EMBOLDEN_REGEN_PERCENT_CAP  300 // extra regeneration % asymptote while emboldened (recovery-paced, not combat sustain)
+
+// Front-loaded, diminishing-toward-a-ceiling curve: cap * E/(E+1). ~half at +1, ~80% at +3, never exceeds cap.
+static short emboldenmentCurve(short cap, short enchant) {
+    if (enchant <= 0) {
+        return 0;
+    }
+    return cap * enchant / (enchant + 1);
+}
+
+// Defense modifier for an emboldened ally. Positive ring buffs; cursed (negative) ring applies a mild penalty (inversion-lite).
+short emboldenmentDefenseBonus(const creature *monst) {
+    if (!monst->status[STATUS_EMBOLDENED]) {
+        return 0;
+    }
+    if (rogue.lightRingBonus > 0) {
+        return emboldenmentCurve(EMBOLDEN_DEFENSE_CAP, rogue.lightRingBonus);
+    } else if (rogue.lightRingBonus < 0) {
+        return -emboldenmentCurve(EMBOLDEN_DEFENSE_CAP, -rogue.lightRingBonus) / 2; // gentler than the buff
+    }
+    return 0;
+}
+
+// Small flat accuracy nudge for an emboldened ally (positive ring only). No damage bonus, ever.
+short emboldenmentAccuracyBonus(const creature *monst) {
+    if (monst->status[STATUS_EMBOLDENED] && rogue.lightRingBonus > 0) {
+        return EMBOLDEN_ACCURACY_BONUS;
+    }
+    return 0;
+}
+
+// Whether the player's worn ring of light exposes an otherwise-invisible enemy, and how clearly.
+// Graded by the light's own falloff: bright core -> full visibility; dim fade -> flicker; beyond -> nothing.
+// Scoped to invisible *enemies* only (not the player, not allies, not submerged/dormant). One-directional:
+// only the player and allies benefit; it never reveals an invisible player to monsters.
+// Returns 0 = not revealed, 1 = flicker (dim light), 2 = full (bright light).
+short playerLightRevealsMonster(const creature *monst) {
+    short radius, dist;
+    if (rogue.lightRingBonus <= 0) {
+        return 0;
+    }
+    if (monst == &player || !monst->status[STATUS_INVISIBLE]) {
+        return 0;
+    }
+    if (monst->bookkeepingFlags & (MB_SUBMERGED | MB_IS_DORMANT)) {
+        return 0;
+    }
+    if (!monstersAreEnemies(&player, monst)) {
+        return 0;
+    }
+    if (!(pmapAt(monst->loc)->flags & IN_FIELD_OF_VIEW)) {
+        return 0;
+    }
+    radius = rogue.minersLight.lightRadius.lowerBound;
+    if (radius < 1) {
+        return 0;
+    }
+    dist = distanceBetween(player.loc, monst->loc);
+    if (dist > radius) {
+        return 0;
+    }
+    // Inner 60% of the radius is the "bright core" (full visibility); the dim fade ring only flickers.
+    return (5 * dist <= 3 * radius) ? 2 : 1;
+}
+
+// Refreshes the "emboldened" status on allies standing in the player's light (or, for a cursed ring,
+// marks them for the inversion-lite penalty). Idempotent and derived purely from current game state, so
+// it is safe to call from the display pipeline and replays deterministically. Driven once per vision update.
+void updateAllyEmboldenment() {
+    short radius;
+    if (rogue.lightRingBonus == 0) {
+        return; // no ring of light worn (or net-neutral pair)
+    }
+    radius = rogue.minersLight.lightRadius.lowerBound;
+    if (radius < 1) {
+        return;
+    }
+    for (creatureIterator it = iterateCreatures(monsters); hasNextCreature(it);) {
+        creature *monst = nextCreature(&it);
+        if (monst->creatureState != MONSTER_ALLY) {
+            continue;
+        }
+        if ((pmapAt(monst->loc)->flags & IN_FIELD_OF_VIEW)
+            && distanceBetween(player.loc, monst->loc) <= radius) {
+
+            monst->status[STATUS_EMBOLDENED] = EMBOLDEN_LINGER;
+            if (monst->maxStatus[STATUS_EMBOLDENED] < EMBOLDEN_LINGER) {
+                monst->maxStatus[STATUS_EMBOLDENED] = EMBOLDEN_LINGER;
+            }
+        }
+    }
 }
 
 void monsterName(char *buf, creature *monst, boolean includeArticle) {
@@ -1848,7 +1956,13 @@ void decrementMonsterStatus(creature *monst) {
         && monst->info.turnsBetweenRegen > 0
         && !monst->status[STATUS_POISONED]) {
 
-        if ((monst->turnsUntilRegen -= 1000) <= 0) {
+        long regenStep = 1000;
+        // iOS port (iBrogue): ring of light. An emboldened ally mends faster in your light -- recovery-paced
+        // (capped extra regeneration), never enough to out-heal focused damage in a real fight.
+        if (monst->status[STATUS_EMBOLDENED] && rogue.lightRingBonus > 0) {
+            regenStep += 1000L * emboldenmentCurve(EMBOLDEN_REGEN_PERCENT_CAP, rogue.lightRingBonus) / 100;
+        }
+        if ((monst->turnsUntilRegen -= regenStep) <= 0) {
             monst->currentHP++;
             monst->previousHealthPoints++;
             monst->turnsUntilRegen += monst->info.turnsBetweenRegen * 1000;
@@ -3013,6 +3127,17 @@ static boolean allyFlees(creature *ally, creature *closestEnemy) {
         return false;
     }
 
+    // iOS port (iBrogue): ring of light. Emboldened allies hold the line and never flee.
+    if (ally->status[STATUS_EMBOLDENED] && rogue.lightRingBonus > 0) {
+        return false;
+    }
+    // iOS port (iBrogue): a cursed ring of light unsettles nearby allies, who break sooner (inversion-lite).
+    if (ally->status[STATUS_EMBOLDENED] && rogue.lightRingBonus < 0
+        && distanceBetween((pos){x, y}, closestEnemy->loc) < 10
+        && (100 * ally->currentHP / ally->info.maxHP <= 50)) {
+        return true;
+    }
+
     if (distanceBetween((pos){x, y}, closestEnemy->loc) < 10
         && (100 * ally->currentHP / ally->info.maxHP <= 33)
         && ally->info.turnsBetweenRegen > 0
@@ -3105,7 +3230,7 @@ static void moveAlly(creature *monst) {
             && distanceBetween((pos){x, y}, target->loc) < shortestDistance
             && traversiblePathBetween(monst, target->loc.x, target->loc.y)
             && (!cellHasTerrainFlag(target->loc, T_OBSTRUCTS_PASSABILITY) || (target->info.flags & MONST_ATTACKABLE_THRU_WALLS))
-            && (!target->status[STATUS_INVISIBLE] || rand_percent(33))) {
+            && (!target->status[STATUS_INVISIBLE] || playerLightRevealsMonster(target) || rand_percent(33))) { // iOS port (iBrogue): light-revealed invisibles are reliably engaged
 
             shortestDistance = distanceBetween((pos){x, y}, target->loc);
             closestMonster = target;
@@ -3155,6 +3280,10 @@ static void moveAlly(creature *monst) {
     } else {
         leashLength = 4;
     }
+    // iOS port (iBrogue): ring of light. Emboldened allies will engage anything within your light.
+    if (monst->status[STATUS_EMBOLDENED] && rogue.lightRingBonus > 0) {
+        leashLength = max(leashLength, (short) rogue.minersLight.lightRadius.lowerBound);
+    }
     if (shortestDistance == 1) {
         if (closestMonster->movementSpeed < monst->movementSpeed
             && !(closestMonster->info.flags & (MONST_FLITS | MONST_IMMOBILE))
@@ -3201,7 +3330,7 @@ static void moveAlly(creature *monst) {
                     && distanceBetween((pos){x, y}, target->loc) < shortestDistance
                     && traversiblePathBetween(monst, target->loc.x, target->loc.y)
                     && (!monsterAvoids(monst, target->loc) || (target->info.flags & MONST_ATTACKABLE_THRU_WALLS))
-                    && (!target->status[STATUS_INVISIBLE] || ((monst->info.flags & MONST_ALWAYS_USE_ABILITY) || rand_percent(33)))) {
+                    && (!target->status[STATUS_INVISIBLE] || playerLightRevealsMonster(target) || ((monst->info.flags & MONST_ALWAYS_USE_ABILITY) || rand_percent(33)))) { // iOS port (iBrogue): light-revealed invisibles are reliably engaged
 
                     enemyMap[target->loc.x][target->loc.y] = 0;
                     costMap[target->loc.x][target->loc.y] = 1;

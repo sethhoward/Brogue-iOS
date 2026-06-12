@@ -2053,6 +2053,7 @@ enum statusEffects {
     STATUS_INVISIBLE,
     STATUS_AGGRAVATING,
     STATUS_REGENERATING, // iOS port (iBrogue): honey potion's heal-over-time
+    STATUS_EMBOLDENED, // iOS port (iBrogue): ally standing in the light of a worn ring of light
     NUMBER_OF_STATUS_EFFECTS,
 };
 
@@ -2579,6 +2580,7 @@ typedef struct playerCharacter {
     short stealthBonus;
     short regenerationBonus;
     short lightMultiplier;
+    short lightRingBonus; // iOS port (iBrogue): net enchant of worn rings of light (negative if cursed); drives ally emboldenment & invisible-reveal
     short awarenessBonus;
     short transference;
     short wisdomBonus;
@@ -3313,6 +3315,10 @@ extern "C" {
     boolean monsterIsHidden(const creature *monst, const creature *observer);
     boolean canSeeMonster(creature *monst);
     boolean canDirectlySeeMonster(creature *monst);
+    short playerLightRevealsMonster(const creature *monst); // iOS port (iBrogue): 0=no, 1=flicker (dim light), 2=full (bright light)
+    void updateAllyEmboldenment(void); // iOS port (iBrogue): ring of light ally aura
+    short emboldenmentDefenseBonus(const creature *monst); // iOS port (iBrogue)
+    short emboldenmentAccuracyBonus(const creature *monst); // iOS port (iBrogue)
     void monsterName(char *buf, creature *monst, boolean includeArticle);
     boolean monsterIsInClass(const creature *monst, const short monsterClass);
     boolean chooseTarget(pos *returnLoc, short maxDistance, enum autoTargetMode targetingMode, const item *theItem);

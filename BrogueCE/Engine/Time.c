@@ -810,6 +810,7 @@ void updateVision(boolean refreshDisplay) {
 
     updateTelepathy();
     updateLighting();
+    updateAllyEmboldenment(); // iOS port (iBrogue): ring of light -- emboldens allies in your light (idempotent; runs after lighting)
     updateFieldOfViewDisplay(true, refreshDisplay);
 
     //  for (i=0; i<DCOLS; i++) {

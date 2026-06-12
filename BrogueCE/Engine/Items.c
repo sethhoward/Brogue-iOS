@@ -8851,6 +8851,7 @@ void updateRingBonuses() {
     rogue.clairvoyance = rogue.stealthBonus = rogue.transference
     = rogue.awarenessBonus = rogue.regenerationBonus = rogue.wisdomBonus = rogue.reaping = 0;
     rogue.lightMultiplier = 1;
+    rogue.lightRingBonus = 0; // iOS port (iBrogue): ring of light ally aura / invisible-reveal
 
     for (i=0; i<= 1; i++) {
         if (rings[i]) {
@@ -8869,6 +8870,7 @@ void updateRingBonuses() {
                     break;
                 case RING_LIGHT:
                     rogue.lightMultiplier += effectiveRingEnchant(rings[i]);
+                    rogue.lightRingBonus += effectiveRingEnchant(rings[i]); // iOS port (iBrogue): net light-ring enchant, used by ally aura & reveal
                     break;
                 case RING_AWARENESS:
                     rogue.awarenessBonus += 20 * effectiveRingEnchant(rings[i]);

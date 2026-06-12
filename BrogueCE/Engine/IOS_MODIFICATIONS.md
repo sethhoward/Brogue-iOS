@@ -28,6 +28,64 @@ covers the separate Classic engine that ships in the app target).
 
 ## Change log
 
+### 2026-06-12 — Ring of light becomes an ally-build cornerstone (new content)
+
+**What.** A worn **ring of light** now does far more than widen your view — its lit radius becomes a
+buff aura *and* an invisible-creature detector. The vanilla item only scaled `rogue.lightMultiplier`
+(light radius / fade), which is pure upside with no payoff — a "trap" pickup. The rework keeps that and
+adds, keyed off a new `rogue.lightRingBonus` (net enchant of worn rings of light; negative if cursed):
+
+- **Emboldened allies.** Any ally standing in the player's light (`IN_FIELD_OF_VIEW` and within
+  `rogue.minersLight.lightRadius.lowerBound` tiles) gets the new `STATUS_EMBOLDENED` status, refreshed
+  each vision update and lingering `EMBOLDEN_LINGER` (3) turns after leaving the light (so it fades
+  rather than blinks at the dim edge). While emboldened:
+  - **Defense** bonus, front-loaded and diminishing toward a ceiling (`EMBOLDEN_DEFENSE_CAP` × E/(E+1),
+    cap 20 ≈ two `empowerMonster` levels) — applied in `monsterDefenseAdjusted()`.
+  - **Accuracy** small flat `EMBOLDEN_ACCURACY_BONUS` (8) — applied in `monsterAccuracyAdjusted()`.
+    **No damage bonus, deliberately** — damage compounds with `empowerMonster` leveling into an
+    unbeatable squad; the buff is survivability + presence only.
+  - **Courage** — `allyFlees()` returns false (holds the line); `moveAlly()` extends the attack leash to
+    the light radius (engages anything in your light).
+  - **Regeneration** — extra, capped `regenStep` in `decrementMonsterStatus()` (cap
+    `EMBOLDEN_REGEN_PERCENT_CAP` 300%). Always-on but recovery-paced: tops off an ally between fights,
+    never out-heals focused damage mid-fight (no combat-gating — the engine has no clean combat flag and
+    no other regen source is gated).
+- **Reveal invisibles.** `playerLightRevealsMonster()` grades by the light's own falloff: invisible
+  *enemies* in the **bright core** (inner 60% of the radius) are fully exposed (treated as not hidden →
+  translucent, targetable sprite via the existing renderer); in the **dim fade ring** they only flicker
+  (`monsterRevealed()` → the existing `X`/`x` render); beyond the light, nothing. Scoped to
+  `STATUS_INVISIBLE` enemies (not submerged/dormant, not the player). One-directional and *shared*: the
+  player **and** the player's allies see the revealed enemy (allies drop their 33% hesitation in
+  `moveAlly()`); an invisible *player* is never revealed to monsters. Because `monsterIsHidden()` also
+  governs whip/spear targeting, this incidentally makes reach weapons hit a ring-revealed phantom
+  correctly (the concern behind upstream PR #686 / issue #540).
+- **Cursed ring (inversion-lite).** A negative `lightRingBonus` (the standard 16% ring curse) shrinks
+  your light as before and now also *unsettles* nearby allies: they lose the defense/regen/courage
+  (mild defense penalty, flee sooner). No HP drain — a bad roll shouldn't end an ally run.
+- **Description + ID.** `ringTable` light description rewritten to state the ally/reveal effect and (for
+  the first time, matching its siblings) a cursed clause. Equip-time ID is unchanged
+  (`ringIdentifiesOnEquip` already covers light), so the player reads the full effect immediately.
+
+**Why.** Requested — give ring of light a real reason to use without nerfing baseline allies (it
+*amplifies* them past baseline rather than fixing them, the way ring of wisdom amplifies staffs) and
+without trivializing phantoms globally (the counter is costed, radius-bound, and strictly weaker than
+telepathy, which already hard-counters them). Front-loaded so a natural +1–+3 ring is worth wearing;
+diminishing-toward-a-ceiling so over-enchanting can't build an invincible army.
+
+**Where.** `Rogue.h` (`STATUS_EMBOLDENED`, `rogue.lightRingBonus`, prototypes);
+`Globals.c` (`statusEffectCatalog` "Emboldened" + the previously-implicit AGGRAVATING/REGENERATING
+entries; light `ringTable` description); `Items.c` (`updateRingBonuses` sets `lightRingBonus`);
+`Monsters.c` (`emboldenmentCurve`/`emboldenmentDefenseBonus`/`emboldenmentAccuracyBonus`,
+`playerLightRevealsMonster`, `updateAllyEmboldenment`, clauses in `monsterRevealed`/`monsterIsHidden`/
+`allyFlees`/`moveAlly`, regen in `decrementMonsterStatus`); `Combat.c` (defense/accuracy chokepoints);
+`Time.c` (`updateVision` drives `updateAllyEmboldenment` after lighting).
+
+**Determinism / saves.** The added `rogue.lightRingBonus` field and `STATUS_EMBOLDENED` don't affect
+save format (saves replay inputs). `updateAllyEmboldenment()` is idempotent and derived purely from
+deterministic state (positions, light radius), so it reconstructs identically on replay; regen accel
+happens once per turn in `decrementMonsterStatus`. Like any gameplay change it diverges replays from
+pre-change recordings. CE-only; all magnitudes (`EMBOLDEN_*` defines in `Monsters.c`) are tunable.
+
 ### 2026-06-11 — Sense when a pursuer gives up the chase (new content)
 
 **What.** When a monster loses the player's trail and reverts from hunting to wandering
