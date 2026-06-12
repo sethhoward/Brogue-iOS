@@ -71,6 +71,10 @@
 #define D_MESSAGE_ITEM_GENERATION       (WIZARD_MODE && 0)
 #define D_MESSAGE_MACHINE_GENERATION    (WIZARD_MODE && 0)
 
+// iOS port (iBrogue): guarantee a gold goblin on the shallowest eligible level (depth 5), bypassing the
+// random spawn roll, so the encounter is easy to reach and debug. Flip to 0 to restore normal behavior.
+#define D_ALWAYS_SPAWN_GOLD_GOBLIN      (WIZARD_MODE && 1)
+
 // If enabled, runs a benchmark for the performance of repeatedly updating the screen at the start of the game.
 // #define SCREEN_UPDATE_BENCHMARK
 
@@ -1084,6 +1088,10 @@ enum monsterTypes {
     MK_PHOENIX,
     MK_PHOENIX_EGG,
     MK_ANCIENT_SPIRIT,
+
+    // iOS port (iBrogue): passive treasure-hoarder that flees to the up stairs when struck;
+    // spawned by spawnGoldGoblin() in Architect.c. Appended last so existing kind indices don't shift.
+    MK_GOLD_GOBLIN,
 
     NUMBER_MONSTER_KINDS
 };
@@ -2343,6 +2351,9 @@ typedef struct creature {
     short xpxp;                         // exploration experience (used to time telepathic bonding for allies)
     short newPowerCount;                // how many more times this monster can absorb a fallen monster
     short totalPowerCount;              // how many times has the monster been empowered? Used to recover abilities when negated.
+    short goldGoblinBurstTiles;         // iOS port (iBrogue): tiles left in the gold goblin's current flee burst
+    boolean goldGoblinTriggered;        // iOS port (iBrogue): gold goblin has been struck and is committed to fleeing
+    boolean goldGoblinHasHoard;         // iOS port (iBrogue): drops the death hoard (false for clones/debug spawns)
 
     struct creature *leader;                 // only if monster is a follower
     struct creature *carriedMonster; // when vampires turn into bats, one of the bats restores the vampire when it dies
@@ -2544,6 +2555,7 @@ typedef struct playerCharacter {
     creature *lastTarget;               // to keep track of the last monster the player has thrown at or zapped
     item *lastItemThrown;
     short rewardRoomsGenerated;         // to meter the number of reward machines
+    boolean goldGoblinSpawned;          // iOS port (iBrogue): the gold goblin appears at most once per run
     short machineNumber;                // so each machine on a level gets a unique number
     pos sidebarLocationList[ROWS*2];    // to keep track of which location each line of the sidebar references
 
@@ -3288,6 +3300,8 @@ extern "C" {
     void unAlly(creature *monst);
     boolean monsterFleesFrom(creature *monst, creature *defender);
     void monstersTurn(creature *monst);
+    void goldGoblinReactToDamage(creature *monst, creature *attacker); // iOS port (iBrogue)
+    void goldGoblinDropHoard(creature *monst); // iOS port (iBrogue)
     boolean getRandomMonsterSpawnLocation(short *x, short *y);
     void spawnPeriodicHorde(void);
     void initializeStatus(creature *monst);

@@ -171,6 +171,7 @@ const color pedestalBackColor =     {10,    5,      20,     0,      0,          
 
 // monster colors
 const color goblinColor =           {44,    33,     22,     0,      0,          0,          0,      false};
+const color goldGoblinColor =       {90,    73,     20,     0,      12,         0,          8,      true};  // iOS port (iBrogue): shimmering gold
 const color jackalColor =           {60,    42,     27,     0,      0,          0,          0,      false};
 const color ogreColor =             {60,    25,     25,     0,      0,          0,          0,      false};
 const color eelColor =              {30,    12,     12,     0,      0,          0,          0,      false};
@@ -1192,6 +1193,11 @@ creatureType monsterCatalog[NUMBER_MONSTER_KINDS] = {
         (MONST_IMMUNE_TO_FIRE| MONST_IMMUNE_TO_WEBS | MONST_NEVER_SLEEPS | MONST_IMMOBILE | MONST_INANIMATE | MONST_WILL_NOT_USE_STAIRS | MONST_NO_POLYMORPH | MONST_ALWAYS_HUNTING | MONST_IMMUNE_TO_WEAPONS), (MA_CAST_SUMMON | MA_ENTER_SUMMONS)},
     {0, "mangrove dryad",G_ANCIENT_SPIRIT,   &tanColor,      70,     60,     175,    {2, 8, 2},      6,  100,    100,    DF_ASH_BLOOD,   0,    true,       0,      0,              {BOLT_ANCIENT_SPIRIT_VINES},
         (MONST_IMMUNE_TO_WEBS | MONST_ALWAYS_USE_ABILITY | MONST_MAINTAINS_DISTANCE | MONST_NO_POLYMORPH | MONST_MALE | MONST_FEMALE), (0)},
+    // iOS port (iBrogue): gold goblin. HP is overridden per-depth at spawn (see spawnGoldGoblin); the 65
+    // here is the fallback for non-hook spawns (e.g. wizard mode). Never attacks (0 damage), fast (move 50),
+    // modest dodge (def 25), no regen (0), can't be polymorphed. Custom AI/combat/loot keyed off MK_GOLD_GOBLIN.
+    {0, "gold goblin",  G_GOBLIN, &goldGoblinColor,    65,     25,     100,    {0, 0, 0},      0,  50,     100,    DF_RED_BLOOD,   0,    false,      0,      0,              {0},
+        (MONST_MALE | MONST_FEMALE | MONST_NO_POLYMORPH), (0)},
 };
 
 const monsterWords monsterText[NUMBER_MONSTER_KINDS] = {
@@ -1421,6 +1427,9 @@ const monsterWords monsterText[NUMBER_MONSTER_KINDS] = {
     {"This mangrove dryad is as old as the earth, and $HISHER gnarled figure houses an ancient power. When angered, $HESHE can call upon the forces of nature to bind $HISHER foes and tear them to shreds.",
         "absorbing", "Absorbing",
         {"whips", "lashes", "thrashes", "lacerates", {0}}},
+    {"Laden with pilfered treasure, this furtive goblin craves nothing but to escape with $HISHER hoard intact. $HESHE will not raise a hand against you -- but wound $HIMHER and $HESHE scatters gold in a panic, hurls a flask of hallucinogen to cloak $HISHER retreat, and bolts for the stairs above. Cut $HIMHER down before $HESHE flees, and the hoard is yours.",
+        "examining", "Fleeing",
+        {"shoves", "scrabbles at", {0}}},
 };
 
 const mutation mutationCatalog[NUMBER_MUTATORS] = {

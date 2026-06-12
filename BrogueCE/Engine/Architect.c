@@ -3890,6 +3890,55 @@ boolean placeStairs(pos *upStairsLoc) {
     return true;
 }
 
+// iOS port (iBrogue): the "gold goblin" is a passive treasure-hoarder that spawns near the down
+// stairs and (in later phases) flees toward the up stairs when struck, shedding gold and dropping a
+// hoard if killed. Spawned here rather than via the horde/machine tables so we can pin it adjacent to
+// rogue.downLoc and meter it to a single appearance per run. Eligible on depths 5-24 at a low
+// per-level chance. Uses the substantive (seeded) RNG, so it is fully replay-deterministic.
+static void spawnGoldGoblin(void) {
+    if (rogue.goldGoblinSpawned) {
+        return; // at most once per run, even when forced for debugging
+    }
+
+    // iOS port (iBrogue): D_ALWAYS_SPAWN_GOLD_GOBLIN forces a guaranteed spawn on the shallowest
+    // eligible level (depth 5), skipping the depth/chance gate; otherwise it is the normal random roll.
+    const boolean forceSpawn = D_ALWAYS_SPAWN_GOLD_GOBLIN && rogue.depthLevel == 5;
+
+    if (!forceSpawn
+        && (rogue.depthLevel < 5
+            || rogue.depthLevel > 24
+            || !rand_percent(5))) {
+
+        return;
+    }
+
+    pos loc;
+    if (!getQualifyingLocNear(&loc, rogue.downLoc, false, NULL,
+                              (T_PATHING_BLOCKER | T_HARMFUL_TERRAIN),
+                              (HAS_PLAYER | HAS_MONSTER | HAS_STAIRS | HAS_ITEM | IS_IN_MACHINE),
+                              true, false)) {
+        return;
+    }
+
+    creature *monst = generateMonster(MK_GOLD_GOBLIN, false, false);
+    monst->loc = loc;
+    monst->info.maxHP = 35 + 6 * rogue.depthLevel; // depth-scaled so the chase stays ~6-10 hits across 5-24
+    monst->currentHP = monst->info.maxHP;
+    monst->creatureState = MONSTER_WANDERING; // dormant; its custom turn logic keeps it still until struck
+    monst->goldGoblinHasHoard = true; // the genuine hoard-bearer (clones, cleared in cloneMonster, drop nothing)
+    if (forceSpawn) {
+        // iOS port (iBrogue): in debug mode, reveal the goblin telepathically so it can be tracked on the
+        // map (and watched as it flees) even when it slips out of line of sight.
+        monst->bookkeepingFlags |= MB_TELEPATHICALLY_REVEALED;
+    }
+    pmapAt(loc)->flags |= HAS_MONSTER;
+    if (playerCanSeeOrSense(loc.x, loc.y)) {
+        refreshDungeonCell(loc);
+    }
+
+    rogue.goldGoblinSpawned = true;
+}
+
 // Places the player, monsters, items and stairs.
 void initializeLevel(pos upStairsLoc) {
     short i, j, dir;
@@ -3919,6 +3968,7 @@ void initializeLevel(pos upStairsLoc) {
         }
         populateItems(upLoc);
         populateMonsters();
+        spawnGoldGoblin(); // iOS port (iBrogue)
     }
 
     // Restore items that fell from the previous depth.

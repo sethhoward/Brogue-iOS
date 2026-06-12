@@ -290,6 +290,7 @@ void initializeRogue(uint64_t seed) {
     }
 
     rogue.rewardRoomsGenerated = 0;
+    rogue.goldGoblinSpawned = false; // iOS port (iBrogue): meter the gold goblin to once per run
 
     // pre-shuffle the random terrain colors
     oldRNG = rogue.RNG;

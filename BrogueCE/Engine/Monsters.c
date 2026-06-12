@@ -679,6 +679,7 @@ creature *cloneMonster(creature *monst, boolean announce, boolean placeClone) {
     newMonst->mapToMe = NULL;
     newMonst->safetyMap = NULL;
     newMonst->carriedItem = NULL;
+    newMonst->goldGoblinHasHoard = false; // iOS port (iBrogue): cloned gold goblins carry no hoard
     if (monst->carriedMonster) {
         creature *parentMonst = cloneMonster(monst->carriedMonster, false, false); // Also clone the carriedMonster
         removeCreature(monsters, parentMonst); // The cloned create will be added to the world, which we immediately undo.
@@ -3519,6 +3520,167 @@ static boolean updateMonsterCorpseAbsorption(creature *monst) {
     return false;
 }
 
+#define GOLD_GOBLIN_BURST_TILES 8 // iOS port (iBrogue): max tiles a gold goblin flees per hit
+
+// iOS port (iBrogue): the gold goblin reached the up stairs and escapes the level, taking its
+// (undropped) hoard with it. Administrative death removes it cleanly with no drops, corpse or FX.
+// Phase 5 adds the player-facing "scrambles up the stairs" message.
+static void goldGoblinEscapes(creature *monst) {
+    // Closure message: always shown when the escape happens in plain view; otherwise only if the
+    // player has a ring of awareness equipped (rogue.awarenessBonus > 0), letting them sense it slip
+    // away. Without that, an out-of-sight escape is silent -- the player simply never finds it again.
+    if (canDirectlySeeMonster(monst) || rogue.awarenessBonus > 0) {
+        char buf[COLS], monstName[COLS];
+        monsterName(monstName, monst, true);
+        snprintf(buf, COLS, "%s scrambles up the stairs and is gone.", monstName);
+        resolvePronounEscapes(buf, monst);
+        message(buf, 0);
+    }
+    killCreature(monst, true);
+}
+
+// iOS port (iBrogue): complete turn logic for the gold goblin, used in place of the normal monster
+// AI. It is dormant and motionless until first struck (goldGoblinTriggered). Each hit arms a burst of
+// up to GOLD_GOBLIN_BURST_TILES tiles (goldGoblinBurstTiles); during a burst it beelines for the up
+// stairs, breaking off to idle the instant it slips out of the player's sight. Reaching the up stairs
+// lets it escape. If its route to the stairs is blocked it flees from the player and retries later.
+static void goldGoblinTakesTurn(creature *monst) {
+    monst->ticksUntilTurn = monst->movementSpeed;
+
+    // Dormant, or idling between bursts: hold still and ignore the player.
+    if (!monst->goldGoblinTriggered || monst->goldGoblinBurstTiles <= 0) {
+        return;
+    }
+
+    const pos prevLoc = monst->loc;
+    boolean movedThisTurn = moveMonsterPassivelyTowards(monst, rogue.upLoc, false)
+                            && !posEq(monst->loc, prevLoc);
+
+    if (!movedThisTurn) {
+        // Route to the up stairs is blocked (or it is webbed/cornered): flee away from the player this
+        // turn and retry the stairs on a later turn.
+        pos awayTarget;
+        awayTarget.x = clamp(monst->loc.x + signum(monst->loc.x - player.loc.x) * 5, 0, DCOLS - 1);
+        awayTarget.y = clamp(monst->loc.y + signum(monst->loc.y - player.loc.y) * 5, 0, DROWS - 1);
+        moveMonsterPassivelyTowards(monst, awayTarget, false);
+        movedThisTurn = !posEq(monst->loc, prevLoc);
+    }
+
+    // Only tiles actually travelled count against the burst budget, so being webbed or cornered does
+    // not silently spend it.
+    if (movedThisTurn) {
+        monst->goldGoblinBurstTiles--;
+    }
+
+    // Reached the up stairs: gone, hoard and all.
+    if (posEq(monst->loc, rogue.upLoc)) {
+        goldGoblinEscapes(monst);
+        return;
+    }
+
+    // The burst ends the moment it breaks the player's line of sight; then it idles until struck again.
+    if (!canDirectlySeeMonster(monst)) {
+        monst->goldGoblinBurstTiles = 0;
+    }
+}
+
+// iOS port (iBrogue): the gold goblin sheds a small pile of gold when struck, forming a trail the
+// player can scoop up mid-chase. Dropped on its own tile when free, otherwise on a nearby open tile;
+// if there is nowhere clear, the pile is skipped rather than stacked onto an existing item.
+static void goldGoblinShedGold(creature *monst) {
+    pos loc = monst->loc;
+    if (pmapAt(loc)->flags & HAS_ITEM) {
+        if (!getQualifyingLocNear(&loc, monst->loc, true, NULL,
+                                  (T_OBSTRUCTS_ITEMS | T_PATHING_BLOCKER),
+                                  (HAS_ITEM | HAS_STAIRS), true, false)) {
+            return;
+        }
+    }
+    item *gold = generateItem(GOLD, -1);
+    gold->quantity = rand_range(2 * rogue.depthLevel, 5 * rogue.depthLevel);
+    gold->originDepth = rogue.depthLevel;
+    placeItemAt(gold, loc);
+}
+
+// iOS port (iBrogue): called from inflictDamage(). The first wound (from any source) commits the
+// goblin to fleeing and makes it hurl a flask of hallucinogen at its feet -- a luminescent fungal
+// forest blooms there and screens its retreat. Every discrete attack (attacker != NULL; fire/gas/
+// poison pass NULL) also arms a fresh flee burst and sheds a pile of gold.
+void goldGoblinReactToDamage(creature *monst, creature *attacker) {
+    const boolean firstHit = !monst->goldGoblinTriggered;
+    monst->goldGoblinTriggered = true;
+    monst->creatureState = MONSTER_FLEEING;
+
+    if (firstHit) {
+        spawnDungeonFeature(monst->loc.x, monst->loc.y, &dungeonFeatureCatalog[DF_FUNGUS_FOREST], true, false);
+        if (canSeeMonster(monst)) {
+            char buf[COLS], monstName[COLS];
+            monsterName(monstName, monst, true);
+            snprintf(buf, COLS, "%s flings a potion to the ground and a glowing forest erupts!", monstName);
+            resolvePronounEscapes(buf, monst);
+            message(buf, 0);
+        }
+    }
+
+    if (attacker != NULL) {
+        monst->goldGoblinBurstTiles = GOLD_GOBLIN_BURST_TILES;
+        goldGoblinShedGold(monst);
+    }
+}
+
+// iOS port (iBrogue): roll the gold goblin's single marquee drop from a curated, weighted pool (sums
+// to 100). Equipment categories are rolled honestly -- random kind with natural enchant/runic/curse,
+// i.e. Brogue's usual identification gamble -- while the consumable slots are forced to guaranteed-
+// useful kinds (detect magic is POTION_DETECT_MAGIC2, the always-present good potion on this branch).
+static item *goldGoblinMarqueeItem(void) {
+    const int roll = rand_range(1, 100);
+    if (roll <= 20) return generateItem(STAFF,  -1);
+    if (roll <= 36) return generateItem(CHARM,  -1);
+    if (roll <= 47) return generateItem(WAND,   -1);
+    if (roll <= 58) return generateItem(RING,   -1);
+    if (roll <= 69) return generateItem(WEAPON, -1);
+    if (roll <= 80) return generateItem(ARMOR,  -1);
+    if (roll <= 90) return generateItem(POTION, POTION_DETECT_MAGIC2);
+    if (roll <= 96) return generateItem(SCROLL, SCROLL_ENCHANTING);
+    if (roll <= 98) return generateItem(POTION, POTION_LIFE);
+    return                 generateItem(POTION, POTION_STRENGTH);
+}
+
+// iOS port (iBrogue): scatter one item onto an open tile near origin; discard it if there is no room.
+static void goldGoblinScatterItem(item *theItem, pos origin) {
+    pos loc;
+    if (getQualifyingLocNear(&loc, origin, true, NULL,
+                             (T_OBSTRUCTS_ITEMS | T_PATHING_BLOCKER),
+                             (HAS_ITEM | HAS_STAIRS), true, false)) {
+        placeItemAt(theItem, loc);
+    } else {
+        deleteItem(theItem);
+    }
+}
+
+// iOS port (iBrogue): the gold goblin's death hoard -- one curated marquee item, a burst of 2-4 fat
+// gold piles, and a depth-gated stack of thrown weapons (darts early, javelins from depth 10) --
+// scattered around the corpse. Called from killCreature() on a normal (non-administrative) death, and
+// only for the genuine hoard-bearer, so clones and debug spawns drop nothing. Net-new loot by design.
+void goldGoblinDropHoard(creature *monst) {
+    const pos origin = monst->loc;
+    const int depth = rogue.depthLevel;
+
+    goldGoblinScatterItem(goldGoblinMarqueeItem(), origin);
+
+    const int piles = rand_range(2, 4);
+    for (int i = 0; i < piles; i++) {
+        item *gold = generateItem(GOLD, -1);
+        gold->quantity = rand_range(5 * depth, 10 * depth);
+        gold->originDepth = depth;
+        goldGoblinScatterItem(gold, origin);
+    }
+
+    item *thrown = generateItem(WEAPON, depth >= 10 ? JAVELIN : DART);
+    thrown->quantity = (depth >= 10) ? rand_range(5, 8) : rand_range(10, 15);
+    goldGoblinScatterItem(thrown, origin);
+}
+
 void monstersTurn(creature *monst) {
     short x, y, dir, shortestDistance;
     boolean alreadyAtBestScent;
@@ -3555,6 +3717,13 @@ void monstersTurn(creature *monst) {
     }
 
     monst->ticksUntilTurn = monst->movementSpeed / 3; // will be later overwritten by movement or attack
+
+    // iOS port (iBrogue): the gold goblin runs entirely on its own dormant->flee logic, bypassing the
+    // normal hunting/fleeing AI below. (Paralysis, entrancement and captivity already returned above.)
+    if (monst->info.monsterID == MK_GOLD_GOBLIN) {
+        goldGoblinTakesTurn(monst);
+        return;
+    }
 
     x = monst->loc.x;
     y = monst->loc.y;

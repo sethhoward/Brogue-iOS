@@ -28,6 +28,64 @@ covers the separate Classic engine that ships in the app target).
 
 ## Change log
 
+### 2026-06-12 — Gold goblin: a passive treasure-hoarder you chase down (new content)
+
+**What.** A new monster, the **gold goblin** (`MK_GOLD_GOBLIN`), a passive "treasure goblin": it spawns
+near the down stairs, never attacks, and — once struck — flees toward the up stairs in bursts, shedding a
+trail of gold and dropping a hoard if you kill it before it escapes. Lifecycle:
+
+- **Generation.** `spawnGoldGoblin()` runs once per level (first visit) from `initializeLevel()`. Eligible
+  on depths **5–24**, **5%** per eligible level, **at most once per run** (`rogue.goldGoblinSpawned`).
+  Placed on an open tile adjacent to `rogue.downLoc`. HP is depth-scaled at spawn (`35 + 6·depth`); the
+  catalog HP (65) is only a fallback for non-hook spawns (e.g. wizard mode).
+- **Stats.** Never attacks (`{0,0,0}` damage), fast (`movementSpeed` 50), modest dodge (defense 25), no
+  regen (`turnsBetweenRegen` 0), `MONST_NO_POLYMORPH`, random gender (`MONST_MALE | MONST_FEMALE`).
+- **AI** (`goldGoblinTakesTurn`, dispatched from `monstersTurn` before the normal AI). Dormant and
+  motionless until first damaged. Each discrete hit arms a burst of up to **8 tiles**
+  (`goldGoblinBurstTiles`); during a burst it beelines for `rogue.upLoc` via `moveMonsterPassivelyTowards`,
+  breaking off to idle the instant it leaves the player's direct line of sight. If the route to the stairs
+  is blocked (e.g. a wand of obstruction), it flees from the player instead and retries the stairs each
+  turn. Only tiles actually travelled spend the burst, so webs/entrancement/cornering stop it cleanly.
+  Reaching the up stairs = escape (`goldGoblinEscapes` → administrative `killCreature`, forfeiting the
+  undropped hoard); the closure message shows in sight, or off-screen only with a ring of awareness
+  (`rogue.awarenessBonus > 0`).
+- **On hit** (`goldGoblinReactToDamage`, from `inflictDamage`). Any damage (incl. fire/gas) commits it to
+  fleeing and, on the *first* wound, blooms `DF_FUNGUS_FOREST` at its own tile (a hallucinogen flask whose
+  glowing forest blocks line of sight, screening its retreat). A *discrete* attack — `attacker != NULL`, so
+  not fire/gas/poison ticks, which pass `NULL` — also sheds a gold pile (`rand_range(2·depth, 5·depth)`).
+- **Death hoard** (`goldGoblinDropHoard`, from `killCreature` on non-administrative death only, and only for
+  the genuine hoard-bearer): one curated marquee item + 2–4 gold piles (`5–10·depth` each) + one thrown-
+  weapon stack (darts < depth 10, javelins ≥ 10), scattered nearby. Marquee pool (weights /100): Staff 20,
+  Charm 16, Wand 11, Ring 11, Weapon 11, Armor 11 (honest unidentified rolls) | Detect-magic potion 10
+  (`POTION_DETECT_MAGIC2`, the always-present good potion on this branch), Scroll of enchanting 6, Potion of
+  life 2, Potion of strength 2 (guaranteed-good). Clones (`cloneMonster` clears `goldGoblinHasHoard`) and
+  debug spawns drop nothing, so a staff of cloning can't duplicate the loot.
+
+**Why.** Requested feature — a high-risk/reward chase encounter (Diablo's "treasure goblin"). Spawned via a
+custom hook rather than the horde/machine tables so it can be pinned to the down stairs and metered to once
+per run. The gold is net-new (a deliberate bonus); leaderboard impact is within existing seed noise (gold is
+score, items are not — see design notes), and on shared/weekly seeds the encounter is fully deterministic, so
+it's a pure skill test rather than a luck swing.
+
+**Where.** `Rogue.h` — `MK_GOLD_GOBLIN` (appended last so kind indices don't shift); `creature` fields
+`goldGoblinBurstTiles`/`goldGoblinTriggered`/`goldGoblinHasHoard`; `rogue.goldGoblinSpawned`; decls for
+`goldGoblinReactToDamage`/`goldGoblinDropHoard`; debug flag `D_ALWAYS_SPAWN_GOLD_GOBLIN` (wizard-mode
+only) which forces a guaranteed spawn on depth 5 and, in `spawnGoldGoblin`, also flags that goblin
+`MB_TELEPATHICALLY_REVEALED` so it can be tracked on the map (even out of sight) while debugging. `Globals.c` — `goldGoblinColor`, `monsterCatalog` and
+`monsterText` entries (all appended last, parallel to the enum). `RogueMain.c` — reset
+`rogue.goldGoblinSpawned` in `initializeRogue`. `Architect.c` — `spawnGoldGoblin()` + its call in
+`initializeLevel`. `Monsters.c` — `goldGoblinEscapes`/`goldGoblinTakesTurn`/`goldGoblinReactToDamage`/
+`goldGoblinShedGold`/`goldGoblinMarqueeItem`/`goldGoblinScatterItem`/`goldGoblinDropHoard`, the dispatch
+branch in `monstersTurn`, and the loot-less-clone line in `cloneMonster`. `Combat.c` — the trigger hook in
+`inflictDamage` and the hoard-drop hook in `killCreature`.
+
+**Determinism / RNG.** All RNG (the `rand_percent(5)` spawn roll, placement, depth-scaled HP, per-hit and
+death gold, marquee/thrown rolls) runs on the substantive gameplay RNG during seeded level generation and
+normal turns, so it is fully replay-deterministic. The spawn roll draws one `rand_percent` per eligible
+level even when it fails (consistent on replay). New `rogue`/`creature` fields don't affect the
+recording-based save format (saves replay inputs; only determinism matters). Recordings made before this
+change will desync, as with any generation change.
+
 ### 2026-06-12 — Ring of awareness senses room machines on arrival (new content)
 
 **What.** On *first* arriving at a level, a character wearing a (non-cursed) ring of awareness may get a

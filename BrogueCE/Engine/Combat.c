@@ -1629,6 +1629,12 @@ boolean inflictDamage(creature *attacker, creature *defender,
         wakeUp(defender);
     }
 
+    // iOS port (iBrogue): a wounded gold goblin commits to fleeing; a discrete attack (not fire/gas/
+    // poison, which pass a NULL attacker) also arms a fresh flee burst. Gold/potion effects in Phase 3.
+    if (defender->info.monsterID == MK_GOLD_GOBLIN && damage > 0) {
+        goldGoblinReactToDamage(defender, attacker);
+    }
+
     if (defender == &player
         && rogue.mode == GAME_MODE_EASY
         && damage > 0) {
@@ -1754,6 +1760,16 @@ void killCreature(creature *decedent, boolean administrativeDeath) {
         } else {
             makeMonsterDropItem(decedent);
         }
+    }
+
+    // iOS port (iBrogue): a slain gold goblin spills its hoard (marquee item + gold piles + thrown
+    // weapons). Only on a real death -- escaping up the stairs uses administrativeDeath and forfeits
+    // everything -- and only for the true hoard-bearer, so clones and debug spawns drop nothing.
+    if (!administrativeDeath
+        && decedent->info.monsterID == MK_GOLD_GOBLIN
+        && decedent->goldGoblinHasHoard) {
+
+        goldGoblinDropHoard(decedent);
     }
 
     if (!administrativeDeath && (decedent->info.abilityFlags & MA_DF_ON_DEATH)
