@@ -7571,6 +7571,10 @@ static item *applyPolarityInsightToRandomItem(unsigned short categoryMask, boole
 // Schedule (step = 100): reveal N needs 100*N consecutive rested turns since the last reveal, i.e.
 // intervals 100, 200, 300, 400, ... (cumulative 100, 300, 600, 1000, ...). Keyed off reveals earned, not
 // kinds known, so the always-identified empty bottle / hidden themed-set potions can't skew the pacing.
+//
+// A worn ring of wisdom hastens this: ~10% faster per ring level (rogue.wisdomBonus, the effective
+// enchant of equipped wisdom rings). Cursed (negative) wisdom slows it. Clamped so it speeds up by at
+// most 80% and slows by at most 2x, and the threshold never drops below 1 rested turn.
 #define REST_INSIGHT_STEP_TURNS   100
 
 void gainPolarityInsightFromRest(void) {
@@ -7579,7 +7583,12 @@ void gainPolarityInsightFromRest(void) {
     for (short d = 1; d <= rogue.deepestLevel; d++) {
         revealsSoFar += levels[d].restRevealsOnLevel;
     }
-    const unsigned long threshold = (unsigned long)REST_INSIGHT_STEP_TURNS * (revealsSoFar + 1);
+    unsigned long threshold = (unsigned long)REST_INSIGHT_STEP_TURNS * (revealsSoFar + 1);
+    // iOS port (iBrogue): ring of wisdom reduces the rest-insight threshold by ~10% per ring level.
+    long reductionPct = 10L * rogue.wisdomBonus;
+    if (reductionPct > 80)   reductionPct = 80;   // never faster than 20% of base
+    if (reductionPct < -100) reductionPct = -100; // never slower than 2x base
+    threshold = max(1UL, threshold * (unsigned long)(100 - reductionPct) / 100);
     if (rogue.restTurnsSinceInsight < threshold) {
         return;
     }
@@ -7664,8 +7673,10 @@ static void quaffDetectMagic(item *exclude) {
         message("you sense no magic left to discern among your possessions.", 0);
         return;
     }
-    const int toReveal = min(rand_range(1, 2), count);
-    boolean wasFullID[2] = { false, false };
+    // iOS port (iBrogue): a worn ring of wisdom widens the spread, from 1-2 to 1-(2 + ring level).
+    const int maxReveals = max(1, 2 + (int)rogue.wisdomBonus);
+    const int toReveal = min(rand_range(1, maxReveals), count);
+    boolean wasFullID[32] = { false }; // sized to match `eligible`; toReveal <= count <= 32
     // Partial Fisher-Yates: pick `toReveal` distinct eligible items; reveal each one's polarity, or fully
     // identify it if already sensed.
     for (int i = 0; i < toReveal; i++) {

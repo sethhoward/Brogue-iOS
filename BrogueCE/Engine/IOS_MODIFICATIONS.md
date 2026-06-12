@@ -43,6 +43,12 @@ escalating schedule keyed off **reveals already earned this game**: reveal N nee
 rested turns since the last reveal — intervals 100, 200, 300, 400… (cumulative 100, 300, 600, 1000…).
 `knownPolarityKindCount` is removed entirely.
 
+**Ring of wisdom.** A worn ring of wisdom makes the polarity machinery scale with its level
+(`rogue.wisdomBonus`): the rest-insight threshold is reduced ~10% per level (cursed/negative wisdom slows
+it; clamped to at most 80% faster / 2× slower, never below 1 rested turn), and the potion of detect magic
+acts on `1 – (2 + ring level)` items instead of `1–2`. (A separate exploration-driven "XPXP" reveal
+channel was considered and tabled.)
+
 **Random target + escalation to full ID.** Both the rest check and the eat-a-meal scroll check now pick a
 **random** eligible pack item via a shared helper (`applyPolarityInsightToRandomItem`), and the eligible
 pool **includes items whose polarity is already known**: an unknown item gets its polarity revealed; an
