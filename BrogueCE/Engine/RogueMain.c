@@ -471,6 +471,17 @@ void initializeRogue(uint64_t seed) {
         theItem = addItemToPack(theItem);
     }
 
+    if (D_HEAL_CHARM_START) {
+        // iOS port (iBrogue): playtest grant for a strong charm of health. Added deterministically here
+        // (not as a recorded input), so it reconstructs identically on replay.
+        theItem = generateItem(CHARM, CHARM_HEALTH);
+        theItem->enchant1 = 10;
+        theItem->charges = 0; // ready to use immediately
+        theItem->flags |= ITEM_IDENTIFIED;
+        identify(theItem);
+        theItem = addItemToPack(theItem);
+    }
+
     DEBUG {
         theItem = generateItem(RING, RING_CLAIRVOYANCE);
         theItem->enchant1 = max(DROWS, DCOLS);

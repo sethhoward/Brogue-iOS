@@ -86,6 +86,10 @@
 // effect. Flip to 0 to ship.
 #define D_LIGHT_RING_START              1//(WIZARD_MODE && 0)
 
+// iOS port (iBrogue): start with a strong (+10) charm of health for playtesting -- a near-full heal on a
+// short cooldown. Granted deterministically in initializeRogue, so it is recording-safe. Flip to 0 to ship.
+#define D_HEAL_CHARM_START              1//(WIZARD_MODE && 0)
+
 // If enabled, runs a benchmark for the performance of repeatedly updating the screen at the start of the game.
 // #define SCREEN_UPDATE_BENCHMARK
 
