@@ -1263,6 +1263,33 @@ boolean exposeTileToFire(short x, short y, boolean alwaysIgnite) {
     return fireIgnited;
 }
 
+// iOS port (iBrogue): staff of frost. Snuff terrain fire at a cell -- clear every burning (T_IS_FIRE) gas or
+// surface layer back to NOTHING and refresh, leaving the floor beneath untouched. The engine has no built-in
+// tile extinguisher (fire normally just burns out on its own); brimstone/lava-fed fire may simply reignite
+// next turn from its source, and that one calm turn is intended. Returns true if anything was put out.
+boolean extinguishFireOnTile(short x, short y) {
+    boolean changed = false;
+    if (!cellHasTerrainFlag((pos){ x, y }, T_IS_FIRE)) {
+        return false;
+    }
+    for (enum dungeonLayers layer = 0; layer < NUMBER_TERRAIN_LAYERS; layer++) {
+        if ((layer == GAS || layer == SURFACE)
+            && (tileCatalog[pmap[x][y].layers[layer]].flags & T_IS_FIRE)) {
+
+            pmap[x][y].layers[layer] = NOTHING;
+            if (layer == GAS) {
+                pmap[x][y].volume = 0;
+            }
+            changed = true;
+        }
+    }
+    if (changed) {
+        pmap[x][y].flags &= ~CAUGHT_FIRE_THIS_TURN;
+        refreshDungeonCell((pos){ x, y });
+    }
+    return changed;
+}
+
 // Only the gas layer can be volumetric.
 static void updateVolumetricMedia() {
     short i, j, newX, newY, numSpaces;

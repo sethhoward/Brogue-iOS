@@ -4887,6 +4887,14 @@ static boolean updateBolt(bolt *theBolt, creature *caster, short x, short y,
         spawnDungeonFeature(x, y, &dungeonFeatureCatalog[theBolt->pathDF], true, false);
     }
 
+    // iOS port (iBrogue): staff of frost. The cold sweeps out any terrain fire the ray crosses (ice quenches
+    // flame -- the mirror of "fire melts the staff's ice"), carving a firebreak along the bolt's path.
+    if (theBolt->boltEffect == BE_FREEZE) {
+        if (extinguishFireOnTile(x, y) && autoID) {
+            *autoID = true;
+        }
+    }
+
     // iOS port (iBrogue): a fire/lightning bolt crossing a DROPPED bad potion detonates it in place,
     // spawning the potion's normal shatter signature. Placed before the BF_FIERY exposeTileToFire below
     // so a fire bolt ignites the freshly-spawned flammable terrain — a gas cloud, or the fungal forest

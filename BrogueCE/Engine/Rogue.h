@@ -3237,6 +3237,7 @@ extern "C" {
     short staffChargeDuration(const item *theItem);
     void rechargeItemsIncrementally(short multiplier);
     void extinguishFireOnCreature(creature *monst);
+    boolean extinguishFireOnTile(short x, short y); // iOS port (iBrogue): staff of frost — snuff terrain fire
     void autoRest(void);
     void manualSearch(void);
     boolean startFighting(enum directions dir, boolean tillDeath);

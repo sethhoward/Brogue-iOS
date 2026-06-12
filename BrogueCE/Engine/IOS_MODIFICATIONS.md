@@ -50,6 +50,10 @@ BF_TARGET_ENEMIES | BF_NOT_LEARNABLE`, `forbiddenMonsterFlags MONST_INANIMATE`, 
 - **Fire beats freeze (both directions).** Casting on a `MONST_FIERY` or currently-burning creature only
   extinguishes + slows it (never freezes); catching fire later (`exposeCreatureToFire`, `Time.c`) instantly
   thaws a frozen creature; a blow shatters the freeze (`Combat.c`, leaving the slow tail).
+- **Ice quenches terrain fire.** The ray also snuffs any `T_IS_FIRE` terrain it crosses (new
+  `extinguishFireOnTile` in `Time.c` clears burning gas/surface layers to `NOTHING`; called per path cell in
+  `updateBolt`), carving a firebreak. Brimstone/lava-fed fire may reignite next turn from its source — that one
+  calm turn is intended.
 - **Ice bridges over deep water.** The bolt's `pathDF` is the previously-dead `DF_DEEP_WATER_FREEZE`
   cascade, which now does something: deep water it crosses becomes the latent **`ICE_DEEP`** walkable floor
   (white "glossy ice", safe), melting edge-inward (negative `promoteChance`) back to water through the black
