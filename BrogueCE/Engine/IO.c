@@ -4721,6 +4721,12 @@ short printMonsterInfo(creature *monst, short y, boolean dim, boolean highlight)
                             monst->poisonAmount);
                     printProgressBar(0, y++, buf2, monst->status[i], monst->maxStatus[i], &redBar, dim);
                 }
+            } else if (i == STATUS_CONFUSED && monst->status[i] > 0) {
+                // iOS port (iBrogue): confusion caused by catching fire (see exposeCreatureToFire) is
+                // the same STATUS_CONFUSED, but reads as "Panic" while the creature is still burning.
+                printProgressBar(0, y++,
+                                 (monst->status[STATUS_BURNING] > 0 ? "Panic" : statusEffectCatalog[i].name),
+                                 monst->status[i], monst->maxStatus[i], &redBar, dim);
             } else if (statusEffectCatalog[i].name[0] && monst->status[i] > 0) {
                 printProgressBar(0, y++, statusEffectCatalog[i].name, monst->status[i], monst->maxStatus[i], &redBar, dim);
             }

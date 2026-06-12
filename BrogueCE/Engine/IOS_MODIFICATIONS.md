@@ -106,8 +106,14 @@ confusion weapon runic.
 water. Note this also confuses the *player* on ignition (3 turns of randomized movement), which is a
 real difficulty bump when you're trying to flee to water; tunable via the `#define`.
 
-**Where.** `Time.c` — `FIRE_CONFUSION_DURATION` define + one assignment in `exposeCreatureToFire`. No
-RNG drawn here; deterministic, no save/replay impact. CE-only.
+**Displayed as "Panic".** It's the ordinary `STATUS_CONFUSED` mechanic, but the sidebar status readout
+relabels `STATUS_CONFUSED` to "Panic" while the creature is also burning (`IO.c`), since that window is
+exactly the fire-induced confusion (confusion lasts 3 turns, burning up to 7). Confusion from other
+sources keeps its normal "Confused" label.
+
+**Where.** `Time.c` — `FIRE_CONFUSION_DURATION` define + one assignment in `exposeCreatureToFire`.
+`IO.c` — a `STATUS_CONFUSED` special case in the sidebar status loop renders "Panic" when burning. No
+RNG drawn; deterministic, no save/replay impact. CE-only.
 
 ### 2026-06-11 — Subtle progress bars behind inventory rows (new content)
 
