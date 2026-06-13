@@ -2387,6 +2387,7 @@ typedef struct creature {
     short goldGoblinBurstTiles;         // iOS port (iBrogue): tiles left in the gold goblin's current flee burst
     boolean goldGoblinTriggered;        // iOS port (iBrogue): gold goblin has been struck and is committed to fleeing
     boolean goldGoblinHasHoard;         // iOS port (iBrogue): drops the death hoard (false for clones/debug spawns)
+    boolean goldGoblinThrewPotion;      // iOS port (iBrogue): has thrown its one hallucinogen flask (after gaining distance)
 
     struct creature *leader;                 // only if monster is a follower
     struct creature *carriedMonster; // when vampires turn into bats, one of the bats restores the vampire when it dies

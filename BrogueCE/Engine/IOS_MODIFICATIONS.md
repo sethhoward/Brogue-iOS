@@ -31,9 +31,10 @@ covers the separate Classic engine that ships in the app target).
 ### 2026-06-12 — Staff of frost: freeze, slow, ice bridges, frozen-foliage walls, and shoving (new content)
 
 **What.** A new good staff, the **staff of frost** (`STAFF_FREEZE`, positive polarity, freq 8, value 1200,
-inserted before `STAFF_HEALING` so it falls inside `NUMBER_GOOD_STAFF_KINDS`). It fires a new piercing,
-indiscriminate but enemy-targeting bolt (`BOLT_FREEZE` / `BE_FREEZE`, `BF_PASSES_THRU_CREATURES |
-BF_TARGET_ENEMIES | BF_NOT_LEARNABLE`, `forbiddenMonsterFlags MONST_INANIMATE`, deals no direct damage):
+inserted before `STAFF_HEALING` so it falls inside `NUMBER_GOOD_STAFF_KINDS`). It fires a new single-target,
+enemy-targeting bolt (`BOLT_FREEZE` / `BE_FREEZE`, `BF_TARGET_ENEMIES | BF_NOT_LEARNABLE`,
+`forbiddenMonsterFlags MONST_INANIMATE`, deals no direct damage). It stops at the first creature it hits —
+rather than freezing a whole line — so a single frozen creature can be meaningfully shoved into the others:
 
 - **Freeze → slow.** A struck creature is encased in ice via a new first-class status `STATUS_FROZEN`
   (added before `NUMBER_OF_STATUS_EFFECTS`; "Frozen", not negatable). Frozen gates actions exactly like
@@ -91,17 +92,21 @@ trail of gold and dropping a hoard if you kill it before it escapes. Lifecycle:
   regen (`turnsBetweenRegen` 0), `MONST_NO_POLYMORPH`, random gender (`MONST_MALE | MONST_FEMALE`).
 - **AI** (`goldGoblinTakesTurn`, dispatched from `monstersTurn` before the normal AI). Dormant and
   motionless until first damaged. Each discrete hit arms a burst of up to **8 tiles**
-  (`goldGoblinBurstTiles`); during a burst it beelines for `rogue.upLoc` via `moveMonsterPassivelyTowards`,
-  breaking off to idle the instant it leaves the player's direct line of sight. If the route to the stairs
-  is blocked (e.g. a wand of obstruction), it flees from the player instead and retries the stairs each
-  turn. Only tiles actually travelled spend the burst, so webs/entrancement/cornering stop it cleanly.
-  Reaching the up stairs = escape (`goldGoblinEscapes` → administrative `killCreature`, forfeiting the
-  undropped hoard); the closure message shows in sight, or off-screen only with a ring of awareness
-  (`rogue.awarenessBonus > 0`).
+  (`goldGoblinBurstTiles`); during a burst it paths toward `rogue.upLoc` along a real distance map
+  (`goldGoblinFleeStep`: `calculateDistances` + `nextStep`), so it navigates around walls and corners
+  toward the actual exit rather than greedily beelining into a dead end. It breaks off to idle the instant
+  it leaves the player's direct line of sight. If the up stairs are genuinely unreachable (e.g. walled off
+  by a wand of obstruction), it falls back to the safety map (`getSafetyMap`) and flees away from the
+  player, retrying the stairs each turn. Only tiles actually travelled spend the burst, so
+  webs/entrancement/cornering stop it cleanly. Once it has opened up a lead
+  (`distanceBetween >= GOLD_GOBLIN_POTION_DISTANCE`, 4 tiles) it flings its one hallucinogen flask, blooming
+  `DF_FUNGUS_FOREST` (a glowing forest that blocks line of sight) *behind* it for cover — deliberately not
+  on the first point-blank hit, where it would screen nothing. Reaching the up stairs = escape
+  (`goldGoblinEscapes` → administrative `killCreature`, forfeiting the undropped hoard); the closure message
+  shows in sight, or off-screen only with a ring of awareness (`rogue.awarenessBonus > 0`).
 - **On hit** (`goldGoblinReactToDamage`, from `inflictDamage`). Any damage (incl. fire/gas) commits it to
-  fleeing and, on the *first* wound, blooms `DF_FUNGUS_FOREST` at its own tile (a hallucinogen flask whose
-  glowing forest blocks line of sight, screening its retreat). A *discrete* attack — `attacker != NULL`, so
-  not fire/gas/poison ticks, which pass `NULL` — also sheds a gold pile (`rand_range(2·depth, 5·depth)`).
+  fleeing. A *discrete* attack — `attacker != NULL`, so not fire/gas/poison ticks, which pass `NULL` — also
+  arms a fresh flee burst and sheds a gold pile (`rand_range(2·depth, 5·depth)`).
 - **Death hoard** (`goldGoblinDropHoard`, from `killCreature` on non-administrative death only, and only for
   the genuine hoard-bearer): one curated marquee item + 2–4 gold piles (`5–10·depth` each) + one thrown-
   weapon stack (darts < depth 10, javelins ≥ 10), scattered nearby. Marquee pool (weights /100): Staff 20,
@@ -124,7 +129,7 @@ depth 5 and, in `spawnGoldGoblin`, also flags that goblin `MB_TELEPATHICALLY_REV
 tracked on the map (even out of sight) while debugging. `Globals.c` — `goldGoblinColor`, `monsterCatalog` and
 `monsterText` entries (all appended last, parallel to the enum). `RogueMain.c` — reset
 `rogue.goldGoblinSpawned` in `initializeRogue`. `Architect.c` — `spawnGoldGoblin()` + its call in
-`initializeLevel`. `Monsters.c` — `goldGoblinEscapes`/`goldGoblinTakesTurn`/`goldGoblinReactToDamage`/
+`initializeLevel`. `Monsters.c` — `goldGoblinEscapes`/`goldGoblinFleeStep`/`goldGoblinTakesTurn`/`goldGoblinReactToDamage`/
 `goldGoblinShedGold`/`goldGoblinMarqueeItem`/`goldGoblinScatterItem`/`goldGoblinDropHoard`, the dispatch
 branch in `monstersTurn`, and the loot-less-clone line in `cloneMonster`. `Combat.c` — the trigger hook in
 `inflictDamage` and the hoard-drop hook in `killCreature`.

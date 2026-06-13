@@ -3521,7 +3521,8 @@ static boolean updateMonsterCorpseAbsorption(creature *monst) {
     return false;
 }
 
-#define GOLD_GOBLIN_BURST_TILES 8 // iOS port (iBrogue): max tiles a gold goblin flees per hit
+#define GOLD_GOBLIN_BURST_TILES 8     // iOS port (iBrogue): max tiles a gold goblin flees per hit
+#define GOLD_GOBLIN_POTION_DISTANCE 4 // iOS port (iBrogue): throws its hallucinogen once this far from the player
 
 // iOS port (iBrogue): the gold goblin reached the up stairs and escapes the level, taking its
 // (undropped) hoard with it. Administrative death removes it cleanly with no drops, corpse or FX.
@@ -3540,11 +3541,33 @@ static void goldGoblinEscapes(creature *monst) {
     killCreature(monst, true);
 }
 
+// iOS port (iBrogue): step the gold goblin one tile toward the up stairs along a real distance map, so
+// it navigates around walls and corners toward the actual exit instead of greedily beelining into a
+// dead end. If the up stairs are genuinely unreachable (e.g. walled off by a wand of obstruction), it
+// falls back to the safety map and flees away from the player. Returns true if it actually moved.
+static boolean goldGoblinFleeStep(creature *monst) {
+    const pos prevLoc = monst->loc;
+
+    short **distanceMap = allocGrid();
+    calculateDistances(distanceMap, rogue.upLoc.x, rogue.upLoc.y, T_PATHING_BLOCKER, monst, false, true);
+    short dir = nextStep(distanceMap, monst->loc, monst, false);
+    freeGrid(distanceMap);
+
+    if (dir == NO_DIRECTION) {
+        dir = nextStep(getSafetyMap(monst), monst->loc, monst, true); // can't reach the stairs; just flee
+    }
+    if (dir != NO_DIRECTION) {
+        const pos step = (pos){ monst->loc.x + nbDirs[dir][0], monst->loc.y + nbDirs[dir][1] };
+        moveMonsterPassivelyTowards(monst, step, false); // false: never step onto / attack the player
+    }
+    return !posEq(monst->loc, prevLoc);
+}
+
 // iOS port (iBrogue): complete turn logic for the gold goblin, used in place of the normal monster
 // AI. It is dormant and motionless until first struck (goldGoblinTriggered). Each hit arms a burst of
-// up to GOLD_GOBLIN_BURST_TILES tiles (goldGoblinBurstTiles); during a burst it beelines for the up
-// stairs, breaking off to idle the instant it slips out of the player's sight. Reaching the up stairs
-// lets it escape. If its route to the stairs is blocked it flees from the player and retries later.
+// up to GOLD_GOBLIN_BURST_TILES tiles (goldGoblinBurstTiles); during a burst it paths toward the up
+// stairs, breaking off to idle the instant it slips out of the player's sight. Once it has opened up a
+// lead it flings its one hallucinogen flask behind it for cover. Reaching the up stairs lets it escape.
 static void goldGoblinTakesTurn(creature *monst) {
     monst->ticksUntilTurn = monst->movementSpeed;
 
@@ -3553,24 +3576,26 @@ static void goldGoblinTakesTurn(creature *monst) {
         return;
     }
 
-    const pos prevLoc = monst->loc;
-    boolean movedThisTurn = moveMonsterPassivelyTowards(monst, rogue.upLoc, false)
-                            && !posEq(monst->loc, prevLoc);
-
-    if (!movedThisTurn) {
-        // Route to the up stairs is blocked (or it is webbed/cornered): flee away from the player this
-        // turn and retry the stairs on a later turn.
-        pos awayTarget;
-        awayTarget.x = clamp(monst->loc.x + signum(monst->loc.x - player.loc.x) * 5, 0, DCOLS - 1);
-        awayTarget.y = clamp(monst->loc.y + signum(monst->loc.y - player.loc.y) * 5, 0, DROWS - 1);
-        moveMonsterPassivelyTowards(monst, awayTarget, false);
-        movedThisTurn = !posEq(monst->loc, prevLoc);
-    }
-
     // Only tiles actually travelled count against the burst budget, so being webbed or cornered does
     // not silently spend it.
-    if (movedThisTurn) {
+    if (goldGoblinFleeStep(monst)) {
         monst->goldGoblinBurstTiles--;
+    }
+
+    // Once it has put real distance between itself and the player, it flings its hallucinogen flask --
+    // the fungal forest blooms behind it and screens the rest of the chase. Once per goblin.
+    if (!monst->goldGoblinThrewPotion
+        && distanceBetween(monst->loc, player.loc) >= GOLD_GOBLIN_POTION_DISTANCE) {
+
+        monst->goldGoblinThrewPotion = true;
+        spawnDungeonFeature(monst->loc.x, monst->loc.y, &dungeonFeatureCatalog[DF_FUNGUS_FOREST], true, false);
+        if (canSeeMonster(monst)) {
+            char buf[COLS], monstName[COLS];
+            monsterName(monstName, monst, true);
+            snprintf(buf, COLS, "%s flings a potion to the ground and a glowing forest erupts!", monstName);
+            resolvePronounEscapes(buf, monst);
+            message(buf, 0);
+        }
     }
 
     // Reached the up stairs: gone, hoard and all.
@@ -3603,25 +3628,13 @@ static void goldGoblinShedGold(creature *monst) {
     placeItemAt(gold, loc);
 }
 
-// iOS port (iBrogue): called from inflictDamage(). The first wound (from any source) commits the
-// goblin to fleeing and makes it hurl a flask of hallucinogen at its feet -- a luminescent fungal
-// forest blooms there and screens its retreat. Every discrete attack (attacker != NULL; fire/gas/
-// poison pass NULL) also arms a fresh flee burst and sheds a pile of gold.
+// iOS port (iBrogue): called from inflictDamage(). Any wound (from any source) commits the goblin to
+// fleeing; it throws its hallucinogen flask later, from goldGoblinTakesTurn, once it has gained some
+// distance. Every discrete attack (attacker != NULL; fire/gas/poison pass NULL) arms a fresh flee
+// burst and sheds a pile of gold.
 void goldGoblinReactToDamage(creature *monst, creature *attacker) {
-    const boolean firstHit = !monst->goldGoblinTriggered;
     monst->goldGoblinTriggered = true;
     monst->creatureState = MONSTER_FLEEING;
-
-    if (firstHit) {
-        spawnDungeonFeature(monst->loc.x, monst->loc.y, &dungeonFeatureCatalog[DF_FUNGUS_FOREST], true, false);
-        if (canSeeMonster(monst)) {
-            char buf[COLS], monstName[COLS];
-            monsterName(monstName, monst, true);
-            snprintf(buf, COLS, "%s flings a potion to the ground and a glowing forest erupts!", monstName);
-            resolvePronounEscapes(buf, monst);
-            message(buf, 0);
-        }
-    }
 
     if (attacker != NULL) {
         monst->goldGoblinBurstTiles = GOLD_GOBLIN_BURST_TILES;
