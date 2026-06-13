@@ -2249,6 +2249,30 @@ enum monsterBookkeepingFlags {
 };
 
 // Defines all creatures, which include monsters and the player:
+// iOS port (iBrogue): reusable "fleeing creature" component (see docs/guides/reusable-components.md).
+// A creatureType carries an optional fleeProfile (config); creatures with one run fleeAITakesTurn()
+// in place of the normal monster AI. The gold goblin is the first/reference consumer.
+enum fleeTrigger { FLEE_ON_SIGHT, FLEE_ON_DAMAGE };
+enum fleeExit { FLEE_EXIT_UP, FLEE_EXIT_DOWN, FLEE_EXIT_NEAREST };
+
+typedef struct fleeProfile {
+    enum fleeTrigger trigger;             // what starts it fleeing (taking damage always commits, regardless)
+    enum fleeExit exit;                   // which stair counts as escape
+    short breakForExitBelowHpPct;         // >= this %HP it only keeps distance; below it, it breaks for the exit. 0 = never break (pure kite); 100 = break once damaged
+    short playerBerth;                    // routing: tiles within which it pays a cost to stay clear of the player
+    short berthCost;                      // routing: extra cost per tile inside the berth (steeper = wider detours)
+    short fleeMemoryTurns;                // turns it keeps running after last seeing the player
+    boolean rerouteWhenBlocked;           // when the exit route is blocked, reposition toward the other stair (non-escape)
+    enum dungeonFeatureTypes tossFeature; // DF flung onto the just-vacated tile on the first break step (0 = none)
+} fleeProfile;
+
+typedef struct fleerState {               // iOS port (iBrogue): per-instance runtime state for the flee component
+    boolean triggered;                    // has committed to fleeing
+    short fleeTurns;                       // turns left running (refreshed while it can see the player)
+    short fleeCommit;                      // turns left committed to the reroute (anti-dither)
+    boolean threwToss;                     // has flung its one tossFeature
+} fleerState;
+
 typedef struct creatureType {
     enum monsterTypes monsterID; // index number for the monsterCatalog
     char monsterName[COLS];
@@ -2269,6 +2293,7 @@ typedef struct creatureType {
     enum boltType bolts[20];
     unsigned long flags;
     unsigned long abilityFlags;
+    const struct fleeProfile *fleeAI;   // iOS port (iBrogue): NULL = normal AI; non-NULL = reusable flee component
 } creatureType;
 
 typedef struct monsterWords {
@@ -2384,12 +2409,9 @@ typedef struct creature {
     short xpxp;                         // exploration experience (used to time telepathic bonding for allies)
     short newPowerCount;                // how many more times this monster can absorb a fallen monster
     short totalPowerCount;              // how many times has the monster been empowered? Used to recover abilities when negated.
-    short goldGoblinFleeTurns;          // iOS port (iBrogue): turns the gold goblin keeps running after last seeing the player
-    boolean goldGoblinTriggered;        // iOS port (iBrogue): gold goblin has been struck and is committed to fleeing
+    fleerState fleer;                   // iOS port (iBrogue): reusable flee-component runtime state (gold goblin etc.)
     boolean goldGoblinHasHoard;         // iOS port (iBrogue): drops the death hoard (false for clones/debug spawns)
-    boolean goldGoblinThrewPotion;      // iOS port (iBrogue): has thrown its one hallucinogen flask (after gaining distance)
     boolean goldGoblinDroppedDetectMagic; // iOS port (iBrogue): has shed its one-time below-25%-HP potion of detect magic
-    short goldGoblinFleeCommit;         // iOS port (iBrogue): turns left committed to the down-stairs reroute while the up stairs are blocked
 
     struct creature *leader;                 // only if monster is a follower
     struct creature *carriedMonster; // when vampires turn into bats, one of the bats restores the vampire when it dies
@@ -3344,6 +3366,7 @@ extern "C" {
     void unAlly(creature *monst);
     boolean monsterFleesFrom(creature *monst, creature *defender);
     void monstersTurn(creature *monst);
+    void fleerNoteDamage(creature *monst); // iOS port (iBrogue): generic flee-component damage trigger
     void goldGoblinReactToDamage(creature *monst, creature *attacker, short damage); // iOS port (iBrogue)
     void goldGoblinDropHoard(creature *monst); // iOS port (iBrogue)
     boolean getRandomMonsterSpawnLocation(short *x, short *y);

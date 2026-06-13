@@ -125,6 +125,21 @@ appended (not inserted) since the staff→bolt link is the `power` field, not po
 
 ### 2026-06-12 — Gold goblin: a passive treasure-hoarder you chase down (new content)
 
+> **Refactored 2026-06-13 into a reusable flee component (behavior unchanged).** The flee/escape AI no
+> longer lives in bespoke `goldGoblin*` functions; it is now the generic, config-driven component
+> `fleeProfile` (in `Rogue.h`, attached to a `creatureType`'s `fleeAI` field) + `fleeAITakesTurn` /
+> `fleeStepToExit` / `monsterStepTowardAvoidingPlayer` / `monsterFleeDistanceMap` / `monsterKeepDistanceStep` /
+> `fleerAtExit` / `fleerEscape` / `monsterTossFeatureBehind` / `fleerNoteDamage` (in `Monsters.c`), with
+> per-instance state in `creature.fleer` (`fleerState`). `monstersTurn` dispatches on `monst->info.fleeAI`
+> (one data-driven branch for *all* fleers, not a per-monster `if`). The gold goblin is the reference
+> consumer: its config is `goldGoblinFleeProfile` (in `Globals.c`), and its loot/spawn stay gold-specific
+> (`goldGoblinReactToDamage` now does only loot; `fleerNoteDamage` handles the flight trigger). See
+> [docs/guides/reusable-components.md](../../docs/guides/reusable-components.md) and ADR 0001. The
+> behavior below is unchanged; the old `goldGoblin*`/`GOLD_GOBLIN_*` symbol names in this entry now map to
+> the generic ones (`goldGoblinFleeTurns`→`fleer.fleeTurns`, `GOLD_GOBLIN_PLAYER_BERTH`→`fleeProfile.playerBerth`,
+> etc.). One cosmetic change: the toss message is now generic ("flings a flask to the ground and it erupts
+> behind it") rather than naming the fungal forest.
+
 **What.** A new monster, the **gold goblin** (`MK_GOLD_GOBLIN`), a passive "treasure goblin": it spawns
 near the down stairs, never attacks, and — once struck — flees toward the up stairs in bursts, shedding a
 trail of gold and dropping a hoard if you kill it before it escapes. Lifecycle:

@@ -1063,6 +1063,20 @@ const lightSource lightCatalog[NUMBER_LIGHT_KINDS] = {
     {&sacrificeTargetColor, {800, 1200, 1},          0,      true},      // demonic statue light
 };
 
+// iOS port (iBrogue): the gold goblin's flee-component config (see docs/guides/reusable-components.md).
+// Attached to its catalog entry's fleeAI field; the shared fleeAITakesTurn() in Monsters.c does the rest.
+// A second flee-creature is just another fleeProfile + catalog row, no new behavior code.
+const fleeProfile goldGoblinFleeProfile = {
+    .trigger = FLEE_ON_SIGHT,
+    .exit = FLEE_EXIT_UP,
+    .breakForExitBelowHpPct = 50,   // keep distance until wounded, then break for the up stairs
+    .playerBerth = 4,
+    .berthCost = 5,
+    .fleeMemoryTurns = 10,
+    .rerouteWhenBlocked = true,     // reroute toward the down stairs (non-escape) when the up route is blocked
+    .tossFeature = DF_FUNGUS_FOREST,
+};
+
 // Defines all creatures, which include monsters and the player:
 // This cannot be const, since we set monsterIDs
 creatureType monsterCatalog[NUMBER_MONSTER_KINDS] = {
@@ -1211,7 +1225,7 @@ creatureType monsterCatalog[NUMBER_MONSTER_KINDS] = {
     // uncatchable), modest dodge (def 25), no regen (0), can't be polymorphed. Custom AI/combat/loot keyed
     // off MK_GOLD_GOBLIN.
     {0, "gold goblin",  G_GOBLIN, &goldGoblinColor,    65,     25,     100,    {0, 0, 0},      0,  100,    100,    DF_RED_BLOOD,   0,    false,      0,      0,              {0},
-        (MONST_MALE | MONST_FEMALE | MONST_NO_POLYMORPH), (0)},
+        (MONST_MALE | MONST_FEMALE | MONST_NO_POLYMORPH), (0), &goldGoblinFleeProfile}, // iOS port (iBrogue): reusable flee component
 };
 
 const monsterWords monsterText[NUMBER_MONSTER_KINDS] = {

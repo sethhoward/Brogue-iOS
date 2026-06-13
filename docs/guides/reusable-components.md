@@ -89,30 +89,31 @@ Accurate as of this writing; confirm signatures in-engine before use.
 
 ## Candidate behavior components — bespoke today, extract on next reuse
 
-These behaviors exist *only* as the gold goblin's bespoke `goldGoblin*` code (`Monsters.c`). They are
-the obvious shared monster-behavior primitives — but per ADR 0001 they should be lifted into generic
-form **the next time a creature needs one**, not as a speculative refactor. When that happens, here's
-the target shape (gold goblin becomes one of the two regression checks):
+**The flee/escape behaviors are now a real, reusable component** (built 2026-06-13 as the first dogfood
+of this model). Everything in the *flee* group below ships as the generic functions named; the gold
+goblin is the reference consumer (config in `goldGoblinFleeProfile`, assigned via its catalog `fleeAI`
+field). The **loot and spawn** behaviors remain gold-goblin-specific and are the *next* extraction
+candidates — to be lifted on next reuse, per [ADR 0001](../adr/0001-deterministic-component-based-content.md),
+not speculatively.
 
-| Behavior | Lives now in | Proposed reusable form |
+| Behavior | Status | Reusable form |
 |---|---|---|
-| Flee toward a target, swinging wide around the player | `goldGoblinStepToward` / `goldGoblinDistanceMap` | `monsterStepTowardAvoidingPlayer(monst, target, berth, berthCost)` |
-| Keep maximum distance (elusive) | `goldGoblinKeepDistanceStep` | `monsterKeepDistanceStep(monst)` |
-| Toss a screen onto the just-vacated tile | the flask block in `goldGoblinTakesTurn` | `monsterTossFeatureBehind(monst, dfType, vacatedTile)` |
-| HP-phased behavior switch | the `< X% HP` branch in `goldGoblinTakesTurn` | `hpPhased(monst, pct, belowFn, aboveFn)` |
-| Scatter curated loot on death | `goldGoblinDropHoard` / `goldGoblinScatterItem` | `monsterScatterLoot(monst, pool, counts)` |
-| Once-per-run pinned spawn | `spawnGoldGoblin` (`Architect.c`) | `spawnUniqueNear(MK_*, anchor, depthRange, chance, &flag)` |
-| Adjacency-escape at a stair | `goldGoblinAtUpStairs` + `goldGoblinEscapes` | `monsterReachedStairs(monst, loc)` / `monsterEscapeUpstairs(monst)` |
-
-A reusable state sub-struct on `creature` (e.g. `fleerState { triggered; fleeTurns; fleeCommit; … }`)
-should replace the per-monster `goldGoblin*` fields at the same time.
+| Flee toward a target, swinging wide around the player | ✅ **built** | `monsterStepTowardAvoidingPlayer(monst, target, berth, berthCost)` (+ `monsterFleeDistanceMap`) |
+| Keep maximum distance (elusive) | ✅ **built** | `monsterKeepDistanceStep(monst)` |
+| Toss a screen onto the just-vacated tile | ✅ **built** | `monsterTossFeatureBehind(monst, dfType, vacatedTile)` |
+| HP-phased keep-distance → break-for-exit switch | ✅ **built** | the `breakForExitBelowHpPct` branch in `fleeAITakesTurn` |
+| Adjacency-escape at the exit stair | ✅ **built** | `fleerAtExit` / `fleerEscape` |
+| Whole flee/escape turn, config-driven | ✅ **built** | `fleeAITakesTurn(monst, const fleeProfile *)` + `fleerState` runtime + `fleeProfile` config |
+| Scatter curated loot on death | candidate | `monsterScatterLoot(monst, pool, counts)` (now `goldGoblinDropHoard` / `goldGoblinScatterItem`) |
+| Once-per-run pinned spawn | candidate | `spawnUniqueNear(MK_*, anchor, depthRange, chance, &flag)` (now `spawnGoldGoblin`) |
 
 ---
 
-## Worked example: a flee-to-exit creature (what the refactor buys)
+## Worked example: a flee-to-exit creature
 
-This is the concrete target shape for the candidate components above, using a flee-creature as the
-case study — the test being "does a *second* such creature drop out as data, not code?" (It does.)
+This is **the shipping flee component** (built 2026-06-13), using a flee-creature as the case study —
+the test being "does a *second* such creature drop out as data, not code?" (It does.) The structs and
+functions below are real; the gold goblin is the first consumer.
 
 **First, the decision-tree check:** existing flags get you partway — `MONST_FLEES_NEAR_DEATH` flees
 under 25% and `MONST_MAINTAINS_DISTANCE` backs off — but both flee *away from the player* (safety

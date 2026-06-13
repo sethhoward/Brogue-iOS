@@ -1723,9 +1723,13 @@ boolean inflictDamage(creature *attacker, creature *defender,
         wakeUp(defender);
     }
 
-    // iOS port (iBrogue): a wounded gold goblin commits to fleeing; a discrete attack (not fire/gas/
-    // poison, which pass a NULL attacker) sheds gold, or a one-time potion of detect magic if this blow
-    // drops it below 25% HP. `damage` here is post-shield and not yet subtracted from currentHP.
+    // iOS port (iBrogue): any wounded fleer (a creature with a fleeAI profile) commits to fleeing -- the
+    // generic flee component. The gold goblin then layers its own loot reaction on top (a discrete attack,
+    // i.e. attacker != NULL, sheds gold, or a one-time detect-magic potion if this blow drops it below
+    // 25% HP). `damage` here is post-shield and not yet subtracted from currentHP.
+    if (defender->info.fleeAI && damage > 0) {
+        fleerNoteDamage(defender);
+    }
     if (defender->info.monsterID == MK_GOLD_GOBLIN && damage > 0) {
         goldGoblinReactToDamage(defender, attacker, damage);
     }

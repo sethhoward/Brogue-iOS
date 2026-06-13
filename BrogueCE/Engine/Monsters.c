@@ -3521,50 +3521,56 @@ static boolean updateMonsterCorpseAbsorption(creature *monst) {
     return false;
 }
 
-#define GOLD_GOBLIN_FLEE_MEMORY 10    // iOS port (iBrogue): turns it keeps running after last sharing sight with the player
-#define GOLD_GOBLIN_PLAYER_BERTH 4    // iOS port (iBrogue): tiles within which routing pays a penalty to stay clear of the player
-#define GOLD_GOBLIN_BERTH_COST 5      // iOS port (iBrogue): extra routing cost per tile inside the berth (steeper = wider detours)
-#define GOLD_GOBLIN_FLEE_COMMIT 3     // iOS port (iBrogue): turns it sticks with the down-stairs reroute once the up stairs are blocked (anti-dither)
-#define GOLD_GOBLIN_BREAK_FOR_STAIRS_PCT 50 // iOS port (iBrogue): below this % HP it stops merely keeping distance and breaks for the up stairs
+// iOS port (iBrogue): reusable "fleeing creature" component (docs/guides/reusable-components.md). A
+// creatureType with a non-NULL fleeAI (fleeProfile, in Rogue.h) runs fleeAITakesTurn() below in place of
+// the normal monster AI; the gold goblin is the first consumer. Per-creature tuning is in the profile;
+// this is the one shared knob.
+#define FLEER_REROUTE_COMMIT 3   // turns a fleer sticks with the reroute once its exit is blocked (anti-dither)
 
-// iOS port (iBrogue): the gold goblin reached the up stairs and escapes the level, taking its
-// (undropped) hoard with it. Administrative death removes it cleanly with no drops, corpse or FX.
-// Phase 5 adds the player-facing "scrambles up the stairs" message.
-static void goldGoblinEscapes(creature *monst) {
-    // Closure message: always shown when the escape happens in plain view; otherwise only if the
-    // player has a ring of awareness equipped (rogue.awarenessBonus > 0), letting them sense it slip
-    // away. Without that, an out-of-sight escape is silent -- the player simply never finds it again.
+// iOS port (iBrogue): the stair this profile treats as the escape, and (for rerouting when it's
+// blocked) the other stair to run toward.
+static pos fleerPrimaryExit(const creature *monst, const fleeProfile *p) {
+    if (p->exit == FLEE_EXIT_DOWN) return rogue.downLoc;
+    if (p->exit == FLEE_EXIT_UP)   return rogue.upLoc;
+    return (distanceBetween(monst->loc, rogue.upLoc) <= distanceBetween(monst->loc, rogue.downLoc))
+           ? rogue.upLoc : rogue.downLoc; // FLEE_EXIT_NEAREST
+}
+static pos fleerRerouteTarget(const creature *monst, const fleeProfile *p) {
+    return posEq(fleerPrimaryExit(monst, p), rogue.upLoc) ? rogue.downLoc : rogue.upLoc;
+}
+
+// iOS port (iBrogue): a fleer reached its exit stair and escapes the level. Administrative death removes
+// it cleanly (no drops/corpse/FX), so any carried hoard is forfeit. The closure message shows when the
+// escape is in plain view, or off-screen only with a ring of awareness (rogue.awarenessBonus > 0).
+static void fleerEscape(creature *monst, const fleeProfile *p) {
     if (canDirectlySeeMonster(monst) || rogue.awarenessBonus > 0) {
+        const char *dir = posEq(fleerPrimaryExit(monst, p), rogue.downLoc) ? "down" : "up";
         char buf[COLS], monstName[COLS];
         monsterName(monstName, monst, true);
-        snprintf(buf, COLS, "%s scrambles up the stairs and is gone.", monstName);
+        snprintf(buf, COLS, "%s scrambles %s the stairs and is gone.", monstName, dir);
         resolvePronounEscapes(buf, monst);
         message(buf, 0);
     }
     killCreature(monst, true);
 }
 
-// iOS port (iBrogue): build the goblin's routing field to `target` -- a single cost map that folds its
-// two desires into one decision (no state machine, which the engine's AI can't really do): get to the
-// exit, while keeping its distance from the player. Walls / hazards / stair tiles are impassable, the
-// player's own tile is impassable (never route through them), and cells within GOLD_GOBLIN_PLAYER_BERTH
-// of the player carry a steep extra cost that fades with distance -- so the cheapest route to `target`
-// naturally swings wide around the player rather than brushing past. Because the penalty is a smooth
-// gradient (not a hard on/off block), the chosen route shifts smoothly as the player moves instead of
-// flickering reachable/unreachable, which is what kills the dithering. It also means the goblin keeps
-// moving toward the exit (not parking in a corner to be shot) while still refusing to brute-force past
-// the player. Only when the player's tile is a true 1-wide chokepoint does `target` become unreachable,
-// leaving the goblin's side at 30000 so the caller can fall back to plain flee-from-player.
-static void goldGoblinDistanceMap(creature *monst, pos target, short **distanceMap) {
+// iOS port (iBrogue): routing field to `target` that swings wide around the player -- one cost map
+// folding "get to the exit" and "keep your distance" into a single decision (the engine's AI does one
+// thing per turn). Walls/hazards/stairs and the player's own tile are impassable; cells within `berth`
+// of the player carry a steep extra cost that fades with distance, so the cheapest route to `target`
+// detours around the player rather than brushing past. The penalty is a smooth gradient, so the route
+// shifts smoothly as the player moves (no flicker) and the fleer keeps moving toward the exit without
+// brute-forcing past. Only a true 1-wide chokepoint leaves the fleer's side at 30000 (unreachable).
+static void monsterFleeDistanceMap(creature *monst, pos target, short berth, short berthCost, short **distanceMap) {
     short **costMap = allocGrid();
     for (int i = 0; i < DCOLS; i++) {
         for (int j = 0; j < DROWS; j++) {
             const pos p = (pos){ i, j };
             if (posEq(p, target)) {
-                // The destination MUST be enterable in the cost grid, or dijkstraScan (which only seeds
-                // the field from cells with cost > 0) never propagates its distance-0 and the whole map
-                // reads unreachable. The stair tile is normally monsterAvoids()'d, so exempt it here; the
-                // goblin still won't stand on it (nextStep re-checks monsterAvoids; escape is by adjacency).
+                // The destination MUST be enterable, or dijkstraScan (which only seeds from cells with
+                // cost > 0) never propagates its distance-0 and the whole map reads unreachable. Stairs
+                // are normally monsterAvoids()'d, so exempt the target; the fleer still won't stand on it
+                // (nextStep re-checks monsterAvoids; escape is by adjacency).
                 costMap[i][j] = 1;
             } else if (cellHasTerrainFlag(p, T_OBSTRUCTS_PASSABILITY)) {
                 costMap[i][j] = cellHasTerrainFlag(p, T_OBSTRUCTS_DIAGONAL_MOVEMENT) ? PDS_OBSTRUCTION : PDS_FORBIDDEN;
@@ -3572,9 +3578,7 @@ static void goldGoblinDistanceMap(creature *monst, pos target, short **distanceM
                 costMap[i][j] = PDS_FORBIDDEN;
             } else {
                 const int toPlayer = distanceBetween(p, player.loc);
-                costMap[i][j] = (toPlayer <= GOLD_GOBLIN_PLAYER_BERTH)
-                                ? 1 + (GOLD_GOBLIN_PLAYER_BERTH - toPlayer + 1) * GOLD_GOBLIN_BERTH_COST
-                                : 1;
+                costMap[i][j] = (toPlayer <= berth) ? 1 + (berth - toPlayer + 1) * berthCost : 1;
             }
         }
     }
@@ -3586,20 +3590,20 @@ static void goldGoblinDistanceMap(creature *monst, pos target, short **distanceM
     freeGrid(costMap);
 }
 
-// iOS port (iBrogue): direction of the next step toward `target` along that field. Returns NO_DIRECTION
-// only when `target` is genuinely unreachable from the goblin's side (player holding a 1-wide chokepoint).
-static short goldGoblinStepToward(creature *monst, pos target) {
+// iOS port (iBrogue): next step toward `target` along that field. NO_DIRECTION only when `target` is
+// genuinely unreachable from the fleer's side (player holding a 1-wide chokepoint).
+static short monsterStepTowardAvoidingPlayer(creature *monst, pos target, short berth, short berthCost) {
     short **distanceMap = allocGrid();
-    goldGoblinDistanceMap(monst, target, distanceMap);
+    monsterFleeDistanceMap(monst, target, berth, berthCost, distanceMap);
     short dir = nextStep(distanceMap, monst->loc, monst, false);
     freeGrid(distanceMap);
     return dir;
 }
 
-// iOS port (iBrogue): true once the goblin has reached the up stairs -- its only escape. Monsters can
-// never stand on a stair tile (see monsterAvoids), so "reached" means adjacent.
-static boolean goldGoblinAtUpStairs(creature *monst) {
-    return distanceBetween(monst->loc, rogue.upLoc) <= 1;
+// iOS port (iBrogue): true once the fleer has reached its exit stair. Monsters can never stand on a
+// stair tile (see monsterAvoids), so "reached" means adjacent.
+static boolean fleerAtExit(const creature *monst, const fleeProfile *p) {
+    return distanceBetween(monst->loc, fleerPrimaryExit(monst, p)) <= 1;
 }
 
 // iOS port (iBrogue): take one flee step. The up stairs (its only escape) are the first target, routed
@@ -3616,24 +3620,26 @@ static boolean goldGoblinAtUpStairs(creature *monst) {
 // and it retargets the up stairs the moment that route truly clears. If even the down stairs are walled
 // off from it (both routes blocked at once), it falls to the engine's safety map as a last resort.
 // Returns true if it moved.
-static boolean goldGoblinFleeStep(creature *monst) {
+static boolean fleeStepToExit(creature *monst, const fleeProfile *p) {
     const pos prevLoc = monst->loc;
     short dir = NO_DIRECTION;
 
-    if (monst->goldGoblinFleeCommit <= 0) {
-        dir = goldGoblinStepToward(monst, rogue.upLoc);
+    if (monst->fleer.fleeCommit <= 0) {
+        dir = monsterStepTowardAvoidingPlayer(monst, fleerPrimaryExit(monst, p), p->playerBerth, p->berthCost);
         if (dir == NO_DIRECTION) {
-            monst->goldGoblinFleeCommit = GOLD_GOBLIN_FLEE_COMMIT; // up stairs blocked; commit to the reroute
+            monst->fleer.fleeCommit = FLEER_REROUTE_COMMIT; // exit blocked; commit to the reroute
         }
     }
 
     if (dir == NO_DIRECTION) {
-        if (monst->goldGoblinFleeCommit > 0) {
-            monst->goldGoblinFleeCommit--;
+        if (monst->fleer.fleeCommit > 0) {
+            monst->fleer.fleeCommit--;
         }
-        dir = goldGoblinStepToward(monst, rogue.downLoc); // elusive reroute -- a place to run, not an exit
+        if (p->rerouteWhenBlocked) {
+            dir = monsterStepTowardAvoidingPlayer(monst, fleerRerouteTarget(monst, p), p->playerBerth, p->berthCost);
+        }
         if (dir == NO_DIRECTION) {
-            dir = nextStep(getSafetyMap(monst), monst->loc, monst, true); // both routes blocked; last resort
+            dir = nextStep(getSafetyMap(monst), monst->loc, monst, true); // last resort
             if (dir != NO_DIRECTION) {
                 const pos step = (pos){ monst->loc.x + nbDirs[dir][0], monst->loc.y + nbDirs[dir][1] };
                 if (pmapAt(step)->flags & HAS_PLAYER) {
@@ -3649,11 +3655,10 @@ static boolean goldGoblinFleeStep(creature *monst) {
     return !posEq(monst->loc, prevLoc);
 }
 
-// iOS port (iBrogue): while still healthy the goblin does NOT run for the exit -- it just stays elusive,
-// fleeing to the farthest-from-player cell via the engine's safety map (the same keep-your-distance
-// behavior that emerged, fortuitously, while its stair-pathing was broken). It only commits to the stairs
-// once wounded (see goldGoblinTakesTurn). Returns true if it moved.
-static boolean goldGoblinKeepDistanceStep(creature *monst) {
+// iOS port (iBrogue): keep maximum distance from the player -- flee to the farthest-from-player cell via
+// the engine's safety map. A fleer in its keep-distance phase uses this; it heads for no exit. Returns
+// true if it moved.
+static boolean monsterKeepDistanceStep(creature *monst) {
     const pos prevLoc = monst->loc;
     const short dir = nextStep(getSafetyMap(monst), monst->loc, monst, true);
     if (dir != NO_DIRECTION) {
@@ -3665,69 +3670,82 @@ static boolean goldGoblinKeepDistanceStep(creature *monst) {
     return !posEq(monst->loc, prevLoc);
 }
 
-// iOS port (iBrogue): complete turn logic for the gold goblin, used in place of the normal monster AI.
-// It is dormant and motionless until it shares line of sight with the player (or is attacked); from then
-// on it runs continuously, like a fleeing monkey, never pausing within sight (its flee timer is topped up
-// while it can see the player and runs on for GOLD_GOBLIN_FLEE_MEMORY turns after losing sight). Its
-// flight has two phases keyed off health: while still healthy (>= GOLD_GOBLIN_BREAK_FOR_STAIRS_PCT HP) it
-// merely keeps its distance -- fleeing to the farthest-from-player cell, NOT toward any exit -- letting
-// the player wear it down; once wounded (below that threshold) it breaks for the up stairs to escape.
-// Only in that wounded phase does reaching the up stairs count (its only escape). Once it has opened a
-// lead it flings its one hallucinogen flask behind it for cover.
-static void goldGoblinTakesTurn(creature *monst) {
+// iOS port (iBrogue): a fleer flings a feature (e.g. a hallucinogen flask -> fungal screen) onto the
+// tile it just vacated -- cover dropped between itself and the pursuer, right where they will follow.
+static void monsterTossFeatureBehind(creature *monst, enum dungeonFeatureTypes dfType, pos vacatedTile) {
+    spawnDungeonFeature(vacatedTile.x, vacatedTile.y, &dungeonFeatureCatalog[dfType], true, false);
+    if (canSeeMonster(monst)) {
+        char buf[COLS], monstName[COLS];
+        monsterName(monstName, monst, true);
+        snprintf(buf, COLS, "%s flings a flask to the ground and it erupts behind $HIMHER!", monstName);
+        resolvePronounEscapes(buf, monst);
+        message(buf, 0);
+    }
+}
+
+// iOS port (iBrogue): the reusable flee-component turn logic (the generalized gold goblin AI), driven
+// entirely by the creature's fleeProfile -- no per-monster code. Dormant until it shares sight with the
+// player (when FLEE_ON_SIGHT) or is hurt; then it runs continuously, never pausing within sight (its
+// timer is topped up while it can see the player and runs on for fleeMemoryTurns after losing sight).
+// Two phases by health: at/above breakForExitBelowHpPct it merely keeps its distance (letting the player
+// wear it down); below it, it breaks for the exit, and only then can reaching the exit escape it. On the
+// first break step it flings its tossFeature behind for cover.
+static void fleeAITakesTurn(creature *monst, const fleeProfile *p) {
     monst->ticksUntilTurn = monst->movementSpeed;
 
     // Spotting the player (line of sight is mutual) commits it to flight and keeps the timer full.
-    if (canDirectlySeeMonster(monst)) {
-        monst->goldGoblinTriggered = true;
-        monst->goldGoblinFleeTurns = GOLD_GOBLIN_FLEE_MEMORY;
+    if (p->trigger == FLEE_ON_SIGHT && canDirectlySeeMonster(monst)) {
+        monst->fleer.triggered = true;
+        monst->fleer.fleeTurns = p->fleeMemoryTurns;
         monst->creatureState = MONSTER_FLEEING;
     }
 
-    // Dormant (never spotted), or it has lost the player and calmed down: hold still.
-    if (!monst->goldGoblinTriggered || monst->goldGoblinFleeTurns <= 0) {
+    // Dormant (never triggered), or it has lost the player and calmed down: hold still.
+    if (!monst->fleer.triggered || monst->fleer.fleeTurns <= 0) {
         return;
     }
-    monst->goldGoblinFleeTurns--;
+    monst->fleer.fleeTurns--;
 
-    if (monst->currentHP * 100 >= monst->info.maxHP * GOLD_GOBLIN_BREAK_FOR_STAIRS_PCT) {
-        // Still healthy: just keep your distance and stay elusive; don't run for the exit (or escape, or
-        // throw the flask) until wounded.
-        goldGoblinKeepDistanceStep(monst);
-        return;
-    }
-
-    // Wounded: break for the up stairs. Reaching them -- adjacent, since monsters can't stand on a stair
-    // tile -- means escape, hoard and all. Checked before the step so it doesn't bounce off a tile it
-    // can't enter, and again after so it leaves the moment it arrives.
-    if (goldGoblinAtUpStairs(monst)) {
-        goldGoblinEscapes(monst);
+    if (monst->currentHP * 100 >= monst->info.maxHP * p->breakForExitBelowHpPct) {
+        // At/above the break threshold: just keep distance; don't run for the exit (or escape, or toss).
+        monsterKeepDistanceStep(monst);
         return;
     }
 
+    // Wounded: break for the exit. Reaching it -- adjacent, since monsters can't stand on a stair tile --
+    // escapes. Checked before the step so it doesn't bounce off a tile it can't enter, and again after so
+    // it leaves the moment it arrives.
+    if (fleerAtExit(monst, p)) {
+        fleerEscape(monst, p);
+        return;
+    }
     const pos vacatedTile = monst->loc;
-    goldGoblinFleeStep(monst);
-
-    if (goldGoblinAtUpStairs(monst)) {
-        goldGoblinEscapes(monst);
+    fleeStepToExit(monst, p);
+    if (fleerAtExit(monst, p)) {
+        fleerEscape(monst, p);
         return;
     }
 
-    // As it breaks for the stairs it flings its one hallucinogen flask back onto the tile it just left --
-    // a glowing fungal screen dropped between itself and the pursuer, right where the player will follow.
-    // Once per goblin, and only on a turn it actually moved, so the vacated tile is real (by definition
-    // clear now, or holding the player -- both valid spots for the bloom).
-    if (!monst->goldGoblinThrewPotion && !posEq(monst->loc, vacatedTile)) {
-        monst->goldGoblinThrewPotion = true;
-        spawnDungeonFeature(vacatedTile.x, vacatedTile.y, &dungeonFeatureCatalog[DF_FUNGUS_FOREST], true, false);
-        if (canSeeMonster(monst)) {
-            char buf[COLS], monstName[COLS];
-            monsterName(monstName, monst, true);
-            snprintf(buf, COLS, "%s flings a flask behind $HIMHER and a glowing forest erupts!", monstName);
-            resolvePronounEscapes(buf, monst);
-            message(buf, 0);
-        }
+    // On the first break step it actually moves, fling the cover feature onto the just-vacated tile
+    // (by definition a valid cell: clear now, or holding the player). Once per fleer.
+    if (!monst->fleer.threwToss && p->tossFeature != 0 && !posEq(monst->loc, vacatedTile)) {
+        monst->fleer.threwToss = true;
+        monsterTossFeatureBehind(monst, p->tossFeature, vacatedTile);
     }
+}
+
+// iOS port (iBrogue): generic flee-component damage trigger, called from inflictDamage() for any
+// creature with a fleeAI. Any wound commits it to fleeing and refreshes its timer, regardless of the
+// profile's primary trigger. (Entity-specific damage reactions -- e.g. the gold goblin's gold/loot --
+// run separately, alongside this.)
+void fleerNoteDamage(creature *monst) {
+    const fleeProfile *p = monst->info.fleeAI;
+    if (!p) {
+        return;
+    }
+    monst->fleer.triggered = true;
+    monst->fleer.fleeTurns = p->fleeMemoryTurns;
+    monst->creatureState = MONSTER_FLEEING;
 }
 
 // iOS port (iBrogue): drop an item at the goblin's tile when free, otherwise on a nearby open tile; if
@@ -3753,20 +3771,14 @@ static void goldGoblinShedGold(creature *monst) {
     goldGoblinShedItem(monst, gold);
 }
 
-// iOS port (iBrogue): called from inflictDamage(). Any wound (from any source) commits the goblin to
-// fleeing and refreshes its flee timer -- so even a hit landed from out of sight, or a melee swing that
-// connects, sends it running. (A missed melee swing needs no special case: to swing at it you must be
-// adjacent and in sight, which already triggers flight via goldGoblinTakesTurn.) It throws its
-// hallucinogen flask later, once it has gained distance. A discrete attack (attacker != NULL; fire/gas/
-// poison pass NULL) sheds loot: the first non-lethal blow that drops it below 25% HP sheds a potion of
-// detect magic (a one-time near-death bonus -- healing and re-wounding it will not repeat it); every
-// other discrete hit sheds a pile of gold. `damage` is the post-shield amount, not yet subtracted, so the
-// resulting HP is currentHP - damage.
+// iOS port (iBrogue): gold-goblin-specific damage reaction, called from inflictDamage() alongside the
+// generic fleerNoteDamage() (which handles the flight trigger). A discrete attack (attacker != NULL;
+// fire/gas/poison pass NULL) sheds loot: the first non-lethal blow that drops it below 25% HP sheds a
+// potion of detect magic (a one-time near-death bonus -- healing and re-wounding it will not repeat it);
+// every other discrete hit sheds a pile of gold. `damage` is the post-shield amount, not yet subtracted,
+// so the resulting HP is currentHP - damage.
 void goldGoblinReactToDamage(creature *monst, creature *attacker, short damage) {
-    monst->goldGoblinTriggered = true;
-    monst->goldGoblinFleeTurns = GOLD_GOBLIN_FLEE_MEMORY;
-    monst->creatureState = MONSTER_FLEEING;
-
+    // The flee trigger is handled generically by fleerNoteDamage(); this is gold-goblin-specific loot.
     if (attacker == NULL) {
         return;
     }
@@ -3873,10 +3885,11 @@ void monstersTurn(creature *monst) {
 
     monst->ticksUntilTurn = monst->movementSpeed / 3; // will be later overwritten by movement or attack
 
-    // iOS port (iBrogue): the gold goblin runs entirely on its own dormant->flee logic, bypassing the
-    // normal hunting/fleeing AI below. (Paralysis, entrancement and captivity already returned above.)
-    if (monst->info.monsterID == MK_GOLD_GOBLIN) {
-        goldGoblinTakesTurn(monst);
+    // iOS port (iBrogue): any creature with a flee component runs its reusable dormant->flee AI in place
+    // of the normal hunting/fleeing logic below. (Paralysis, entrancement and captivity already returned
+    // above.) Data-driven: the behavior comes from the catalog's fleeAI profile, not a per-monster branch.
+    if (monst->info.fleeAI) {
+        fleeAITakesTurn(monst, monst->info.fleeAI);
         return;
     }
 
