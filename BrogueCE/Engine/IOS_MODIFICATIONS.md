@@ -622,9 +622,13 @@ friendly-fire exception** — the player wading in the same pool gets zapped by 
   as **one shock per body, nearest source wins** (no double-dipping).
 - *Submerged creatures (eels) ARE shocked* — this deliberately overrides the usual rule that submerged
   monsters can't be bolt-targeted (`updateBolt`, `Items.c`), making lightning the hard counter to eels.
-- *Stun:* anything the shock actually damages is paralyzed for `WATER_SHOCK_STUN_DURATION` (3) turns —
-  the player included (set via `status`/`maxStatus[STATUS_PARALYZED]`, the same path as the paralysis
-  weapon runic). The directly-struck bolt target (ring 0) takes the normal hit and is not stunned.
+- *Stun:* anything the shock damages is paralyzed for `WATER_SHOCK_STUN_DURATION` (3) turns — the player
+  included (set via `status`/`maxStatus[STATUS_PARALYZED]`, the same path as the paralysis weapon runic).
+  **The directly-struck bolt target (ring 0) is stunned too** (amended 2026-06-13): it takes the normal
+  bolt hit — ring 0 is excluded from the *spread damage* to avoid double-hitting it — but it's standing in
+  the same electrified water, so it still gets the stun (paralysis-only, no extra damage), for both
+  monsters and the player. (Originally ring 0 was left unstunned; that was an oversight — a creature
+  struck by lightning while in water should be briefly paralyzed.)
 - *Levitation:* a creature hovering over water (`STATUS_LEVITATING` / `MONST_FLIES`) is not in contact —
   it neither triggers nor takes the shock. `MONST_INVULNERABLE` creatures are skipped.
 - *Feedback:* a cosmetic shockwave flashes the conducting tiles ring-by-ring (dimming with distance) plus
@@ -1008,10 +1012,13 @@ action-triggered by the throw; no new serialized state. Same release-time `recor
 signature is a **flammable gas cloud** (poison / confusion / paralysis / vomit), the flame instantly
 consumes the cloud — so you no longer **fully identify** the potion; instead you learn only its
 **polarity** (good/bad), and the message is generic (*"the volatile flask bursts into flame — you sense
-its contents were malevolent."*) rather than naming the cloud. Every other detonation still fully IDs:
-non-fire triggers (lightning, dart/javelin, hand-throw) of any potion, and fire triggers of potions
-whose effect is self-evident (wort's healing cloud, honey's mire, darkness, descent's hole, a flood,
-lichen, the fungal forest, steam, ice, acid, and incineration's flame).
+its contents were malevolent."*) rather than naming the cloud. **Incineration** is also erased (added
+2026-06-13): its tell *is* fire, which the fire trigger's own flame masks completely — you can't tell an
+incinerated potion from the fire bolt / incendiary-dart burst that lit it — so it too reveals only
+polarity on a fire trigger. Every other detonation still fully IDs: non-fire triggers (lightning,
+dart/javelin, hand-throw) of any potion, and fire triggers of potions whose effect is self-evident
+(wort's healing cloud, honey's mire, darkness, descent's hole, a flood, lichen, the fungal forest,
+steam, ice, acid).
 
 **Why.** A fire blast erases a gas cloud's tell — you see flame, not a purple poison cloud — so a free
 full ID was unearned; the volatility is still legible, hence polarity. Effects the fire *doesn't* erase
@@ -1020,9 +1027,11 @@ give the kind away on their own, so those keep full ID. (Player request.)
 **Where.** `Items.c`:
 - `shatterPotionAtLoc` gained a `boolean fiery` parameter and now **defers** its per-kind message into a
   local (`shatterMsg`) so it can be suppressed. After spawning the signature it computes
-  `fireErasedKind = fiery && the GAS layer at the tile is flammable` (data-driven — the gas tile's own
-  `T_IS_FLAMMABLE`, checked on the GAS layer specifically so honey's flammable SURFACE net doesn't
-  qualify). If erased and not already identified, it reveals polarity via `detectMagicOnItem` (+ a
+  `fireErasedKind = fiery && (the GAS layer at the tile is flammable || kind == POTION_INCINERATION)`
+  (data-driven on the gas tile's own `T_IS_FLAMMABLE`, checked on the GAS layer specifically so honey's
+  flammable SURFACE net doesn't qualify, plus incineration explicitly — its fire signature sits on the
+  SURFACE layer and matching `T_IS_FIRE` broadly would wrongly catch any potion detonated on already-
+  burning ground). If erased and not already identified, it reveals polarity via `detectMagicOnItem` (+ a
   generic, polarity-announcing message, gated on `playerCanSee`) instead of `autoIdentify`; otherwise it
   prints the kind message and `autoIdentify`s as before.
 - Callers pass `fiery`: `updateBolt` → `(theBolt->flags & BF_FIERY)`; `detonateFloorPotionAt` gained a

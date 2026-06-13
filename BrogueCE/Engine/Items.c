@@ -5237,7 +5237,14 @@ static void electrifyWater(bolt *theBolt, creature *caster, const pos *sources, 
             continue;
         }
         d = dist[monst->loc.x][monst->loc.y];
-        if (d >= 1 && creatureContactsWater(monst)) {
+        if (d == 0 && creatureContactsWater(monst)) {
+            // iOS port (iBrogue): the directly-struck creature already took the bolt's damage above (ring 0
+            // is excluded from the spread damage to avoid double-hitting it), but it is standing in the same
+            // electrified water, so the shock still stuns it -- a creature struck by lightning in water is
+            // briefly paralyzed.
+            monst->status[STATUS_PARALYZED] = monst->maxStatus[STATUS_PARALYZED] =
+                max(monst->status[STATUS_PARALYZED], WATER_SHOCK_STUN_DURATION);
+        } else if (d >= 1 && creatureContactsWater(monst)) {
             short dmg = (short) ((long long) staffDamage(theBolt->magnitude * FP_FACTOR) * ringMult[d] / FP_FACTOR);
             if (dmg >= 1) {
                 if (inflictDamage(caster, monst, dmg, boltColor, false)) {
@@ -5251,7 +5258,12 @@ static void electrifyWater(bolt *theBolt, creature *caster, const pos *sources, 
         }
     }
     d = dist[player.loc.x][player.loc.y];
-    if (d >= 1 && creatureContactsWater(&player)) {
+    if (d == 0 && creatureContactsWater(&player)) {
+        // iOS port (iBrogue): the player, directly struck in water, took the bolt's damage already (ring 0
+        // is out of the spread); the shock through the water still stuns -- symmetric with monsters.
+        player.status[STATUS_PARALYZED] = player.maxStatus[STATUS_PARALYZED] =
+            max(player.status[STATUS_PARALYZED], WATER_SHOCK_STUN_DURATION);
+    } else if (d >= 1 && creatureContactsWater(&player)) {
         short dmg = (short) ((long long) staffDamage(theBolt->magnitude * FP_FACTOR) * ringMult[d] / FP_FACTOR);
         if (dmg >= 1) {
             inflictDamage(caster, &player, dmg, boltColor, false);
@@ -6676,12 +6688,17 @@ static boolean shatterPotionAtLoc(item *theItem, short x, short y, boolean fiery
             return false;
     }
 
-    // Did a fire trigger just erase this kind's tell? (Flammable gas cloud on the tile -> it ignites into
-    // indistinguishable flame the same instant. Checks the GAS layer specifically so honey's flammable
-    // SURFACE net doesn't qualify.)
+    // Did a fire trigger just erase this kind's tell? A flammable GAS cloud (poison/confusion/paralysis/
+    // vomit) ignites into indistinguishable flame the same instant -- checked on the GAS layer
+    // specifically, so honey's flammable SURFACE net doesn't qualify. Incineration is the one extra case:
+    // its tell IS fire (it spawns PLAIN_FIRE), which a fire trigger's own flame completely masks -- you
+    // can't tell an incinerated potion from the fire bolt / incendiary-dart burst that set it off -- so it
+    // joins the erased set explicitly (its fire tile sits on the SURFACE layer, and matching that flag
+    // broadly would wrongly catch any potion detonated on already-burning ground).
     const boolean fireErasedKind = fiery
-        && pmap[x][y].layers[GAS] != NOTHING
-        && (tileCatalog[pmap[x][y].layers[GAS]].flags & T_IS_FLAMMABLE);
+        && ((pmap[x][y].layers[GAS] != NOTHING
+             && (tileCatalog[pmap[x][y].layers[GAS]].flags & T_IS_FLAMMABLE))
+            || theItem->kind == POTION_INCINERATION);
 
     if (fireErasedKind && !potionTable[theItem->kind].identified) {
         // Contents lost to the flame: reveal only the volatility (polarity), never the kind, and only if

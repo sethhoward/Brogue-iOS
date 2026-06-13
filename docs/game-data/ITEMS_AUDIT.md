@@ -213,10 +213,14 @@ the switch there covers the active-on-hit runics.)
 
 Source: `staffTable[NUMBER_STAFF_KINDS]` at `Globals.c:1641`. Enum: `Rogue.h:901`.
 The `power` column is the `boltType`. All staffs share `range {2,4,1}`. Good staffs are
-`STAFF_LIGHTNING..STAFF_HEALING` (`NUMBER_GOOD_STAFF_KINDS = STAFF_HEALING`); `STAFF_HASTE`
-and `STAFF_PROTECTION` have `magicPolarity = -1` (they help the *target*, so bad to fire at
-a foe). On generation (`Items.c:327`): start with 2 charges, 50% +1, then 15% +1, then 10%
+`STAFF_LIGHTNING..STAFF_FREEZE` (`NUMBER_GOOD_STAFF_KINDS = STAFF_HEALING`, the first non-good index);
+healing, `STAFF_HASTE` and `STAFF_PROTECTION` have `magicPolarity = -1` (they help the *target*, so bad
+to fire at a foe). On generation (`Items.c:327`): start with 2 charges, 50% +1, then 15% +1, then 10%
 chains; `enchant1 = charges`; recharge counter starts at 500 (1000 for blinking/obstruction).
+
+**iOS port:** `STAFF_FREEZE` (staff of **frost**, #9) is an iOS-port addition inserted into the enum
+before healing (shifting healing/haste/protection to 10/11/12). Full design:
+[`docs/design/staff-of-frost.md`](../design/staff-of-frost.md).
 
 | # | Staff | Bolt | StrReq | Freq | MktVal | Polarity |
 |---|---|---|---|---|---|---|
@@ -229,9 +233,10 @@ chains; `enchant1 = charges`; recharge counter starts at 500 (1000 for blinking/
 | 6 | obstruction | `BOLT_OBSTRUCTION` | 0 | 10 | 1000 | + |
 | 7 | discord | `BOLT_DISCORD` | 0 | 10 | 1000 | + |
 | 8 | conjuration | `BOLT_CONJURATION` | 0 | 8 | 1000 | + |
-| 9 | healing | `BOLT_HEALING` | 0 | 5 | 1100 | − |
-| 10 | haste | `BOLT_HASTE` | 0 | 5 | 900 | − |
-| 11 | protection | `BOLT_SHIELDING` | 0 | 5 | 900 | − |
+| 9 | **frost** (iOS port) | `BOLT_FREEZE` | 0 | 8 | 1200 | + |
+| 10 | healing | `BOLT_HEALING` | 0 | 5 | 1100 | − |
+| 11 | haste | `BOLT_HASTE` | 0 | 5 | 900 | − |
+| 12 | protection | `BOLT_SHIELDING` | 0 | 5 | 900 | − |
 
 ### Staff power scaling by enchant level
 All from `PowerTables.c:48`. `enchant` below is the net enchant ×`FP_FACTOR`; the formulas
@@ -248,6 +253,34 @@ use `enchant/FP_FACTOR` (= the displayed staff level).
 | entrancement | `staffEntrancementDuration = level*3` turns |
 | obstruction | scales with level (larger crystal walls); uses bolt magnitude |
 | protection (shielding) | `staffProtection(e) = 130 * 1.40^(level-2)` shield points |
+| frost (iOS port) | single-target freeze: `staffFreezeDuration` turns frozen, then a `staffFreezeSlowDuration` slow tail (both scale with level, `PowerTables.c`); freezes deep water into temporary walkable ice and dense foliage into brittle walls; quenches fire it crosses. Anything ablaze/`MONST_FIERY` is doused + slowed instead of frozen. Shared `freezeCreature()` with the potion of ice. |
+
+### Electrified water (iOS port) — lightning + water
+
+A lightning bolt (`BF_ELECTRIC` — staff of lightning, spark turrets, a reflected/monster electric bolt)
+that strikes a creature **standing in water** charges the entire **connected body of water** and shocks
+everything in it. (`Items.c` `electrifyWater`, ~`5140`; hooks in `zap` / `updateBolt`.)
+
+- **Conductive water** = `isConductiveWater` (`Items.c:5124`): tiles with both `TM_ALLOWS_SUBMERGING`
+  and `TM_EXTINGUISHES_FIRE` — i.e. deep / shallow / sloshing / luminescent water. Bog, lava, cooling
+  lava and the sacrificial pit allow submerging but don't extinguish fire, so they're **excluded**.
+- **In contact** = `creatureContactsWater` (`Items.c:5131`): standing in conductive water and **not**
+  levitating or flying. Hovering creatures neither trigger nor take the shock; `MONST_INVULNERABLE`
+  creatures are skipped.
+- **Spread & damage:** a breadth-first flood from each struck-in-water tile (8-connected, nearest source
+  wins — one shock per body, no double-dipping). Each shocked creature rolls lightning damage scaled by a
+  geometric falloff of `WATER_SHOCK_FALLOFF_PERCENT` (75%) per ring; the spread stops where even a max
+  roll would deal <1 damage.
+- **Stun:** anything the shock damages is paralyzed for `WATER_SHOCK_STUN_DURATION` (**3** turns). The
+  **directly-struck target** (ring 0) takes the normal bolt hit — excluded from the *spread damage* to
+  avoid double-hitting — and (as of 2026-06-13) **is also stunned** (paralysis only). So a creature struck
+  by lightning while in water is both damaged and briefly paralyzed; the player is affected symmetrically.
+- **Submerged eels ARE shocked** — this deliberately overrides the usual "submerged monsters can't be
+  bolt-targeted" rule, making lightning the hard counter to eels.
+
+The iOS **potion of water** (§7, capture-only) exists partly to set this up: its flood is "lightning-stun
+footing" (and washes scent — see [MONSTERS_AUDIT.md](MONSTERS_AUDIT.md)). Determinism: damage iterates the
+monster list then the player in a fixed order; the cosmetic shockwave draws no RNG.
 
 ---
 
@@ -425,7 +458,7 @@ always-identified, so their color is never shown). `numberGoodPotionKinds` = 11.
 | 22 | webbing | − | **0✦** | 300 | 0 | **Capture-only.** Thrown/uncorked: lays an entangling web patch (`DF_WEB_LARGE`) |
 | 23 | steam | − | **0✦** | 300 | 0 | **Capture-only.** Thrown/uncorked: a scalding steam cloud (`DF_STEAM_PUFF`) |
 | 24 | ice | − | **0✦** | 300 | 5 | **Capture-only.** Thrown/uncorked: a freezing cloud — freeze 3 turns → slow, douses flame, freezes water it covers. Bolt-detonable as a trap |
-| 25 | water | − | **0✦** | 300 | 0 | **Capture-only.** Thrown/uncorked: a large flood puddle (`DF_FLOOD`) — lightning-stun footing, washes out scent |
+| 25 | water | − | **0✦** | 300 | 0 | **Capture-only.** Thrown/uncorked: a large flood puddle (`DF_FLOOD`) — lightning-stun footing (§3 *Electrified water*), washes out scent |
 
 † **Metered.** `POTION_LIFE` and `POTION_STRENGTH` have base `frequency = 0` in the table;
 their generation is driven entirely by the metered system (see §10). Comments in the table
@@ -484,14 +517,15 @@ potion with a fire/lightning bolt. Not every potion reacts.
   ammo-based potion-trap trigger. (Good potions / the empty bottle are untouched — a dart can't capture.)
 - **Identification from a detonation — fire reveals only polarity for gas clouds** (iOS port). Detonating
   an *unidentified* potion normally **fully identifies** it (you saw the cloud). But a **fire** trigger
-  (fire bolt / incendiary dart) on a **flammable gas cloud** (poison / confusion / paralysis / vomit)
-  instantly burns the cloud into indistinguishable flame, so you learn only its **polarity** (good/bad),
-  not the kind — a generic "volatile flask bursts into flame" message, gated on seeing it
-  (`shatterPotionAtLoc`'s `fiery` path; the test is data-driven — the GAS layer's own `T_IS_FLAMMABLE`).
-  Polarity is per-kind, so it persists and tags every potion of that appearance (see §7 ‡/✦). Every other
-  detonation still full-IDs: non-fire triggers (lightning, dart/javelin, hand-throw), and fire triggers of
-  self-evident effects (wort, honey, darkness, descent, flood, lichen, fungal forest, steam, ice, acid,
-  incineration's flame).
+  (fire bolt / incendiary dart) erases the tell of two groups, leaving only their **polarity** (good/bad)
+  — a generic "volatile flask bursts into flame" message, gated on seeing it: **(1)** the **flammable gas
+  clouds** (poison / confusion / paralysis / vomit), which instantly burn into indistinguishable flame
+  (data-driven — the GAS layer's own `T_IS_FLAMMABLE`); and **(2)** **incineration**, whose tell *is*
+  fire and so is completely masked by the trigger's own flame (an explicit `POTION_INCINERATION` case —
+  its fire sits on the SURFACE layer). Polarity is per-kind, so it persists and tags every potion of that
+  appearance (see §7 ‡/✦). Every other detonation still full-IDs: non-fire triggers (lightning,
+  dart/javelin, hand-throw), and fire triggers of self-evident effects (wort, honey, darkness, descent,
+  flood, lichen, fungal forest, steam, ice, acid).
 - **Harmless splash when thrown on bare ground but active on a direct creature hit:** strength, speed,
   levitation, fire immunity, invisibility **buff the struck creature** (throwing them at an enemy
   helps it); venom **poisons** it; **telepathy** (iOS port) **permanently bonds you to the struck
