@@ -65,6 +65,10 @@ final class CEHost: NSObject, BrogueCEHost {
         viewController?.setCEAtTitle(atTitle)
     }
 
+    func requestTextInput(_ defaultText: String, numeric: Bool) {
+        viewController?.requestTextInput(for: defaultText, numeric: numeric)
+    }
+
     func presentFileManagement() {
         viewController?.presentFileManagementScreenForCE()
     }

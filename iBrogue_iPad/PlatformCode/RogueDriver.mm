@@ -220,8 +220,11 @@ void nextKeyOrMouseEvent(rogueEvent *returnEvent, __unused boolean textInput, bo
 
 #pragma mark - bridge
 
-void requestKeyboardInput(char *string) {
-    [brogueViewController requestTextInputFor:[NSString stringWithUTF8String:string]];
+// iOS port (iBrogue): `numeric` selects a number pad for digit-only entry (seeds);
+// `string` is the engine's default, which pre-fills the field so backspace can
+// clear it.
+void requestKeyboardInput(char *string, boolean numeric) {
+    [brogueViewController requestTextInputFor:[NSString stringWithUTF8String:string] numeric:(BOOL)numeric];
 }
 
 void setBrogueGameEvent(CBrogueGameEvent brogueGameEvent) {
@@ -380,6 +383,22 @@ short getHighScoresList(rogueHighScoresEntry returnList[HIGH_SCORES_COUNT]) {
 // date instead.
 
 // TODO: going to assume every save highscore qualifies as an end game screen.
+
+// iOS port (iBrogue): persist the most recent run's seed (previousGameSeed) so the
+// title screen's seeded-game prompt can pre-fill it across app launches; iOS kills
+// backgrounded apps, which would otherwise reset it to 0 each launch. Stored as an
+// NSNumber so the full unsigned long seed range round-trips losslessly.
+static NSString * const kLastSeedKey = @"last game seed";
+
+void persistLastSeed(unsigned long seed) {
+    [[NSUserDefaults standardUserDefaults] setObject:@((unsigned long long)seed) forKey:kLastSeedKey];
+    [[NSUserDefaults standardUserDefaults] synchronize];
+}
+
+unsigned long loadPersistedSeed(void) {
+    NSNumber *n = [[NSUserDefaults standardUserDefaults] objectForKey:kLastSeedKey];
+    return n ? (unsigned long)[n unsignedLongLongValue] : 0;
+}
 
 boolean saveHighScore(rogueHighScoresEntry theEntry) {
 	NSMutableArray *scoresArray, *textArray, *datesArray;

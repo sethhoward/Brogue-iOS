@@ -3521,8 +3521,11 @@ static boolean updateMonsterCorpseAbsorption(creature *monst) {
     return false;
 }
 
-#define GOLD_GOBLIN_BURST_TILES 8     // iOS port (iBrogue): max tiles a gold goblin flees per hit
-#define GOLD_GOBLIN_POTION_DISTANCE 4 // iOS port (iBrogue): throws its hallucinogen once this far from the player
+#define GOLD_GOBLIN_FLEE_MEMORY 10    // iOS port (iBrogue): turns it keeps running after last sharing sight with the player
+#define GOLD_GOBLIN_PLAYER_BERTH 4    // iOS port (iBrogue): tiles within which routing pays a penalty to stay clear of the player
+#define GOLD_GOBLIN_BERTH_COST 5      // iOS port (iBrogue): extra routing cost per tile inside the berth (steeper = wider detours)
+#define GOLD_GOBLIN_FLEE_COMMIT 3     // iOS port (iBrogue): turns it sticks with the down-stairs reroute once the up stairs are blocked (anti-dither)
+#define GOLD_GOBLIN_BREAK_FOR_STAIRS_PCT 50 // iOS port (iBrogue): below this % HP it stops merely keeping distance and breaks for the up stairs
 
 // iOS port (iBrogue): the gold goblin reached the up stairs and escapes the level, taking its
 // (undropped) hoard with it. Administrative death removes it cleanly with no drops, corpse or FX.
@@ -3541,103 +3544,241 @@ static void goldGoblinEscapes(creature *monst) {
     killCreature(monst, true);
 }
 
-// iOS port (iBrogue): step the gold goblin one tile toward the up stairs along a real distance map, so
-// it navigates around walls and corners toward the actual exit instead of greedily beelining into a
-// dead end. If the up stairs are genuinely unreachable (e.g. walled off by a wand of obstruction), it
-// falls back to the safety map and flees away from the player. Returns true if it actually moved.
-static boolean goldGoblinFleeStep(creature *monst) {
-    const pos prevLoc = monst->loc;
+// iOS port (iBrogue): build the goblin's routing field to `target` -- a single cost map that folds its
+// two desires into one decision (no state machine, which the engine's AI can't really do): get to the
+// exit, while keeping its distance from the player. Walls / hazards / stair tiles are impassable, the
+// player's own tile is impassable (never route through them), and cells within GOLD_GOBLIN_PLAYER_BERTH
+// of the player carry a steep extra cost that fades with distance -- so the cheapest route to `target`
+// naturally swings wide around the player rather than brushing past. Because the penalty is a smooth
+// gradient (not a hard on/off block), the chosen route shifts smoothly as the player moves instead of
+// flickering reachable/unreachable, which is what kills the dithering. It also means the goblin keeps
+// moving toward the exit (not parking in a corner to be shot) while still refusing to brute-force past
+// the player. Only when the player's tile is a true 1-wide chokepoint does `target` become unreachable,
+// leaving the goblin's side at 30000 so the caller can fall back to plain flee-from-player.
+static void goldGoblinDistanceMap(creature *monst, pos target, short **distanceMap) {
+    short **costMap = allocGrid();
+    for (int i = 0; i < DCOLS; i++) {
+        for (int j = 0; j < DROWS; j++) {
+            const pos p = (pos){ i, j };
+            if (posEq(p, target)) {
+                // The destination MUST be enterable in the cost grid, or dijkstraScan (which only seeds
+                // the field from cells with cost > 0) never propagates its distance-0 and the whole map
+                // reads unreachable. The stair tile is normally monsterAvoids()'d, so exempt it here; the
+                // goblin still won't stand on it (nextStep re-checks monsterAvoids; escape is by adjacency).
+                costMap[i][j] = 1;
+            } else if (cellHasTerrainFlag(p, T_OBSTRUCTS_PASSABILITY)) {
+                costMap[i][j] = cellHasTerrainFlag(p, T_OBSTRUCTS_DIAGONAL_MOVEMENT) ? PDS_OBSTRUCTION : PDS_FORBIDDEN;
+            } else if (monsterAvoids(monst, p)) {
+                costMap[i][j] = PDS_FORBIDDEN;
+            } else {
+                const int toPlayer = distanceBetween(p, player.loc);
+                costMap[i][j] = (toPlayer <= GOLD_GOBLIN_PLAYER_BERTH)
+                                ? 1 + (GOLD_GOBLIN_PLAYER_BERTH - toPlayer + 1) * GOLD_GOBLIN_BERTH_COST
+                                : 1;
+            }
+        }
+    }
+    costMap[player.loc.x][player.loc.y] = PDS_FORBIDDEN; // never route through the player
 
+    fillGrid(distanceMap, 30000);
+    distanceMap[target.x][target.y] = 0;
+    dijkstraScan(distanceMap, costMap, true);
+    freeGrid(costMap);
+}
+
+// iOS port (iBrogue): direction of the next step toward `target` along that field. Returns NO_DIRECTION
+// only when `target` is genuinely unreachable from the goblin's side (player holding a 1-wide chokepoint).
+static short goldGoblinStepToward(creature *monst, pos target) {
     short **distanceMap = allocGrid();
-    calculateDistances(distanceMap, rogue.upLoc.x, rogue.upLoc.y, T_PATHING_BLOCKER, monst, false, true);
+    goldGoblinDistanceMap(monst, target, distanceMap);
     short dir = nextStep(distanceMap, monst->loc, monst, false);
     freeGrid(distanceMap);
+    return dir;
+}
+
+// iOS port (iBrogue): true once the goblin has reached the up stairs -- its only escape. Monsters can
+// never stand on a stair tile (see monsterAvoids), so "reached" means adjacent.
+static boolean goldGoblinAtUpStairs(creature *monst) {
+    return distanceBetween(monst->loc, rogue.upLoc) <= 1;
+}
+
+// iOS port (iBrogue): take one flee step. The up stairs (its only escape) are the first target, routed
+// along the blended head-home/keep-distance field. If that route is open it takes it -- swinging wide
+// around the player thanks to the proximity penalty, never brute-forcing past. If the player has blocked
+// it (their body in a doorway, a fire/gas wall, a 1-wide pinch), the up-stairs field returns nothing, and
+// rather than HOLDING in the player's eyeline for free hits -- a block is temporary; it only persists
+// while the goblin lets it -- the goblin stays elusive: it reroutes toward the **down stairs** as a
+// lower-priority target through the SAME keep-distance field, so it runs for open ground (a real
+// destination, never a dead-end corner) and keeps its distance, forcing the player to abandon the block
+// to give chase. Both targets are reached only adjacently (monsters can't stand on stairs); only the up
+// stairs are an actual escape -- the down stairs are purely a place to run to. A block commits it to the
+// reroute for a few turns so it doesn't visibly flip up/down as the player jockeys on and off the route,
+// and it retargets the up stairs the moment that route truly clears. If even the down stairs are walled
+// off from it (both routes blocked at once), it falls to the engine's safety map as a last resort.
+// Returns true if it moved.
+static boolean goldGoblinFleeStep(creature *monst) {
+    const pos prevLoc = monst->loc;
+    short dir = NO_DIRECTION;
+
+    if (monst->goldGoblinFleeCommit <= 0) {
+        dir = goldGoblinStepToward(monst, rogue.upLoc);
+        if (dir == NO_DIRECTION) {
+            monst->goldGoblinFleeCommit = GOLD_GOBLIN_FLEE_COMMIT; // up stairs blocked; commit to the reroute
+        }
+    }
 
     if (dir == NO_DIRECTION) {
-        dir = nextStep(getSafetyMap(monst), monst->loc, monst, true); // can't reach the stairs; just flee
+        if (monst->goldGoblinFleeCommit > 0) {
+            monst->goldGoblinFleeCommit--;
+        }
+        dir = goldGoblinStepToward(monst, rogue.downLoc); // elusive reroute -- a place to run, not an exit
+        if (dir == NO_DIRECTION) {
+            dir = nextStep(getSafetyMap(monst), monst->loc, monst, true); // both routes blocked; last resort
+            if (dir != NO_DIRECTION) {
+                const pos step = (pos){ monst->loc.x + nbDirs[dir][0], monst->loc.y + nbDirs[dir][1] };
+                if (pmapAt(step)->flags & HAS_PLAYER) {
+                    dir = NO_DIRECTION;
+                }
+            }
+        }
     }
+
     if (dir != NO_DIRECTION) {
-        const pos step = (pos){ monst->loc.x + nbDirs[dir][0], monst->loc.y + nbDirs[dir][1] };
-        moveMonsterPassivelyTowards(monst, step, false); // false: never step onto / attack the player
+        moveMonster(monst, nbDirs[dir][0], nbDirs[dir][1]);
     }
     return !posEq(monst->loc, prevLoc);
 }
 
-// iOS port (iBrogue): complete turn logic for the gold goblin, used in place of the normal monster
-// AI. It is dormant and motionless until first struck (goldGoblinTriggered). Each hit arms a burst of
-// up to GOLD_GOBLIN_BURST_TILES tiles (goldGoblinBurstTiles); during a burst it paths toward the up
-// stairs, breaking off to idle the instant it slips out of the player's sight. Once it has opened up a
-// lead it flings its one hallucinogen flask behind it for cover. Reaching the up stairs lets it escape.
+// iOS port (iBrogue): while still healthy the goblin does NOT run for the exit -- it just stays elusive,
+// fleeing to the farthest-from-player cell via the engine's safety map (the same keep-your-distance
+// behavior that emerged, fortuitously, while its stair-pathing was broken). It only commits to the stairs
+// once wounded (see goldGoblinTakesTurn). Returns true if it moved.
+static boolean goldGoblinKeepDistanceStep(creature *monst) {
+    const pos prevLoc = monst->loc;
+    const short dir = nextStep(getSafetyMap(monst), monst->loc, monst, true);
+    if (dir != NO_DIRECTION) {
+        const pos step = (pos){ monst->loc.x + nbDirs[dir][0], monst->loc.y + nbDirs[dir][1] };
+        if (!(pmapAt(step)->flags & HAS_PLAYER)) {
+            moveMonster(monst, nbDirs[dir][0], nbDirs[dir][1]);
+        }
+    }
+    return !posEq(monst->loc, prevLoc);
+}
+
+// iOS port (iBrogue): complete turn logic for the gold goblin, used in place of the normal monster AI.
+// It is dormant and motionless until it shares line of sight with the player (or is attacked); from then
+// on it runs continuously, like a fleeing monkey, never pausing within sight (its flee timer is topped up
+// while it can see the player and runs on for GOLD_GOBLIN_FLEE_MEMORY turns after losing sight). Its
+// flight has two phases keyed off health: while still healthy (>= GOLD_GOBLIN_BREAK_FOR_STAIRS_PCT HP) it
+// merely keeps its distance -- fleeing to the farthest-from-player cell, NOT toward any exit -- letting
+// the player wear it down; once wounded (below that threshold) it breaks for the up stairs to escape.
+// Only in that wounded phase does reaching the up stairs count (its only escape). Once it has opened a
+// lead it flings its one hallucinogen flask behind it for cover.
 static void goldGoblinTakesTurn(creature *monst) {
     monst->ticksUntilTurn = monst->movementSpeed;
 
-    // Dormant, or idling between bursts: hold still and ignore the player.
-    if (!monst->goldGoblinTriggered || monst->goldGoblinBurstTiles <= 0) {
+    // Spotting the player (line of sight is mutual) commits it to flight and keeps the timer full.
+    if (canDirectlySeeMonster(monst)) {
+        monst->goldGoblinTriggered = true;
+        monst->goldGoblinFleeTurns = GOLD_GOBLIN_FLEE_MEMORY;
+        monst->creatureState = MONSTER_FLEEING;
+    }
+
+    // Dormant (never spotted), or it has lost the player and calmed down: hold still.
+    if (!monst->goldGoblinTriggered || monst->goldGoblinFleeTurns <= 0) {
+        return;
+    }
+    monst->goldGoblinFleeTurns--;
+
+    if (monst->currentHP * 100 >= monst->info.maxHP * GOLD_GOBLIN_BREAK_FOR_STAIRS_PCT) {
+        // Still healthy: just keep your distance and stay elusive; don't run for the exit (or escape, or
+        // throw the flask) until wounded.
+        goldGoblinKeepDistanceStep(monst);
         return;
     }
 
-    // Only tiles actually travelled count against the burst budget, so being webbed or cornered does
-    // not silently spend it.
-    if (goldGoblinFleeStep(monst)) {
-        monst->goldGoblinBurstTiles--;
-    }
-
-    // Once it has put real distance between itself and the player, it flings its hallucinogen flask --
-    // the fungal forest blooms behind it and screens the rest of the chase. Once per goblin.
-    if (!monst->goldGoblinThrewPotion
-        && distanceBetween(monst->loc, player.loc) >= GOLD_GOBLIN_POTION_DISTANCE) {
-
-        monst->goldGoblinThrewPotion = true;
-        spawnDungeonFeature(monst->loc.x, monst->loc.y, &dungeonFeatureCatalog[DF_FUNGUS_FOREST], true, false);
-        if (canSeeMonster(monst)) {
-            char buf[COLS], monstName[COLS];
-            monsterName(monstName, monst, true);
-            snprintf(buf, COLS, "%s flings a potion to the ground and a glowing forest erupts!", monstName);
-            resolvePronounEscapes(buf, monst);
-            message(buf, 0);
-        }
-    }
-
-    // Reached the up stairs: gone, hoard and all.
-    if (posEq(monst->loc, rogue.upLoc)) {
+    // Wounded: break for the up stairs. Reaching them -- adjacent, since monsters can't stand on a stair
+    // tile -- means escape, hoard and all. Checked before the step so it doesn't bounce off a tile it
+    // can't enter, and again after so it leaves the moment it arrives.
+    if (goldGoblinAtUpStairs(monst)) {
         goldGoblinEscapes(monst);
         return;
     }
 
-    // The burst ends the moment it breaks the player's line of sight; then it idles until struck again.
-    if (!canDirectlySeeMonster(monst)) {
-        monst->goldGoblinBurstTiles = 0;
+    const pos vacatedTile = monst->loc;
+    goldGoblinFleeStep(monst);
+
+    if (goldGoblinAtUpStairs(monst)) {
+        goldGoblinEscapes(monst);
+        return;
+    }
+
+    // As it breaks for the stairs it flings its one hallucinogen flask back onto the tile it just left --
+    // a glowing fungal screen dropped between itself and the pursuer, right where the player will follow.
+    // Once per goblin, and only on a turn it actually moved, so the vacated tile is real (by definition
+    // clear now, or holding the player -- both valid spots for the bloom).
+    if (!monst->goldGoblinThrewPotion && !posEq(monst->loc, vacatedTile)) {
+        monst->goldGoblinThrewPotion = true;
+        spawnDungeonFeature(vacatedTile.x, vacatedTile.y, &dungeonFeatureCatalog[DF_FUNGUS_FOREST], true, false);
+        if (canSeeMonster(monst)) {
+            char buf[COLS], monstName[COLS];
+            monsterName(monstName, monst, true);
+            snprintf(buf, COLS, "%s flings a flask behind $HIMHER and a glowing forest erupts!", monstName);
+            resolvePronounEscapes(buf, monst);
+            message(buf, 0);
+        }
     }
 }
 
-// iOS port (iBrogue): the gold goblin sheds a small pile of gold when struck, forming a trail the
-// player can scoop up mid-chase. Dropped on its own tile when free, otherwise on a nearby open tile;
-// if there is nowhere clear, the pile is skipped rather than stacked onto an existing item.
-static void goldGoblinShedGold(creature *monst) {
+// iOS port (iBrogue): drop an item at the goblin's tile when free, otherwise on a nearby open tile; if
+// there is nowhere clear, the item is discarded rather than stacked onto an existing one.
+static void goldGoblinShedItem(creature *monst, item *theItem) {
     pos loc = monst->loc;
     if (pmapAt(loc)->flags & HAS_ITEM) {
         if (!getQualifyingLocNear(&loc, monst->loc, true, NULL,
                                   (T_OBSTRUCTS_ITEMS | T_PATHING_BLOCKER),
                                   (HAS_ITEM | HAS_STAIRS), true, false)) {
+            deleteItem(theItem);
             return;
         }
     }
+    placeItemAt(theItem, loc);
+}
+
+// iOS port (iBrogue): a small pile of gold, forming a trail the player can scoop up mid-chase.
+static void goldGoblinShedGold(creature *monst) {
     item *gold = generateItem(GOLD, -1);
     gold->quantity = rand_range(2 * rogue.depthLevel, 5 * rogue.depthLevel);
     gold->originDepth = rogue.depthLevel;
-    placeItemAt(gold, loc);
+    goldGoblinShedItem(monst, gold);
 }
 
 // iOS port (iBrogue): called from inflictDamage(). Any wound (from any source) commits the goblin to
-// fleeing; it throws its hallucinogen flask later, from goldGoblinTakesTurn, once it has gained some
-// distance. Every discrete attack (attacker != NULL; fire/gas/poison pass NULL) arms a fresh flee
-// burst and sheds a pile of gold.
-void goldGoblinReactToDamage(creature *monst, creature *attacker) {
+// fleeing and refreshes its flee timer -- so even a hit landed from out of sight, or a melee swing that
+// connects, sends it running. (A missed melee swing needs no special case: to swing at it you must be
+// adjacent and in sight, which already triggers flight via goldGoblinTakesTurn.) It throws its
+// hallucinogen flask later, once it has gained distance. A discrete attack (attacker != NULL; fire/gas/
+// poison pass NULL) sheds loot: the first non-lethal blow that drops it below 25% HP sheds a potion of
+// detect magic (a one-time near-death bonus -- healing and re-wounding it will not repeat it); every
+// other discrete hit sheds a pile of gold. `damage` is the post-shield amount, not yet subtracted, so the
+// resulting HP is currentHP - damage.
+void goldGoblinReactToDamage(creature *monst, creature *attacker, short damage) {
     monst->goldGoblinTriggered = true;
+    monst->goldGoblinFleeTurns = GOLD_GOBLIN_FLEE_MEMORY;
     monst->creatureState = MONSTER_FLEEING;
 
-    if (attacker != NULL) {
-        monst->goldGoblinBurstTiles = GOLD_GOBLIN_BURST_TILES;
+    if (attacker == NULL) {
+        return;
+    }
+
+    const short hpAfter = monst->currentHP - damage;
+    if (!monst->goldGoblinDroppedDetectMagic
+        && hpAfter > 0
+        && hpAfter * 4 < monst->info.maxHP) {
+
+        monst->goldGoblinDroppedDetectMagic = true;
+        goldGoblinShedItem(monst, generateItem(POTION, POTION_DETECT_MAGIC2));
+    } else {
         goldGoblinShedGold(monst);
     }
 }

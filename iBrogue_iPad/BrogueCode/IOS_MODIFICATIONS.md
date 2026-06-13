@@ -23,6 +23,38 @@ future maintainers (human or AI) don't mistake an intentional port change for a 
 
 ## Change log
 
+### 2026-06-13 — Seed-entry keyboard: use a number pad (iOS port)
+
+**What.** The pre-filled text dialog (`requestKeyboardInput` → `getInputTextString`) already passed
+the default to the iOS field, so backspace worked in Classic — but it always showed the default
+(alpha) keyboard, even for numeric seed entry. `requestKeyboardInput` now takes a `numeric` flag
+(passed `textEntryType == TEXT_INPUT_NUMBERS`) so the host can show a number pad. (A number pad has
+no Return key; the host adds a "Done" accessory bar that submits like Return.) This is the Classic
+half of the same fix made on the CE side, where the missing pre-fill also broke backspace.
+
+**Where.** `Rogue.h` (`requestKeyboardInput(char *string, boolean numeric)`), `RogueDriver.mm`
+(forwards to `requestTextInputFor:numeric:`), `IO.c` (call site passes the numeric flag).
+
+### 2026-06-13 — Persist the last-played seed across app launches (iOS port)
+
+**What.** The title screen's seeded-game prompt pre-fills `previousGameSeed` — the seed of the most
+recent run. Upstream keeps this only in memory for the process lifetime; on iOS, where backgrounded
+apps are routinely terminated, it reset to 0 on every relaunch, so the prompt never remembered your
+last seed. We now back `previousGameSeed` with `NSUserDefaults`.
+
+**Why.** Players expect the "play a seeded run" field to default to their last seed (as on desktop),
+but app kills wiped it. Persisting it makes the iOS behavior match desktop across launches.
+
+**Where.**
+- `RogueDriver.mm` — `persistLastSeed(unsigned long)` / `loadPersistedSeed(void)` store the seed as
+  an `NSNumber` under `@"last game seed"`, mirroring the high-score persistence. Declared in
+  `Rogue.h` (inside the `extern "C"` platform-function block, next to `saveHighScore`) so the
+  engine `.c`/`.mm` files can call them.
+- `RogueMain.mm` (`rogueMain()`): `previousGameSeed = loadPersistedSeed();` replaces the `= 0` reset.
+- Persist wherever `previousGameSeed` is assigned: after the seed assignment in `initializeRogue`
+  (`RogueMain.mm`, guarded by `!playbackMode`) and after the recording-load assignment
+  (`Recordings.c`), so the persisted value always tracks the in-memory one.
+
 ### 2026-06-11 — Port BrogueCE's rethrow command
 
 **What.** Added the rethrow command (`RETHROW_KEY`, Shift+T): repeat the last thrown

@@ -58,6 +58,12 @@ NS_ASSUME_NONNULL_BEGIN
 // True only while the CE title screen is showing — gates the version chooser.
 - (void)setAtTitle:(BOOL)atTitle;
 
+// Show the on-screen keyboard for engine text entry (naming a save, entering a
+// seed). `defaultText` pre-fills the field with the engine's default so backspace
+// can clear it; `numeric` picks a number pad (with a Done bar) for seed entry vs.
+// the default keyboard.
+- (void)requestTextInput:(NSString *)defaultText numeric:(BOOL)numeric;
+
 // Present the native file manager (CE title menu's "File Management" entry),
 // scoped to the CE save directory.
 - (void)presentFileManagement;

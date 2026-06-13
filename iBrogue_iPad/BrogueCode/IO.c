@@ -2721,7 +2721,7 @@ boolean getInputTextString(char *inputText,
         plotCharWithColor((suffix[0] ? suffix[0] : ' '), x + charNum, y, &black, &white);
         
         // SETH: custom function
-        requestKeyboardInput(defaultEntry);
+        requestKeyboardInput(defaultEntry, textEntryType == TEXT_INPUT_NUMBERS);
         
         keystroke = nextKeyPress(true);
         if (keystroke == DELETE_KEY && charNum > 0) {

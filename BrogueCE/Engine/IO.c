@@ -2836,6 +2836,11 @@ boolean getInputTextString(char *inputText,
         strcpy(suffix, promptSuffix);
     }
 
+    // iOS port (iBrogue): hand the default to the host so the on-screen keyboard
+    // is pre-filled (otherwise backspace can't clear the pre-filled seed) and uses
+    // a number pad for numeric entry.
+    ceRequestTextInput(defaultEntry, textEntryType == TEXT_INPUT_NUMBERS);
+
     CBrogueGameEvent oldUiMode = uiMode;
     do {
         uiMode = CBrogueGameEventShowKeyboardAndEscape; // tablet ui mode

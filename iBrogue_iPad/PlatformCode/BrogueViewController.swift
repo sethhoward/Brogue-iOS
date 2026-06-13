@@ -2825,9 +2825,25 @@ extension BrogueViewController {
 }
 
 extension BrogueViewController: UITextFieldDelegate {
-    @objc func requestTextInput(for string: String) {
+    // `numeric` requests a number pad for digit-only entry (e.g. the seeded-game
+    // seed); otherwise the default keyboard is used (e.g. naming a save). The
+    // engine pre-fills `string` with its default value and renders the text
+    // itself — the field is an off-screen key-capture proxy, so it MUST be seeded
+    // with the same default, otherwise iOS suppresses the backspace callback for
+    // an empty field and the pre-filled characters can't be deleted (iOS port).
+    @objc func requestTextInput(for string: String, numeric: Bool) {
         inputRequestString = string
         DispatchQueue.main.async {
+            let desiredType: UIKeyboardType = numeric ? .numberPad : .default
+            if self.inputTextField.keyboardType != desiredType {
+                self.inputTextField.keyboardType = desiredType
+                // A number pad has no Return key, so give it a "Done" accessory
+                // bar that submits the same way Return would.
+                self.inputTextField.inputAccessoryView = numeric ? self.makeKeyboardDoneBar() : nil
+                if self.inputTextField.isFirstResponder {
+                    self.inputTextField.reloadInputViews()
+                }
+            }
             // When a hardware keyboard is attached, skip the software keyboard
             // entirely — pressesBegan delivers keystrokes to the Brogue queue
             // via the responder chain. Just expose the Esc button so the user
@@ -2838,6 +2854,22 @@ extension BrogueViewController: UITextFieldDelegate {
                 self.inputTextField.becomeFirstResponder()
             }
         }
+    }
+
+    /// Toolbar shown above the number pad (which has no Return key) with a single
+    /// "Done" button that submits the entry exactly like pressing Return.
+    private func makeKeyboardDoneBar() -> UIToolbar {
+        let bar = UIToolbar()
+        bar.sizeToFit()
+        bar.items = [
+            UIBarButtonItem(barButtonSystemItem: .flexibleSpace, target: nil, action: nil),
+            UIBarButtonItem(barButtonSystemItem: .done, target: self, action: #selector(keyboardDonePressed))
+        ]
+        return bar
+    }
+
+    @objc private func keyboardDonePressed() {
+        _ = textFieldShouldReturn(inputTextField)
     }
 
     func textFieldShouldReturn(_ textField: UITextField) -> Bool {

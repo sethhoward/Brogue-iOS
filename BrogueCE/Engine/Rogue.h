@@ -72,8 +72,8 @@
 #define D_MESSAGE_MACHINE_GENERATION    (WIZARD_MODE && 0)
 
 // iOS port (iBrogue): standalone debug toggle (NOT gated on wizard mode -- works in a normal game).
-// When 1, guarantees a single gold goblin on the shallowest eligible level (depth 5), bypassing the
-// random spawn roll, and telepathically reveals it so it can be tracked on the map while it flees.
+// When 1, guarantees a single gold goblin on depth 2 (early, to reach it fast while testing), bypassing
+// the random spawn roll, and telepathically reveals it so it can be tracked on the map while it flees.
 // Set to 0 for normal random behavior.
 #define D_ALWAYS_SPAWN_GOLD_GOBLIN      1
 
@@ -2384,10 +2384,12 @@ typedef struct creature {
     short xpxp;                         // exploration experience (used to time telepathic bonding for allies)
     short newPowerCount;                // how many more times this monster can absorb a fallen monster
     short totalPowerCount;              // how many times has the monster been empowered? Used to recover abilities when negated.
-    short goldGoblinBurstTiles;         // iOS port (iBrogue): tiles left in the gold goblin's current flee burst
+    short goldGoblinFleeTurns;          // iOS port (iBrogue): turns the gold goblin keeps running after last seeing the player
     boolean goldGoblinTriggered;        // iOS port (iBrogue): gold goblin has been struck and is committed to fleeing
     boolean goldGoblinHasHoard;         // iOS port (iBrogue): drops the death hoard (false for clones/debug spawns)
     boolean goldGoblinThrewPotion;      // iOS port (iBrogue): has thrown its one hallucinogen flask (after gaining distance)
+    boolean goldGoblinDroppedDetectMagic; // iOS port (iBrogue): has shed its one-time below-25%-HP potion of detect magic
+    short goldGoblinFleeCommit;         // iOS port (iBrogue): turns left committed to the down-stairs reroute while the up stairs are blocked
 
     struct creature *leader;                 // only if monster is a follower
     struct creature *carriedMonster; // when vampires turn into bats, one of the bats restores the vampire when it dies
@@ -3075,6 +3077,13 @@ extern "C" {
     void notifyEvent(short eventId, int data1, int data2, const char *str1, const char *str2);
     boolean takeScreenshot(void);
     enum graphicsModes setGraphicsMode(enum graphicsModes mode);
+    // iOS port (iBrogue): persist/restore the most recent run's seed so the
+    // "New Seeded Game" prompt can pre-fill it across app launches.
+    uint64_t ceLoadPersistedSeed(void);
+    void cePersistLastSeed(uint64_t seed);
+    // iOS port (iBrogue): pre-fill + show the on-screen keyboard for text entry;
+    // numeric selects a number pad for seed entry.
+    void ceRequestTextInput(const char *defaultText, boolean numeric);
     boolean controlKeyIsDown(void);
     boolean shiftKeyIsDown(void);
     short getHighScoresList(rogueHighScoresEntry returnList[HIGH_SCORES_COUNT]);
@@ -3335,7 +3344,7 @@ extern "C" {
     void unAlly(creature *monst);
     boolean monsterFleesFrom(creature *monst, creature *defender);
     void monstersTurn(creature *monst);
-    void goldGoblinReactToDamage(creature *monst, creature *attacker); // iOS port (iBrogue)
+    void goldGoblinReactToDamage(creature *monst, creature *attacker, short damage); // iOS port (iBrogue)
     void goldGoblinDropHoard(creature *monst); // iOS port (iBrogue)
     boolean getRandomMonsterSpawnLocation(short *x, short *y);
     void spawnPeriodicHorde(void);

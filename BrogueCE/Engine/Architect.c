@@ -3900,9 +3900,10 @@ static void spawnGoldGoblin(void) {
         return; // at most once per run, even when forced for debugging
     }
 
-    // iOS port (iBrogue): D_ALWAYS_SPAWN_GOLD_GOBLIN forces a guaranteed spawn on the shallowest
-    // eligible level (depth 5), skipping the depth/chance gate; otherwise it is the normal random roll.
-    const boolean forceSpawn = D_ALWAYS_SPAWN_GOLD_GOBLIN && rogue.depthLevel == 5;
+    // iOS port (iBrogue): D_ALWAYS_SPAWN_GOLD_GOBLIN forces a guaranteed spawn on depth 2 (earlier than
+    // the normal 5-24 range, to reach it fast while testing), skipping the depth/chance gate; otherwise
+    // it is the normal random roll.
+    const boolean forceSpawn = D_ALWAYS_SPAWN_GOLD_GOBLIN && rogue.depthLevel == 2;
 
     if (!forceSpawn
         && (rogue.depthLevel < 5

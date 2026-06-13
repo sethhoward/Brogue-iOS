@@ -2671,6 +2671,10 @@ extern "C" {
     boolean shiftKeyIsDown();
     short getHighScoresList(rogueHighScoresEntry returnList[HIGH_SCORES_COUNT]);
     boolean saveHighScore(rogueHighScoresEntry theEntry);
+    // iOS port (iBrogue): persist/restore the most recent run's seed so the
+    // title screen's seeded-game prompt can pre-fill it across app launches.
+    unsigned long loadPersistedSeed(void);
+    void persistLastSeed(unsigned long seed);
     void initializeBrogueSaveLocation();
     fileEntry *listFiles(short *fileCount, char **dynamicMemoryBuffer);
     void initializeLaunchArguments(enum NGCommands *command, char *path, unsigned long *seed);
@@ -3227,7 +3231,7 @@ extern "C" {
     } CBrogueGameEvent;
     
     void setBrogueGameEvent(CBrogueGameEvent brogueGameState);
-    void requestKeyboardInput(char *string);
+    void requestKeyboardInput(char *string, boolean numeric); // iOS port (iBrogue): numeric -> number pad
 
     // iOS port (iBrogue): title-menu entries that open native screens.
     void showFileManagementScreen(void);

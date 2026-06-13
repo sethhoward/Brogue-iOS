@@ -1206,9 +1206,11 @@ creatureType monsterCatalog[NUMBER_MONSTER_KINDS] = {
     {0, "mangrove dryad",G_ANCIENT_SPIRIT,   &tanColor,      70,     60,     175,    {2, 8, 2},      6,  100,    100,    DF_ASH_BLOOD,   0,    true,       0,      0,              {BOLT_ANCIENT_SPIRIT_VINES},
         (MONST_IMMUNE_TO_WEBS | MONST_ALWAYS_USE_ABILITY | MONST_MAINTAINS_DISTANCE | MONST_NO_POLYMORPH | MONST_MALE | MONST_FEMALE), (0)},
     // iOS port (iBrogue): gold goblin. HP is overridden per-depth at spawn (see spawnGoldGoblin); the 65
-    // here is the fallback for non-hook spawns (e.g. wizard mode). Never attacks (0 damage), fast (move 50),
-    // modest dodge (def 25), no regen (0), can't be polymorphed. Custom AI/combat/loot keyed off MK_GOLD_GOBLIN.
-    {0, "gold goblin",  G_GOBLIN, &goldGoblinColor,    65,     25,     100,    {0, 0, 0},      0,  50,     100,    DF_RED_BLOOD,   0,    false,      0,      0,              {0},
+    // here is the fallback for non-hook spawns (e.g. wizard mode). Never attacks (0 damage); moves at the
+    // player's pace like a monkey (move 100 -- it flees continuously, so a faster speed would be flatly
+    // uncatchable), modest dodge (def 25), no regen (0), can't be polymorphed. Custom AI/combat/loot keyed
+    // off MK_GOLD_GOBLIN.
+    {0, "gold goblin",  G_GOBLIN, &goldGoblinColor,    65,     25,     100,    {0, 0, 0},      0,  100,    100,    DF_RED_BLOOD,   0,    false,      0,      0,              {0},
         (MONST_MALE | MONST_FEMALE | MONST_NO_POLYMORPH), (0)},
 };
 

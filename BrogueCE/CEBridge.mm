@@ -575,12 +575,39 @@ enum graphicsModes setGraphicsMode(enum graphicsModes mode) {
     return graphicsMode;
 }
 
+// iOS port (iBrogue): the seed of the most recent run (previousGameSeed) is
+// persisted in NSUserDefaults so the title screen's "New Seeded Game" prompt can
+// pre-fill the last-played seed even after the app is killed. Desktop keeps this
+// only in memory for the lifetime of the process; on iOS backgrounded apps are
+// frequently terminated, which would otherwise reset it to 0 each launch. Stored
+// as an NSNumber so the full uint64_t seed range round-trips losslessly.
+static NSString * const kCELastSeedKey = @"ce last game seed";
+
+uint64_t ceLoadPersistedSeed(void) {
+    NSNumber *n = [[NSUserDefaults standardUserDefaults] objectForKey:kCELastSeedKey];
+    return n ? (uint64_t)[n unsignedLongLongValue] : 0;
+}
+
+void cePersistLastSeed(uint64_t seed) {
+    [[NSUserDefaults standardUserDefaults] setObject:@((unsigned long long)seed) forKey:kCELastSeedKey];
+}
+
 boolean controlKeyIsDown(void) {
     return gHost ? [gHost controlKeyIsDown] : false;
 }
 
 boolean shiftKeyIsDown(void) {
     return false;
+}
+
+// iOS port (iBrogue): CE's getInputTextString calls this before its input loop so
+// the on-screen keyboard is pre-filled with the engine's default seed/name —
+// otherwise the field is empty and iOS suppresses the backspace callback for the
+// pre-filled text, so it can't be deleted. `numeric` requests a number pad (with
+// a Done bar) for seed entry.
+void ceRequestTextInput(const char *defaultText, boolean numeric) {
+    NSString *s = defaultText ? [NSString stringWithUTF8String:defaultText] : @"";
+    if (gHost) [gHost requestTextInput:s numeric:(BOOL)numeric];
 }
 
 // iOS port (iBrogue): the CE title menu's "File Management" entry routes here.
