@@ -292,9 +292,47 @@ immediately on inspection (`Items.c:5964`).
 | 2 | regeneration | 1 | 750 | Faster HP regen (`turnsForFullRegenInThousandths`, 0.75^x) | Slows/halts regen |
 | 3 | transference | 1 | 750 | Heal % of damage dealt (`playerTransferenceRatio` = 20% per level base) | Lose HP when dealing damage |
 | 4 | light | 1 | 600 | See farther in dim light; no extra noticeability | (always good kind) |
-| 5 | awareness | 1 | 700 | Better detection of traps/secret doors/levers | Dulls detection |
-| 6 | wisdom | 1 | 700 | Staffs recharge faster (`ringWisdomMultiplier`, 1.3^x, `PowerTables.c:72`) | Slower staff recharge |
+| 5 | awareness | 1 | 700 | Better detection of traps/secret doors/levers + iOS-port perception effects (see below) | Dulls detection (cursed senses nothing extra) |
+| 6 | wisdom | 1 | 700 | Staffs recharge faster (`ringWisdomMultiplier`, 1.3^x, `PowerTables.c:72`) + iOS-port insight effects (see below) | Slower staff recharge / slower insight |
 | 7 | reaping | 1 | 700 | Recharge staffs/charms on each hit | Drains staffs/charms on each hit |
+
+The worn enchant of each ring is summed into a `rogue.*Bonus` field on equip (`Items.c:8890`).
+`rogue.awarenessBonus += 20 * effectiveRingEnchant` (so +20 per enchant level);
+`rogue.wisdomBonus += effectiveRingEnchant` (so +1 per enchant level). Cursed (negative-enchant)
+rings push the bonus negative.
+
+### Ring of awareness — iOS-port effects
+
+Beyond vanilla trap/secret-door/lever detection, the iOS port adds several **perception** effects, all
+keyed off `rogue.awarenessBonus`:
+
+- **Search strength.** Passive/active searches scale with the bonus: a base search is
+  `max(60, awarenessBonus + 30)` (positive ring) and the per-turn passive search is `awarenessBonus + 30`;
+  a cursed ring (`< 0`) drops the active base to 30 (`Time.c:2263`, `Time.c:2272`, `Time.c:2385`).
+- **Sense a pursuer losing your trail.** When a hunting monster gives up (hunting → wandering), you get a
+  `clamp(50 + awarenessBonus, 0, 100)`% chance to be told it lost your trail — no line of sight required
+  (`SENSE_LOST_TRAIL_BASE_CHANCE = 50`, `Monsters.c:1827`, `Monsters.c:1894`).
+- **Off-screen escape notice.** A fleeing creature that escapes up/down the stairs prints its closure
+  message even off-screen, but only if `awarenessBonus > 0` (`Monsters.c:3552`).
+- **Sense a level's room machine.** On first arriving at a level that contains a room machine
+  (vault/altar/captive/guardian set-piece), a positive ring gives a
+  `min(100, 25 + awarenessBonus)`% chance of "you sense that something of significance lies hidden on
+  this level." Existence only — never location or reward/danger; truthful (never false-positives), so
+  silence is ambiguous. Gated on wearing the ring AND a machine existing, so non-wearers draw no RNG and
+  keep vanilla replay behavior (`AWARENESS_MACHINE_SENSE_BASE = 25`, `RogueMain.c:597`, `RogueMain.c:815`).
+
+### Ring of wisdom — iOS-port effects
+
+Beyond the vanilla staff-recharge multiplier, the iOS port adds two **insight** effects, keyed off
+`rogue.wisdomBonus` (the effective enchant, +1 per level):
+
+- **Faster rest-insight.** Resting reveals/identifies a random polarity-bearing pack item on an
+  escalating turn threshold (`100 * (revealsSoFar + 1)`). A worn wisdom ring cuts that threshold by
+  ~`10 * wisdomBonus`%, clamped to at most 80% faster (cursed slows it, capped at 2× and never below 1
+  rested turn) (`Items.c:7902`).
+- **Wider detect-magic spread.** The reworked potion of detect magic reveals `rand_range(1, maxReveals)`
+  pack items, where `maxReveals = max(1, 2 + wisdomBonus)` — so a worn wisdom ring widens the 1–2 default
+  (`Items.c:7992`).
 
 ---
 
@@ -354,17 +392,19 @@ enchant = longer effect **and** shorter relative recharge for the duration-scali
 
 ## 7. Potions
 
-Source: `potionTable_Brogue[]` at `GlobalsBrogue.c:665`. Enum: `Rogue.h:805`. 16 kinds.
-`magicPolarity` +1 = beneficial, −1 = malevolent. The `range` for many is the effect duration
-in turns. Appearance is a random color from `itemColorsRef`. `numberGoodPotionKinds` = 8.
+Source: `potionTable_Brogue[]` at `GlobalsBrogue.c:665`. Enum: `Rogue.h` `enum potionKind`. **26 kinds**
+= 16 vanilla (0–15) + 5 **iOS-port** themed/returning (16–20) + 5 **iOS-port** capture-only (21–25).
+`magicPolarity` +1 = beneficial, −1 = malevolent. The `range` for many is the effect duration in
+turns. Appearance is a random color from `itemColorsRef` (capture-only kinds and the empty bottle are
+always-identified, so their color is never shown). `numberGoodPotionKinds` = 11.
 
 | # | Potion | Good? | Freq | MktVal | Range (effect) | Description summary |
 |---|---|---|---|---|---|---|
 | 0 | life | + | **0†** | 500 | 10,10 | Full heal, cure, +max HP permanently |
 | 1 | strength | + | **0†** | 400 | 1,1 | +1 strength permanently |
-| 2 | telepathy | + | 20 | 350 | 300 | Sense creatures |
+| 2 | telepathy | + | 20 | 350 | 300 | Drink: sense all creatures (temporary). iOS: thrown at a creature → a *permanent* single-target bond (that one stays revealed). See §7b |
 | 3 | levitation | + | 15 | 250 | 100 | Hover over hazards |
-| 4 | detect magic | + | 20 | 500 | 0 | Reveal good/bad sigils on items |
+| 4 | **empty bottle** | + | 20 | 500 | 0 | iOS port: the `POTION_DETECT_MAGIC` slot, repurposed. Captures a gas/liquid/hazard → the matching, already-known potion. See §7a |
 | 5 | speed (haste self) | + | 10 | 500 | 25 | Move at double speed |
 | 6 | fire immunity | + | 15 | 500 | 150 | Immune to heat/fire/lava |
 | 7 | invisibility | + | 15 | 400 | 75 | Temporarily invisible |
@@ -376,10 +416,83 @@ in turns. Appearance is a random color from `itemColorsRef`. `numberGoodPotionKi
 | 13 | darkness | − | 7 | 150 | 400 | Blinds; supernatural darkness cloud |
 | 14 | descent | − | 15 | 500 | 0 | Ground vanishes (fall to next level) |
 | 15 | creeping death (lichen) | − | 7 | 450 | 0 | Plants deadly lichen |
+| 16 | honey | + | 10‡ | 400 | 20 | iOS: regenerate over time; thrown → a sticky net mire |
+| 17 | vomit | − | 10‡ | 150 | 0 | iOS: rot-gas nausea cloud (a zombie's stench, bottled) |
+| 18 | wort | + | 10‡ | 500 | 0 | iOS: healing-spore cloud |
+| 19 | venom | − | 10‡ | 250 | 15 | iOS: poison DoT; thrown poisons the struck creature |
+| 20 | detect magic | + | 10 | 350 | 0 | iOS: the *returning* detect magic — drink reveals polarity of 1–2 random **pack** items; **thrown** instead senses 1–2 undiscovered **floor** items (auras on the map). See §7b |
+| 21 | acid | − | **0✦** | 300 | 15 | **Capture-only.** Thrown: `weaken()` the struck creature (defense −25/pt + accuracy/damage down) + acid splatter |
+| 22 | webbing | − | **0✦** | 300 | 0 | **Capture-only.** Thrown/uncorked: lays an entangling web patch (`DF_WEB_LARGE`) |
+| 23 | steam | − | **0✦** | 300 | 0 | **Capture-only.** Thrown/uncorked: a scalding steam cloud (`DF_STEAM_PUFF`) |
+| 24 | ice | − | **0✦** | 300 | 5 | **Capture-only.** Thrown/uncorked: a freezing cloud — freeze 3 turns → slow, douses flame, freezes water it covers. Bolt-detonable as a trap |
+| 25 | water | − | **0✦** | 300 | 0 | **Capture-only.** Thrown/uncorked: a large flood puddle (`DF_FLOOD`) — lightning-stun footing, washes out scent |
 
 † **Metered.** `POTION_LIFE` and `POTION_STRENGTH` have base `frequency = 0` in the table;
 their generation is driven entirely by the metered system (see §10). Comments in the table
 note "frequency is dynamically adjusted".
+
+‡ **Themed sets (iOS port).** honey+vomit (set 1) and wort+venom (set 2) are *mutually exclusive* —
+exactly one set is live per run, chosen deterministically from the seed in `shuffleFlavors`; the
+other set's two kinds are marked absent (never generated, pre-identified). Detect magic (20) is
+always present. Polarity of the live set is what `detect magic` / rest-insight can reveal.
+
+✦ **Capture-only (iOS port, empty-bottle v2).** `frequency = 0` **and** deliberately absent from the
+metered table (§10), so *nothing* overrides the 0 — these never generate. The only way to obtain one
+is to capture a matching hazard with the empty bottle (§7a). Always identified (`shuffleFlavors`);
+`magicPolarity −1` so a thrown one is treated as offensive. Adding `POTION_*` enum values shifts the
+generation/ID stream → a `recordingVersionString` bump is owed at release.
+
+### 7a. Empty bottle & the capture system (iOS port)
+
+The empty bottle (slot 4) fills with the hazard you reach and becomes the matching, already-known
+potion. Three capture gestures, resolved **GAS > SURFACE > LIQUID** (`emptyBottleCaptureKindForTile`,
+`Items.c`):
+
+- **Step-in** (stand on the tile): poison gas→poison, confusion→confusion, paralysis→paralysis, rot
+  gas→lichen, stench/smoke→vomit, methane→incineration, darkness cloud→darkness, healing cloud→wort,
+  steam→**steam**, deep/shallow water→**water**, ice→**ice**, brimstone→incineration, embers→fire
+  immunity, acid splatter→**acid**, web/net→**webbing**.
+- **Levitation skim** (float over an un-standable tile): lava→incineration, any `T_AUTO_DESCENT`
+  (chasm/hole/trap door)→descent.
+- **Bolt** (drop the bottle, zap it): lightning→speed, fire→incineration.
+
+A once-per-kind contextual hint names the exact result while you carry a bottle. Full capture map,
+hazard reference, and rationale: [TERRAIN_AUDIT.md §8–9](TERRAIN_AUDIT.md) and the design doc
+[`docs/design/empty-bottle-v2.md`](../design/empty-bottle-v2.md).
+
+### 7b. Throw & zap behavior — which potions are inert
+
+Two off-label uses exist: **throwing** a potion (shatters at the target) and **zapping** a *dropped*
+potion with a fire/lightning bolt. Not every potion reacts.
+
+- **Inert under all conditions** (thrown *and* zapped): **none anymore.** (Telepathy and detect magic
+  used to be — both now have thrown effects, below. The empty bottle is harmless *thrown* but captures
+  when *zapped*.)
+- **Fires on any throw, target irrelevant:** **detect magic** (iOS port) — a thrown detect magic senses
+  1–2 random *undiscovered* magic items lying on the dungeon **floor** (not your pack), revealing their
+  polarity and marking their auras on the map. Works thrown at a creature or bare ground alike
+  (`throwDetectMagicOnFloor`). Same 1–2 base count as the drink (widened by a ring of wisdom).
+- **Glow-and-pass when zapped** (the bolt passes through harmlessly): the **8 benevolent potions** —
+  life, strength, telepathy, levitation, speed, fire immunity, invisibility, detect magic
+  (`Items.c`, "the bolt passes through the flask and its fluid glows warmly"). A zap is thus a
+  *costed polarity probe*, not a free mass-ID (see KNOWN_CAVEATS.md). The **empty bottle is the
+  exception** — zapping it *captures* the bolt. Bad/cloud potions **detonate** (spawn their shatter
+  signature and absorb the bolt), including the new acid/webbing/steam/ice/water.
+- **Thrown weapons can detonate a dropped bad/cloud potion too** (iOS port, `detonateFloorPotionAt`): an
+  **incendiary dart** triggers it like a *fire* bolt (cloud spawns, then the dart's blast ignites it), and
+  a plain **dart / javelin** triggers it like a *lightning* bolt (cloud blooms, unignited) — a cheap,
+  ammo-based potion-trap trigger. (Good potions / the empty bottle are untouched — a dart can't capture.)
+- **Harmless splash when thrown on bare ground but active on a direct creature hit:** strength, speed,
+  levitation, fire immunity, invisibility **buff the struck creature** (throwing them at an enemy
+  helps it); venom **poisons** it; **telepathy** (iOS port) **permanently bonds you to the struck
+  creature** — it stays revealed on the map wherever it roams (the one "throw at an enemy" here that
+  *helps you*; excludes inanimate turrets/totems; `applyPotionEffectToCreature`, `MB_TELEPATHICALLY_REVEALED`).
+  life thrown bursts a healing cloud (but is inert when zapped).
+
+So the practical "wasted if thrown" potions are the good self-buffs thrown at *bare ground* — with the
+caveats that **the empty bottle wants to be zapped, not thrown**, the **buff potions help an enemy you
+directly hit**, **telepathy thrown at an enemy is a permanent tracker**, and **detect magic thrown
+anywhere scouts the level's loot**. After these iOS changes, no potion is inert under every condition.
 
 ---
 
@@ -502,6 +615,14 @@ from the catalog. **Important:** after each level's population, `populateItems` 
 original potion/scroll tables (`memcpy` from saved copies, `Items.c:800`), which is what keeps
 enchant scrolls and life/strength potions out of the ordinary raffle except via the metered
 path or blueprints.
+
+**This table is also why `frequency = 0` means different things for different potions.** Life and
+strength sit here with a nonzero `incrementFrequency`, so their effective frequency is set at runtime
+(the catalog `0` is just a placeholder — hence "frequency is dynamically adjusted" in the table).
+The empty-bottle v2 capture-only potions (§7, acid/webbing/steam/ice/water) are `frequency = 0`
+**and deliberately absent from this table**, so nothing ever overrides their `0` — they can never
+generate, only be captured. *Rule of thumb:* freq 0 + metered = guaranteed pacing; freq 0 +
+unmetered = never generated. (The same "why" is commented in `Items.c` at the metered-override loop.)
 
 ---
 

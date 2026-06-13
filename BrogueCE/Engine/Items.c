@@ -703,7 +703,24 @@ void populateItems(pos upstairs) {
         short theCategory = ALL_ITEMS & ~GOLD; // gold is placed separately, below, so it's not a punishment
         short theKind = -1;
 
-        // Set metered item itemTable frequency to memory.
+        // Item generation has TWO independent paths, and the itemTable `frequency` only controls the
+        // first:
+        //   1. Weighted random pick (chooseKind), using itemTable[kind].frequency as the weight. A
+        //      frequency of 0 means this path NEVER picks that kind.
+        //   2. The metered-generation system here: a curated pacing track (meteredItemsGenerationTable +
+        //      rogue.meteredItems) for items that must appear on a schedule rather than by luck. For its
+        //      entries with incrementFrequency != 0 it accrues a running frequency each depth (see the
+        //      rogue.meteredItems[j].frequency += incrementFrequency above) and writes it back into the
+        //      itemTable below, plus it can hard-guarantee a spawn by depth (levelGuarantee /
+        //      itemNumberGuarantee, further down).
+        // This is why potions of life/strength (and the scroll of enchanting) appear despite their
+        // itemTable frequency being 0: that 0 is just a placeholder ("frequency is dynamically adjusted"
+        // in the tables) -- the meter sets their real frequency at runtime. It is ALSO why the
+        // empty-bottle v2 capture-only potions (acid/webbing/steam/ice/water) are guaranteed to never
+        // generate: they are frequency 0 AND deliberately absent from meteredItemsGenerationTable, so
+        // nothing here ever overrides their 0. Frequency 0 + metered = guaranteed pacing; frequency 0 +
+        // unmetered = never generated (capture-only). To make one drop in the wild, give it a non-zero
+        // itemTable frequency or add a metered entry.
         for (int j = 0; j < gameConst->numberMeteredItems; j++) {
             if (meteredItemsGenerationTable[j].incrementFrequency != 0) {
                 if (j >= gameConst->numberScrollKinds) {
@@ -4529,6 +4546,45 @@ enum boltType boltForItem(item *theItem) {
 // iOS port (iBrogue): a fire/lightning bolt crossing a dropped bad potion detonates it (helper defined near throwItem)
 static boolean shatterPotionAtLoc(item *theItem, short x, short y);
 
+// iOS port (iBrogue): staff-of-frost freeze semantics, applied to one creature. Anything fiery or
+// currently ablaze is too hot to freeze solid -- the cold merely douses it and leaves it sluggish.
+// Otherwise it freezes solid (a paralysis-like lock) for freezeTurns and thaws into STATUS_SLOWED, with
+// the slow tail layered underneath the freeze so exactly slowTurns remain when the ice breaks (no
+// remembered state). Shared by the BE_FREEZE bolt (staff of frost, which passes staffFreeze*Duration)
+// and the empty-bottle v2 frost cloud (T_CAUSES_FREEZE, which calls this each turn with fixed counts).
+// The message/flash fire only on the transition INTO frozen (or a real dousing), so a per-turn gas
+// caller never spams. Returns true if anything observable happened (used by the bolt for auto-ID).
+boolean freezeCreature(creature *monst, short freezeTurns, short slowTurns) {
+    if (monst->info.flags & (MONST_INANIMATE | MONST_INVULNERABLE)) {
+        return false;
+    }
+    if ((monst->info.flags & MONST_FIERY) || monst->status[STATUS_BURNING]) {
+        const boolean wasBurning = monst->status[STATUS_BURNING];
+        if (wasBurning) {
+            extinguishFireOnCreature(monst);
+        }
+        slow(monst, slowTurns);
+        // MONST_FIERY creatures relight every turn, so only flash on an actual dousing (avoids per-turn spam in a cloud).
+        if (wasBurning && canDirectlySeeMonster(monst) && boltCatalog[BOLT_FREEZE].backColor) {
+            flashMonster(monst, boltCatalog[BOLT_FREEZE].backColor, 100);
+        }
+        return true;
+    }
+    const boolean wasFrozen = (monst->status[STATUS_FROZEN] > 0);
+    monst->status[STATUS_FROZEN] = monst->maxStatus[STATUS_FROZEN] =
+        max(monst->status[STATUS_FROZEN], freezeTurns);
+    slow(monst, max(monst->status[STATUS_SLOWED], freezeTurns + slowTurns));
+    if (!wasFrozen) { // transition into frozen: message + flash once, not every turn in a cloud
+        if (monst == &player) {
+            message("the cold encases you in ice!", 0);
+        }
+        if (canDirectlySeeMonster(monst) && boltCatalog[BOLT_FREEZE].backColor) {
+            flashMonster(monst, boltCatalog[BOLT_FREEZE].backColor, 100);
+        }
+    }
+    return true;
+}
+
 static boolean updateBolt(bolt *theBolt, creature *caster, short x, short y,
                    boolean boltInView, boolean alreadyReflected,
                    boolean *autoID, boolean *lightingChanged) {
@@ -4665,33 +4721,12 @@ static boolean updateBolt(bolt *theBolt, creature *caster, short x, short y,
                 }
                 break;
             case BE_FREEZE:
-                // iOS port (iBrogue): staff of frost. Anything fiery or currently ablaze is too hot to freeze
-                // solid -- the cold merely douses it and leaves it sluggish. Otherwise it freezes solid (a
-                // paralysis-like lock) and thaws into STATUS_SLOWED (see decrementMonsterStatus / player status).
-                if (!(monst->info.flags & (MONST_INANIMATE | MONST_INVULNERABLE))) {
-                    if ((monst->info.flags & MONST_FIERY) || monst->status[STATUS_BURNING]) {
-                        if (monst->status[STATUS_BURNING]) {
-                            extinguishFireOnCreature(monst);
-                        }
-                        slow(monst, staffFreezeSlowDuration(theBolt->magnitude * FP_FACTOR));
-                    } else {
-                        short freezeTurns = staffFreezeDuration(theBolt->magnitude * FP_FACTOR);
-                        short slowTurns = staffFreezeSlowDuration(theBolt->magnitude * FP_FACTOR);
-                        monst->status[STATUS_FROZEN] = monst->maxStatus[STATUS_FROZEN] =
-                            max(monst->status[STATUS_FROZEN], freezeTurns);
-                        // Layer the thaw-slow underneath the freeze: both tick down together, so when the ice
-                        // breaks exactly slowTurns of STATUS_SLOWED remain -- no need to recall the enchant at thaw.
-                        slow(monst, max(monst->status[STATUS_SLOWED], freezeTurns + slowTurns));
-                        if (monst == &player) {
-                            message("the cold encases you in ice!", 0);
-                        }
-                    }
-                    if (boltCatalog[BOLT_FREEZE].backColor) {
-                        flashMonster(monst, boltCatalog[BOLT_FREEZE].backColor, 100);
-                    }
-                    if (autoID) {
-                        *autoID = true;
-                    }
+                // iOS port (iBrogue): staff of frost. Freeze semantics extracted to freezeCreature(),
+                // shared with the empty-bottle v2 frost cloud. Duration scales with bolt magnitude.
+                if (freezeCreature(monst,
+                                   staffFreezeDuration(theBolt->magnitude * FP_FACTOR),
+                                   staffFreezeSlowDuration(theBolt->magnitude * FP_FACTOR)) && autoID) {
+                    *autoID = true;
                 }
                 break;
             case BE_HASTE:
@@ -6537,9 +6572,20 @@ static boolean hitMonsterWithProjectileWeapon(creature *thrower, creature *monst
     }
 }
 
+// iOS port (iBrogue): empty-bottle v2 potion of ice -- a freezing cloud (creatures caught in it freeze
+// then thaw to slow; it also douses flame via the gas tile's TM_EXTINGUISHES_FIRE), plus a water sheet
+// wherever the cloud lands on water (the staff-of-frost water freeze; the water-freeze DFs only
+// propagate over water, so they no-op on dry land). Shared by the thrown/bolt-detonated shatter and the
+// uncork-in-hand drink path.
+static void spawnFrostCloud(short x, short y) {
+    spawnDungeonFeature(x, y, &dungeonFeatureCatalog[DF_FREEZING_CLOUD_POTION], true, false);
+    spawnDungeonFeature(x, y, &dungeonFeatureCatalog[DF_DEEP_WATER_FREEZE], true, false);
+    spawnDungeonFeature(x, y, &dungeonFeatureCatalog[DF_SHALLOW_WATER_FREEZE], true, false);
+}
+
 // iOS port (iBrogue): spawn a bad/cloud potion's shatter signature at (x,y), auto-identify the flask,
-// refresh the cell. Returns true for the 7 cloud/explosion kinds, false otherwise. Shared by throwItem
-// and the bolt-detonation hook in updateBolt so the kind->DF mapping lives in one place.
+// refresh the cell. Returns true for the cloud/explosion/terrain kinds, false otherwise. Shared by
+// throwItem and the bolt-detonation hook in updateBolt so the kind->DF mapping lives in one place.
 static boolean shatterPotionAtLoc(item *theItem, short x, short y) {
     switch (theItem->kind) {
         case POTION_POISON:
@@ -6592,6 +6638,29 @@ static boolean shatterPotionAtLoc(item *theItem, short x, short y) {
             message("the flask shatters and a cloud of healing spores bursts out!", 0);
             spawnDungeonFeature(x, y, &dungeonFeatureCatalog[DF_LIFE_POTION_CLOUD], true, false);
             break;
+        // iOS port (iBrogue): empty-bottle v2 capture-only cloud/terrain potions. (Acid's creature
+        // weaken and ice's freeze are handled in throwItem's struck-creature path; this is the
+        // empty-ground / bolt-detonation signature -- acid leaves a splatter, ice falls through.)
+        case POTION_STEAM:
+            message("the flask shatters and a searing cloud of steam boils out!", 0);
+            spawnDungeonFeature(x, y, &dungeonFeatureCatalog[DF_STEAM_PUFF], true, false);
+            break;
+        case POTION_WATER:
+            message("the flask shatters and water gushes out, flooding the area!", 0);
+            spawnDungeonFeature(x, y, &dungeonFeatureCatalog[DF_FLOOD], true, false);
+            break;
+        case POTION_WEBBING:
+            message("the flask shatters and bursts into a tangle of grasping web!", 0);
+            spawnDungeonFeature(x, y, &dungeonFeatureCatalog[DF_WEB_LARGE], true, false);
+            break;
+        case POTION_ACID:
+            message("the flask shatters and acid sprays across the ground!", 0);
+            spawnDungeonFeature(x, y, &dungeonFeatureCatalog[DF_ACID_BLOOD], true, false);
+            break;
+        case POTION_ICE:
+            message("the flask shatters into a cloud of biting frost!", 0);
+            spawnFrostCloud(x, y);
+            break;
         default:
             return false;
     }
@@ -6625,7 +6694,11 @@ boolean fillEmptyBottle(item *bottle, short newPotionKind, const char *flavorTex
 // when applied there. Returns the potion kind (and sets *flavorText) if the tile holds a catchable
 // element, else -1. Used by the empty-bottle apply path in drinkPotion.
 static short emptyBottleCaptureKindForTile(short x, short y, const char **flavorText) {
-    // Gas on the tile takes priority (a more deliberate hazard); otherwise deep water.
+    const pos loc = (pos){ x, y };
+    // empty-bottle v2 precedence (see docs/design/empty-bottle-v2.md): GAS first -- it's in the air
+    // around you and the most perishable, so grab it before it dissipates. Then, if levitating, the
+    // float-only skim targets (lava/chasm); otherwise the standing SURFACE pass beats the LIQUID
+    // pass (GAS > SURFACE > LIQUID). Each branch sets *flavorText and returns a potion kind, else -1.
     if (pmap[x][y].layers[GAS] != NOTHING && pmap[x][y].volume > 0) {
         switch (pmap[x][y].layers[GAS]) {
             case POISON_GAS:
@@ -6640,6 +6713,15 @@ static short emptyBottleCaptureKindForTile(short x, short y, const char **flavor
             case ROT_GAS:
                 *flavorText = "fetid spores drift into the bottle, already furring the glass with lichen.";
                 return POTION_LICHEN;
+            case STENCH_SMOKE_GAS:
+                *flavorText = "a reeking smoke coils into the bottle and curdles there.";
+                return POTION_VOMIT;
+            case METHANE_GAS:
+                *flavorText = "explosive swamp gas hisses into the bottle under pressure.";
+                return POTION_INCINERATION;
+            case STEAM:
+                *flavorText = "scalding steam fogs the glass as it crowds into the bottle.";
+                return POTION_STEAM;
             case DARKNESS_CLOUD:
                 *flavorText = "the bottle swallows a wisp of darkness; light bends around the stopper.";
                 return POTION_DARKNESS;
@@ -6652,16 +6734,106 @@ static short emptyBottleCaptureKindForTile(short x, short y, const char **flavor
                 break;
         }
     }
-    if (!player.status[STATUS_LEVITATING]
-        && cellHasTerrainFlag((pos){ x, y }, T_IS_DEEP_WATER)) {
-        *flavorText = "you dip the bottle until cool water beads on the glass.";
-        return POTION_FIRE_IMMUNITY;
+
+    // Levitation skim: hazards you can't survive on foot, captured only while floating over them.
+    // Floating means you aren't touching the floor, so no standing surface/liquid capture applies.
+    if (player.status[STATUS_LEVITATING]) {
+        if (cellHasTerrainFlag(loc, T_LAVA_INSTA_DEATH)) {
+            *flavorText = "you skim the bottle across the molten surface and it fills with fire.";
+            return POTION_INCINERATION;
+        }
+        if (cellHasTerrainFlag(loc, T_AUTO_DESCENT)) {
+            *flavorText = "you cork a breath of the empty air above the drop.";
+            return POTION_DESCENT;
+        }
+        return -1;
+    }
+
+    // Standing SURFACE pass (beats LIQUID).
+    switch (pmap[x][y].layers[SURFACE]) {
+        case EMBERS:
+            // iOS port (iBrogue): embers are the residue of fire-immune creatures (salamander,
+            // flamedancer, phoenix, ...) -- bottle the essence of a thing that can't burn.
+            *flavorText = "you scoop the dying embers into the bottle before they cool to ash.";
+            return POTION_FIRE_IMMUNITY;
+        case ACID_SPLATTER:
+            *flavorText = "hissing acid eats at the bottle as you scoop it from the floor.";
+            return POTION_ACID;
+        case SPIDERWEB:
+        case NETTING:
+            *flavorText = "you wind the clinging strands into the bottle.";
+            return POTION_WEBBING;
+        default:
+            break;
+    }
+
+    // Standing LIQUID pass.
+    if (cellHasTerrainFlag(loc, T_IS_DEEP_WATER)
+        || cellHasTerrainType(loc, SHALLOW_WATER)
+        || cellHasTerrainType(loc, FLOOD_WATER_SHALLOW)) {
+        *flavorText = "you dip the bottle until water sloshes inside.";
+        return POTION_WATER;
+    }
+    if (cellHasTerrainType(loc, ICE_DEEP) || cellHasTerrainType(loc, ICE_SHALLOW)) {
+        *flavorText = "you chip a sliver of ice into the bottle.";
+        return POTION_ICE;
+    }
+    if (cellHasTerrainType(loc, ACTIVE_BRIMSTONE) || cellHasTerrainType(loc, INERT_BRIMSTONE)) {
+        *flavorText = "you scrape smoldering brimstone into the bottle.";
+        return POTION_INCINERATION;
     }
     return -1;
 }
 
+// iOS port (iBrogue): empty-bottle v2 contextual capture hint. While carrying an empty bottle, name
+// the exact potion the tile underfoot would yield (or, if levitating, the hazard below) -- once per
+// capture kind per game, so it never nags. Pure messaging keyed off the same capture mapping used to
+// actually fill the bottle, so the hint and the result can never drift apart. No RNG and no state
+// beyond the per-kind hinted bitmask, so it's replay-safe. Called from playerTurnEnded.
+void showEmptyBottleCaptureHint(void) {
+    boolean carryingEmptyBottle = false;
+    for (item *theItem = packItems->nextItem; theItem != NULL; theItem = theItem->nextItem) {
+        if ((theItem->category & POTION) && theItem->kind == POTION_DETECT_MAGIC) {
+            carryingEmptyBottle = true;
+            break;
+        }
+    }
+    if (!carryingEmptyBottle) {
+        return;
+    }
+    const char *flavor = NULL;
+    short captureKind = emptyBottleCaptureKindForTile(player.loc.x, player.loc.y, &flavor);
+    if (captureKind < 0 || captureKind >= 32 || (rogue.emptyBottleHintedKinds & (1UL << captureKind))) {
+        return;
+    }
+    rogue.emptyBottleHintedKinds |= (1UL << captureKind);
+    char buf[COLS * 2];
+    sprintf(buf, "your empty bottle could capture this -- it would become a potion of %s.",
+            potionTable[captureKind].name);
+    messageWithColor(buf, &itemMessageColor, 0);
+}
+
 // iOS port (iBrogue): thrown good potions apply their effect to the struck creature (helper defined below)
 static boolean applyPotionEffectToCreature(creature *monst, short potionKind, short magnitude);
+// iOS port (iBrogue): a thrown potion of detect magic senses floor items instead of pack items (defined below near quaffDetectMagic)
+static void throwDetectMagicOnFloor(void);
+
+// iOS port (iBrogue): detonate a dropped bad/cloud potion lying at (x,y), exactly as a bolt's detonation
+// does -- spawn the potion's shatter signature (gas cloud / terrain burst) and remove the flask. Used by
+// thrown incendiary darts (whose own blast then ignites the flammable cloud, like a fire bolt) and thrown
+// darts/javelins (which leave the cloud unignited, like a lightning bolt). Mirrors the remove/delete the
+// bolt hook does after shatterPotionAtLoc. Returns true if a potion detonated; good potions (no shatter
+// signature) and the empty bottle are left untouched (a dart isn't a bolt, so it can't capture).
+static boolean detonateFloorPotionAt(short x, short y) {
+    item *floorPotion = itemAtLoc((pos){ x, y });
+    if (floorPotion && (floorPotion->category & POTION) && shatterPotionAtLoc(floorPotion, x, y)) {
+        removeItemFromChain(floorPotion, floorItems);
+        deleteItem(floorPotion);
+        pmap[x][y].flags &= ~(HAS_ITEM | ITEM_DETECTED);
+        return true;
+    }
+    return false;
+}
 
 static void throwItem(item *theItem, creature *thrower, pos targetLoc, short maxDistance) {
     short i, numCells;
@@ -6781,6 +6953,17 @@ static void throwItem(item *theItem, creature *thrower, pos targetLoc, short max
         // bad-potion shatter / harmless-splash paths below when there's no tell.
         creature *struck = (pmap[x][y].flags & (HAS_MONSTER | HAS_PLAYER)) ? monsterAtLoc((pos){ x, y }) : NULL;
         short potionMag = potionTable[theItem->kind].range.upperBound; // fixed magnitude (good potions: lo==hi)
+        // iOS port (iBrogue): a thrown potion of detect magic turns its insight OUTWARD -- instead of
+        // reading items in your pack (the drink), it senses 1-2 random undiscovered magic items lying on
+        // the dungeon floor, revealing their polarity (and location) on the map. Fires wherever it lands
+        // (creature or bare ground), then auto-IDs and is consumed.
+        if (theItem->kind == POTION_DETECT_MAGIC2) {
+            throwDetectMagicOnFloor();
+            autoIdentify(theItem);
+            refreshDungeonCell((pos){ x, y });
+            deleteItem(theItem);
+            return;
+        }
         // iOS port (iBrogue): a thrown potion of life bursts into a healing-spore cloud (its signature)
         // and IDs unconditionally on shatter, like the gas potions. A direct hit also gets the instant
         // panacea heal from the helper; the cloud adds the lingering area heal.
@@ -6807,6 +6990,23 @@ static void throwItem(item *theItem, creature *thrower, pos targetLoc, short max
             deleteItem(theItem);
             return;
         }
+        // iOS port (iBrogue): empty-bottle v2 potion of acid -- a direct hit corrodes the creature
+        // (weaken: defense -25/pt plus reduced accuracy & damage) and leaves an acid splatter. On empty
+        // ground it falls through to shatterPotionAtLoc (splatter only).
+        if (theItem->kind == POTION_ACID && struck) {
+            weaken(struck, potionMag);
+            spawnDungeonFeature(x, y, &dungeonFeatureCatalog[DF_ACID_BLOOD], true, false);
+            monsterName(buf3, struck, true);
+            sprintf(buf, "the flask shatters and acid sears %s!", buf3);
+            message(buf, 0);
+            autoIdentify(theItem);
+            refreshDungeonCell((pos){ x, y });
+            deleteItem(theItem);
+            return;
+        }
+        // iOS port (iBrogue): empty-bottle v2 potion of ice now bursts into a freezing CLOUD rather than
+        // a single-target hit -- handled (for any target, struck or empty ground, and for the
+        // bolt-detonation trap) by shatterPotionAtLoc below.
         // iOS port (iBrogue): gate on actual benevolent polarity rather than a kind-index boundary, since
         // good potions are no longer contiguous at the front of the enum. Good potions with no creature
         // effect (e.g. honey/wort/detect-magic/empty bottle) return false here and fall through to shatter.
@@ -6841,12 +7041,22 @@ static void throwItem(item *theItem, creature *thrower, pos targetLoc, short max
         return; // potions disappear when they break
     }
     if ((theItem->category & WEAPON) && theItem->kind == INCENDIARY_DART) {
+        // iOS port (iBrogue): an incendiary dart detonates a dropped bad/cloud potion like a FIRE bolt --
+        // the potion's cloud spawns first, then the dart's own blast (DF_DART_EXPLOSION, fire) ignites it
+        // for a violent burst.
+        detonateFloorPotionAt(x, y);
         spawnDungeonFeature(x, y, &dungeonFeatureCatalog[DF_DART_EXPLOSION], true, false);
         if (pmap[x][y].flags & (HAS_MONSTER | HAS_PLAYER)) {
             exposeCreatureToFire(monsterAtLoc((pos){ x, y }));
         }
         deleteItem(theItem);
         return;
+    }
+    // iOS port (iBrogue): a thrown dart or javelin detonates a dropped bad/cloud potion like a LIGHTNING
+    // bolt -- the cloud blooms but nothing ignites it (no fire is applied here). The weapon then drops as
+    // usual below.
+    if ((theItem->category & WEAPON) && (theItem->kind == DART || theItem->kind == JAVELIN)) {
+        detonateFloorPotionAt(x, y);
     }
     pos dropLoc;
     getQualifyingLocNear(&dropLoc, (pos){ x, y }, true, 0, (T_OBSTRUCTS_ITEMS | T_OBSTRUCTS_PASSABILITY), (HAS_ITEM), false, false);
@@ -8016,6 +8226,48 @@ static void quaffDetectMagic(item *exclude) {
     }
 }
 
+// iOS port (iBrogue): a THROWN potion of detect magic turns its insight outward, onto the dungeon
+// floor, rather than the pack (quaffDetectMagic). It senses the same 1-2 base count (widened by a worn
+// ring of wisdom, like the drink) of random undiscovered, polarity-bearing items lying on this level,
+// revealing each one's good/bad polarity AND its location on the map (the ITEM_DETECTED cell flag, so
+// the aura glyph shows even for items you haven't found yet) -- the classic "detect magic on the level"
+// feel. Items already identified or already magic-detected are skipped. Action-triggered RNG (the throw),
+// reproduced identically on replay; mirrors quaffDetectMagic's draws.
+static void throwDetectMagicOnFloor(void) {
+    item *eligible[64];
+    int count = 0;
+    for (item *theItem = floorItems->nextItem; theItem != NULL; theItem = theItem->nextItem) {
+        if ((theItem->category & HAS_INTRINSIC_POLARITY)
+            && !(theItem->flags & (ITEM_IDENTIFIED | ITEM_MAGIC_DETECTED))
+            && itemMagicPolarity(theItem) != MAGIC_POLARITY_NEUTRAL
+            && count < (int)(sizeof(eligible) / sizeof(eligible[0]))) {
+
+            eligible[count++] = theItem;
+        }
+    }
+    if (count == 0) {
+        message("the flask shatters, but no undiscovered magic stirs anywhere on this level.", 0);
+        return;
+    }
+    const int maxReveals = max(1, 2 + (int)rogue.wisdomBonus); // same 1-2 base as the drink (+ ring of wisdom)
+    const int toReveal = min(rand_range(1, maxReveals), count);
+    // Partial Fisher-Yates: pick `toReveal` distinct floor items and detect each.
+    for (int i = 0; i < toReveal; i++) {
+        const int j = rand_range(i, count - 1);
+        item *tmp = eligible[i]; eligible[i] = eligible[j]; eligible[j] = tmp;
+        detectMagicOnItem(eligible[i]);
+        if (itemMagicPolarity(eligible[i])) {
+            pmapAt(eligible[i]->loc)->flags |= ITEM_DETECTED; // show the aura glyph on the map
+            refreshDungeonCell(eligible[i]->loc);
+        }
+    }
+    tryIdentifyLastItemKinds(HAS_INTRINSIC_POLARITY);
+    char buf[COLS * 2];
+    sprintf(buf, "the flask shatters in a burst of insight -- you sense the aura%s of %i hidden item%s on this level.",
+            (toReveal == 1 ? "" : "s"), toReveal, (toReveal == 1 ? "" : "s"));
+    messageWithColor(buf, &itemMessageColor, 0);
+}
+
 // iOS port (iBrogue): the altars-of-insight machine. When both linked altars hold items, reveal the item
 // on the insight altar and consume the item on the offering altar. Sacrificing an UNidentified item fully
 // identifies the insight item; paying with an identified item reveals the insight item's polarity, or (if
@@ -8244,7 +8496,24 @@ static boolean applyPotionEffectToCreature(creature *monst, short potionKind, sh
             }
             return false;
         }
-        default: // POTION_TELEPATHY, POTION_DETECT_MAGIC (player-only) and any bad potion
+        case POTION_TELEPATHY:
+            // iOS port (iBrogue): a thrown potion of telepathy bonds you to the struck creature alone --
+            // permanently revealing it (and its surroundings) on the map wherever it roams, via the same
+            // MB_TELEPATHICALLY_REVEALED flag used for ally bonds. Drinking reveals every creature on the
+            // level but only briefly; throwing trades that breadth for a single permanent bond. Inanimate
+            // things (turrets/totems) are excluded, matching the drink's flavor; the flask then splashes
+            // harmlessly. Returning true consumes + auto-IDs the potion (see throwItem).
+            if (monst->info.flags & MONST_INANIMATE) {
+                return false;
+            }
+            monst->bookkeepingFlags |= MB_TELEPATHICALLY_REVEALED;
+            refreshDungeonCell(monst->loc);
+            if (visible) {
+                sprintf(buf, "you bond with %s's mind; you will always sense where it lurks.", mName);
+                combatMessage(buf, NULL);
+            }
+            return true;
+        default: // POTION_DETECT_MAGIC (player-only) and any bad potion
             return false;
     }
 }
@@ -8402,6 +8671,31 @@ boolean drinkPotion(item *theItem) {
         case POTION_DETECT_MAGIC2:
             quaffDetectMagic(theItem);
             break;
+        // iOS port (iBrogue): empty-bottle v2 capture-only potions, uncorked in hand -- each releases
+        // its captured hazard around you (the bad-end of a tool meant to be thrown).
+        case POTION_ACID:
+            message("acid sears your throat as you uncork the flask!", 0);
+            weaken(&player, magnitude); // also prints the weakness message
+            spawnDungeonFeature(player.loc.x, player.loc.y, &dungeonFeatureCatalog[DF_ACID_BLOOD], true, false);
+            break;
+        case POTION_WEBBING:
+            message("strands of grasping web erupt from the open flask and seize you!", 0);
+            spawnDungeonFeature(player.loc.x, player.loc.y, &dungeonFeatureCatalog[DF_WEB_LARGE], true, false);
+            break;
+        case POTION_STEAM:
+            message("scalding steam boils out of the open flask!", 0);
+            spawnDungeonFeature(player.loc.x, player.loc.y, &dungeonFeatureCatalog[DF_STEAM_PUFF], true, false);
+            break;
+        case POTION_ICE:
+            // Uncorked in hand: a freezing cloud blooms around you (the frost cloud's T_CAUSES_FREEZE
+            // freezes you as the turn resolves), and any water underfoot ices over.
+            message("frost erupts from the open flask, and biting cold engulfs you!", 0);
+            spawnFrostCloud(player.loc.x, player.loc.y);
+            break;
+        case POTION_WATER:
+            message("water gushes out of the flask, flooding the area around you!", 0);
+            spawnDungeonFeature(player.loc.x, player.loc.y, &dungeonFeatureCatalog[DF_FLOOD], true, false);
+            break;
         default:
             message("you feel very strange, as though your body doesn't know how to react!", REQUIRE_ACKNOWLEDGMENT);
     }
@@ -8443,6 +8737,11 @@ short magicCharDiscoverySuffix(short category, short kind) {
                 case POTION_DARKNESS:
                 case POTION_VOMIT:  // iOS port (iBrogue)
                 case POTION_VENOM:  // iOS port (iBrogue)
+                case POTION_ACID:     // iOS port (iBrogue): empty-bottle v2 capture-only -- bad to drink (offensive when thrown)
+                case POTION_WEBBING:  // iOS port (iBrogue)
+                case POTION_STEAM:    // iOS port (iBrogue)
+                case POTION_ICE:      // iOS port (iBrogue)
+                case POTION_WATER:    // iOS port (iBrogue)
                     result = -1;
                     break;
                 default: // good potions, incl. honey/wort/detect-magic2 (iOS port)
@@ -8993,6 +9292,16 @@ void shuffleFlavors() {
     // identified so it never joins the potion-ID guessing pool and always reads as "empty bottle".
     potionTable[POTION_DETECT_MAGIC].identified = true;
     potionTable[POTION_DETECT_MAGIC].magicPolarityRevealed = true;
+    // iOS port (iBrogue): empty-bottle v2 capture-only potions (acid/webbing/steam/ice/water) are
+    // never generated and only ever exist already-known (the bottle creates them identified), so keep
+    // their kinds permanently identified -- they never join the potion-ID guessing pool.
+    {
+        const short captureOnlyKinds[] = {POTION_ACID, POTION_WEBBING, POTION_STEAM, POTION_ICE, POTION_WATER};
+        for (i = 0; i < (short)(sizeof(captureOnlyKinds) / sizeof(captureOnlyKinds[0])); i++) {
+            potionTable[captureOnlyKinds[i]].identified = true;
+            potionTable[captureOnlyKinds[i]].magicPolarityRevealed = true;
+        }
+    }
     // iOS port (iBrogue): pick which themed potion set is live this run. Deterministic from the seed
     // (shuffleFlavors runs after seedRandomGenerator and reruns identically on replay). The inactive
     // set's two potions are marked absent -- skipped by generation (chooseKind) and the Discoveries

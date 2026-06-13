@@ -720,6 +720,11 @@ enum tileType {
     FROZEN_FOLIAGE,
     FROZEN_FOLIAGE_MELT,
 
+    // iOS port (iBrogue): empty-bottle v2 potion of ice -- the freezing cloud's gas tile. Appended at
+    // the end of the enum (not grouped with the other gases) so it doesn't shift any existing tileType
+    // index; its gas-layer behavior comes from the DF that spawns it, not from enum adjacency.
+    FROST_GAS,
+
     NUMBER_TILETYPES,
 };
 
@@ -859,6 +864,14 @@ enum potionKind {
     POTION_WORT,            // Set 2 (good): healing/wort cloud; the empty bottle's wort capture
     POTION_VENOM,           // Set 2 (bad): inflicts poison (DoT)
     POTION_DETECT_MAGIC2,   // always present (good): reveals polarity of 1-2 random pack items
+    // iOS port (iBrogue): empty-bottle v2 capture-only potions. Frequency 0 -- never generated; the
+    // ONLY way to obtain one is to capture a matching gas/liquid/hazard with an empty bottle. Each
+    // re-creates its captured hazard when thrown/uncorked. See docs/design/empty-bottle-v2.md.
+    POTION_ACID,            // capture: acid splatter. Thrown: weaken() the struck creature (defense down)
+    POTION_WEBBING,         // capture: spiderweb/netting. Thrown: lays an entangling web patch
+    POTION_STEAM,           // capture: steam. Thrown/uncorked: scalding steam cloud
+    POTION_ICE,             // capture: ice. Thrown: freezes the struck creature (mirrors the frost staff)
+    POTION_WATER,           // capture: deep/shallow water. Thrown/uncorked: a large flood puddle
 };
 
 enum weaponKind {
@@ -1852,6 +1865,9 @@ enum dungeonFeatureTypes {
     // iOS port (iBrogue): a transference altar promotes to its inert form after a transfer
     DF_ALTAR_TRANSFER_INERT,
 
+    // iOS port (iBrogue): empty-bottle v2 potion of ice -- the freezing cloud (spawns FROST_GAS)
+    DF_FREEZING_CLOUD_POTION,
+
     NUMBER_DUNGEON_FEATURES,
 };
 
@@ -2018,6 +2034,7 @@ enum terrainFlagCatalog {
     T_IS_DF_TRAP                    = Fl(19),       // spews gas of type specified in fireType when stepped on
     T_CAUSES_EXPLOSIVE_DAMAGE       = Fl(20),       // is an explosion; deals higher of 15-20 or 50% damage instantly, but not again for five turns
     T_SACRED                        = Fl(21),       // monsters that aren't allies of the player will avoid stepping here
+    T_CAUSES_FREEZE                 = Fl(22),       // iOS port (iBrogue): freezes anything caught on this tile (the frost cloud)
 
     T_OBSTRUCTS_SCENT               = (T_OBSTRUCTS_PASSABILITY | T_OBSTRUCTS_VISION | T_AUTO_DESCENT | T_LAVA_INSTA_DEATH | T_IS_DEEP_WATER | T_SPONTANEOUSLY_IGNITES),
     T_PATHING_BLOCKER               = (T_OBSTRUCTS_PASSABILITY | T_AUTO_DESCENT | T_IS_DF_TRAP | T_LAVA_INSTA_DEATH | T_IS_DEEP_WATER | T_IS_FIRE | T_SPONTANEOUSLY_IGNITES),
@@ -2027,7 +2044,7 @@ enum terrainFlagCatalog {
     T_MOVES_ITEMS                   = (T_IS_DEEP_WATER | T_LAVA_INSTA_DEATH),
     T_CAN_BE_BRIDGED                = (T_AUTO_DESCENT),
     T_OBSTRUCTS_EVERYTHING          = (T_OBSTRUCTS_PASSABILITY | T_OBSTRUCTS_VISION | T_OBSTRUCTS_ITEMS | T_OBSTRUCTS_GAS | T_OBSTRUCTS_SURFACE_EFFECTS | T_OBSTRUCTS_DIAGONAL_MOVEMENT),
-    T_HARMFUL_TERRAIN               = (T_CAUSES_POISON | T_IS_FIRE | T_CAUSES_DAMAGE | T_CAUSES_PARALYSIS | T_CAUSES_CONFUSION | T_CAUSES_EXPLOSIVE_DAMAGE),
+    T_HARMFUL_TERRAIN               = (T_CAUSES_POISON | T_IS_FIRE | T_CAUSES_DAMAGE | T_CAUSES_PARALYSIS | T_CAUSES_CONFUSION | T_CAUSES_EXPLOSIVE_DAMAGE | T_CAUSES_FREEZE),
     T_RESPIRATION_IMMUNITIES        = (T_CAUSES_DAMAGE | T_CAUSES_CONFUSION | T_CAUSES_PARALYSIS | T_CAUSES_NAUSEA),
 };
 
@@ -2722,6 +2739,7 @@ typedef struct playerCharacter {
     short transference;
     short wisdomBonus;
     short reaping;
+    unsigned long emptyBottleHintedKinds; // iOS port (iBrogue): bitmask of capture-result potion kinds already hinted this game (empty-bottle v2 contextual hint, once per kind)
 
     // feats:
     boolean *featRecord;
@@ -3525,6 +3543,8 @@ extern "C" {
     void identifyItemKind(item *theItem);
     void autoIdentify(item *theItem);
     boolean fillEmptyBottle(item *bottle, short newPotionKind, const char *flavorText); // iOS port (iBrogue): empty-bottle capture
+    void showEmptyBottleCaptureHint(void); // iOS port (iBrogue): empty-bottle v2 contextual capture hint
+    boolean freezeCreature(creature *monst, short freezeTurns, short slowTurns); // iOS port (iBrogue): shared freeze (staff of frost bolt + frost cloud)
     boolean potionKindAbsentThisSeed(short kind); // iOS port (iBrogue): inactive themed-set potions are hidden this run
     short numberOfItemsInPack(void);
     char nextAvailableInventoryCharacter(void);

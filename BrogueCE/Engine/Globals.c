@@ -600,6 +600,10 @@ const floorTileType tileCatalog[NUMBER_TILETYPES] = {
     // melts from exposed edges inward (negative promoteChance) and fire thaws it instantly (T_IS_FLAMMABLE -> thaw).
  /*FROZEN_FOLIAGE*/            {G_FOLIAGE, &white,                 &lightBlue,         45, 100,DF_FROZEN_FOLIAGE_THAW,0,DF_FROZEN_FOLIAGE_MELTING,           -100,  NO_LIGHT,   (T_OBSTRUCTS_PASSABILITY | T_OBSTRUCTS_VISION | T_IS_FLAMMABLE), (TM_VANISHES_UPON_PROMOTION),       "frozen foliage",       "the dense foliage has frozen solid into a brittle, glittering thicket."},
  /*FROZEN_FOLIAGE_MELT*/       {G_FOLIAGE, &black,                 &lightBlue,         45, 100,DF_FROZEN_FOLIAGE_THAW,0,DF_FROZEN_FOLIAGE_THAW,              10000,  NO_LIGHT,   (T_OBSTRUCTS_PASSABILITY | T_OBSTRUCTS_VISION | T_IS_FLAMMABLE), (TM_VANISHES_UPON_PROMOTION),       "thawing foliage",      "the ice sheathing the foliage cracks and sloughs away."},
+    // iOS port (iBrogue): empty-bottle v2 potion of ice -- the freezing cloud. Anything caught in it
+    // freezes (T_CAUSES_FREEZE; see applyInstantTileEffectsToCreature), and the cloud douses flame
+    // (TM_EXTINGUISHES_FIRE). Not flammable; dissipates quickly like the other potion gases.
+ /*FROST_GAS*/                 {' ',       0,                      &lightBlue,         35, 0,  0,0,0,                                          0,  NO_LIGHT,   (T_CAUSES_FREEZE), (TM_STAND_IN_TILE | TM_GAS_DISSIPATES_QUICKLY | TM_EXTINGUISHES_FIRE),     "a cloud of biting frost", "the air is full of stinging, frost-laden mist."},
 };
 
 unsigned long terrainFlags(pos p) {
@@ -972,6 +976,10 @@ dungeonFeature dungeonFeatureCatalog[NUMBER_DUNGEON_FEATURES] = {
     // iOS port (iBrogue): a transference altar promotes to its inert form after a transfer (visual flash;
     // the message is emitted by performEnchantTransfer so it appears once, not once per altar)
     {TRANSFER_ALTAR_INERT,      DUNGEON,    0,      0,      0,  "", SCROLL_ENCHANTMENT_LIGHT},
+
+    // iOS port (iBrogue): empty-bottle v2 potion of ice -- a freezing cloud (gas-layer volume, like the
+    // other potion gas clouds). effectRadius/flashColor give the cyan burst on shatter.
+    {FROST_GAS,                 GAS,        1000,   0,      0,  "", 0,  &lightBlue, 4},
 };
 
 const dungeonProfile dungeonProfileCatalog[NUMBER_DUNGEON_PROFILES] = {

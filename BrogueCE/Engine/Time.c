@@ -425,6 +425,18 @@ void applyInstantTileEffectsToCreature(creature *monst) {
         }
     }
 
+    // frost cloud (iOS port iBrogue): empty-bottle v2 potion of ice. Anything caught in it freezes for a
+    // few turns, then thaws into a slow tail (freezeCreature handles the fiery-douse case, guards
+    // inanimate/invulnerable, and de-spams its own message/flash). Outside the respiration gate above:
+    // it's external cold, not an inhaled toxin, matching the staff of frost.
+    if (cellHasTerrainFlag((pos){ *x, *y }, T_CAUSES_FREEZE)
+        && !(monst->bookkeepingFlags & MB_SUBMERGED)) {
+        freezeCreature(monst, 3, 5); // 3-turn freeze, then a ~5-turn slow tail
+        if (monst == &player) {
+            rogue.disturbed = true;
+        }
+    }
+
     // poisonous lichen
     if (cellHasTerrainFlag((pos){ *x, *y }, T_CAUSES_POISON)
         && !(monst->info.flags & (MONST_INANIMATE | MONST_INVULNERABLE))
@@ -2334,6 +2346,8 @@ void playerTurnEnded() {
     // the start of the turn to avoid them being able to act while suspended
     // over a chasm
     monstersFall();
+
+    showEmptyBottleCaptureHint(); // iOS port (iBrogue): empty-bottle v2 -- once-per-kind hint naming what the tile underfoot would capture into
 
     do {
         if (rogue.gameHasEnded) {

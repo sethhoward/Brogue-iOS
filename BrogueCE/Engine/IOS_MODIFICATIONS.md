@@ -862,6 +862,146 @@ release is warranted. Capture mutates only existing item/level state (no new RNG
 detect magic from the unidentified-potion pool slightly shifts the `tryIdentifyLastItemKinds` deduction
 counts (one fewer good potion to deduce) — intended.
 
+### 2026-06-13 — Empty Bottle v2: broad capture + capture-only potions
+
+**What.** Expands the empty bottle from 9 capture outcomes to a broad "bottle the hazard you're in"
+system, adds **five capture-only potions** (never generated — only obtainable by capture), and surfaces
+the mapping in-game. Full design: `docs/design/empty-bottle-v2.md`; terrain reference:
+`docs/game-data/TERRAIN_AUDIT.md`.
+
+- **Capture-only potions** (frequency 0, always-identified): `POTION_ACID`, `POTION_WEBBING`,
+  `POTION_STEAM`, `POTION_ICE`, `POTION_WATER`. Each re-creates its hazard when thrown/uncorked:
+  acid → `weaken()` the struck creature (defense −25/pt + accuracy/damage down) and an acid splatter;
+  webbing → `DF_WEB_LARGE`; steam → `DF_STEAM_PUFF`; ice → freeze the struck creature (shared frost
+  semantics); water → `DF_FLOOD` puddle.
+- **Capture precedence `GAS > SURFACE > LIQUID`** (deterministic, no prompt). New gas mappings:
+  stench/smoke → vomit, methane → incineration, steam → steam. New surface mappings: embers → fire
+  immunity (residue of fire-immune creatures), acid splatter → acid, web/net → webbing. New liquid
+  mappings: deep/shallow water → water (**replaces** the old deep-water → fire immunity), ice → ice,
+  brimstone → incineration.
+- **Levitation skim** (captured only while `STATUS_LEVITATING` over an un-standable tile): lava →
+  incineration, any `T_AUTO_DESCENT` tile → descent.
+- **Discoverability:** the bottle's description states the general rule; a once-per-kind contextual
+  message names the exact potion the tile underfoot would yield while carrying an empty bottle.
+
+**Why.** Many walkable liquids/surfaces and several gases were uncapturable in v1 (only deep water +
+GAS). v2 makes terrain engagement rewarding and gives the bottle a small exclusive toolkit, without
+diluting the natural loot table (freq 0). Fire immunity moved from deep water (indirect) to embers (the
+residue of things that can't burn). Brogue's transparency ethos: surface the exact mapping in-game.
+
+**Where.**
+- `Rogue.h` — 5 new `enum potionKind` values; `rogue.emptyBottleHintedKinds` (per-kind hint bitmask);
+  `showEmptyBottleCaptureHint` prototype.
+- `GlobalsBrogue.c` / `GlobalsRapidBrogue.c` / `GlobalsBulletBrogue.c` — 5 freq-0 potion rows; empty
+  bottle description rewritten to the v2 general rule. (`numberPotionKinds` auto-sizes via `sizeof`.)
+- `Items.c` — `shuffleFlavors` force-IDs the 5 new kinds; `magicCharDiscoverySuffix` marks them bad;
+  new static `freezeCreature()` extracted from the `BE_FREEZE` bolt case and shared with the ice potion;
+  `emptyBottleCaptureKindForTile` rewritten with the full precedence + levitation branch;
+  `shatterPotionAtLoc` gains steam/water/webbing/acid; `throwItem` gains acid (weaken) + ice (freeze)
+  struck-creature cases; `drinkPotion` gains the 5 self-effects; new `showEmptyBottleCaptureHint`.
+- `Time.c` — `playerTurnEnded` calls `showEmptyBottleCaptureHint` (after `monstersFall`).
+
+**Determinism.** Captures and the hint use **no RNG** (the hint is pure messaging keyed off the same
+capture mapping; its bitmask is zeroed by the game-start `memset(&rogue)` and evolves deterministically
+from player position). The thrown/quaffed effects draw the same RNG as the hazards they reproduce
+(`DF_FLOOD`, `DF_STEAM_PUFF`, `weaken`, freeze), so they're replay-safe by construction. New potion
+kinds change the generation stream / table sizes / `shuffleFlavors` ID bookkeeping, and add new gameplay
+effects → **bump `recordingVersionString` at release**; pre-v2 recordings won't replay. **CE only / all
+three variants — Classic 1.7.5 untouched (the empty bottle is CE-only).**
+
+**Potion of ice → freezing cloud (refinement).** Thrown/uncorked ice now bursts into a persistent
+**freezing cloud** instead of a single-target hit. New `FROST_GAS` gas tile (appended at the end of
+`enum tileType` / `tileCatalog` so no existing index shifts) carries a new terrain flag `T_CAUSES_FREEZE`
+(`Fl(22)`, added to `T_HARMFUL_TERRAIN`) + `TM_EXTINGUISHES_FIRE` + quick dissipation. New
+`DF_FREEZING_CLOUD_POTION` spawns it. `Time.c` `applyInstantTileEffectsToCreature` gains a
+`T_CAUSES_FREEZE` block (outside the armor-of-respiration gate — external cold, not an inhaled toxin)
+that calls the now-shared, non-static **`freezeCreature(monst, freezeTurns, slowTurns)`** (extracted from
+the `BE_FREEZE` bolt case; signature changed from a fixpt enchant to explicit turns; message/flash
+de-spammed to fire only on the transition into frozen). Cloud effect: freeze 3 turns → ~5-turn slow
+tail, douses flame (the gas tile's `TM_EXTINGUISHES_FIRE`). On shatter/uncork a `spawnFrostCloud(x,y)`
+helper also spawns `DF_DEEP_WATER_FREEZE`/`DF_SHALLOW_WATER_FREEZE` (no-ops on dry land) so the cloud
+**freezes a sheet over any water it covers** — and because the shatter path is shared with the
+bolt-detonation hook, a dropped ice bottle struck by a lightning/fire bolt is a water-freeze **trap**.
+No RNG beyond what those DFs already draw.
+
+### 2026-06-13 — Thrown potion of telepathy bonds to the struck creature
+
+**What.** A thrown potion of telepathy that strikes a (non-inanimate) creature now **permanently
+reveals that single creature** on the map — it stays telepathically visible wherever it roams, for
+the rest of its life — and the potion auto-identifies. Previously a thrown telepathy did nothing
+(splashed harmlessly). Drinking is unchanged (brief, level-wide reveal of all creatures).
+
+**Why.** Gives the otherwise throw-useless telepathy potion a deliberate offensive/utility use:
+trade the drink's breadth-but-brief reveal for a single *permanent* tracker on a chosen target (e.g.
+tag a fleeing treasure monster or a dangerous out-of-depth threat). Permanent (no countdown) was the
+chosen design — simpler than a timed bond and no decrement wiring.
+
+**Where.**
+- `Items.c` `applyPotionEffectToCreature` — new `POTION_TELEPATHY` case: sets
+  `MB_TELEPATHICALLY_REVEALED` on the struck creature (the same flag used for ally telepathic bonds;
+  `monsterRevealed` already honors it, so `updateTelepathy` reveals it with no further plumbing),
+  refreshes the cell, and returns true so `throwItem`'s benevolent-throw path consumes + auto-IDs the
+  flask. Inanimate creatures (turrets/totems) are excluded (returns false → harmless splash), matching
+  the drink's "won't reveal inanimate" flavor.
+- `GlobalsBrogue.c` / `GlobalsRapidBrogue.c` / `GlobalsBulletBrogue.c` — telepathy description gains a
+  sentence about the thrown bond.
+
+**Determinism.** Sets an existing bookkeeping flag on a throw (a recorded input); no RNG, no new
+serialized state. Replay-safe. (A new gameplay effect still warrants the standard
+`recordingVersionString` bump bundled with the other v2 changes.)
+
+### 2026-06-13 — Thrown potion of detect magic scouts the dungeon floor
+
+**What.** A thrown potion of detect magic now turns its insight **outward**: instead of reading 1-2
+items in your pack (the drink, `quaffDetectMagic`), it senses **1-2 random undiscovered, polarity-
+bearing items lying on the dungeon floor**, revealing each one's good/bad polarity and **marking its
+aura on the map** (even for items you haven't found). Fires wherever the flask lands — creature or bare
+ground. Same 1-2 base count as the drink (widened by a worn ring of wisdom). Drinking is unchanged.
+
+**Why.** Gave the throw-useless detect magic a real use: a limited "detect magic on the level" scout
+that points you at the good loot (or warns of cursed items) without spending the drink. Pairs naturally
+with the potion's identification role.
+
+**Where.**
+- `Items.c` new static `throwDetectMagicOnFloor()` (near `quaffDetectMagic`): scans `floorItems` for
+  unidentified, not-yet-`ITEM_MAGIC_DETECTED`, non-neutral-polarity items; partial Fisher-Yates picks
+  `rand_range(1, max(1, 2 + wisdomBonus))`; calls `detectMagicOnItem` on each and sets the cell's
+  `ITEM_DETECTED` flag so the aura glyph shows on the map; `tryIdentifyLastItemKinds` + a count message.
+  Forward-declared above `throwItem`, which gains a `POTION_DETECT_MAGIC2` case that calls it then
+  auto-IDs/consumes the flask (fires regardless of `struck`).
+- `GlobalsBrogue.c` / `GlobalsRapidBrogue.c` / `GlobalsBulletBrogue.c` — detect magic description gains
+  a sentence about the thrown, outward scouting.
+
+**Determinism.** `rand_range` draws here are action-triggered (the throw) and reproduced identically on
+replay, exactly like the drink's draws. No new serialized state. Same release-time
+`recordingVersionString` bump as the rest of the v2 work.
+
+### 2026-06-13 — Thrown weapons detonate dropped potions (cheap potion-trap triggers)
+
+**What.** A thrown weapon that lands on a dropped bad/cloud potion now **detonates** it, the same way a
+staff bolt does — giving a cheap, ammo-based way to set off a potion trap from range:
+- **Incendiary dart → like a fire bolt:** the potion's cloud spawns, then the dart's own blast
+  (`DF_DART_EXPLOSION`, fire) ignites the flammable cloud — a violent burst. Works even when the dart
+  strikes a creature standing on the potion (incendiary darts already explode on the tile they hit).
+- **Dart / javelin → like a lightning bolt:** the cloud blooms but nothing ignites it (no fire applied);
+  the weapon then drops as usual.
+
+Good potions (no shatter signature) and the empty bottle are left untouched — a dart isn't a bolt, so
+it can't capture into the bottle.
+
+**Why.** Extends the existing "zap a dropped potion to detonate it" play to thrown weapons, which are
+cheaper and more plentiful than staff charges. Incendiary = violent (fire), plain dart/javelin = gentle
+(no fire), mirroring the fire-vs-lightning bolt distinction.
+
+**Where.** `Items.c` new static `detonateFloorPotionAt(x, y)` (just above `throwItem`): finds a floor
+potion at the tile and runs the shared `shatterPotionAtLoc`, then removes the flask (mirrors the bolt
+hook's remove/delete). `throwItem` calls it in the `INCENDIARY_DART` landing block (before spawning the
+dart's fire blast, so the cloud is present to ignite) and in a new `DART`/`JAVELIN` check just before the
+weapon is dropped. The bolt detonation path in `updateBolt` is unchanged.
+
+**Determinism.** Detonation runs the same RNG `shatterPotionAtLoc` already draws (gas volumes, etc.),
+action-triggered by the throw; no new serialized state. Same release-time `recordingVersionString` bump.
+
 ### 2026-06-11 — Sharpen monkey theft preference (tunes PR #849)
 
 **What.** Strengthened the monkey's deductive-theft bias from the PR #849 entry above: the favored-item
