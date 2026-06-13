@@ -388,43 +388,39 @@ static boolean playerImmuneToMonster(creature *monst) {
     }
 }
 
-// iOS port (iBrogue): port of upstream PR #849 ("Deductive Thievery"). Scores how much a given thief wants
-// to steal a given item, turning theft into an identification hint: monkeys favor food and potions of life
-// or strength; imps favor scrolls of enchanting, positively-enchanted gear, and runics (and dislike food).
-// Pure scoring (no RNG); the weighted draw happens at the call site in specialHit.
+// iOS port (iBrogue): steal-preference component (see docs/guides/reusable-components.md). Scores how much a
+// thief wants a given item, from its catalog stealProfile -- the data-driven successor to the per-monsterID
+// branches that ported PR #849 ("Deductive Thievery"). Theft becomes an identification hint: monkeys favor food
+// and potions of life/strength (but, ADDITIVE, will take anything); imps favor scrolls of enchanting, positively-
+// enchanted gear (scaled), and runics, and dislike food. Pure scoring (no RNG); the weighted draw happens at the
+// call site in specialHit. Returns 0 for an item this thief will not take (EXCLUSIVE mode, no rule matched).
+// A thief with no profile falls back to the legacy "every item equally desirable" (score 10) behavior.
 static short rateItemStealDesirability(creature *thief, item *theItem) {
     if (!theItem) {
         return 0;
     }
-    short score = 10; // base desirability for any item
-    if (thief->info.monsterID == MK_MONKEY) {
-        // iOS port (iBrogue): tuned the monkey's favored-item bonus up from PR #849's +50 to +290 so the
-        // preference for food / life / strength actually shows in play. At +50 (a 6:1 weight) a single
-        // favored item still lost to the summed weight of a full pack of mundane items; +290 (~30:1) makes
-        // food the steal ~70%+ of the time when carried, matching the monkey's "snatch familiar foods and
-        // drafts of health or strength" flavor. (Life/strength remain rarely observed simply because they
-        // are rarely in the pack.)
-        if (theItem->category & FOOD) {
-            score += 290;
-        } else if (theItem->category & POTION) {
-            if (theItem->kind == POTION_LIFE || theItem->kind == POTION_STRENGTH) {
-                score += 290;
-            }
-        }
-    } else if (thief->info.monsterID == MK_IMP) {
-        if ((theItem->category & SCROLL) && theItem->kind == SCROLL_ENCHANTING) {
-            score += 50;
-        } else if (theItem->category & (RING | CHARM | STAFF | WEAPON | ARMOR)) {
-            if (theItem->enchant1 > 0) { // imps sense positive enchantment even when the player can't
-                score += theItem->enchant1 * 5;
-            }
-            if (theItem->flags & ITEM_RUNIC) {
-                score += 25;
-            }
-        }
-        if (theItem->category & FOOD) {
-            score -= 8;
-        }
+    const stealProfile *profile = thief->info.steal;
+    if (!profile) {
+        return 10; // legacy default: uniform desirability
+    }
+    short score = profile->baseScore;
+    boolean matched = false;
+    for (const stealRule *r = profile->rules;
+         r->categories || r->requireFlags || r->enchant != ENCHANT_ANY; // a no-criteria row terminates the list
+         r++) {
+
+        if (r->categories && !(theItem->category & r->categories)) continue;
+        if (r->kind >= 0 && theItem->kind != r->kind) continue;
+        if (r->enchant == ENCHANT_POSITIVE && theItem->enchant1 <= 0) continue;
+        if (r->enchant == ENCHANT_NEGATIVE && theItem->enchant1 >= 0) continue;
+        if (r->requireFlags && (theItem->flags & r->requireFlags) != r->requireFlags) continue;
+
+        matched = true;
+        score += r->flatBonus;
+        score += theItem->enchant1 * r->perEnchantBonus;
+    }
+    if (profile->mode == STEAL_EXCLUSIVE && !matched) {
+        return 0; // this thief is only interested in matching items
     }
     return max(1, score);
 }
@@ -480,17 +476,26 @@ static void specialHit(creature *attacker, creature *defender, short damage) {
             && !attacker->status[STATUS_CONFUSED] // No stealing from the player if you bump him while confused.
             && attackHit(attacker, defender)) {
 
-            itemCandidates = numberOfMatchingPackItems(ALL_ITEMS, 0, (ITEM_EQUIPPED), false);
+            // iOS port (iBrogue): steal-preference component. Eligibility and weighting come from the thief's
+            // stealProfile (catalog `steal` field) via rateItemStealDesirability: an ADDITIVE thief (monkey, imp)
+            // scores every unequipped item >= 1, so it always grabs SOMETHING; an EXCLUSIVE thief scores only the
+            // items it wants (the rest rate 0 and are skipped). A configurable share of thefts (randomPickPercent,
+            // default 5) ignores the weighting and picks uniformly -- but only AMONG THE ELIGIBLE items, so an
+            // EXCLUSIVE thief never breaks its own rule. Monkey/imp stay RNG-identical to the previous hardcoded
+            // path (same rand_percent, then rand_range over the same scores).
+            const stealProfile *stealPrefs = attacker->info.steal;
+            itemCandidates = 0;
+            for (theItem = packItems->nextItem; theItem != NULL; theItem = theItem->nextItem) {
+                if (!(theItem->flags & (ITEM_EQUIPPED)) && rateItemStealDesirability(attacker, theItem) > 0) {
+                    itemCandidates++;
+                }
+            }
+            theItem = NULL;
             if (itemCandidates) {
-                // iOS port (iBrogue): PR #849 — pick uniformly at random part of the time (legacy hedge);
-                // otherwise pick by weighted steal-desirability, so theft hints at item identity. Lowered
-                // the hedge from 10% to 5% so the deductive weighting (and the monkey's sharpened food /
-                // life / strength bias) dominates more visibly. Affects imp theft too, which is consistent
-                // with the deductive-thievery intent.
-                if (rand_percent(5)) {
+                if (rand_percent(stealPrefs ? stealPrefs->randomPickPercent : 5)) {
                     randItemIndex = rand_range(1, itemCandidates);
                     for (theItem = packItems->nextItem; theItem != NULL; theItem = theItem->nextItem) {
-                        if (!(theItem->flags & (ITEM_EQUIPPED))) {
+                        if (!(theItem->flags & (ITEM_EQUIPPED)) && rateItemStealDesirability(attacker, theItem) > 0) {
                             if (randItemIndex == 1) {
                                 break;
                             } else {

@@ -92,15 +92,16 @@ Accurate as of this writing; confirm signatures in-engine before use.
 
 ## Candidate behavior components — bespoke today, extract on next reuse
 
-**The flee/escape AND loot behaviors are now real, reusable components** (the flee component built
-2026-06-13 as the first dogfood of this model, the loot component the same day as the second).
-Everything in the *flee* and *loot* groups below ships as the generic functions named; the gold goblin
-is the reference consumer of both (flee config `goldGoblinFleeProfile` via the catalog `fleeAI` field;
-loot config `goldGoblinLoot` + `goldGoblinMarquee` via the catalog `loot` field). After these two,
-**no `MK_GOLD_GOBLIN` branch remains in the engine** — the goblin is defined entirely by catalog
-config. Only the **once-per-run pinned spawn** remains gold-goblin-specific, the *next* extraction
-candidate — to be lifted on next reuse, per [ADR 0001](../adr/0001-deterministic-component-based-content.md),
-not speculatively.
+**The flee, loot, AND steal behaviors are now real, reusable components** (flee + loot built 2026-06-13
+as the first two dogfoods of this model; the **steal-preference** component the same day as the third,
+extracted from the monkey + imp). Everything in the *flee*, *loot*, and *steal* groups below ships as the
+generic forms named; the gold goblin is the reference consumer of flee + loot (configs `goldGoblinFleeProfile`
+/ `goldGoblinLoot` via the catalog `fleeAI` / `loot` fields), and monkey + imp are the reference consumers of
+steal (`monkeyStealProfile` / `impStealProfile` via the catalog `steal` field). After flee + loot, **no
+`MK_GOLD_GOBLIN` branch remains in the engine**; after steal, **no per-monsterID branch remains in
+`rateItemStealDesirability`** — thieves are defined by config. Only the gold goblin's **once-per-run pinned
+spawn** remains entity-specific, the *next* extraction candidate — to be lifted on next reuse, per
+[ADR 0001](../adr/0001-deterministic-component-based-content.md), not speculatively.
 
 | Behavior | Status | Reusable form |
 |---|---|---|
@@ -114,6 +115,8 @@ not speculatively.
 | Place loot (trail at self / scatter near origin) | ✅ **built** | `monsterShedItem(monst, item)` / `monsterScatterItem(item, origin)` |
 | Per-hit shed + one-time near-death bonus | ✅ **built** | `monsterShedLootOnHit(monst, attacker, damage)` |
 | Death hoard (marquee + gold burst + thrown stack), config-driven | ✅ **built** | `monsterDropDeathLoot(monst)` + `lootState` runtime + `lootProfile` config |
+| Theft preference: which pack item a thief snatches | ✅ **built** | `rateItemStealDesirability(thief, item)` reads `stealProfile` (`STEAL_ADDITIVE`/`STEAL_EXCLUSIVE` + weighted `stealRule[]` + tunable random hedge), via the catalog `steal` field |
+| Use a stolen item against the player (zap/throw/quaff) | candidate | not built — a separate turn-time behavior keyed off `carriedItem`; build with the first thief that needs it |
 | Once-per-run pinned spawn | candidate | `spawnUniqueNear(MK_*, anchor, depthRange, chance, &flag)` (now `spawnGoldGoblin`) |
 
 ---

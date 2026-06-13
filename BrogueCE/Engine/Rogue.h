@@ -2311,6 +2311,34 @@ typedef struct lootState {                // iOS port (iBrogue): per-instance ru
     boolean bonusDropped;                 // has shed its one-time near-death bonus
 } lootState;
 
+// iOS port (iBrogue): reusable "thieving creature" component (see docs/guides/reusable-components.md).
+// A creature with the MA_HIT_STEAL_FLEE ability chooses WHICH unequipped pack item to snatch via this
+// weighted, rule-based desirability profile (catalog `steal` field), evaluated in rateItemStealDesirability
+// (Combat.c) -- replacing the old per-monsterID branches. The steal/flee/drop machinery itself is unchanged;
+// only the preference is data-driven. A thief with no profile falls back to "every item equally desirable".
+enum stealMode {
+    STEAL_ADDITIVE,                       // every unequipped item is eligible; rules adjust its score (monkey, imp)
+    STEAL_EXCLUSIVE,                      // ONLY items matching a rule are eligible; everything else is never taken
+};
+
+enum enchantPolarity { ENCHANT_ANY, ENCHANT_POSITIVE, ENCHANT_NEGATIVE }; // gate on the sign of enchant1
+
+typedef struct stealRule {                // contributes to an item's score when category + kind + all gates match
+    unsigned long categories;             // itemCategory bitmask the rule matches (0 = any category)
+    short kind;                           // -1 = any kind; else a specific kind (POTION_LIFE, SCROLL_ENCHANTING, ...)
+    enum enchantPolarity enchant;         // require enchant1 ANY / > 0 / < 0
+    unsigned long requireFlags;           // require ALL these item flags (ITEM_RUNIC, ITEM_CURSED, ...); 0 = none
+    short flatBonus;                      // added to the score when the rule applies
+    short perEnchantBonus;                // added (enchant1 * this) when the rule applies (e.g. the imp's enchant-scaling)
+} stealRule;                              // a row with NO match criteria (categories 0, requireFlags 0, enchant ANY) TERMINATES the list
+
+typedef struct stealProfile {
+    enum stealMode mode;
+    short baseScore;                      // starting desirability of an eligible item (monkey/imp = 10)
+    short randomPickPercent;              // % of thefts that ignore the weighting and pick uniformly AMONG ELIGIBLE items (monkey/imp = 5)
+    const stealRule *rules;               // rule list, terminated by a no-criteria sentinel row
+} stealProfile;
+
 typedef struct creatureType {
     enum monsterTypes monsterID; // index number for the monsterCatalog
     char monsterName[COLS];
@@ -2333,6 +2361,7 @@ typedef struct creatureType {
     unsigned long abilityFlags;
     const struct fleeProfile *fleeAI;   // iOS port (iBrogue): NULL = normal AI; non-NULL = reusable flee component
     const struct lootProfile *loot;     // iOS port (iBrogue): NULL = no special loot; non-NULL = reusable loot component
+    const struct stealProfile *steal;   // iOS port (iBrogue): NULL = legacy uniform theft; non-NULL = reusable steal-preference component
 } creatureType;
 
 typedef struct monsterWords {

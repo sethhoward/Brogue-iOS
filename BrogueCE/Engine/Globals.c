@@ -1113,6 +1113,36 @@ const lootProfile goldGoblinLoot = {
     .bonusCategory = POTION, .bonusKind = POTION_DETECT_MAGIC2,
 };
 
+// iOS port (iBrogue): steal-preference configs for the thieving creatures (see docs/guides/reusable-components.md).
+// Attached to the catalog `steal` field; the shared evaluator in rateItemStealDesirability (Combat.c) reads these
+// instead of per-monsterID branches. Both reproduce the previous hardcoded scoring exactly (RNG-identical). A
+// second thief is just another stealRule table + stealProfile + catalog row.
+
+// Monkey: favors food and potions of life/strength, but (ADDITIVE, base 10) will snatch ANYTHING when nothing
+// favored is carried; 5% of thefts ignore the preference and grab a random item.
+static const stealRule monkeyStealRules[] = {
+    {FOOD,   -1,              ENCHANT_ANY, 0, 290, 0},
+    {POTION, POTION_LIFE,     ENCHANT_ANY, 0, 290, 0},
+    {POTION, POTION_STRENGTH, ENCHANT_ANY, 0, 290, 0},
+    {0}, // sentinel
+};
+const stealProfile monkeyStealProfile = {
+    .mode = STEAL_ADDITIVE, .baseScore = 10, .randomPickPercent = 5, .rules = monkeyStealRules,
+};
+
+// Imp: senses enchantment -- favors scrolls of enchanting, positively-enchanted gear (scaled by enchant), and
+// runics; mildly dislikes food. ADDITIVE, base 10, 5% random.
+static const stealRule impStealRules[] = {
+    {SCROLL,                                SCROLL_ENCHANTING, ENCHANT_ANY,      0,          50, 0},
+    {RING | CHARM | STAFF | WEAPON | ARMOR, -1,                ENCHANT_POSITIVE, 0,           0, 5}, // +enchant1*5
+    {RING | CHARM | STAFF | WEAPON | ARMOR, -1,                ENCHANT_ANY,      ITEM_RUNIC, 25, 0},
+    {FOOD,                                  -1,                ENCHANT_ANY,      0,          -8, 0},
+    {0}, // sentinel
+};
+const stealProfile impStealProfile = {
+    .mode = STEAL_ADDITIVE, .baseScore = 10, .randomPickPercent = 5, .rules = impStealRules,
+};
+
 // Defines all creatures, which include monsters and the player:
 // This cannot be const, since we set monsterIDs
 creatureType monsterCatalog[NUMBER_MONSTER_KINDS] = {
@@ -1126,7 +1156,7 @@ creatureType monsterCatalog[NUMBER_MONSTER_KINDS] = {
     {0, "eel",          G_EEL,    &eelColor,      18,     27,     100,    {3, 7, 2},      5,  50,     100,    0,              0,    false,      0,      0,              {0},
         (MONST_RESTRICTED_TO_LIQUID | MONST_IMMUNE_TO_WATER | MONST_SUBMERGES | MONST_FLITS | MONST_NEVER_SLEEPS)},
     {0, "monkey",       G_MONKEY,    &ogreColor,     12,     17,     100,    {1, 3, 1},      20, 100,    100,    DF_RED_BLOOD,   0,    false,      1,      DF_URINE,       {0},
-        (0), (MA_HIT_STEAL_FLEE)},
+        (0), (MA_HIT_STEAL_FLEE), 0, 0, &monkeyStealProfile}, // iOS port (iBrogue): reusable steal component
     {0, "bloat",        G_BLOAT,    &poisonGasColor,4,      0,      100,    {0, 0, 0},      5,  100,    100,    DF_PURPLE_BLOOD,0,    false,      0,      DF_BLOAT_DEATH, {0},
         (MONST_FLIES | MONST_FLITS), (MA_KAMIKAZE | MA_DF_ON_DEATH)},
     {0, "pit bloat",    G_BLOAT,    &lightBlue,     4,      0,      100,    {0, 0, 0},      5,  100,    100,    DF_PURPLE_BLOOD,0,    false,      0,      DF_HOLE_POTION, {0},
@@ -1205,7 +1235,7 @@ creatureType monsterCatalog[NUMBER_MONSTER_KINDS] = {
     {0, "flame turret", G_TURRET, &lavaForeColor,40, 0,      150,    {1, 2, 1},      0,  100,    250,    0,              LAVA_LIGHT,    false, 0,  0,              {BOLT_FIRE},
         (MONST_TURRET), (0)},
     {0, "imp",          G_IMP,    &pink,          35,     90,     225,    {4, 9, 2},      10, 100,    100,    DF_GREEN_BLOOD, IMP_LIGHT,    false,  0,  0,              {BOLT_BLINKING},
-        (0), (MA_HIT_STEAL_FLEE)},
+        (0), (MA_HIT_STEAL_FLEE), 0, 0, &impStealProfile}, // iOS port (iBrogue): reusable steal component
     {0, "fury",         G_FURY,    &darkRed,       19,     90,     200,    {6, 11, 4},     20, 50,     100,    DF_RED_BLOOD,   0,    false,      0,      0,              {0},
         (MONST_NEVER_SLEEPS | MONST_FLIES)},
     {0, "revenant",     G_REVENANT,    &ectoplasmColor,30,     0,      200,    {15, 20, 5},    0,  100,    100,    DF_ECTOPLASM_BLOOD, 0,    true,   0,      0,              {0},

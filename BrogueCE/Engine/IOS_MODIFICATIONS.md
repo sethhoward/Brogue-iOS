@@ -123,6 +123,41 @@ were appended to all three variant catalogs (`GlobalsBrogue.c` / `GlobalsRapidBr
 `GlobalsBulletBrogue.c`); the staff/status/tile/DF tables are shared in `Globals.c`. `BOLT_FREEZE` is
 appended (not inserted) since the staff→bolt link is the `power` field, not positional.
 
+### 2026-06-13 — Steal-preference component (extracted from monkey + imp; third reusable component)
+
+**What.** The per-monsterID theft scoring in `rateItemStealDesirability` (the `if monsterID == MK_MONKEY …
+else if == MK_IMP …` branches) is now a data-driven **steal component** — the third reusable component after
+flee and loot. A thieving creature (anything with `MA_HIT_STEAL_FLEE`) carries a `stealProfile` on its catalog
+`steal` field describing *which* unequipped pack item it prefers to snatch; the shared evaluator scores items
+from that profile. The `MA_HIT_STEAL_FLEE` machinery itself (trigger, steal, flee, drop) is untouched — only
+the *preference* was extracted.
+
+**Schema** (`Rogue.h`): `stealProfile` = `mode` (`STEAL_ADDITIVE`: every unequipped item eligible, rules adjust
+score — monkey/imp; or `STEAL_EXCLUSIVE`: only rule-matching items eligible, the rest never taken) + `baseScore`
++ `randomPickPercent` (the formerly-hardcoded 5% hedge, now per-thief) + a `{0}`-terminated `stealRule[]`. Each
+`stealRule` matches `categories` (bitmask) / `kind` / `enchant` polarity / `requireFlags`, and contributes a
+`flatBonus` and/or `perEnchantBonus` (× enchant1). The hedge now picks uniformly **among the eligible set only**,
+so an EXCLUSIVE thief never breaks its own rule.
+
+**Why.** The steal mechanic (PR #849 + the 2026-06-11 tuning, both below) was recent iOS-port code already
+diverged from upstream, and a suite of new thieves is planned — so the per-ID branching was the bespoke duplication
+ADR 0001 says to extract on the next consumer. New thieves are now config: e.g. "only cursed" = one EXCLUSIVE rule
+gated on `ITEM_CURSED`; "only staffs/potions" = one EXCLUSIVE rule on `STAFF | POTION`. (A thief that *uses* the
+stolen item is a separate future behavior, not part of this preference component.)
+
+**Where.** `Rogue.h` — `stealMode` / `enchantPolarity` / `stealRule` / `stealProfile` + the `creatureType.steal`
+field (appended after `loot`). `Globals.c` — `monkeyStealProfile`/`monkeyStealRules`, `impStealProfile`/
+`impStealRules`, attached to the monkey and imp catalog rows. `Combat.c` — `rateItemStealDesirability` rewritten to
+evaluate the profile (returns 0 = ineligible); the candidate count + hedge + weighted pick in `specialHit` made
+eligibility-aware.
+
+**Determinism.** Monkey and imp are **RNG-identical** to the prior hardcoded path: their profiles reproduce the
+exact per-item scores, and the call order (one `rand_percent(randomPickPercent)`, then one `rand_range` over the
+same eligible set / score sum) is unchanged, so seeded runs and recordings are unaffected. New edge for future
+EXCLUSIVE thieves: if no eligible item is carried, the steal simply fizzles (the hit still lands). A thief with
+no `steal` profile falls back to the legacy uniform "every item desirability 10" behavior. See
+[docs/guides/reusable-components.md](../../docs/guides/reusable-components.md) and ADR 0001.
+
 ### 2026-06-12 — Gold goblin: a passive treasure-hoarder you chase down (new content)
 
 > **Refactored 2026-06-13 into a reusable flee component (behavior unchanged).** The flee/escape AI no
