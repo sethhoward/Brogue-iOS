@@ -152,6 +152,12 @@ void initializeMonster(creature *monst, boolean itemPossible) {
         monst->carriedItem = NULL;
     }
 
+    // iOS port (iBrogue): loot component -- any genuinely-generated creature with a lootProfile is its loot
+    // bearer (sheds loot on hit, drops the death hoard). cloneMonster() clears this so clones are loot-less.
+    // For every other monster info.loot is NULL, so this is false and nothing reads it (no behavior change).
+    monst->looter.isBearer = (monst->info.loot != NULL);
+    monst->looter.bonusDropped = false;
+
     initializeGender(monst);
 
     if (!(monst->info.flags & MONST_INANIMATE) || (monst->info.abilityFlags & MA_ENTER_SUMMONS)) {
@@ -679,7 +685,7 @@ creature *cloneMonster(creature *monst, boolean announce, boolean placeClone) {
     newMonst->mapToMe = NULL;
     newMonst->safetyMap = NULL;
     newMonst->carriedItem = NULL;
-    newMonst->goldGoblinHasHoard = false; // iOS port (iBrogue): cloned gold goblins carry no hoard
+    newMonst->looter.isBearer = false; // iOS port (iBrogue): cloned looters carry no hoard and shed no loot
     if (monst->carriedMonster) {
         creature *parentMonst = cloneMonster(monst->carriedMonster, false, false); // Also clone the carriedMonster
         removeCreature(monsters, parentMonst); // The cloned create will be added to the world, which we immediately undo.
@@ -3748,9 +3754,16 @@ void fleerNoteDamage(creature *monst) {
     monst->creatureState = MONSTER_FLEEING;
 }
 
-// iOS port (iBrogue): drop an item at the goblin's tile when free, otherwise on a nearby open tile; if
-// there is nowhere clear, the item is discarded rather than stacked onto an existing one.
-static void goldGoblinShedItem(creature *monst, item *theItem) {
+// iOS port (iBrogue): reusable loot component (see docs/guides/reusable-components.md). A creature with a
+// lootProfile sheds gold/items as it is struck and scatters a hoard on death, all data-driven. This is
+// NET-NEW loot, separate from the engine's carried-item system (MONST_CARRY_ITEM_*, which assigns one item
+// from the dungeon's item budget at level-gen). The gold goblin is the first/reference consumer; its config
+// lives in goldGoblinLoot (Globals.c). Determinism: every roll uses the substantive RNG (rand_range), so a
+// looter's drops are replay-safe and identical on a shared seed.
+
+// Drop an item at the creature's own tile if free, otherwise on a nearby open tile; if there is nowhere
+// clear, the item is discarded rather than stacked onto an existing one. Lays the live "trail" behind a fleer.
+static void monsterShedItem(creature *monst, item *theItem) {
     pos loc = monst->loc;
     if (pmapAt(loc)->flags & HAS_ITEM) {
         if (!getQualifyingLocNear(&loc, monst->loc, true, NULL,
@@ -3763,58 +3776,8 @@ static void goldGoblinShedItem(creature *monst, item *theItem) {
     placeItemAt(theItem, loc);
 }
 
-// iOS port (iBrogue): a small pile of gold, forming a trail the player can scoop up mid-chase.
-static void goldGoblinShedGold(creature *monst) {
-    item *gold = generateItem(GOLD, -1);
-    gold->quantity = rand_range(2 * rogue.depthLevel, 5 * rogue.depthLevel);
-    gold->originDepth = rogue.depthLevel;
-    goldGoblinShedItem(monst, gold);
-}
-
-// iOS port (iBrogue): gold-goblin-specific damage reaction, called from inflictDamage() alongside the
-// generic fleerNoteDamage() (which handles the flight trigger). A discrete attack (attacker != NULL;
-// fire/gas/poison pass NULL) sheds loot: the first non-lethal blow that drops it below 25% HP sheds a
-// potion of detect magic (a one-time near-death bonus -- healing and re-wounding it will not repeat it);
-// every other discrete hit sheds a pile of gold. `damage` is the post-shield amount, not yet subtracted,
-// so the resulting HP is currentHP - damage.
-void goldGoblinReactToDamage(creature *monst, creature *attacker, short damage) {
-    // The flee trigger is handled generically by fleerNoteDamage(); this is gold-goblin-specific loot.
-    if (attacker == NULL) {
-        return;
-    }
-
-    const short hpAfter = monst->currentHP - damage;
-    if (!monst->goldGoblinDroppedDetectMagic
-        && hpAfter > 0
-        && hpAfter * 4 < monst->info.maxHP) {
-
-        monst->goldGoblinDroppedDetectMagic = true;
-        goldGoblinShedItem(monst, generateItem(POTION, POTION_DETECT_MAGIC2));
-    } else {
-        goldGoblinShedGold(monst);
-    }
-}
-
-// iOS port (iBrogue): roll the gold goblin's single marquee drop from a curated, weighted pool (sums
-// to 100). Equipment categories are rolled honestly -- random kind with natural enchant/runic/curse,
-// i.e. Brogue's usual identification gamble -- while the consumable slots are forced to guaranteed-
-// useful kinds (detect magic is POTION_DETECT_MAGIC2, the always-present good potion on this branch).
-static item *goldGoblinMarqueeItem(void) {
-    const int roll = rand_range(1, 100);
-    if (roll <= 20) return generateItem(STAFF,  -1);
-    if (roll <= 36) return generateItem(CHARM,  -1);
-    if (roll <= 47) return generateItem(WAND,   -1);
-    if (roll <= 58) return generateItem(RING,   -1);
-    if (roll <= 69) return generateItem(WEAPON, -1);
-    if (roll <= 80) return generateItem(ARMOR,  -1);
-    if (roll <= 90) return generateItem(POTION, POTION_DETECT_MAGIC2);
-    if (roll <= 96) return generateItem(SCROLL, SCROLL_ENCHANTING);
-    if (roll <= 98) return generateItem(POTION, POTION_LIFE);
-    return                 generateItem(POTION, POTION_STRENGTH);
-}
-
-// iOS port (iBrogue): scatter one item onto an open tile near origin; discard it if there is no room.
-static void goldGoblinScatterItem(item *theItem, pos origin) {
+// Scatter one item onto an open tile near origin; discard it if there is no room. Used for the death hoard.
+static void monsterScatterItem(item *theItem, pos origin) {
     pos loc;
     if (getQualifyingLocNear(&loc, origin, true, NULL,
                              (T_OBSTRUCTS_ITEMS | T_PATHING_BLOCKER),
@@ -3825,27 +3788,90 @@ static void goldGoblinScatterItem(item *theItem, pos origin) {
     }
 }
 
-// iOS port (iBrogue): the gold goblin's death hoard -- one curated marquee item, a burst of 2-4 fat
-// gold piles, and a depth-gated stack of thrown weapons (darts early, javelins from depth 10) --
-// scattered around the corpse. Called from killCreature() on a normal (non-administrative) death, and
-// only for the genuine hoard-bearer, so clones and debug spawns drop nothing. Net-new loot by design.
-void goldGoblinDropHoard(creature *monst) {
+// A depth-scaled pile of gold: rand_range(loPerDepth * depth, hiPerDepth * depth).
+static item *lootGoldPile(short loPerDepth, short hiPerDepth) {
+    item *gold = generateItem(GOLD, -1);
+    gold->quantity = rand_range(loPerDepth * rogue.depthLevel, hiPerDepth * rogue.depthLevel);
+    gold->originDepth = rogue.depthLevel;
+    return gold;
+}
+
+// Roll one item from a weighted loot table: a single rand_range against the weight sum, walked in row order
+// (so a table summing to 100 consumes exactly one rand_range(1, 100), preserving any prior call sequence).
+// The table is terminated by a {0}-weight sentinel row -- self-delimiting, so there is no separate count to
+// keep in sync. kind -1 = honest random roll (natural enchant/runic/curse); a specific kind forces that item.
+static item *rollLootTable(const lootEntry *table) {
+    short total = 0, count = 0;
+    while (table[count].weight > 0) {
+        total += table[count].weight;
+        count++;
+    }
+    const short roll = rand_range(1, total);
+    short cumulative = 0;
+    for (short i = 0; i < count; i++) {
+        cumulative += table[i].weight;
+        if (roll <= cumulative) {
+            return generateItem(table[i].category, table[i].kind);
+        }
+    }
+    return generateItem(table[count - 1].category, table[count - 1].kind); // safety; unreachable for a positive-weight table
+}
+
+// iOS port (iBrogue): loot-component per-hit shedding, called from inflictDamage() alongside the generic
+// fleerNoteDamage() flight trigger. Only a discrete attack sheds loot (attacker != NULL; fire/gas/poison
+// pass NULL, so a damage-over-time effect can't farm it), and only for the genuine bearer (clones & debug
+// spawns have isBearer = false). The first non-lethal blow that drops the creature below its bonusBelowHpPct
+// sheds the one-time bonus item (healing and re-wounding will not repeat it); every other discrete hit sheds
+// a gold trail. `damage` is the post-shield amount, not yet subtracted, so resulting HP is currentHP - damage.
+void monsterShedLootOnHit(creature *monst, creature *attacker, short damage) {
+    const lootProfile *loot = monst->info.loot;
+    if (!loot || !monst->looter.isBearer || attacker == NULL) {
+        return;
+    }
+
+    const short hpAfter = monst->currentHP - damage;
+    if (loot->bonusBelowHpPct > 0
+        && !monst->looter.bonusDropped
+        && hpAfter > 0
+        && hpAfter * 100 < monst->info.maxHP * loot->bonusBelowHpPct) {
+
+        monst->looter.bonusDropped = true;
+        monsterShedItem(monst, generateItem(loot->bonusCategory, loot->bonusKind));
+    } else if (loot->hitGoldLoPerDepth > 0 || loot->hitGoldHiPerDepth > 0) {
+        monsterShedItem(monst, lootGoldPile(loot->hitGoldLoPerDepth, loot->hitGoldHiPerDepth));
+    }
+}
+
+// iOS port (iBrogue): loot-component death hoard -- one marquee item (weighted roll), a burst of depth-scaled
+// gold piles, and an optional depth-gated thrown-weapon stack, all scattered around the corpse. Called from
+// killCreature() on a normal (non-administrative) death, for the genuine bearer only, so clones and debug
+// spawns (isBearer = false) drop nothing. Net-new loot by design.
+void monsterDropDeathLoot(creature *monst) {
+    const lootProfile *loot = monst->info.loot;
+    if (!loot) {
+        return;
+    }
     const pos origin = monst->loc;
     const int depth = rogue.depthLevel;
 
-    goldGoblinScatterItem(goldGoblinMarqueeItem(), origin);
-
-    const int piles = rand_range(2, 4);
-    for (int i = 0; i < piles; i++) {
-        item *gold = generateItem(GOLD, -1);
-        gold->quantity = rand_range(5 * depth, 10 * depth);
-        gold->originDepth = depth;
-        goldGoblinScatterItem(gold, origin);
+    if (loot->marquee && loot->marquee[0].weight > 0) {
+        monsterScatterItem(rollLootTable(loot->marquee), origin);
     }
 
-    item *thrown = generateItem(WEAPON, depth >= 10 ? JAVELIN : DART);
-    thrown->quantity = (depth >= 10) ? rand_range(5, 8) : rand_range(10, 15);
-    goldGoblinScatterItem(thrown, origin);
+    if (loot->deathGoldPilesHi > 0) {
+        const int piles = rand_range(loot->deathGoldPilesLo, loot->deathGoldPilesHi);
+        for (int i = 0; i < piles; i++) {
+            monsterScatterItem(lootGoldPile(loot->deathGoldLoPerDepth, loot->deathGoldHiPerDepth), origin);
+        }
+    }
+
+    if (loot->thrown.category) {
+        const boolean late = depth >= loot->thrown.lateDepth;
+        item *thrown = generateItem(loot->thrown.category, late ? loot->thrown.lateKind : loot->thrown.earlyKind);
+        thrown->quantity = late ? rand_range(loot->thrown.lateQtyLo, loot->thrown.lateQtyHi)
+                                : rand_range(loot->thrown.earlyQtyLo, loot->thrown.earlyQtyHi);
+        monsterScatterItem(thrown, origin);
+    }
 }
 
 void monstersTurn(creature *monst) {
@@ -3888,9 +3914,21 @@ void monstersTurn(creature *monst) {
     // iOS port (iBrogue): any creature with a flee component runs its reusable dormant->flee AI in place
     // of the normal hunting/fleeing logic below. (Paralysis, entrancement and captivity already returned
     // above.) Data-driven: the behavior comes from the catalog's fleeAI profile, not a per-monster branch.
+    // Exception -- discord overrides the flee component: a discordant fleer turns on whatever is nearest
+    // (handled by the normal discord/hunting logic below), so the player can use discord to break off an
+    // escape. We drop it out of FLEEING state here so that logic engages (the discord pass deliberately
+    // skips fleeing monsters); the flee AI re-asserts itself -- on sight, or via its remaining flee timer --
+    // once discord wears off, since we leave fleer.triggered/fleeTurns untouched.
+    // NOTE for future flee-creatures: this early dispatch also bypasses the normal per-turn tail below
+    // (updateMonsterState, scent/state transitions, and any MONST DFType aura). The gold goblin needs none
+    // of those; a fleer that does must fold them into the flee component rather than rely on this path.
     if (monst->info.fleeAI) {
-        fleeAITakesTurn(monst, monst->info.fleeAI);
-        return;
+        if (monst->status[STATUS_DISCORDANT]) {
+            monst->creatureState = MONSTER_TRACKING_SCENT;
+        } else {
+            fleeAITakesTurn(monst, monst->info.fleeAI);
+            return;
+        }
     }
 
     x = monst->loc.x;

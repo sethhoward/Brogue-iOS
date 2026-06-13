@@ -89,11 +89,14 @@ Accurate as of this writing; confirm signatures in-engine before use.
 
 ## Candidate behavior components — bespoke today, extract on next reuse
 
-**The flee/escape behaviors are now a real, reusable component** (built 2026-06-13 as the first dogfood
-of this model). Everything in the *flee* group below ships as the generic functions named; the gold
-goblin is the reference consumer (config in `goldGoblinFleeProfile`, assigned via its catalog `fleeAI`
-field). The **loot and spawn** behaviors remain gold-goblin-specific and are the *next* extraction
-candidates — to be lifted on next reuse, per [ADR 0001](../adr/0001-deterministic-component-based-content.md),
+**The flee/escape AND loot behaviors are now real, reusable components** (the flee component built
+2026-06-13 as the first dogfood of this model, the loot component the same day as the second).
+Everything in the *flee* and *loot* groups below ships as the generic functions named; the gold goblin
+is the reference consumer of both (flee config `goldGoblinFleeProfile` via the catalog `fleeAI` field;
+loot config `goldGoblinLoot` + `goldGoblinMarquee` via the catalog `loot` field). After these two,
+**no `MK_GOLD_GOBLIN` branch remains in the engine** — the goblin is defined entirely by catalog
+config. Only the **once-per-run pinned spawn** remains gold-goblin-specific, the *next* extraction
+candidate — to be lifted on next reuse, per [ADR 0001](../adr/0001-deterministic-component-based-content.md),
 not speculatively.
 
 | Behavior | Status | Reusable form |
@@ -104,7 +107,10 @@ not speculatively.
 | HP-phased keep-distance → break-for-exit switch | ✅ **built** | the `breakForExitBelowHpPct` branch in `fleeAITakesTurn` |
 | Adjacency-escape at the exit stair | ✅ **built** | `fleerAtExit` / `fleerEscape` |
 | Whole flee/escape turn, config-driven | ✅ **built** | `fleeAITakesTurn(monst, const fleeProfile *)` + `fleerState` runtime + `fleeProfile` config |
-| Scatter curated loot on death | candidate | `monsterScatterLoot(monst, pool, counts)` (now `goldGoblinDropHoard` / `goldGoblinScatterItem`) |
+| Roll one item from a weighted pool | ✅ **built** | `rollLootTable(const lootEntry *)` ({0}-weight-terminated table) |
+| Place loot (trail at self / scatter near origin) | ✅ **built** | `monsterShedItem(monst, item)` / `monsterScatterItem(item, origin)` |
+| Per-hit shed + one-time near-death bonus | ✅ **built** | `monsterShedLootOnHit(monst, attacker, damage)` |
+| Death hoard (marquee + gold burst + thrown stack), config-driven | ✅ **built** | `monsterDropDeathLoot(monst)` + `lootState` runtime + `lootProfile` config |
 | Once-per-run pinned spawn | candidate | `spawnUniqueNear(MK_*, anchor, depthRange, chance, &flag)` (now `spawnGoldGoblin`) |
 
 ---
@@ -174,10 +180,19 @@ That the goblin and a bare skulker differ only in *config* is the signal the abs
 profile, so you can mix and match (a fleeing monster with no special loot; a stationary monster with a
 hoard):
 
-- `lootProfile` — per-hit shed, near-death one-time drop, death-hoard pool — consumed by hooks in
-  `inflictDamage` / `killCreature` (or just `MONST_CARRY_ITEM_*` for the simple case).
-- `spawnProfile` — anchor stair, depth range, chance, once-per-run — consumed by `initializeLevel`
-  (or a plain `hordeCatalog` entry for normal spawns).
+- `lootProfile` — ✅ **built** (the second dogfood). A `lootEntry` weighted table (`marquee`) +
+  depth-scaled death gold + an optional depth-gated `lootThrownStack` + a per-hit gold trail + a
+  one-time near-death bonus. Attached to the catalog `loot` field; consumed by `monsterShedLootOnHit`
+  (in `inflictDamage`) and `monsterDropDeathLoot` (in `killCreature`). Runtime state is `lootState`
+  (`isBearer`, set in `initializeMonster` for any creature whose `info.loot != NULL` and cleared in
+  `cloneMonster` so clones are loot-less; `bonusDropped`). Because the bearer flag is initialized
+  generically, **giving a monster a `lootProfile` is enough — no custom spawn code required.**
+  This is *net-new* loot — use `MONST_CARRY_ITEM_*` instead for an ordinary single carried drop drawn
+  from the dungeon's item budget. The gold goblin's config is `goldGoblinLoot` (Globals.c). A second
+  looting creature is just another `lootEntry` table + `lootProfile` row.
+- `spawnProfile` — *candidate.* Anchor stair, depth range, chance, once-per-run — would be consumed by
+  `initializeLevel` (or a plain `hordeCatalog` entry for normal spawns). Still bespoke in
+  `spawnGoldGoblin`; extract on next reuse.
 
 **Limits, honestly:** the `dijkstraScan`/stairs gotchas live *inside* the shared primitives, so a new
 creature can't re-trip them — but genuinely novel movement (teleporting, burrowing) is a *new*
@@ -188,6 +203,30 @@ have actually built.
 `GOLD_GOBLIN_FLEE`, and confirm it plays identically (the regression check) — then the skulker is free.
 Per [ADR 0001](../adr/0001-deterministic-component-based-content.md) this happens *when a second
 flee-creature is actually wanted*, not as a speculative standalone pass.
+
+---
+
+## Sharp edges — read before adopting a component
+
+These were surfaced auditing the gold goblin (2026-06-13). None block reuse; they're the seams to know.
+
+- **The flee dispatch returns early, bypassing the rest of `monstersTurn`.** Status counters that end a
+  turn (paralysis, frozen, entrancement, captivity) are handled *above* the dispatch, so they still work.
+  **Discord** is handled explicitly: a discordant fleer is dropped out of `MONSTER_FLEEING` so the engine's
+  discord logic engages (it turns on the nearest creature instead of escaping — a clean player counter),
+  and the flee AI resumes when discord ends. But the early `return` still skips `updateMonsterState`, scent
+  transitions, and any per-turn `DFType` aura. The goblin needs none of those; a future fleer that **attacks**
+  (so wants normal targeting), or that **emits a terrain aura**, must fold that into the flee component
+  rather than expect the normal tail to run.
+- **Loot tables are `{0}`-weight-terminated** (`rollLootTable` walks to the sentinel), so there's no count
+  to keep in sync — but the array *must* end in a `{0}` row or the walk runs off the end. `rand_range` is
+  defensive (a zero/degenerate range returns its low bound and consumes no RNG), so a malformed table can't
+  crash, but it can silently mis-roll. Keep weights positive and the sentinel present.
+- **Loot scales with spawn count.** A `lootProfile` is net-new gold/items; on a once-per-run pinned monster
+  that's within seed noise (see the goblin's leaderboard analysis), but the *same* profile on a horde monster
+  multiplies by every spawn and can skew the gold-based leaderboard. Size loot to expected spawn frequency.
+- **`fleeAI` and `loot` are positional trailing columns** in `monsterCatalog`, relying on C zero-init for the
+  rows that omit them. Append new `creatureType` fields; never insert/reorder, or every catalog row shifts.
 
 ---
 

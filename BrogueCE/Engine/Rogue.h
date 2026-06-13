@@ -2273,6 +2273,44 @@ typedef struct fleerState {               // iOS port (iBrogue): per-instance ru
     boolean threwToss;                     // has flung its one tossFeature
 } fleerState;
 
+// iOS port (iBrogue): reusable "looting creature" component (see docs/guides/reusable-components.md).
+// A creatureType carries an optional lootProfile (config); creatures with one shed gold/items as they are
+// struck and scatter a hoard on death, all data-driven via the shared helpers in Monsters.c. This is
+// NET-NEW loot, distinct from the engine's carried-item system (MONST_CARRY_ITEM_*, which assigns one item
+// from the dungeon's item budget at level-gen) -- use that flag for an ordinary single carried drop, and a
+// lootProfile for a curated, multi-item, event-triggered bonus hoard. The gold goblin is the reference consumer.
+typedef struct lootEntry {                // one weighted row of a loot table
+    enum itemCategory category;
+    short kind;                           // -1 = honest random kind (natural enchant/runic/curse); else forces that kind
+    short weight;                         // relative weight within the table; a row with weight 0 TERMINATES the table
+} lootEntry;
+
+typedef struct lootThrownStack {          // a guaranteed depth-gated stack of thrown weapons dropped on death
+    enum itemCategory category;           // 0 = no thrown stack
+    short earlyKind, lateKind;            // item kind below / at-or-above lateDepth (e.g. DART / JAVELIN)
+    short lateDepth;                      // depth at which it switches from the early kind to the late kind
+    short earlyQtyLo, earlyQtyHi;         // stack size (rand_range bounds) below lateDepth
+    short lateQtyLo, lateQtyHi;           // stack size (rand_range bounds) at or above lateDepth
+} lootThrownStack;
+
+typedef struct lootProfile {
+    // death hoard (scattered around the corpse on a real, non-administrative death)
+    const lootEntry *marquee;             // weighted pool ({0}-weight-terminated); one item rolled & scattered on death (NULL = none)
+    short deathGoldPilesLo, deathGoldPilesHi; // number of gold piles on death (rand_range; 0/0 = none)
+    short deathGoldLoPerDepth, deathGoldHiPerDepth; // each pile = rand_range(lo*depth, hi*depth)
+    lootThrownStack thrown;               // optional depth-gated thrown-weapon stack (category 0 = none)
+    // live shedding (per discrete attack the creature survives)
+    short hitGoldLoPerDepth, hitGoldHiPerDepth; // gold trail per hit = rand_range(lo*depth, hi*depth); 0/0 = none
+    short bonusBelowHpPct;                // one-time near-death drop the first hit that leaves it below this %HP (0 = none)
+    enum itemCategory bonusCategory;      // category of that one-time bonus item
+    short bonusKind;                      // kind of that one-time bonus item (-1 = honest random)
+} lootProfile;
+
+typedef struct lootState {                // iOS port (iBrogue): per-instance runtime state for the loot component
+    boolean isBearer;                     // sheds loot & drops the death hoard (false for clones & debug spawns)
+    boolean bonusDropped;                 // has shed its one-time near-death bonus
+} lootState;
+
 typedef struct creatureType {
     enum monsterTypes monsterID; // index number for the monsterCatalog
     char monsterName[COLS];
@@ -2294,6 +2332,7 @@ typedef struct creatureType {
     unsigned long flags;
     unsigned long abilityFlags;
     const struct fleeProfile *fleeAI;   // iOS port (iBrogue): NULL = normal AI; non-NULL = reusable flee component
+    const struct lootProfile *loot;     // iOS port (iBrogue): NULL = no special loot; non-NULL = reusable loot component
 } creatureType;
 
 typedef struct monsterWords {
@@ -2410,8 +2449,7 @@ typedef struct creature {
     short newPowerCount;                // how many more times this monster can absorb a fallen monster
     short totalPowerCount;              // how many times has the monster been empowered? Used to recover abilities when negated.
     fleerState fleer;                   // iOS port (iBrogue): reusable flee-component runtime state (gold goblin etc.)
-    boolean goldGoblinHasHoard;         // iOS port (iBrogue): drops the death hoard (false for clones/debug spawns)
-    boolean goldGoblinDroppedDetectMagic; // iOS port (iBrogue): has shed its one-time below-25%-HP potion of detect magic
+    lootState looter;                   // iOS port (iBrogue): reusable loot-component runtime state (gold goblin etc.)
 
     struct creature *leader;                 // only if monster is a follower
     struct creature *carriedMonster; // when vampires turn into bats, one of the bats restores the vampire when it dies
@@ -3367,8 +3405,8 @@ extern "C" {
     boolean monsterFleesFrom(creature *monst, creature *defender);
     void monstersTurn(creature *monst);
     void fleerNoteDamage(creature *monst); // iOS port (iBrogue): generic flee-component damage trigger
-    void goldGoblinReactToDamage(creature *monst, creature *attacker, short damage); // iOS port (iBrogue)
-    void goldGoblinDropHoard(creature *monst); // iOS port (iBrogue)
+    void monsterShedLootOnHit(creature *monst, creature *attacker, short damage); // iOS port (iBrogue): loot-component per-hit shedding
+    void monsterDropDeathLoot(creature *monst); // iOS port (iBrogue): loot-component death hoard
     boolean getRandomMonsterSpawnLocation(short *x, short *y);
     void spawnPeriodicHorde(void);
     void initializeStatus(creature *monst);

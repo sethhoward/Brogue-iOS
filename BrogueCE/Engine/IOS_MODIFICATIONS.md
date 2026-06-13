@@ -132,13 +132,49 @@ appended (not inserted) since the staff→bolt link is the `power` field, not po
 > `fleerAtExit` / `fleerEscape` / `monsterTossFeatureBehind` / `fleerNoteDamage` (in `Monsters.c`), with
 > per-instance state in `creature.fleer` (`fleerState`). `monstersTurn` dispatches on `monst->info.fleeAI`
 > (one data-driven branch for *all* fleers, not a per-monster `if`). The gold goblin is the reference
-> consumer: its config is `goldGoblinFleeProfile` (in `Globals.c`), and its loot/spawn stay gold-specific
-> (`goldGoblinReactToDamage` now does only loot; `fleerNoteDamage` handles the flight trigger). See
-> [docs/guides/reusable-components.md](../../docs/guides/reusable-components.md) and ADR 0001. The
-> behavior below is unchanged; the old `goldGoblin*`/`GOLD_GOBLIN_*` symbol names in this entry now map to
+> consumer: its config is `goldGoblinFleeProfile` (in `Globals.c`), and its spawn stays gold-specific.
+> See [docs/guides/reusable-components.md](../../docs/guides/reusable-components.md) and ADR 0001. The
+> flee behavior below is unchanged; the old `goldGoblin*`/`GOLD_GOBLIN_*` symbol names in this entry now map to
 > the generic ones (`goldGoblinFleeTurns`→`fleer.fleeTurns`, `GOLD_GOBLIN_PLAYER_BERTH`→`fleeProfile.playerBerth`,
 > etc.). One cosmetic change: the toss message is now generic ("flings a flask to the ground and it erupts
 > behind it") rather than naming the fungal forest.
+>
+> **Refactored 2026-06-13 (second dogfood) into a reusable loot component (behavior preserved in normal
+> play).** The goblin's gold/item drops are no longer bespoke `goldGoblin*` loot functions; they are now the
+> generic, config-driven component `lootProfile` + `lootEntry` (weighted table) + `lootThrownStack` (in
+> `Rogue.h`, attached to a `creatureType`'s `loot` field) + `monsterShedItem` / `monsterScatterItem` /
+> `lootGoldPile` / `rollLootTable` / `monsterShedLootOnHit` / `monsterDropDeathLoot` (in `Monsters.c`), with
+> per-instance state in `creature.looter` (`lootState`: `isBearer` + `bonusDropped`). `isBearer` is set in
+`initializeMonster` for any creature whose `info.loot != NULL` (so the component is drop-in for *any* looting
+monster, not just the goblin's custom spawn) and cleared in `cloneMonster`, so clones stay loot-less; for the
+67 non-looting monsters `info.loot` is NULL, leaving `isBearer` false exactly as before (no behavior change).
+The one observable shift: a gold goblin created outside `spawnGoldGoblin` (e.g. a wizard-mode summon) now
+drops its hoard, where before only the spawn hook flagged it — debug-only, can't affect a seeded run. The
+`inflictDamage` and
+> `killCreature` hooks now dispatch on `monst->info.loot` — **no `MK_GOLD_GOBLIN` branch remains anywhere in
+> the engine**; the goblin is defined entirely by its catalog config (`fleeAI` + `loot`). The goblin's config
+> is `goldGoblinLoot` + `goldGoblinMarquee` (in `Globals.c`). Old→new field names: `goldGoblinHasHoard`→
+> `looter.isBearer`, `goldGoblinDroppedDetectMagic`→`looter.bonusDropped`; old→new fns: `goldGoblinReactToDamage`→
+> `monsterShedLootOnHit`, `goldGoblinDropHoard`→`monsterDropDeathLoot`. The marquee roll is RNG-identical (one
+> `rand_range(1, 100)` walked over the weighted table, same thresholds), and the death-hoard / per-hit RNG call
+> order is preserved, so seeded drops are unchanged. **One deliberate behavior change:** per-hit shedding is now
+> gated on `looter.isBearer`, so a *cloned* goblin no longer sheds gold/detect-magic on hit (previously only its
+> *death* hoard was gated). This closes a clone-gold-farm gap and matches the stated "clones are loot-less"
+> design; it is invisible in normal play (a wild goblin can't be cloned mid-chase). The `bonusBelowHpPct` test
+> (`hpAfter * 100 < maxHP * 25`) is the same 25% threshold as the old `hpAfter * 4 < maxHP`.
+>
+> **Component hardening 2026-06-13 (post-audit).** Two changes from auditing the components for reuse traps:
+> (1) **Loot tables are now `{0}`-weight-terminated sentinels** — `lootProfile.marqueeCount` is gone and
+> `rollLootTable(const lootEntry *)` walks to the sentinel, removing the count/array-length mismatch footgun.
+> RNG-identical (still one `rand_range(1, 100)` over the same weights). (2) **Discord now overrides the flee
+> component** — the `fleeAI` dispatch in `monstersTurn` drops a discordant fleer out of `MONSTER_FLEEING`
+> (sets `MONSTER_TRACKING_SCENT`) and falls through to the engine's discord/hunting logic instead of running
+> `fleeAITakesTurn`, so a discordant goblin turns on the nearest creature and stops escaping (a player counter;
+> previously the early return *and* the vanilla `creatureState != MONSTER_FLEEING` discord guard both insulated
+> it). `fleer.triggered`/`fleeTurns` are left intact, so it resumes fleeing when discord ends. Both need a
+> playtest to confirm feel. Caveat documented for future fleers: the early dispatch still bypasses
+> `updateMonsterState` / scent transitions / per-turn `DFType` auras — a fleer needing those must fold them
+> into the flee component. See [reusable-components.md §Sharp edges](../../docs/guides/reusable-components.md).
 
 **What.** A new monster, the **gold goblin** (`MK_GOLD_GOBLIN`), a passive "treasure goblin": it spawns
 near the down stairs, never attacks, and — once struck — flees toward the up stairs in bursts, shedding a

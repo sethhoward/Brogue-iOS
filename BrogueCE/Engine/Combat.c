@@ -1723,15 +1723,15 @@ boolean inflictDamage(creature *attacker, creature *defender,
         wakeUp(defender);
     }
 
-    // iOS port (iBrogue): any wounded fleer (a creature with a fleeAI profile) commits to fleeing -- the
-    // generic flee component. The gold goblin then layers its own loot reaction on top (a discrete attack,
-    // i.e. attacker != NULL, sheds gold, or a one-time detect-magic potion if this blow drops it below
-    // 25% HP). `damage` here is post-shield and not yet subtracted from currentHP.
+    // iOS port (iBrogue): two reusable components react to taking damage. A wounded fleer (creature with a
+    // fleeAI profile) commits to fleeing; a looter (creature with a loot profile) sheds loot -- gold per
+    // discrete hit, or a one-time near-death bonus. Both are data-driven (no per-monster branch); the gold
+    // goblin is the reference consumer of both. `damage` here is post-shield and not yet subtracted from HP.
     if (defender->info.fleeAI && damage > 0) {
         fleerNoteDamage(defender);
     }
-    if (defender->info.monsterID == MK_GOLD_GOBLIN && damage > 0) {
-        goldGoblinReactToDamage(defender, attacker, damage);
+    if (defender->info.loot && damage > 0) {
+        monsterShedLootOnHit(defender, attacker, damage);
     }
 
     if (defender == &player
@@ -1861,14 +1861,14 @@ void killCreature(creature *decedent, boolean administrativeDeath) {
         }
     }
 
-    // iOS port (iBrogue): a slain gold goblin spills its hoard (marquee item + gold piles + thrown
-    // weapons). Only on a real death -- escaping up the stairs uses administrativeDeath and forfeits
-    // everything -- and only for the true hoard-bearer, so clones and debug spawns drop nothing.
+    // iOS port (iBrogue): a slain looter (creature with a loot profile) spills its death hoard (marquee item
+    // + gold piles + thrown weapons). Only on a real death -- escaping via the stairs uses administrativeDeath
+    // and forfeits everything -- and only for the genuine bearer, so clones and debug spawns drop nothing.
     if (!administrativeDeath
-        && decedent->info.monsterID == MK_GOLD_GOBLIN
-        && decedent->goldGoblinHasHoard) {
+        && decedent->info.loot
+        && decedent->looter.isBearer) {
 
-        goldGoblinDropHoard(decedent);
+        monsterDropDeathLoot(decedent);
     }
 
     if (!administrativeDeath && (decedent->info.abilityFlags & MA_DF_ON_DEATH)

@@ -1077,6 +1077,42 @@ const fleeProfile goldGoblinFleeProfile = {
     .tossFeature = DF_FUNGUS_FOREST,
 };
 
+// iOS port (iBrogue): the gold goblin's loot-component config (see docs/guides/reusable-components.md).
+// Net-new bonus loot, distinct from the engine's MONST_CARRY_ITEM_* budget loot. Attached to its catalog
+// entry's loot field; the shared loot helpers in Monsters.c do the rest. A second looting creature is just
+// another lootEntry table + lootProfile + catalog row, no new behavior code.
+// The marquee pool sums to 100: equipment is rolled honestly (random kind, can be cursed -- the usual
+// identification gamble); the consumable slots are forced to guaranteed-useful kinds (detect magic is
+// POTION_DETECT_MAGIC2, the always-present good potion on this branch).
+static const lootEntry goldGoblinMarquee[] = {
+    {STAFF,  -1,                   20},
+    {CHARM,  -1,                   16},
+    {WAND,   -1,                   11},
+    {RING,   -1,                   11},
+    {WEAPON, -1,                   11},
+    {ARMOR,  -1,                   11},
+    {POTION, POTION_DETECT_MAGIC2, 10},
+    {SCROLL, SCROLL_ENCHANTING,     6},
+    {POTION, POTION_LIFE,           2},
+    {POTION, POTION_STRENGTH,       2},
+    {0},  // sentinel: a weight-0 row terminates the table
+};
+
+const lootProfile goldGoblinLoot = {
+    .marquee = goldGoblinMarquee,
+    .deathGoldPilesLo = 2, .deathGoldPilesHi = 4,       // 2-4 fat piles around the corpse
+    .deathGoldLoPerDepth = 5, .deathGoldHiPerDepth = 10, // each rand_range(5*depth, 10*depth)
+    .thrown = {
+        .category = WEAPON,
+        .earlyKind = DART, .lateKind = JAVELIN, .lateDepth = 10,
+        .earlyQtyLo = 5, .earlyQtyHi = 10,             // darts below depth 10
+        .lateQtyLo = 3,   .lateQtyHi = 6,               // javelins from depth 10
+    },
+    .hitGoldLoPerDepth = 2, .hitGoldHiPerDepth = 5,     // chase trail: rand_range(2*depth, 5*depth) per hit
+    .bonusBelowHpPct = 25,                              // one-time near-death drop below 25% HP
+    .bonusCategory = POTION, .bonusKind = POTION_DETECT_MAGIC2,
+};
+
 // Defines all creatures, which include monsters and the player:
 // This cannot be const, since we set monsterIDs
 creatureType monsterCatalog[NUMBER_MONSTER_KINDS] = {
@@ -1225,7 +1261,7 @@ creatureType monsterCatalog[NUMBER_MONSTER_KINDS] = {
     // uncatchable), modest dodge (def 25), no regen (0), can't be polymorphed. Custom AI/combat/loot keyed
     // off MK_GOLD_GOBLIN.
     {0, "gold goblin",  G_GOBLIN, &goldGoblinColor,    65,     25,     100,    {0, 0, 0},      0,  100,    100,    DF_RED_BLOOD,   0,    false,      0,      0,              {0},
-        (MONST_MALE | MONST_FEMALE | MONST_NO_POLYMORPH), (0), &goldGoblinFleeProfile}, // iOS port (iBrogue): reusable flee component
+        (MONST_MALE | MONST_FEMALE | MONST_NO_POLYMORPH), (0), &goldGoblinFleeProfile, &goldGoblinLoot}, // iOS port (iBrogue): reusable flee + loot components
 };
 
 const monsterWords monsterText[NUMBER_MONSTER_KINDS] = {

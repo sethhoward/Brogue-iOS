@@ -3926,7 +3926,7 @@ static void spawnGoldGoblin(void) {
     monst->info.maxHP = 35 + 6 * rogue.depthLevel; // depth-scaled so the chase stays ~6-10 hits across 5-24
     monst->currentHP = monst->info.maxHP;
     monst->creatureState = MONSTER_WANDERING; // dormant; its custom turn logic keeps it still until struck
-    monst->goldGoblinHasHoard = true; // the genuine hoard-bearer (clones, cleared in cloneMonster, drop nothing)
+    // looter.isBearer is set in initializeMonster (true for any creature with a lootProfile); clones clear it.
     if (forceSpawn) {
         // iOS port (iBrogue): in debug mode, reveal the goblin telepathically so it can be tracked on the
         // map (and watched as it flees) even when it slips out of line of sight.
