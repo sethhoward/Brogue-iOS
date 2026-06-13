@@ -102,14 +102,17 @@ rather than freezing a whole line — so a single frozen creature can be meaning
   foliage it crosses into a brittle, impassable barrier (`T_OBSTRUCTS_PASSABILITY | T_OBSTRUCTS_VISION`),
   melting edge-inward back to foliage; `T_IS_FLAMMABLE` + `fireType` = thaw, so fire melts it like lake ice.
 - **Bump-to-push.** Walking into a frozen creature shoves it like a statue (`pushFrozenCreature`, `Combat.c`),
-  intercepted in `playerMoves` (`Movement.c`) before the attack. The block slides across open floor up to
-  `FROST_PUSH_DISTANCE` (5) tiles and comes to rest **on** the first hazard it reaches — lava / a chasm / deep
-  water (`T_LAVA_INSTA_DEATH | T_AUTO_DESCENT | T_IS_DEEP_WATER`), deposited there to die / fall a level /
-  flounder via `applyInstantTileEffectsToCreature` — or **before** a wall, another creature, or the map edge.
-  (The slide is walked manually rather than via a blind blinking-zap, which is what makes "shove the adjacent
-  enemy into the lava" reliable: a raw blink skims over hazards since they aren't obstructions and only applies
-  tile effects at the landing cell.) The block takes no damage; a creature it slams into takes momentum damage
-  (= distance travelled) and is doused if burning. A block wedged against an obstruction won't budge (no turn).
+  intercepted in `playerMoves` (`Movement.c`) before the attack. The block slides across open floor a distance
+  set by the shover's **effective strength** (`clamp(rogue.strength - weaknessAmount - 8, 2, 10)` — 4 tiles at
+  the starting strength 12, up to the 10-tile cap by strength 18) and comes to rest **on** the first hazard it
+  reaches — lava / a chasm / deep water (`T_LAVA_INSTA_DEATH | T_AUTO_DESCENT | T_IS_DEEP_WATER`), deposited
+  there to die / fall a level / flounder via `applyInstantTileEffectsToCreature` — or **before** a wall, another
+  creature, or the map edge. (The slide is walked manually rather than via a blind blinking-zap, which is what
+  makes "shove the adjacent enemy into the lava" reliable: a raw blink skims over hazards since they aren't
+  obstructions and only applies tile effects at the landing cell.) The block takes no damage; a creature it
+  slams into takes **distance travelled + `max(0, strength - 12)`** damage (momentum plus a strength shove-bonus
+  that bites even on an adjacent slam) and is doused if burning. A block wedged against an obstruction won't
+  budge (no turn). Since the frost bolt deals no direct damage, this is the staff's strength-scaling payoff.
 - **Colour state.** Persistent tints in `getCellAppearance` (`IO.c`): a strong icy cast while `STATUS_FROZEN`,
   a fainter chill while `STATUS_SLOWED` (the slow tint is **game-wide, any source**, not just this staff), plus
   the icy `flashMonster` at the moment of freezing. Ice terrain reads via its own tile colours.

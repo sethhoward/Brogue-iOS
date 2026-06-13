@@ -662,15 +662,19 @@ static boolean forceWeaponHit(creature *defender, item *theItem) {
     return autoID;
 }
 
-#define FROST_PUSH_DISTANCE 5 // iOS port (iBrogue): how far a shoved frozen block slides across open floor
+// iOS port (iBrogue): a shoved frozen block slides a distance set by the shover's effective strength
+// (clamped to this range), and a creature it slams into takes bonus damage for strength above the starting 12.
+#define FROST_PUSH_MIN_DISTANCE 2
+#define FROST_PUSH_MAX_DISTANCE 10
 
 // iOS port (iBrogue): staff of frost. Bumping a frozen creature shoves it like a statue. It slides across open
-// floor up to FROST_PUSH_DISTANCE tiles, then comes to rest the moment it reaches a hazard (lava / a chasm /
-// deep water -- it is deposited ONTO the hazard, to die, fall, or flounder) or runs out of room before a wall,
-// another creature, or the map edge. The frozen block itself takes NO damage; a creature it slams into takes
-// momentum damage (= the distance the block travelled) and, being struck by ice, is doused if it was on fire.
-// (dx,dy) is the one-tile push direction (away from the shover); the caller guarantees the first cell is open
-// or a hazard (a block wedged against an obstruction is rejected before we get here).
+// floor -- a distance set by the shover's effective strength (`clamp(str - 8, 2, 10)`) -- then comes to rest
+// the moment it reaches a hazard (lava / a chasm / deep water -- it is deposited ONTO the hazard, to die, fall,
+// or flounder) or runs out of room before a wall, another creature, or the map edge. The frozen block itself
+// takes NO damage; a creature it slams into takes momentum damage (the distance the block travelled) plus a
+// strength shove-bonus (`max(0, str - 12)`, so it bites even on an adjacent slam for a strong shover), and,
+// being struck by ice, is doused if it was on fire. (dx,dy) is the one-tile push direction (away from the
+// shover); the caller guarantees the first cell is open or a hazard (a wedged block is rejected before here).
 void pushFrozenCreature(creature *defender, short dx, short dy) {
     char buf[DCOLS*3], buf2[COLS], monstName[DCOLS];
     creature *slamTarget = NULL;
@@ -681,6 +685,10 @@ void pushFrozenCreature(creature *defender, short dx, short dy) {
     pos oldLoc = defender->loc;
     pos cur = oldLoc;
 
+    const short effectiveStrength = rogue.strength - player.weaknessAmount;
+    const short maxPush = clamp(effectiveStrength - 8, FROST_PUSH_MIN_DISTANCE, FROST_PUSH_MAX_DISTANCE);
+    const short strengthBonus = max(0, effectiveStrength - 12);
+
     if (canDirectlySeeMonster(defender)) {
         sprintf(buf, "you send the frozen %s skidding away", monstName);
         buf[DCOLS] = '\0';
@@ -688,7 +696,7 @@ void pushFrozenCreature(creature *defender, short dx, short dy) {
     }
 
     // Walk the slide: stop ON the first hazard, or BEFORE a wall / creature / map edge, up to the max distance.
-    for (step = 0; step < FROST_PUSH_DISTANCE; step++) {
+    for (step = 0; step < maxPush; step++) {
         pos next = (pos){ cur.x + dx, cur.y + dy };
         if (!coordinatesAreInMap(next.x, next.y)
             || cellHasTerrainFlag(next, T_OBSTRUCTS_PASSABILITY)
@@ -705,11 +713,11 @@ void pushFrozenCreature(creature *defender, short dx, short dy) {
         }
     }
 
-    forceDamage = distanceBetween(oldLoc, cur);
+    forceDamage = distanceBetween(oldLoc, cur) + strengthBonus; // momentum + strength shove-force
 
     // Relocate the block, then let the destination's terrain act on it (lava kills, a chasm drops it a level,
     // deep water sweeps its carried item away -- and fire there would thaw it).
-    if (forceDamage > 0) {
+    if (distanceBetween(oldLoc, cur) > 0) {
         pmapAt(oldLoc)->flags &= ~HAS_MONSTER;
         defender->loc = cur;
         pmapAt(cur)->flags |= HAS_MONSTER;
