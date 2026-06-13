@@ -37,7 +37,10 @@ This reference covers the **BrogueCE 1.15** engine (`BrogueCE/Engine/`). The Cla
   Reach for bespoke AI (a custom `monstersTurn` branch) *only* when no flag combination expresses
   the behavior (e.g. the gold goblin's "flee to a specific exit, phased by HP").
 - **Items:** behavior comes from the per-category effect tables + dispatch (potions/scrolls/staffs/
-  wands/charms/rings), the bolt catalog, and the deferred-action pattern. **See
+  wands/charms/rings), the bolt catalog, and the deferred-action pattern. Items have **no profile
+  component** like the flee/loot ones below, and shouldn't get one (ADR 0001) — they compose from
+  three data-driven seams instead (bolt verbs + modifiers, DF cascades, helpers/statuses). **The
+  item-side deep-dive on composing those seams is [composing-items.md](composing-items.md); see also
   [docs/game-data/ITEMS_AUDIT.md](../game-data/ITEMS_AUDIT.md) and the recipe in
   [adding-an-item.md](adding-an-item.md).**
 - **Terrain/effects:** the **`DF_*` dungeon-feature catalog** (`dungeonFeatureCatalog`) + tile flags
