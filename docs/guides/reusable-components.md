@@ -224,13 +224,6 @@ These were surfaced auditing the gold goblin (2026-06-13). None block reuse; the
   transitions, and any per-turn `DFType` aura. The goblin needs none of those; a future fleer that **attacks**
   (so wants normal targeting), or that **emits a terrain aura**, must fold that into the flee component
   rather than expect the normal tail to run.
-- **Harmful gas can wall off a fleer, and `monsterAvoids` forbids it.** A fleer on a *safe* tile treats every
-  adjacent harmful-gas cell as impassable (it only stops avoiding gas once it's already standing in it), so a
-  gas cloud across its escape can leave every gradient (exit / reroute / safety) with no legal step. To avoid
-  freezing in the player's eyeline, `fleeStepToExit` and `monsterKeepDistanceStep` fall back to
-  `fleerLastDitchStep` — the farthest-from-player step, *willing to wade through gas* (soft counter; one step
-  in re-enables normal pathing). It still refuses walls/lava/chasm/fire/deep water (`T_PATHING_BLOCKER`). A new
-  fleer with a different "won't move" hazard would extend that same fallback.
 - **Loot tables are `{0}`-weight-terminated** (`rollLootTable` walks to the sentinel), so there's no count
   to keep in sync — but the array *must* end in a `{0}` row or the walk runs off the end. `rand_range` is
   defensive (a zero/degenerate range returns its low bound and consumes no RNG), so a malformed table can't
