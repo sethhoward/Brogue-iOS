@@ -4544,7 +4544,8 @@ enum boltType boltForItem(item *theItem) {
 // If the effect causes the level's lighting or vision to change, *lightingChanged
 // will be set to true. (LightingChanged can be null.)
 // iOS port (iBrogue): a fire/lightning bolt crossing a dropped bad potion detonates it (helper defined near throwItem)
-static boolean shatterPotionAtLoc(item *theItem, short x, short y);
+static boolean shatterPotionAtLoc(item *theItem, short x, short y, boolean fiery);
+static void detectMagicOnItem(item *theItem); // iOS port (iBrogue): fire-detonation polarity reveal (defined below near quaffDetectMagic)
 
 // iOS port (iBrogue): staff-of-frost freeze semantics, applied to one creature. Anything fiery or
 // currently ablaze is too hot to freeze solid -- the cold merely douses it and leaves it sluggish.
@@ -4955,7 +4956,7 @@ static boolean updateBolt(bolt *theBolt, creature *caster, short x, short y,
                     *autoID = true; // the visible capture identifies the firing staff/wand
                 }
                 terminateBolt = true; // the bottle drinks the bolt, just as a detonation absorbs it
-            } else if (shatterPotionAtLoc(floorPotion, x, y)) {
+            } else if (shatterPotionAtLoc(floorPotion, x, y, (theBolt->flags & BF_FIERY) != 0)) {
                 removeItemFromChain(floorPotion, floorItems);
                 deleteItem(floorPotion);
                 pmap[x][y].flags &= ~(HAS_ITEM | ITEM_DETECTED);
@@ -6583,38 +6584,48 @@ static void spawnFrostCloud(short x, short y) {
     spawnDungeonFeature(x, y, &dungeonFeatureCatalog[DF_SHALLOW_WATER_FREEZE], true, false);
 }
 
-// iOS port (iBrogue): spawn a bad/cloud potion's shatter signature at (x,y), auto-identify the flask,
-// refresh the cell. Returns true for the cloud/explosion/terrain kinds, false otherwise. Shared by
-// throwItem and the bolt-detonation hook in updateBolt so the kind->DF mapping lives in one place.
-static boolean shatterPotionAtLoc(item *theItem, short x, short y) {
+// iOS port (iBrogue): spawn a bad/cloud potion's shatter signature at (x,y) and refresh the cell.
+// Returns true for the cloud/explosion/terrain kinds, false otherwise. Shared by throwItem and the
+// bolt-detonation hook in updateBolt so the kind->DF mapping lives in one place. The kind-specific
+// message is DEFERRED (stored in shatterMsg, printed below) so a fire detonation can suppress it.
+//
+// `fiery` = the trigger was fire (a fire bolt, or an incendiary dart) rather than lightning / a plain
+// dart-javelin / a hand-throw. A fire trigger instantly ignites a freshly-spawned FLAMMABLE GAS cloud,
+// erasing the visible tell -- so for those kinds we DON'T fully identify or name the potion; we print a
+// generic "volatile flask" line and reveal only its POLARITY (good/bad), gated on the player seeing it.
+// Every other signature is self-evident (a non-flammable cloud, distinctive terrain like honey's mire or
+// wort's healing cloud, a hole, a flood, or fire itself) and fully identifies as before. The "erased by
+// fire" test is data-driven -- the GAS layer's own flammability -- so any future potion auto-classifies.
+static boolean shatterPotionAtLoc(item *theItem, short x, short y, boolean fiery) {
+    const char *shatterMsg = NULL;
     switch (theItem->kind) {
         case POTION_POISON:
             spawnDungeonFeature(x, y, &dungeonFeatureCatalog[DF_POISON_GAS_CLOUD_POTION], true, false);
-            message("the flask shatters and a deadly purple cloud billows out!", 0);
+            shatterMsg = "the flask shatters and a deadly purple cloud billows out!";
             break;
         case POTION_CONFUSION:
             spawnDungeonFeature(x, y, &dungeonFeatureCatalog[DF_CONFUSION_GAS_CLOUD_POTION], true, false);
-            message("the flask shatters and a multi-hued cloud billows out!", 0);
+            shatterMsg = "the flask shatters and a multi-hued cloud billows out!";
             break;
         case POTION_PARALYSIS:
             spawnDungeonFeature(x, y, &dungeonFeatureCatalog[DF_PARALYSIS_GAS_CLOUD_POTION], true, false);
-            message("the flask shatters and a cloud of pink gas billows out!", 0);
+            shatterMsg = "the flask shatters and a cloud of pink gas billows out!";
             break;
         case POTION_INCINERATION:
-            message("the flask shatters and its contents burst violently into flame!", 0);
             spawnDungeonFeature(x, y, &dungeonFeatureCatalog[DF_INCINERATION_POTION], true, false);
+            shatterMsg = "the flask shatters and its contents burst violently into flame!";
             break;
         case POTION_DARKNESS:
             spawnDungeonFeature(x, y, &dungeonFeatureCatalog[DF_DARKNESS_POTION], true, false);
-            message("the flask shatters and the lights in the area start fading.", 0);
+            shatterMsg = "the flask shatters and the lights in the area start fading.";
             break;
         case POTION_DESCENT:
-            message("as the flask shatters, the ground vanishes!", 0);
             spawnDungeonFeature(x, y, &dungeonFeatureCatalog[DF_HOLE_POTION], true, false);
+            shatterMsg = "as the flask shatters, the ground vanishes!";
             break;
         case POTION_LICHEN:
-            message("the flask shatters and deadly spores spill out!", 0);
             spawnDungeonFeature(x, y, &dungeonFeatureCatalog[DF_LICHEN_PLANTED], true, false);
+            shatterMsg = "the flask shatters and deadly spores spill out!";
             break;
         case POTION_HALLUCINATION:
             // iOS port (iBrogue): port of upstream PR #842 — a thrown hallucination potion blooms a
@@ -6622,49 +6633,80 @@ static boolean shatterPotionAtLoc(item *theItem, short x, short y) {
             // this with the bolt-detonation hook means a lightning bolt over a dropped hallucination potion
             // simply spawns the forest, while a fire bolt's exposeTileToFire (in updateBolt, run right after
             // this) ignites the flammable growth.
-            message("the flask shatters and a luminescent fungal forest blooms forth!", 0);
             spawnDungeonFeature(x, y, &dungeonFeatureCatalog[DF_FUNGUS_FOREST], true, false);
+            shatterMsg = "the flask shatters and a luminescent fungal forest blooms forth!";
             break;
         // iOS port (iBrogue): themed-set potions that leave a tile signature when thrown or bolt-hit.
         case POTION_HONEY:
-            message("the flask shatters into a sticky golden mire!", 0);
             spawnDungeonFeature(x, y, &dungeonFeatureCatalog[DF_NET], true, false);
+            shatterMsg = "the flask shatters into a sticky golden mire!";
             break;
         case POTION_VOMIT:
-            message("the flask shatters and a reeking cloud of nausea billows out!", 0);
             spawnDungeonFeature(x, y, &dungeonFeatureCatalog[DF_ROT_GAS_PUFF], true, false);
+            shatterMsg = "the flask shatters and a reeking cloud of nausea billows out!";
             break;
         case POTION_WORT:
-            message("the flask shatters and a cloud of healing spores bursts out!", 0);
             spawnDungeonFeature(x, y, &dungeonFeatureCatalog[DF_LIFE_POTION_CLOUD], true, false);
+            shatterMsg = "the flask shatters and a cloud of healing spores bursts out!";
             break;
         // iOS port (iBrogue): empty-bottle v2 capture-only cloud/terrain potions. (Acid's creature
         // weaken and ice's freeze are handled in throwItem's struck-creature path; this is the
         // empty-ground / bolt-detonation signature -- acid leaves a splatter, ice falls through.)
         case POTION_STEAM:
-            message("the flask shatters and a searing cloud of steam boils out!", 0);
             spawnDungeonFeature(x, y, &dungeonFeatureCatalog[DF_STEAM_PUFF], true, false);
+            shatterMsg = "the flask shatters and a searing cloud of steam boils out!";
             break;
         case POTION_WATER:
-            message("the flask shatters and water gushes out, flooding the area!", 0);
             spawnDungeonFeature(x, y, &dungeonFeatureCatalog[DF_FLOOD], true, false);
+            shatterMsg = "the flask shatters and water gushes out, flooding the area!";
             break;
         case POTION_WEBBING:
-            message("the flask shatters and bursts into a tangle of grasping web!", 0);
             spawnDungeonFeature(x, y, &dungeonFeatureCatalog[DF_WEB_LARGE], true, false);
+            shatterMsg = "the flask shatters and bursts into a tangle of grasping web!";
             break;
         case POTION_ACID:
-            message("the flask shatters and acid sprays across the ground!", 0);
             spawnDungeonFeature(x, y, &dungeonFeatureCatalog[DF_ACID_BLOOD], true, false);
+            shatterMsg = "the flask shatters and acid sprays across the ground!";
             break;
         case POTION_ICE:
-            message("the flask shatters into a cloud of biting frost!", 0);
             spawnFrostCloud(x, y);
+            shatterMsg = "the flask shatters into a cloud of biting frost!";
             break;
         default:
             return false;
     }
-    autoIdentify(theItem);
+
+    // Did a fire trigger just erase this kind's tell? (Flammable gas cloud on the tile -> it ignites into
+    // indistinguishable flame the same instant. Checks the GAS layer specifically so honey's flammable
+    // SURFACE net doesn't qualify.)
+    const boolean fireErasedKind = fiery
+        && pmap[x][y].layers[GAS] != NOTHING
+        && (tileCatalog[pmap[x][y].layers[GAS]].flags & T_IS_FLAMMABLE);
+
+    if (fireErasedKind && !potionTable[theItem->kind].identified) {
+        // Contents lost to the flame: reveal only the volatility (polarity), never the kind, and only if
+        // the player perceives the burst. The cloud was still spawned above (the explosion); we just don't
+        // name it.
+        if (playerCanSee(x, y)) {
+            const boolean polarityWasKnown = potionTable[theItem->kind].magicPolarityRevealed;
+            detectMagicOnItem(theItem); // reveals the KIND's polarity (persists across the run; not a full ID)
+            if (!polarityWasKnown) {
+                tryIdentifyLastItemKinds(HAS_INTRINSIC_POLARITY);
+                const boolean benevolent = (itemMagicPolarity(theItem) == MAGIC_POLARITY_BENEVOLENT);
+                messageWithColor(benevolent
+                    ? "the volatile flask bursts into flame -- you sense its contents were benevolent."
+                    : "the volatile flask bursts into flame -- you sense its contents were malevolent.",
+                    (benevolent ? &goodMessageColor : &badMessageColor), 0);
+            } else {
+                message("the volatile flask bursts into flame.", 0);
+            }
+        }
+    } else {
+        if (shatterMsg) {
+            message(shatterMsg, 0);
+        }
+        autoIdentify(theItem);
+    }
     refreshDungeonCell((pos){ x, y });
     return true;
 }
@@ -6824,9 +6866,9 @@ static void throwDetectMagicOnFloor(void);
 // darts/javelins (which leave the cloud unignited, like a lightning bolt). Mirrors the remove/delete the
 // bolt hook does after shatterPotionAtLoc. Returns true if a potion detonated; good potions (no shatter
 // signature) and the empty bottle are left untouched (a dart isn't a bolt, so it can't capture).
-static boolean detonateFloorPotionAt(short x, short y) {
+static boolean detonateFloorPotionAt(short x, short y, boolean fiery) {
     item *floorPotion = itemAtLoc((pos){ x, y });
-    if (floorPotion && (floorPotion->category & POTION) && shatterPotionAtLoc(floorPotion, x, y)) {
+    if (floorPotion && (floorPotion->category & POTION) && shatterPotionAtLoc(floorPotion, x, y, fiery)) {
         removeItemFromChain(floorPotion, floorItems);
         deleteItem(floorPotion);
         pmap[x][y].flags &= ~(HAS_ITEM | ITEM_DETECTED);
@@ -6947,6 +6989,25 @@ static void throwItem(item *theItem, creature *thrower, pos targetLoc, short max
         }
     }
 
+    // iOS port (iBrogue): a potion lobbed INTO deep water doesn't shatter -- it bobs on the surface and
+    // rides the current to shore via the game's own item drift (the T_MOVES_ITEMS sweep in
+    // updateFloorItems), so you can wade out and recover it rather than wasting it. Only when it actually
+    // lands on open water: a potion that strikes a creature or a wall over the water still shatters there.
+    if ((theItem->category & POTION)
+        && !hitSomethingSolid
+        && !(pmap[x][y].flags & (HAS_MONSTER | HAS_PLAYER))
+        && cellHasTerrainFlag((pos){ x, y }, T_IS_DEEP_WATER)) {
+
+        if (playerCanSee(x, y)) {
+            message("the flask splashes into the water and bobs away on the current.", 0);
+        }
+        pos dropLoc;
+        getQualifyingLocNear(&dropLoc, (pos){ x, y }, true, 0, (T_OBSTRUCTS_ITEMS | T_OBSTRUCTS_PASSABILITY), (HAS_ITEM), false, false);
+        placeItemAt(theItem, dropLoc);
+        refreshDungeonCell(dropLoc);
+        return;
+    }
+
     if ((theItem->category & POTION) && (hitSomethingSolid || !cellHasTerrainFlag((pos){ x, y }, T_AUTO_DESCENT))) {
         // iOS port (iBrogue): a thrown good potion applies its effect to the struck creature, and a
         // visible tell auto-identifies it. Effect-always / tell-gated; falls through to the existing
@@ -7023,7 +7084,7 @@ static void throwItem(item *theItem, creature *thrower, pos targetLoc, short max
         // bolt-detonation hook in updateBolt). Returns true (signature spawned + flask auto-identified)
         // for the cloud/explosion kinds and hallucination's fungal forest; otherwise falls through to the
         // harmless-splash branch.
-        if (shatterPotionAtLoc(theItem, x, y)) {
+        if (shatterPotionAtLoc(theItem, x, y, false)) { // hand-thrown: deliberate use -> full ID (not fiery)
             // bad/cloud potion: its shatter signature was spawned and the flask auto-identified
         } else {
             if (cellHasTerrainFlag((pos){ x, y }, T_OBSTRUCTS_PASSABILITY)) {
@@ -7044,7 +7105,7 @@ static void throwItem(item *theItem, creature *thrower, pos targetLoc, short max
         // iOS port (iBrogue): an incendiary dart detonates a dropped bad/cloud potion like a FIRE bolt --
         // the potion's cloud spawns first, then the dart's own blast (DF_DART_EXPLOSION, fire) ignites it
         // for a violent burst.
-        detonateFloorPotionAt(x, y);
+        detonateFloorPotionAt(x, y, true); // fiery: the dart's blast ignites the cloud (fire-bolt style)
         spawnDungeonFeature(x, y, &dungeonFeatureCatalog[DF_DART_EXPLOSION], true, false);
         if (pmap[x][y].flags & (HAS_MONSTER | HAS_PLAYER)) {
             exposeCreatureToFire(monsterAtLoc((pos){ x, y }));
@@ -7056,7 +7117,7 @@ static void throwItem(item *theItem, creature *thrower, pos targetLoc, short max
     // bolt -- the cloud blooms but nothing ignites it (no fire is applied here). The weapon then drops as
     // usual below.
     if ((theItem->category & WEAPON) && (theItem->kind == DART || theItem->kind == JAVELIN)) {
-        detonateFloorPotionAt(x, y);
+        detonateFloorPotionAt(x, y, false); // non-fiery: cloud blooms unignited (lightning-bolt style)
     }
     pos dropLoc;
     getQualifyingLocNear(&dropLoc, (pos){ x, y }, true, 0, (T_OBSTRUCTS_ITEMS | T_OBSTRUCTS_PASSABILITY), (HAS_ITEM), false, false);

@@ -1002,6 +1002,60 @@ weapon is dropped. The bolt detonation path in `updateBolt` is unchanged.
 **Determinism.** Detonation runs the same RNG `shatterPotionAtLoc` already draws (gas volumes, etc.),
 action-triggered by the throw; no new serialized state. Same release-time `recordingVersionString` bump.
 
+### 2026-06-13 — A fire-detonated gas-cloud potion reveals polarity, not full ID
+
+**What.** When a fire trigger (fire bolt or incendiary dart) detonates an unidentified potion whose
+signature is a **flammable gas cloud** (poison / confusion / paralysis / vomit), the flame instantly
+consumes the cloud — so you no longer **fully identify** the potion; instead you learn only its
+**polarity** (good/bad), and the message is generic (*"the volatile flask bursts into flame — you sense
+its contents were malevolent."*) rather than naming the cloud. Every other detonation still fully IDs:
+non-fire triggers (lightning, dart/javelin, hand-throw) of any potion, and fire triggers of potions
+whose effect is self-evident (wort's healing cloud, honey's mire, darkness, descent's hole, a flood,
+lichen, the fungal forest, steam, ice, acid, and incineration's flame).
+
+**Why.** A fire blast erases a gas cloud's tell — you see flame, not a purple poison cloud — so a free
+full ID was unearned; the volatility is still legible, hence polarity. Effects the fire *doesn't* erase
+give the kind away on their own, so those keep full ID. (Player request.)
+
+**Where.** `Items.c`:
+- `shatterPotionAtLoc` gained a `boolean fiery` parameter and now **defers** its per-kind message into a
+  local (`shatterMsg`) so it can be suppressed. After spawning the signature it computes
+  `fireErasedKind = fiery && the GAS layer at the tile is flammable` (data-driven — the gas tile's own
+  `T_IS_FLAMMABLE`, checked on the GAS layer specifically so honey's flammable SURFACE net doesn't
+  qualify). If erased and not already identified, it reveals polarity via `detectMagicOnItem` (+ a
+  generic, polarity-announcing message, gated on `playerCanSee`) instead of `autoIdentify`; otherwise it
+  prints the kind message and `autoIdentify`s as before.
+- Callers pass `fiery`: `updateBolt` → `(theBolt->flags & BF_FIERY)`; `detonateFloorPotionAt` gained a
+  `fiery` param (incendiary dart → true, dart/javelin → false); the hand-thrown shatter in `throwItem`
+  → false. Forward-declared `detectMagicOnItem` for use before its definition.
+
+**Determinism.** Polarity reveal vs. full ID are both deterministic, action-triggered state changes; no
+RNG difference. The visibility gate keys on deterministic state. Same release-time
+`recordingVersionString` bump as the rest of the v2 work.
+
+### 2026-06-13 — A potion thrown into deep water floats away instead of shattering
+
+**What.** A potion that lands on an open **deep-water** tile (no creature or wall struck) no longer
+shatters — it splashes in and is carried to shore by the existing item current, so it can be waded out
+and recovered rather than wasted. A potion that strikes a creature or wall *over* the water still
+shatters there as before; shallow water (which doesn't sweep items) is unaffected.
+
+**Why.** Lobbing a potion into deep water and having it detonate/vanish felt punishing and unphysical;
+floating it ashore reuses the game's own deep-water item behavior and turns a misthrow into a
+recoverable mistake. (Player request.) Side effects, both desirable: a thrown **potion of water** no
+longer pointlessly floods existing water, and a thrown **potion of ice** no longer freezes a water
+crossing (it floats away) — freezing water is now the staff of frost's job, not a thrown potion's.
+
+**Where.** `Items.c` `throwItem`: a new branch *before* the potion-shatter block — if the item is a
+potion, nothing solid was hit, no creature/player is on the tile, and the tile is `T_IS_DEEP_WATER`,
+it prints a generic splash line (visibility-gated) and `placeItemAt`s the flask in the water (via
+`getQualifyingLocNear`, mirroring the normal thrown-item drop). The per-turn `T_MOVES_ITEMS` drift in
+the floor-item update (`Items.c`, the existing "items in deep water drift one cell toward shore" code)
+then washes it ashore. No new mechanic.
+
+**Determinism.** Placement + the existing drift are deterministic; no RNG. Same release-time
+`recordingVersionString` bump.
+
 ### 2026-06-11 — Sharpen monkey theft preference (tunes PR #849)
 
 **What.** Strengthened the monkey's deductive-theft bias from the PR #849 entry above: the favored-item

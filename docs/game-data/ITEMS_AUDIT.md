@@ -482,12 +482,28 @@ potion with a fire/lightning bolt. Not every potion reacts.
   **incendiary dart** triggers it like a *fire* bolt (cloud spawns, then the dart's blast ignites it), and
   a plain **dart / javelin** triggers it like a *lightning* bolt (cloud blooms, unignited) — a cheap,
   ammo-based potion-trap trigger. (Good potions / the empty bottle are untouched — a dart can't capture.)
+- **Identification from a detonation — fire reveals only polarity for gas clouds** (iOS port). Detonating
+  an *unidentified* potion normally **fully identifies** it (you saw the cloud). But a **fire** trigger
+  (fire bolt / incendiary dart) on a **flammable gas cloud** (poison / confusion / paralysis / vomit)
+  instantly burns the cloud into indistinguishable flame, so you learn only its **polarity** (good/bad),
+  not the kind — a generic "volatile flask bursts into flame" message, gated on seeing it
+  (`shatterPotionAtLoc`'s `fiery` path; the test is data-driven — the GAS layer's own `T_IS_FLAMMABLE`).
+  Polarity is per-kind, so it persists and tags every potion of that appearance (see §7 ‡/✦). Every other
+  detonation still full-IDs: non-fire triggers (lightning, dart/javelin, hand-throw), and fire triggers of
+  self-evident effects (wort, honey, darkness, descent, flood, lichen, fungal forest, steam, ice, acid,
+  incineration's flame).
 - **Harmless splash when thrown on bare ground but active on a direct creature hit:** strength, speed,
   levitation, fire immunity, invisibility **buff the struck creature** (throwing them at an enemy
   helps it); venom **poisons** it; **telepathy** (iOS port) **permanently bonds you to the struck
   creature** — it stays revealed on the map wherever it roams (the one "throw at an enemy" here that
   *helps you*; excludes inanimate turrets/totems; `applyPotionEffectToCreature`, `MB_TELEPATHICALLY_REVEALED`).
   life thrown bursts a healing cloud (but is inert when zapped).
+- **Thrown into deep water → floats to shore, no shatter** (iOS port). A potion that lands on an open
+  `T_IS_DEEP_WATER` tile (no creature/wall struck) is *not* destroyed — it's dropped in the water and the
+  existing `T_MOVES_ITEMS` drift carries it ashore for recovery (`throwItem`). A potion that strikes a
+  creature or wall *over* the water still shatters there; shallow water is unaffected. Consequences:
+  thrown **potion of water** no longer floods existing water, and thrown **potion of ice** no longer
+  freezes the crossing (it floats away — water-freezing is the staff of frost's role).
 
 So the practical "wasted if thrown" potions are the good self-buffs thrown at *bare ground* — with the
 caveats that **the empty bottle wants to be zapped, not thrown**, the **buff potions help an enemy you
