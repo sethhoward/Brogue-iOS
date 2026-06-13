@@ -3612,6 +3612,39 @@ static boolean fleerAtExit(const creature *monst, const fleeProfile *p) {
     return distanceBetween(monst->loc, fleerPrimaryExit(monst, p)) <= 1;
 }
 
+// iOS port (iBrogue): last resort when EVERY flee gradient (exit route, reroute, safety map) is blocked --
+// classically the fleer is on a safe tile but harmful gas walls off its only escape, so each field marks
+// those cells impassable (monsterAvoids) and returns NO_DIRECTION. Rather than HOLD in the player's eyeline
+// for free hits, it takes the single step that moves it FARTHEST from the player, willing to wade through
+// (non-fire) harmful gas -- a SOFT counter: gas costs it (damage/confusion), but never freezes it. One step
+// into the gas is self-correcting -- next turn it is standing IN harmful terrain, so monsterAvoids stops
+// forbidding adjacent gas and the normal gradients route it out. It never steps toward (or alongside) the
+// player, onto a stair, into an occupied tile, or into anything in T_PATHING_BLOCKER (walls/lava/chasm/fire/
+// deep water/traps) -- only gas is tolerated. Deterministic (no RNG); ties break by direction order.
+static boolean fleerLastDitchStep(creature *monst) {
+    const int curDist = distanceBetween(monst->loc, player.loc);
+    short bestDir = NO_DIRECTION;
+    int bestDist = curDist; // strictly-farther required, so it never volunteers melee or dithers sideways
+    for (short dir = 0; dir < DIRECTION_COUNT; dir++) {
+        const pos step = (pos){ monst->loc.x + nbDirs[dir][0], monst->loc.y + nbDirs[dir][1] };
+        if (!coordinatesAreInMap(step.x, step.y)) continue;
+        if (posEq(step, rogue.upLoc) || posEq(step, rogue.downLoc)) continue; // monsters can't stand on stairs
+        if (pmapAt(step)->flags & (HAS_PLAYER | HAS_MONSTER)) continue;       // occupied (player or another monster)
+        if (cellHasTerrainFlag(step, T_PATHING_BLOCKER)) continue;           // walls/lava/chasm/fire/deep water/traps (gas is NOT here)
+        if (diagonalBlocked(monst->loc.x, monst->loc.y, step.x, step.y, false)) continue;
+        const int d = distanceBetween(step, player.loc);
+        if (d > bestDist) {
+            bestDist = d;
+            bestDir = dir;
+        }
+    }
+    if (bestDir != NO_DIRECTION) {
+        moveMonster(monst, nbDirs[bestDir][0], nbDirs[bestDir][1]);
+        return true;
+    }
+    return false;
+}
+
 // iOS port (iBrogue): take one flee step. The up stairs (its only escape) are the first target, routed
 // along the blended head-home/keep-distance field. If that route is open it takes it -- swinging wide
 // around the player thanks to the proximity penalty, never brute-forcing past. If the player has blocked
@@ -3658,6 +3691,9 @@ static boolean fleeStepToExit(creature *monst, const fleeProfile *p) {
     if (dir != NO_DIRECTION) {
         moveMonster(monst, nbDirs[dir][0], nbDirs[dir][1]);
     }
+    if (posEq(monst->loc, prevLoc)) {
+        fleerLastDitchStep(monst); // every gradient blocked (e.g. gas-walled): relocate rather than hold for free hits
+    }
     return !posEq(monst->loc, prevLoc);
 }
 
@@ -3672,6 +3708,9 @@ static boolean monsterKeepDistanceStep(creature *monst) {
         if (!(pmapAt(step)->flags & HAS_PLAYER)) {
             moveMonster(monst, nbDirs[dir][0], nbDirs[dir][1]);
         }
+    }
+    if (posEq(monst->loc, prevLoc)) {
+        fleerLastDitchStep(monst); // safety map blocked (e.g. gas-walled): relocate rather than hold for free hits
     }
     return !posEq(monst->loc, prevLoc);
 }

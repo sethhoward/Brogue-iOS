@@ -123,6 +123,28 @@ were appended to all three variant catalogs (`GlobalsBrogue.c` / `GlobalsRapidBr
 `GlobalsBulletBrogue.c`); the staff/status/tile/DF tables are shared in `Globals.c`. `BOLT_FREEZE` is
 appended (not inserted) since the staff→bolt link is the `power` field, not positional.
 
+### 2026-06-13 — Flee component: gas no longer freezes a fleer (soft-counter last-ditch step)
+
+**What.** A fleer (gold goblin) standing on a safe tile but with harmful gas walling off its escape route
+would refuse to move. Added `fleerLastDitchStep` (`Monsters.c`): when *every* flee gradient (exit route,
+reroute, safety map) returns `NO_DIRECTION`, the fleer takes the single step that moves it farthest from the
+player, **willing to wade through (non-fire) harmful gas**, rather than hold in the player's eyeline for free
+hits. Wired into both `fleeStepToExit` (after the safety-map fallback) and `monsterKeepDistanceStep` (which
+previously had *no* fallback). It never steps toward/alongside the player, onto a stair, into an occupied
+tile, or into anything in `T_PATHING_BLOCKER` (walls/lava/chasm/fire/deep water/traps) — only gas is tolerated.
+
+**Why.** `monsterAvoids` forbids harmful-gas cells (`Monsters.c` ~1566) *unless the monster is already
+standing in harmful terrain*, so a fleer on a safe tile treats all adjacent gas as impassable; the routing
+cost maps (`monsterFleeDistanceMap`) and the safety map then have no legal step and it froze — the free-hit
+"hold in eyeline" failure the flee tuning exists to prevent. Soft counter (chosen over a hard freeze): gas
+costs the fleer (damage/confusion) but never traps it. The fix is **self-correcting** — one step into gas
+means it is then standing *in* harmful terrain, so `monsterAvoids` stops forbidding adjacent gas and the
+normal gradients route it out next turn.
+
+**Determinism.** No RNG (deterministic direction-order tiebreak); `moveMonster` does not consult
+`monsterAvoids`, so the deliberate gas step executes. Behavior is unchanged whenever any normal gradient
+yields a move — `fleerLastDitchStep` is reached only when the fleer would otherwise have frozen.
+
 ### 2026-06-13 — Steal-preference component (extracted from monkey + imp; third reusable component)
 
 **What.** The per-monsterID theft scoring in `rateItemStealDesirability` (the `if monsterID == MK_MONKEY …
