@@ -109,6 +109,87 @@ should replace the per-monster `goldGoblin*` fields at the same time.
 
 ---
 
+## Worked example: a flee-to-exit creature (what the refactor buys)
+
+This is the concrete target shape for the candidate components above, using a flee-creature as the
+case study — the test being "does a *second* such creature drop out as data, not code?" (It does.)
+
+**First, the decision-tree check:** existing flags get you partway — `MONST_FLEES_NEAR_DEATH` flees
+under 25% and `MONST_MAINTAINS_DISTANCE` backs off — but both flee *away from the player* (safety
+map), not *to a chosen exit*. "Flee to the up stairs" is expressible by no flag, so it earns a
+component.
+
+Three pieces (config + system + per-instance state):
+
+```c
+// COMPONENT (config): static, shared, attached to the catalog entry.
+typedef struct fleeProfile {
+    enum { FLEE_ON_SIGHT, FLEE_ON_DAMAGE } trigger;
+    enum { EXIT_UP, EXIT_DOWN, EXIT_NEAREST } exit;  // which stair counts as escape
+    short breakForExitBelowHpPct;  // 100 = always run for the exit; 50 = keep distance until wounded; 0 = pure kite (never escapes)
+    short playerBerth;             // how wide to route around the player
+    short fleeMemoryTurns;         // run-on after losing sight
+    boolean rerouteWhenBlocked;    // head for the OTHER stair to reposition (non-escape) when the exit route is blocked
+    short tossFeatureType;         // DF_* dropped on the just-vacated tile on the first break step (0 = none)
+    boolean forfeitLootOnEscape;
+} fleeProfile;
+```
+
+- **Assign the component:** add `const fleeProfile *fleeAI;` to `creatureType`, set it in the catalog
+  (`NULL` = normal AI).
+- **One shared system** — `fleeAITakesTurn(monst, profile)`, the generalized `goldGoblinTakesTurn` —
+  reads the profile and composes the candidate primitives above (`stepTowardAvoidingPlayer`,
+  `keepDistanceStep`, `tossFeatureBehind`, `reachedStairs`/`escapeUpstairs`, the HP-phase switch).
+- **Per-instance runtime state** — the `fleerState` sub-struct on `creature` (above).
+
+Dispatch is then **one data-driven branch for every flee-creature** (no per-monster branch):
+
+```c
+// in monstersTurn(), before the normal AI:
+if (monst->info.fleeAI) { fleeAITakesTurn(monst, monst->info.fleeAI); return; }
+```
+
+A new "flees upstairs" creature is then **just a config row** — no new behavior code:
+
+```c
+// Minimal skulker: bolts for the up stairs the instant it's hit, keeps its distance, no theatrics.
+static const fleeProfile SKULKER_FLEE = {
+    .trigger = FLEE_ON_DAMAGE, .exit = EXIT_UP, .breakForExitBelowHpPct = 100,
+    .playerBerth = 4, .fleeMemoryTurns = 10, .rerouteWhenBlocked = true,
+    .tossFeatureType = 0, .forfeitLootOnEscape = false,
+};
+
+// The gold goblin is the SAME system, richer config:
+static const fleeProfile GOLD_GOBLIN_FLEE = {
+    .trigger = FLEE_ON_SIGHT, .exit = EXIT_UP, .breakForExitBelowHpPct = 50,  // keep distance, then run when wounded
+    .playerBerth = 4, .fleeMemoryTurns = 10, .rerouteWhenBlocked = true,
+    .tossFeatureType = DF_FUNGUS_FOREST, .forfeitLootOnEscape = true,
+};
+```
+
+That the goblin and a bare skulker differ only in *config* is the signal the abstraction is real.
+
+**Keep the seams orthogonal.** Loot and spawn are *separate* components, not part of the flee
+profile, so you can mix and match (a fleeing monster with no special loot; a stationary monster with a
+hoard):
+
+- `lootProfile` — per-hit shed, near-death one-time drop, death-hoard pool — consumed by hooks in
+  `inflictDamage` / `killCreature` (or just `MONST_CARRY_ITEM_*` for the simple case).
+- `spawnProfile` — anchor stair, depth range, chance, once-per-run — consumed by `initializeLevel`
+  (or a plain `hordeCatalog` entry for normal spawns).
+
+**Limits, honestly:** the `dijkstraScan`/stairs gotchas live *inside* the shared primitives, so a new
+creature can't re-trip them — but genuinely novel movement (teleporting, burrowing) is a *new*
+primitive plus a profile field, written once and then reusable. The profile only covers behaviors we
+have actually built.
+
+**Doing the refactor safely:** introduce `fleeProfile` + `fleeAITakesTurn`, point the gold goblin at
+`GOLD_GOBLIN_FLEE`, and confirm it plays identically (the regression check) — then the skulker is free.
+Per [ADR 0001](../adr/0001-deterministic-component-based-content.md) this happens *when a second
+flee-creature is actually wanted*, not as a speculative standalone pass.
+
+---
+
 ## See also
 
 - [adding-a-creature.md](adding-a-creature.md) — the monster recipe + the gold goblin issues log.
