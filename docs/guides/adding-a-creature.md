@@ -192,6 +192,11 @@ The bespoke flee/escape AI took many iterations. The traps we hit, so you don't:
 
 ## 8. Architecture: are these behaviors reusable? (Honest answer: not yet)
 
+> Before building a new creature, start at the **[reusable-components reference](reusable-components.md)**
+> and [ADR 0001](../adr/0001-deterministic-component-based-content.md) — compose existing
+> flags/helpers first; only the truly novel logic should be bespoke.
+
+
 Everything above the data tables is currently **bespoke to `MK_GOLD_GOBLIN`** — `goldGoblin*`
 functions hardcode the kind, read `goldGoblin*` creature fields, and are wired in by a single
 `if (monsterID == MK_GOLD_GOBLIN)` branch. Adding a second "fleeing treasure" creature today would
