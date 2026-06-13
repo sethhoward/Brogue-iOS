@@ -662,21 +662,24 @@ static boolean forceWeaponHit(creature *defender, item *theItem) {
     return autoID;
 }
 
-// iOS port (iBrogue): staff of frost. Bumping a frozen creature shoves it like a statue, reusing the W_FORCE
-// blinking-slide. The frozen block takes NO damage; whatever it slams into takes momentum damage (= the
-// distance the block travelled) and, being struck by ice, is doused if it was on fire. Sliding the block onto
-// lava / a chasm / deep water deposits it there to its usual fate (contact with fire also thaws it). (dx,dy)
-// is the one-tile push direction (away from the shover).
+#define FROST_PUSH_DISTANCE 5 // iOS port (iBrogue): how far a shoved frozen block slides across open floor
+
+// iOS port (iBrogue): staff of frost. Bumping a frozen creature shoves it like a statue. It slides across open
+// floor up to FROST_PUSH_DISTANCE tiles, then comes to rest the moment it reaches a hazard (lava / a chasm /
+// deep water -- it is deposited ONTO the hazard, to die, fall, or flounder) or runs out of room before a wall,
+// another creature, or the map edge. The frozen block itself takes NO damage; a creature it slams into takes
+// momentum damage (= the distance the block travelled) and, being struck by ice, is doused if it was on fire.
+// (dx,dy) is the one-tile push direction (away from the shover); the caller guarantees the first cell is open
+// or a hazard (a block wedged against an obstruction is rejected before we get here).
 void pushFrozenCreature(creature *defender, short dx, short dy) {
     char buf[DCOLS*3], buf2[COLS], monstName[DCOLS];
-    creature *otherMonster;
-    short forceDamage;
-    bolt theBolt;
+    creature *slamTarget = NULL;
+    short forceDamage, step;
 
     monsterName(monstName, defender, false); // bare name; we supply "the frozen ..." ourselves
 
     pos oldLoc = defender->loc;
-    pos beyondFinal;
+    pos cur = oldLoc;
 
     if (canDirectlySeeMonster(defender)) {
         sprintf(buf, "you send the frozen %s skidding away", monstName);
@@ -684,40 +687,61 @@ void pushFrozenCreature(creature *defender, short dx, short dy) {
         combatMessage(buf, messageColorFromVictim(defender));
     }
 
-    theBolt = boltCatalog[BOLT_BLINKING];
-    theBolt.magnitude = 2; // up to ~10 tiles; halts before walls, but slides onto hazards
-    zap(oldLoc, (pos){ oldLoc.x + dx, oldLoc.y + dy }, &theBolt, false, false);
+    // Walk the slide: stop ON the first hazard, or BEFORE a wall / creature / map edge, up to the max distance.
+    for (step = 0; step < FROST_PUSH_DISTANCE; step++) {
+        pos next = (pos){ cur.x + dx, cur.y + dy };
+        if (!coordinatesAreInMap(next.x, next.y)
+            || cellHasTerrainFlag(next, T_OBSTRUCTS_PASSABILITY)
+            || diagonalBlocked(cur.x, cur.y, next.x, next.y, false)) {
+            break; // wall or map edge: come to rest on the current cell
+        }
+        if (pmapAt(next)->flags & (HAS_MONSTER | HAS_PLAYER)) {
+            slamTarget = monsterAtLoc(next); // stop here and slam into whatever is in the way
+            break;
+        }
+        cur = next; // slide onto the next cell
+        if (cellHasTerrainFlag(cur, (T_LAVA_INSTA_DEATH | T_AUTO_DESCENT | T_IS_DEEP_WATER))) {
+            break; // deposited onto the hazard; it meets its fate via the tile effects below
+        }
+    }
 
-    forceDamage = distanceBetween(oldLoc, defender->loc);
-    if (!(defender->bookkeepingFlags & MB_IS_DYING) && forceDamage > 0) {
-        // If something occupies the cell just beyond where the block stopped, the block slammed into it.
-        beyondFinal = (pos){ defender->loc.x + dx, defender->loc.y + dy };
-        if (coordinatesAreInMap(beyondFinal.x, beyondFinal.y)
-            && (pmapAt(beyondFinal)->flags & (HAS_MONSTER | HAS_PLAYER))) {
+    forceDamage = distanceBetween(oldLoc, cur);
 
-            otherMonster = monsterAtLoc(beyondFinal);
-            monsterName(buf2, otherMonster, true);
-            if (otherMonster->status[STATUS_BURNING]) {
-                extinguishFireOnCreature(otherMonster); // the icy block douses what it strikes
+    // Relocate the block, then let the destination's terrain act on it (lava kills, a chasm drops it a level,
+    // deep water sweeps its carried item away -- and fire there would thaw it).
+    if (forceDamage > 0) {
+        pmapAt(oldLoc)->flags &= ~HAS_MONSTER;
+        defender->loc = cur;
+        pmapAt(cur)->flags |= HAS_MONSTER;
+        refreshDungeonCell(oldLoc);
+        refreshDungeonCell(cur);
+        applyInstantTileEffectsToCreature(defender);
+    }
+
+    // Momentum damage to whatever the block slammed into (the block itself is unharmed).
+    if (slamTarget
+        && !(defender->bookkeepingFlags & MB_IS_DYING)
+        && !(slamTarget->info.flags & (MONST_IMMUNE_TO_WEAPONS | MONST_INVULNERABLE))) {
+
+        monsterName(buf2, slamTarget, true);
+        if (slamTarget->status[STATUS_BURNING]) {
+            extinguishFireOnCreature(slamTarget); // the icy block douses what it strikes
+        }
+        if (inflictDamage(NULL, slamTarget, forceDamage, &lightBlue, false)) {
+            if (canDirectlySeeMonster(slamTarget)) {
+                sprintf(buf, "%s %s when the frozen %s slams into $HIMHER",
+                        buf2,
+                        (slamTarget->info.flags & MONST_INANIMATE) ? "is destroyed" : "dies",
+                        monstName);
+                resolvePronounEscapes(buf, slamTarget);
+                buf[DCOLS] = '\0';
+                combatMessage(buf, messageColorFromVictim(slamTarget));
             }
-            if (!(otherMonster->info.flags & (MONST_IMMUNE_TO_WEAPONS | MONST_INVULNERABLE))) {
-                if (inflictDamage(NULL, otherMonster, forceDamage, &lightBlue, false)) {
-                    if (canDirectlySeeMonster(otherMonster)) {
-                        sprintf(buf, "%s %s when the frozen %s slams into $HIMHER",
-                                buf2,
-                                (otherMonster->info.flags & MONST_INANIMATE) ? "is destroyed" : "dies",
-                                monstName);
-                        resolvePronounEscapes(buf, otherMonster);
-                        buf[DCOLS] = '\0';
-                        combatMessage(buf, messageColorFromVictim(otherMonster));
-                    }
-                    killCreature(otherMonster, false);
-                }
-                if (otherMonster->creatureState != MONSTER_ALLY) {
-                    moralAttack(&player, otherMonster);
-                    splitMonster(otherMonster, &player);
-                }
-            }
+            killCreature(slamTarget, false);
+        }
+        if (slamTarget->creatureState != MONSTER_ALLY) {
+            moralAttack(&player, slamTarget);
+            splitMonster(slamTarget, &player);
         }
     }
 }
@@ -1692,9 +1716,10 @@ boolean inflictDamage(creature *attacker, creature *defender,
     }
 
     // iOS port (iBrogue): a wounded gold goblin commits to fleeing; a discrete attack (not fire/gas/
-    // poison, which pass a NULL attacker) also arms a fresh flee burst. Gold/potion effects in Phase 3.
+    // poison, which pass a NULL attacker) sheds gold, or a one-time potion of detect magic if this blow
+    // drops it below 25% HP. `damage` here is post-shield and not yet subtracted from currentHP.
     if (defender->info.monsterID == MK_GOLD_GOBLIN && damage > 0) {
-        goldGoblinReactToDamage(defender, attacker);
+        goldGoblinReactToDamage(defender, attacker, damage);
     }
 
     if (defender == &player

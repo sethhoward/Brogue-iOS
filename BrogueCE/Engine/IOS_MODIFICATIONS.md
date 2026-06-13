@@ -28,6 +28,44 @@ covers the separate Classic engine that ships in the app target).
 
 ## Change log
 
+### 2026-06-13 — Seed-entry keyboard: pre-fill the field + use a number pad (iOS port)
+
+**What.** Two bugs in the seeded-game (and any pre-filled) text dialog, fixed together.
+
+The engine maintains its own `inputText` buffer and renders the text on the game screen; the
+hidden iOS `UITextField` is only an off-screen key-capture proxy. CE showed the keyboard purely
+via `uiMode == ShowKeyboardAndEscape` and never told the host the default value, so the field was
+**empty** while the engine buffer held the pre-filled seed. iOS does not fire its
+`shouldChangeCharactersIn` callback for Backspace on an empty field, so the engine never received
+`DELETE_KEY` for the pre-filled digits — they couldn't be deleted. We now hand the default to the
+host before the input loop so the field is seeded to match the engine buffer.
+
+The dialog also always used the default (alpha) keyboard even for numeric seed entry. We now pass
+whether the entry is numeric so the host can show a number pad.
+
+- **`Rogue.h` / `CEBridge.mm`**: new host hook `ceRequestTextInput(const char *defaultText, boolean
+  numeric)` → `[gHost requestTextInput:numeric:]`.
+- **`IO.c` (`getInputTextString`)**: call `ceRequestTextInput(defaultEntry, textEntryType ==
+  TEXT_INPUT_NUMBERS)` once just before the input loop. (A number pad has no Return key; the host
+  adds a "Done" accessory bar that submits like Return.)
+
+### 2026-06-13 — Persist the last-played seed across app launches (iOS port)
+
+**What.** The title screen's "New Seeded Game" prompt pre-fills `previousGameSeed` — the seed of
+the most recent run. Upstream keeps this only in memory for the process lifetime; on iOS, where
+backgrounded apps are routinely terminated, it reset to 0 on every relaunch, so the prompt never
+remembered your last seed. We now back `previousGameSeed` with `NSUserDefaults`.
+
+- **Host hooks** (`CEBridge.mm`): `ceLoadPersistedSeed()` / `cePersistLastSeed(uint64_t)`, declared
+  in `Rogue.h` next to `setGraphicsMode`. The seed is stored as an `NSNumber` under
+  `@"ce last game seed"` so the full `uint64_t` range round-trips losslessly (mirrors the existing
+  graphics-mode persistence).
+- **Load** (`RogueMain.c`, `rogueMain()`): `previousGameSeed = ceLoadPersistedSeed();` replaces the
+  `= 0` reset, so the menu default is restored on entry.
+- **Persist**: wherever the engine assigns `previousGameSeed`, we mirror it to disk — after the
+  seed assignment in `initializeRogue` (`RogueMain.c`, guarded by `!playbackMode`) and after the
+  recording-load assignment (`Recordings.c`). The persisted value thus always tracks the in-memory one.
+
 ### 2026-06-12 — Staff of frost: freeze, slow, ice bridges, frozen-foliage walls, and shoving (new content)
 
 **What.** A new good staff, the **staff of frost** (`STAFF_FREEZE`, positive polarity, freq 8, value 1200,
@@ -63,11 +101,15 @@ rather than freezing a whole line — so a single frozen creature can be meaning
   / `_MELTING` / `_THAW`), chained onto the end of the water-freeze cascade so the one ray also freezes dense
   foliage it crosses into a brittle, impassable barrier (`T_OBSTRUCTS_PASSABILITY | T_OBSTRUCTS_VISION`),
   melting edge-inward back to foliage; `T_IS_FLAMMABLE` + `fireType` = thaw, so fire melts it like lake ice.
-- **Bump-to-push.** Walking into a frozen creature shoves it like a statue (`pushFrozenCreature`, `Combat.c`,
-  reusing the `W_FORCE` blinking-slide), intercepted in `playerMoves` (`Movement.c`) before the attack. The
-  block takes no damage; whatever it slams into takes momentum damage (= distance travelled) and is doused if
-  burning. A block wedged against an obstruction won't budge (and costs no turn). Sliding it onto a hazard
-  deposits it there to its usual fate.
+- **Bump-to-push.** Walking into a frozen creature shoves it like a statue (`pushFrozenCreature`, `Combat.c`),
+  intercepted in `playerMoves` (`Movement.c`) before the attack. The block slides across open floor up to
+  `FROST_PUSH_DISTANCE` (5) tiles and comes to rest **on** the first hazard it reaches — lava / a chasm / deep
+  water (`T_LAVA_INSTA_DEATH | T_AUTO_DESCENT | T_IS_DEEP_WATER`), deposited there to die / fall a level /
+  flounder via `applyInstantTileEffectsToCreature` — or **before** a wall, another creature, or the map edge.
+  (The slide is walked manually rather than via a blind blinking-zap, which is what makes "shove the adjacent
+  enemy into the lava" reliable: a raw blink skims over hazards since they aren't obstructions and only applies
+  tile effects at the landing cell.) The block takes no damage; a creature it slams into takes momentum damage
+  (= distance travelled) and is doused if burning. A block wedged against an obstruction won't budge (no turn).
 - **Colour state.** Persistent tints in `getCellAppearance` (`IO.c`): a strong icy cast while `STATUS_FROZEN`,
   a fainter chill while `STATUS_SLOWED` (the slow tint is **game-wide, any source**, not just this staff), plus
   the icy `flashMonster` at the moment of freezing. Ice terrain reads via its own tile colours.
@@ -88,25 +130,71 @@ trail of gold and dropping a hoard if you kill it before it escapes. Lifecycle:
   on depths **5–24**, **5%** per eligible level, **at most once per run** (`rogue.goldGoblinSpawned`).
   Placed on an open tile adjacent to `rogue.downLoc`. HP is depth-scaled at spawn (`35 + 6·depth`); the
   catalog HP (65) is only a fallback for non-hook spawns (e.g. wizard mode).
-- **Stats.** Never attacks (`{0,0,0}` damage), fast (`movementSpeed` 50), modest dodge (defense 25), no
-  regen (`turnsBetweenRegen` 0), `MONST_NO_POLYMORPH`, random gender (`MONST_MALE | MONST_FEMALE`).
+- **Stats.** Never attacks (`{0,0,0}` damage), moves at the player's pace like a monkey (`movementSpeed`
+  100 -- since it now flees *continuously*, a faster speed would be flatly uncatchable), modest dodge
+  (defense 25), no regen (`turnsBetweenRegen` 0), `MONST_NO_POLYMORPH`, random gender
+  (`MONST_MALE | MONST_FEMALE`).
 - **AI** (`goldGoblinTakesTurn`, dispatched from `monstersTurn` before the normal AI). Dormant and
-  motionless until first damaged. Each discrete hit arms a burst of up to **8 tiles**
-  (`goldGoblinBurstTiles`); during a burst it paths toward `rogue.upLoc` along a real distance map
-  (`goldGoblinFleeStep`: `calculateDistances` + `nextStep`), so it navigates around walls and corners
-  toward the actual exit rather than greedily beelining into a dead end. It breaks off to idle the instant
-  it leaves the player's direct line of sight. If the up stairs are genuinely unreachable (e.g. walled off
-  by a wand of obstruction), it falls back to the safety map (`getSafetyMap`) and flees away from the
-  player, retrying the stairs each turn. Only tiles actually travelled spend the burst, so
-  webs/entrancement/cornering stop it cleanly. Once it has opened up a lead
-  (`distanceBetween >= GOLD_GOBLIN_POTION_DISTANCE`, 4 tiles) it flings its one hallucinogen flask, blooming
-  `DF_FUNGUS_FOREST` (a glowing forest that blocks line of sight) *behind* it for cover — deliberately not
-  on the first point-blank hit, where it would screen nothing. Reaching the up stairs = escape
-  (`goldGoblinEscapes` → administrative `killCreature`, forfeiting the undropped hoard); the closure message
-  shows in sight, or off-screen only with a ring of awareness (`rogue.awarenessBonus > 0`).
-- **On hit** (`goldGoblinReactToDamage`, from `inflictDamage`). Any damage (incl. fire/gas) commits it to
-  fleeing. A *discrete* attack — `attacker != NULL`, so not fire/gas/poison ticks, which pass `NULL` — also
-  arms a fresh flee burst and sheds a gold pile (`rand_range(2·depth, 5·depth)`).
+  motionless until it shares line of sight with the player (`canDirectlySeeMonster`) or is attacked; from
+  then on it runs **continuously**, like a fleeing monkey -- it never pauses within sight, so it can't be
+  pinned against a wall and punched. While it can see the player it keeps a flee timer topped up
+  (`goldGoblinFleeTurns = GOLD_GOBLIN_FLEE_MEMORY`, 10); after losing sight it runs on for that many turns
+  ("a little further") then settles, resuming if spotted again. **Its flight has two phases, keyed off
+  health.** While still **healthy** (`>= GOLD_GOBLIN_BREAK_FOR_STAIRS_PCT`, 50% HP) it does *not* run for
+  the exit at all -- it merely keeps its distance, fleeing to the farthest-from-player cell via the
+  engine's safety map (`goldGoblinKeepDistanceStep`), letting the player wear it down (and shedding its
+  gold trail). It can't escape in this phase. Once **wounded** (below 50% HP) it switches to breaking for
+  the up stairs (the pathing below) and only then can reaching them count as an escape. (This deliberately
+  re-uses, as the healthy-phase behavior, the elusive farthest-cell flee that emerged by accident while the
+  stair-pathing was broken -- a bug turned into a feature.) The wounded-phase step (`goldGoblinFleeStep`)
+  heads for the **up stairs** (its only escape) along a single blended cost field (`goldGoblinStepToward` /
+  `goldGoblinDistanceMap`: `dijkstraScan` over a hand-built cost grid + `nextStep`). That one map folds the
+  goblin's two desires into one decision -- which suits an engine whose monster AI does one thing per turn,
+  with no state machine: it routes toward the up stairs, but cells within `GOLD_GOBLIN_PLAYER_BERTH` (4) of
+  the player carry a steep extra cost (`GOLD_GOBLIN_BERTH_COST` per tile, fading with distance) and the
+  player's own tile is impassable. So the cheapest route to the exit naturally swings *wide around* the
+  player rather than brushing past -- the goblin heads home while keeping its distance, the way a monkey
+  does. Because the penalty is a smooth gradient (not a hard reachable/unreachable flag), the route shifts
+  smoothly as the player moves instead of flickering, which is what removed the dithering; it also means the
+  goblin keeps *moving* toward the exit (not parking in a corner to be shot) and never brute-forces past the
+  player (which would make it a free target). **When the up stairs are blocked** (the up-stairs field
+  returns no step -- the player's body in a doorway, a fire/gas wall, or a 1-wide pinch), it does NOT hold
+  in the player's eyeline (that would mean free hits, and the block would never have to break). Instead it
+  stays *elusive*: it reroutes toward the **down stairs** as a lower-priority target via the *same*
+  keep-distance field, so it runs for open ground toward a real destination -- never a dead-end corner, the
+  way a flee-from-player safety map would. The down stairs are only a place to run to, never an escape
+  (only the up stairs are); this forces the player to abandon the block to give chase, at which point the
+  up-stairs route reopens and it retargets the up stairs. A block commits it to the reroute for
+  `GOLD_GOBLIN_FLEE_COMMIT` (3) turns (`goldGoblinFleeCommit`) so it doesn't visibly flip up/down each turn
+  as the player jockeys on and off the route. Only if *both* stair routes are walled off from it at once
+  does it fall to the engine's safety map (`getSafetyMap`) as a last resort. This is the result of a long
+  tuning sequence -- earlier tries side-stepped toward a player-blocked route (melee-range bounce),
+  flip-flopped back after one step, dithered up/down before the berth penalty existed, ran into dead ends
+  via a raw safety map, or held still and ate free hits. (Inherent tension, by design: it
+  spawns by the down stairs and the player enters from the up stairs, so the player is usually *between* the
+  goblin and its only exit -- it reaches the up stairs mainly when a room or loop lets it swing around, and
+  is otherwise run down or cornered. That cost/benefit -- maybe loot, maybe wasted turns chasing -- is the
+  intended trade.) On the **first step of its wounded break for the stairs** (not while merely keeping
+  distance, and never on the first point-blank hit, where it would screen nothing) it flings its one
+  hallucinogen flask back onto the tile it just *vacated* -- blooming `DF_FUNGUS_FOREST` (a glowing forest
+  that blocks line of sight) directly between itself and the pursuer, right where the player will step
+  next. The vacated tile is always a valid bloom site (it's clear now, or holds the player). Once per
+  goblin, only on a turn it actually moved. **Escape (up stairs only):** `monsterAvoids`
+  makes *every* non-player creature avoid the actual stair tile, so the goblin can never stand on a
+  staircase -- "reaching" the up stairs is detected as adjacency (`goldGoblinAtUpStairs`:
+  `distanceBetween(loc, rogue.upLoc) <= 1`), checked both before and after the step so it escapes on
+  arrival rather than bouncing off a tile it cannot enter. The down stairs are a reposition target only,
+  never an exit. Escaping calls `goldGoblinEscapes` (administrative `killCreature`, forfeiting the undropped
+  hoard); the closure message shows in sight, or off-screen only with a ring of awareness
+  (`rogue.awarenessBonus > 0`).
+- **On hit** (`goldGoblinReactToDamage`, from `inflictDamage`, passed the post-shield `damage`). Any damage
+  (incl. fire/gas) commits it to fleeing and refreshes the flee timer. A *discrete* attack — `attacker !=
+  NULL`, so not fire/gas/poison ticks, which pass `NULL` — sheds loot: the **first non-lethal blow that
+  takes it below 25% HP** (`(currentHP - damage) * 4 < maxHP`) sheds a **potion of detect magic**
+  (`POTION_DETECT_MAGIC2`) instead of gold — a one-time near-death bonus, gated by
+  `goldGoblinDroppedDetectMagic` so healing and re-wounding it never repeats it; every other discrete hit
+  sheds a gold pile (`rand_range(2·depth, 5·depth)`). (Lethal blows fall through to gold; the death hoard
+  handles the rest.)
 - **Death hoard** (`goldGoblinDropHoard`, from `killCreature` on non-administrative death only, and only for
   the genuine hoard-bearer): one curated marquee item + 2–4 gold piles (`5–10·depth` each) + one thrown-
   weapon stack (darts < depth 10, javelins ≥ 10), scattered nearby. Marquee pool (weights /100): Staff 20,
@@ -125,11 +213,11 @@ it's a pure skill test rather than a luck swing.
 `goldGoblinBurstTiles`/`goldGoblinTriggered`/`goldGoblinHasHoard`; `rogue.goldGoblinSpawned`; decls for
 `goldGoblinReactToDamage`/`goldGoblinDropHoard`; debug flag `D_ALWAYS_SPAWN_GOLD_GOBLIN` (a standalone
 toggle, *not* gated on wizard mode, so it works in a normal game) which forces a guaranteed spawn on
-depth 5 and, in `spawnGoldGoblin`, also flags that goblin `MB_TELEPATHICALLY_REVEALED` so it can be
-tracked on the map (even out of sight) while debugging. `Globals.c` — `goldGoblinColor`, `monsterCatalog` and
+depth 2 (early, for fast testing) and, in `spawnGoldGoblin`, also flags that goblin
+`MB_TELEPATHICALLY_REVEALED` so it can be tracked on the map (even out of sight) while debugging. `Globals.c` — `goldGoblinColor`, `monsterCatalog` and
 `monsterText` entries (all appended last, parallel to the enum). `RogueMain.c` — reset
 `rogue.goldGoblinSpawned` in `initializeRogue`. `Architect.c` — `spawnGoldGoblin()` + its call in
-`initializeLevel`. `Monsters.c` — `goldGoblinEscapes`/`goldGoblinFleeStep`/`goldGoblinTakesTurn`/`goldGoblinReactToDamage`/
+`initializeLevel`. `Monsters.c` — `goldGoblinEscapes`/`goldGoblinDistanceMap`/`goldGoblinStepToward`/`goldGoblinAtUpStairs`/`goldGoblinFleeStep`/`goldGoblinKeepDistanceStep`/`goldGoblinTakesTurn`/`goldGoblinReactToDamage`/
 `goldGoblinShedGold`/`goldGoblinMarqueeItem`/`goldGoblinScatterItem`/`goldGoblinDropHoard`, the dispatch
 branch in `monstersTurn`, and the loot-less-clone line in `cloneMonster`. `Combat.c` — the trigger hook in
 `inflictDamage` and the hoard-drop hook in `killCreature`.
