@@ -482,6 +482,17 @@ void initializeRogue(uint64_t seed) {
         theItem = addItemToPack(theItem);
     }
 
+    if (D_LEATHER_ARMOR_START) {
+        // iOS port (iBrogue): playtest grant for a +50 leather armor (near-invulnerable, so you can test
+        // without dying). Added deterministically here (not as a recorded input), so it reconstructs
+        // identically on replay. Equip it to wear it.
+        theItem = generateItem(ARMOR, LEATHER_ARMOR);
+        theItem->enchant1 = 50;
+        theItem->flags &= ~(ITEM_CURSED | ITEM_RUNIC);
+        identify(theItem);
+        theItem = addItemToPack(theItem);
+    }
+
     DEBUG {
         theItem = generateItem(RING, RING_CLAIRVOYANCE);
         theItem->enchant1 = max(DROWS, DCOLS);

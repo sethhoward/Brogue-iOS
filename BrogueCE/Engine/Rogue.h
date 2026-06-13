@@ -90,6 +90,11 @@
 // short cooldown. Granted deterministically in initializeRogue, so it is recording-safe. Flip to 0 to ship.
 #define D_HEAL_CHARM_START              1//(WIZARD_MODE && 0)
 
+// iOS port (iBrogue): start with a +50 leather armor for playtesting -- effectively invulnerable, to test
+// without dying. Granted deterministically in initializeRogue, so it is recording-safe. Equip it to wear
+// it. Flip to 0 to ship.
+#define D_LEATHER_ARMOR_START           1//(WIZARD_MODE && 0)
+
 // If enabled, runs a benchmark for the performance of repeatedly updating the screen at the start of the game.
 // #define SCREEN_UPDATE_BENCHMARK
 

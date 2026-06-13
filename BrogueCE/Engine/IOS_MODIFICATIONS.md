@@ -262,8 +262,9 @@ pre-change recordings. CE-only; all magnitudes (`EMBOLDEN_*` defines in `Monster
 **Playtest grants.** `D_LIGHT_RING_START` (`Rogue.h`, default 1) drops a +3 ring of light into the pack
 in `initializeRogue()`, mirroring `D_FROST_STAFF_START`. Equip it to activate the aura/reveal.
 `D_HEAL_CHARM_START` (default 1) likewise grants a strong +10 charm of health (near-full heal, short
-cooldown) for sustaining an ally run during testing. Both are deterministic (not recorded inputs), so
-they're replay-safe. Flip to 0 to ship.
+cooldown) for sustaining an ally run during testing. `D_LEATHER_ARMOR_START` (default 1) grants a +50
+leather armor (near-invulnerable, so you can test without dying); equip it to wear it. All are
+deterministic (not recorded inputs), so they're replay-safe. Flip to 0 to ship.
 
 ### 2026-06-11 — Sense when a pursuer gives up the chase (new content)
 
