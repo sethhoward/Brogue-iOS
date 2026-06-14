@@ -111,6 +111,21 @@ extension CGSize {
     private(set) var zoomOriginXPoints: CGFloat = 0
     private(set) var zoomOriginYPoints: CGFloat = 0
 
+    /// Per-frame batch captured off the main thread (the engine thread's `commitDraws`)
+    /// and flushed together in the next `update(_:)`, on the main thread, right before the
+    /// renderer samples the node tree. Both the cell glyph/colour writes AND the
+    /// auto-follow camera move are buffered here so they land in the SAME render pass —
+    /// otherwise the engine thread mutating SK nodes mid-render tears the player glyph
+    /// away from the camera (a fixed one-frame jump that reverts), which animated terrain
+    /// (water/fire/lava) makes constant by keeping the engine thread, and so `commitDraws`,
+    /// busy every frame. Only used while the zoom layer is active (iPhone, pinch on); the
+    /// flat 1× / iPad path keeps writing nodes directly (no camera → nothing to tear
+    /// against). All three fields are guarded by `pendingLock`.
+    private struct PendingCell { let code: UInt32; let bgColor: CGColor; let fgColor: CGColor }
+    private var pendingCells: [Int: PendingCell] = [:]   // key = x * (gridSize.rows + 1) + y
+    private var pendingZoom: (scale: CGFloat, originXPoints: CGFloat, originYPoints: CGFloat)?
+    private let pendingLock = NSLock()
+
     /// Zoom is an iPhone-only feature; iPad keeps the flat 1× scene unchanged.
     private var zoomEnabled: Bool { UIDevice.current.userInterfaceIdiom == .phone }
 
@@ -154,9 +169,30 @@ extension CGSize {
 
 extension RogueScene {
     public func setCell(x: Int, y: Int, code: UInt32, bgColor: CGColor, fgColor: CGColor) {
+        // When the zoom layer is up (iPhone, pinch on) the dungeon cells live under a
+        // container whose transform the camera moves. To keep the player glyph and the
+        // camera in the same render pass, buffer the engine thread's writes and flush them
+        // in update(_:) on the main thread (see pendingCells). Without the zoom layer
+        // (iPad, or pinch off) there's no camera to tear against, so apply directly — the
+        // long-standing path. Main-thread callers always apply directly.
+        if dungeonContainer != nil, !Thread.isMainThread {
+            pendingLock.lock()
+            pendingCells[x * (gridSize.rows + 1) + y] = PendingCell(code: code, bgColor: bgColor, fgColor: fgColor)
+            pendingLock.unlock()
+            return
+        }
+        applyCell(x: x, y: y, code: code, bgColor: bgColor, fgColor: fgColor)
+    }
+
+    /// Writes a cell's glyph and colours to its SK nodes. MUST run on the main thread when
+    /// the zoom layer is active (it mutates nodes the renderer reads); the direct path
+    /// calls it inline on whatever thread when there's no zoom layer. Texture resolution
+    /// (`getTexture`, which mutates `textureMap`) therefore also stays main-thread-only
+    /// while zoomed.
+    private func applyCell(x: Int, y: Int, code: UInt32, bgColor: CGColor, fgColor: CGColor) {
         cells[x][y].fgcolor = UIColor(cgColor: fgColor)
         cells[x][y].bgcolor = UIColor(cgColor: bgColor)
-        
+
         if let glyph = UnicodeScalar(code) {
             cells[x][y].glyph = getTexture(glyph: String(glyph))
         }
@@ -300,6 +336,19 @@ extension RogueScene {
         zoomScale = 1.0
         zoomOriginXPoints = 0
         zoomOriginYPoints = 0
+        // Flush any buffered cell writes before switching to the direct path: commitDraws
+        // only re-plots *changed* cells, so dropping these would leave stale glyphs. The
+        // pending camera is moot — the container is gone and we've reset to 1×.
+        pendingLock.lock()
+        let leftover = pendingCells
+        pendingCells.removeAll()
+        pendingZoom = nil
+        pendingLock.unlock()
+        let stride = gridSize.rows + 1
+        for (key, pc) in leftover {
+            applyCell(x: key / stride, y: key % stride,
+                      code: pc.code, bgColor: pc.bgColor, fgColor: pc.fgColor)
+        }
     }
 
     /// The dungeon-map rectangle (window cols 21…99, rows 3…30) in scene pixels,
@@ -346,17 +395,78 @@ extension RogueScene {
     /// into the scene's pixel + bottom-up space here, the single place the
     /// y-flip lives. No-op on iPad (no container).
     func setZoom(scale: CGFloat, originXPoints: CGFloat, originYPoints: CGFloat) {
-        guard let container = dungeonContainer else { return }
+        // Publish the transform synchronously on whatever thread asked: these fields are
+        // read by SKViewPort.unzoomedPoint to invert touches, so they must reflect the
+        // latest requested zoom immediately, regardless of when the node write lands.
         zoomScale = scale
         zoomOriginXPoints = originXPoints
         zoomOriginYPoints = originYPoints
 
+        // The container node mutation must land in lockstep with the renderer (main
+        // thread). Main-thread callers — pinch/pan gestures, the suspend/restore zoom
+        // animation, rotation relayout — apply it immediately. The engine thread's
+        // per-step auto-follow (commitDraws → setPlayerWindowX) instead STASHES it for
+        // the next update(_:): writing the container transform from the engine thread
+        // tore the camera away from the player glyph whenever the renderer sampled
+        // mid-commitDraws, which animated terrain (water/fire/lava) made constant —
+        // the player visibly jittered while walking. See update(_:).
+        if Thread.isMainThread {
+            pendingLock.lock()
+            pendingZoom = nil   // a fresh main-thread apply supersedes any stale stash
+            pendingLock.unlock()
+            applyZoomToContainer(scale: scale, originXPoints: originXPoints, originYPoints: originYPoints)
+        } else {
+            pendingLock.lock()
+            pendingZoom = (scale, originXPoints, originYPoints)
+            pendingLock.unlock()
+        }
+    }
+
+    /// Applies a zoom transform to the dungeon container. MUST run on the main thread —
+    /// it mutates the SK node tree the renderer reads. Shared by the immediate path
+    /// (main-thread setZoom callers) and the deferred path (engine-thread auto-follow
+    /// drained in update(_:)).
+    private func applyZoomToContainer(scale: CGFloat, originXPoints: CGFloat, originYPoints: CGFloat) {
+        guard let container = dungeonContainer else { return }
         let pixelScale = UIScreen.main.scale
         container.setScale(scale)
         container.position = CGPoint(
             x: pixelScale * originXPoints,
             y: size.height * (1 - scale) - pixelScale * originYPoints
         )
+    }
+
+    /// SpriteKit calls this on the main thread at the top of every frame, immediately
+    /// before it renders. Drain the engine thread's buffered batch (cell writes + the
+    /// auto-follow camera) and apply it here, so every glyph the engine plotted and the
+    /// camera move that follows it land in the SAME render pass — no engine-thread node
+    /// write ever races the renderer. This is what keeps the player glyph and the camera
+    /// locked together while moving over animated terrain (water/fire/lava); applying the
+    /// camera alone left the glyph free to leak into a render a frame early, a fixed
+    /// one-frame jump that reverts. Cells first, then the camera that frames them. The
+    /// flat 1× / iPad path never buffers, so this is a cheap no-op there.
+    override public func update(_ currentTime: TimeInterval) {
+        super.update(currentTime)
+
+        pendingLock.lock()
+        let cellBatch = pendingCells.isEmpty ? nil : pendingCells
+        if cellBatch != nil { pendingCells.removeAll(keepingCapacity: true) }
+        let zoom = pendingZoom
+        pendingZoom = nil
+        pendingLock.unlock()
+
+        if let cellBatch = cellBatch {
+            let stride = gridSize.rows + 1
+            for (key, pc) in cellBatch {
+                applyCell(x: key / stride, y: key % stride,
+                          code: pc.code, bgColor: pc.bgColor, fgColor: pc.fgColor)
+            }
+        }
+        if let zoom = zoom {
+            applyZoomToContainer(scale: zoom.scale,
+                                 originXPoints: zoom.originXPoints,
+                                 originYPoints: zoom.originYPoints)
+        }
     }
 
     /// Keeps the crop mask sized to the dungeon frame and re-applies the current

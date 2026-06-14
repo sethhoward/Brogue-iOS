@@ -27,7 +27,11 @@
 #include <time.h>
 
 void rogueMain() {
-    previousGameSeed = 0;
+    // iOS port (iBrogue): restore the last-played seed (persisted across app launches) so the
+    // seeded-game prompt pre-fills it; upstream resets to 0.
+    previousGameSeed = loadPersistedSeed();
+    // iOS port (iBrogue): restore the player's chosen keyboard scheme (Classic / Modern).
+    rogueKeyboardScheme = loadPersistedKeyboardScheme();
     initializeBrogueSaveLocation();
     mainBrogueJunction();
 }

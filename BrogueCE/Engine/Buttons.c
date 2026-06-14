@@ -226,7 +226,13 @@ short processButtonInput(buttonState *state, boolean *canceled, rogueEvent *even
                 && x < state->buttons[focusIndex].x + strLenWithoutEscapes(state->buttons[focusIndex].text)) {
 
                 state->buttonFocused = focusIndex;
-                if (event->eventType == MOUSE_DOWN) {
+                // iOS port (iBrogue): on a touch drag (MOUSE_ENTERED_CELL) move the
+                // depressed button to the one under the finger instead of leaving it
+                // stuck on the originally-pressed button. Without this, drawButtonsInState
+                // lights up both the original (BUTTON_PRESSED) and the button under the
+                // finger (BUTTON_HOVER) at once. Matches the Classic engine's behavior.
+                if (event->eventType == MOUSE_DOWN
+                    || (event->eventType == MOUSE_ENTERED_CELL && state->buttonDepressed >= 0)) {
                     state->buttonDepressed = focusIndex; // Keeps track of which button is down at the moment. Cleared on mouseup.
                 }
                 break;

@@ -112,6 +112,7 @@ enum graphicsModes graphicsMode = TEXT_GRAPHICS;
 
 // iOS port (iBrogue): reads the persisted text/tiles/hybrid choice (see below).
 static enum graphicsModes ceLoadPersistedGraphicsMode(void);
+static enum keyboardScheme ceLoadPersistedKeyboardScheme(void);
 
 // ---------------------------------------------------------------------------
 // glyphToUnicode: CE separates the logical display glyph (an enum, to support
@@ -324,6 +325,8 @@ extern "C" __attribute__((visibility("default"))) void ce_start(id<BrogueCEHost>
     // iOS port (iBrogue): restore the player's last-chosen graphics mode so the
     // text/tiles/hybrid selection persists across launches and future runs.
     graphicsMode = ceLoadPersistedGraphicsMode();
+    // iOS port (iBrogue): restore the player's chosen keyboard scheme (Classic / Modern).
+    rogueKeyboardScheme = ceLoadPersistedKeyboardScheme();
     brogueCETerminationRequested = false;
     brogueCEAtTitle = false;
     gNeedsFullRedraw = true; // resync the shared scene on (re)entry
@@ -335,6 +338,13 @@ extern "C" __attribute__((visibility("default"))) void ce_start(id<BrogueCEHost>
 
 extern "C" __attribute__((visibility("default"))) void ce_requestTermination(void) {
     brogueCETerminationRequested = true;
+}
+
+// iOS port (iBrogue): drive the engine's runtime KEYBOARD_LABELS flag (see Rogue.h /
+// GlobalsBase.c). The host calls this on GCKeyboard connect/disconnect so in-game hotkey
+// labels appear only with a hardware keyboard, matching the Classic engine.
+extern "C" __attribute__((visibility("default"))) void ce_setKeyboardLabelsEnabled(int enabled) {
+    KEYBOARD_LABELS = (enabled != 0);
 }
 
 // ---------------------------------------------------------------------------
@@ -426,7 +436,8 @@ void nextKeyOrMouseEvent(rogueEvent *returnEvent, boolean textInput, boolean col
         }
 
         if ([gHost hasKeyEvent]) {
-            uint8_t key = [gHost dequeueKeyEvent];
+            BOOL shift = NO, control = NO, raw = NO;
+            int32_t key = [gHost dequeueKeyEventWithShift:&shift control:&control raw:&raw];
             // The shared iOS input layer is built around Classic's RETURN_KEY,
             // which is carriage-return ('\r', 13). CE's RETURN_KEY is line-feed
             // ('\n', 10), so a Classic-style Return never matches CE's text-entry
@@ -436,10 +447,17 @@ void nextKeyOrMouseEvent(rogueEvent *returnEvent, boolean textInput, boolean col
                 key = RETURN_KEY;
             }
             returnEvent->eventType = KEYSTROKE;
-            returnEvent->param1 = key;
             returnEvent->param2 = 0;
-            returnEvent->controlKey = 0;
-            returnEvent->shiftKey = 0;
+            returnEvent->controlKey = control ? 1 : 0;
+            returnEvent->shiftKey = shift ? 1 : 0;
+            // iOS port (iBrogue): remap raw hardware character keys through the active keyboard scheme
+            // (skipped during text entry, where keys are literal). Synthesized on-screen keys (raw==NO)
+            // are already canonical and pass through untouched. See docs/design/keyboard-schemes.md.
+            if (raw && !textInput) {
+                returnEvent->param1 = applyKeyboardScheme(key, &returnEvent->controlKey, &returnEvent->shiftKey);
+            } else {
+                returnEvent->param1 = key;
+            }
             return;
         }
 
@@ -575,12 +593,59 @@ enum graphicsModes setGraphicsMode(enum graphicsModes mode) {
     return graphicsMode;
 }
 
+// iOS port (iBrogue): the seed of the most recent run (previousGameSeed) is
+// persisted in NSUserDefaults so the title screen's "New Seeded Game" prompt can
+// pre-fill the last-played seed even after the app is killed. Desktop keeps this
+// only in memory for the lifetime of the process; on iOS backgrounded apps are
+// frequently terminated, which would otherwise reset it to 0 each launch. Stored
+// as an NSNumber so the full uint64_t seed range round-trips losslessly.
+static NSString * const kCELastSeedKey = @"ce last game seed";
+
+uint64_t ceLoadPersistedSeed(void) {
+    NSNumber *n = [[NSUserDefaults standardUserDefaults] objectForKey:kCELastSeedKey];
+    return n ? (uint64_t)[n unsignedLongLongValue] : 0;
+}
+
+void cePersistLastSeed(uint64_t seed) {
+    [[NSUserDefaults standardUserDefaults] setObject:@((unsigned long long)seed) forKey:kCELastSeedKey];
+}
+
+// iOS port (iBrogue): the chosen keyboard scheme (Classic / Modern) is persisted in NSUserDefaults so
+// it sticks across launches, defaulting to CLASSIC (stock vi keys) when absent or out of range.
+static NSString * const kCEKeyboardSchemeKey = @"ce keyboard scheme";
+
+static enum keyboardScheme ceLoadPersistedKeyboardScheme(void) {
+    NSUserDefaults *d = [NSUserDefaults standardUserDefaults];
+    if ([d objectForKey:kCEKeyboardSchemeKey] == nil) {
+        return KEYBOARD_SCHEME_CLASSIC;
+    }
+    NSInteger stored = [d integerForKey:kCEKeyboardSchemeKey];
+    if (stored < KEYBOARD_SCHEME_CLASSIC || stored >= KEYBOARD_SCHEME_COUNT) {
+        return KEYBOARD_SCHEME_CLASSIC;
+    }
+    return (enum keyboardScheme)stored;
+}
+
+void cePersistKeyboardScheme(int scheme) {
+    [[NSUserDefaults standardUserDefaults] setInteger:(NSInteger)scheme forKey:kCEKeyboardSchemeKey];
+}
+
 boolean controlKeyIsDown(void) {
     return gHost ? [gHost controlKeyIsDown] : false;
 }
 
 boolean shiftKeyIsDown(void) {
     return false;
+}
+
+// iOS port (iBrogue): CE's getInputTextString calls this before its input loop so
+// the on-screen keyboard is pre-filled with the engine's default seed/name —
+// otherwise the field is empty and iOS suppresses the backspace callback for the
+// pre-filled text, so it can't be deleted. `numeric` requests a number pad (with
+// a Done bar) for seed entry.
+void ceRequestTextInput(const char *defaultText, boolean numeric) {
+    NSString *s = defaultText ? [NSString stringWithUTF8String:defaultText] : @"";
+    if (gHost) [gHost requestTextInput:s numeric:(BOOL)numeric];
 }
 
 // iOS port (iBrogue): the CE title menu's "File Management" entry routes here.
