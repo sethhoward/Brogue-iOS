@@ -32,6 +32,15 @@ See `BrogueCE/Engine/IOS_MODIFICATIONS.md` (faithful CE) and
 
 ## Change log
 
+### 2026-06-14 — "Extra hot" blue title-screen flames (iOS port)
+
+**What.** SE's title-screen menu flames burn blue (hottest part of a real flame) instead of the
+Classic/CE red/orange. `flameSourceColor` / `flameSourceColorSecondary` (`Globals.c`) now make blue
+the dominant channel, with green/red randoms pushing the hottest source cells to a white-blue core.
+Display-only color constants — no change to flame control flow, so RNG/determinism are unaffected.
+
+**Where.** `flameSourceColor`, `flameSourceColorSecondary` in `Globals.c`.
+
 ### 2026-06-14 — Title-screen badge: "CE" → "SE" (iOS port)
 
 **What.** The flame-wreathed title-screen badge to the right of the "BROGUE" logo now reads **SE**

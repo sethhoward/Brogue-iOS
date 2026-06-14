@@ -289,8 +289,12 @@ const color backgroundMessageColor ={60,    20,     70,     0,      0,          
 
 const color superVictoryColor =     {150,   100,    300,    0,      0,          0,          0,      false};
 
-const color flameSourceColor = {20, 7, 7, 60, 40, 40, 0, true}; // 8
-const color flameSourceColorSecondary = {7, 2, 0, 10, 0, 0, 0, true};
+// iOS port (Brogue SE): "extra hot" blue title-screen flames instead of the
+// red/orange of Classic/CE. Struct is {r,g,b, rRand,gRand,bRand, rand, dances}.
+// Blue is now the dominant channel; the green/red randoms push the hottest source
+// cells toward a white-blue core (hotter than fire's red end), cooling to deep blue.
+const color flameSourceColor = {7, 7, 25, 40, 45, 75, 0, true};
+const color flameSourceColorSecondary = {0, 2, 8, 0, 0, 12, 0, true};
 
 const color flameTitleColor = {0, 0, 0, 9, 9, 15, 0, true}; // *pale blue**
 
