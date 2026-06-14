@@ -32,6 +32,14 @@ See `BrogueCE/Engine/IOS_MODIFICATIONS.md` (faithful CE) and
 
 ## Change log
 
+### 2026-06-14 — Title-screen badge: "CE" → "SE" (iOS port)
+
+**What.** The flame-wreathed title-screen badge to the right of the "BROGUE" logo now reads **SE**
+(was the inherited "CE" badge from the CE port). Block-letter "S" + "E" in `seAccent[]` (renamed
+from `ceAccent[]`); same flame/mask treatment, same position.
+
+**Where.** `drawMenuFlames()` in `MainMenu.c`.
+
 ### 2026-06-14 — Tag the welcome line with the engine flavor (iOS port)
 
 **What.** With three selectable engines, the opening adventure-log line now ends with `… Dungeons of

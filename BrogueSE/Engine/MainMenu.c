@@ -234,27 +234,27 @@ static void initializeMenuFlames(boolean includeTitle,
             }
         }
 
-        // iOS port (iBrogue): a small flame-wreathed "CE" badge just to the
-        // right of the final "E" marks the Community Edition. Same mask +
-        // flame-source treatment as the title, so it animates with the flames.
+        // iOS port (Brogue SE): a small flame-wreathed "SE" badge just to the
+        // right of the final "E" marks Seth's Edition. Same mask + flame-source
+        // treatment as the title, so it animates with the flames.
         // (BROGUE letters occupy screen x~9-76, y~9-22.)
         {
-            static const char *ceAccent[] = {
+            static const char *seAccent[] = {
                 "#### ####",
                 "#    #   ",
                 "#    #   ",
-                "#    ### ",
-                "#    #   ",
-                "#    #   ",
+                "#### ### ",
+                "   # #   ",
+                "   # #   ",
                 "#### ####",
             };
             // ~half the height of the "E" in BROGUE (which is ~14 rows tall).
-            const short ceRows = 7, ceCols = 9, ceBaseX = 78, ceBaseY = 9;
-            for (short cy = 0; cy < ceRows; cy++) {
-                for (short cx = 0; cx < ceCols; cx++) {
-                    if (ceAccent[cy][cx] != ' ') {
-                        short x = ceBaseX + cx;
-                        short y = ceBaseY + cy;
+            const short seRows = 7, seCols = 9, seBaseX = 78, seBaseY = 9;
+            for (short cy = 0; cy < seRows; cy++) {
+                for (short cx = 0; cx < seCols; cx++) {
+                    if (seAccent[cy][cx] != ' ') {
+                        short x = seBaseX + cx;
+                        short y = seBaseY + cy;
                         if (x >= 0 && x < COLS && y >= 0 && y < ROWS) {
                             colors[x][y] = &flameTitleColor;
                             colorSourceCount++;
