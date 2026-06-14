@@ -23,6 +23,28 @@ future maintainers (human or AI) don't mistake an intentional port change for a 
 
 ## Change log
 
+### 2026-06-14 — Backport: seed persistence + selectable keyboard schemes + modifier plumbing
+
+**What.** Backported from the `se-game-mode` line (without the gameplay WIP), mirroring the BrogueCE
+engine. Full design: `docs/design/keyboard-schemes.md`; engine-side details in
+`BrogueCE/Engine/IOS_MODIFICATIONS.md`.
+
+- **Seed persistence** — `loadPersistedSeed`/`persistLastSeed` (NSUserDefaults, in `RogueDriver.mm`),
+  restored in `rogueMain` (`RogueMain.mm`) and synced from `Recordings.c`; the seed prompt is pre-filled
+  and `requestKeyboardInput` gained a `numeric` arg for a number pad.
+- **Hardware keyboard modifiers** — the shared `BrogueViewController` key queue now carries real
+  Shift/Ctrl + a `raw` flag (was byte-only, modifiers hardcoded to 0), fixing Shift/Ctrl-run; arrows are
+  scheme-independent. `RogueDriver.mm` sets the event flags and runs `raw` keys through the scheme.
+- **Selectable keyboard schemes** — `enum keyboardScheme` + `rogueKeyboardScheme` (default CLASSIC) +
+  `applyKeyboardScheme()` (`IO.c`); the Modern right-hand grid, Shift/Ctrl-run, displaced
+  inventory/equip/messages/stairs, quit-removed-on-tablet, and the scheme-aware `printHelpScreen` with a
+  Tab toggle (persisted via `persistKeyboardScheme`).
+
+Default is Classic, so behavior is unchanged until the player opts in via `?` → Tab.
+
+**Where.** `Rogue.h`, `Globals.c`, `IO.c`, `RogueMain.mm`, `Recordings.c`; platform files
+(`BrogueViewController.swift`/`CEHost.swift`/`RogueDriver.mm`/`RogueScene.swift`) shared with BrogueCE.
+
 ### 2026-06-11 — Port BrogueCE's rethrow command
 
 **What.** Added the rethrow command (`RETHROW_KEY`, Shift+T): repeat the last thrown

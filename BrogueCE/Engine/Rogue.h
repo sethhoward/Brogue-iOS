@@ -81,9 +81,10 @@
 #define DELETE_SAVE_FILE_AFTER_LOADING  true
 
 // set to false to disable references to keystrokes (e.g. for a tablet port)
-#ifdef BROGUE_TABLET
-#define KEYBOARD_LABELS false
-#else
+// iOS port (iBrogue): on tablet, KEYBOARD_LABELS is a runtime variable (declared after the `boolean`
+// typedef below) so an attached hardware keyboard can turn in-game hotkey labels on/off. Non-tablet
+// keeps the compile-time true.
+#ifndef BROGUE_TABLET
 #define KEYBOARD_LABELS true
 #endif
 
@@ -102,6 +103,12 @@
 
 #define false                   0
 #define true                    1
+
+#ifdef BROGUE_TABLET
+// iOS port (iBrogue): runtime-mutable in-game hotkey-label flag (see above). Default false (touch-only)
+// until the host reports a hardware keyboard via ce_setKeyboardLabelsEnabled(). Defined in GlobalsBase.c.
+extern boolean KEYBOARD_LABELS;
+#endif
 
 #define Fl(N)                   ((unsigned long) 1 << (N))
 
@@ -1234,6 +1241,17 @@ enum tileFlags {
 #define PRINTSCREEN_KEY     '\054'
 
 #define UNKNOWN_KEY         (128+19)
+
+// iOS port (iBrogue): selectable keyboard schemes — see docs/design/keyboard-schemes.md. A scheme
+// remaps physical keys to canonical engine keys at the input layer (before recording), so recordings
+// stay scheme-independent. CLASSIC is identity (vi keys); MODERN is a right-hand 3x3 grid (uio/jkl/m,.)
+// for keyboards without a numpad. Default CLASSIC.
+enum keyboardScheme {
+    KEYBOARD_SCHEME_CLASSIC = 0,
+    KEYBOARD_SCHEME_MODERN,
+    KEYBOARD_SCHEME_COUNT
+};
+extern enum keyboardScheme rogueKeyboardScheme; // active scheme; defined in GlobalsBase.c, default CLASSIC
 
 #define min(x, y)       (((x) < (y)) ? (x) : (y))
 #define max(x, y)       (((x) > (y)) ? (x) : (y))
@@ -3066,6 +3084,16 @@ extern "C" {
     void nextBrogueEvent(rogueEvent *returnEvent, boolean textInput, boolean colorsDance, boolean realInputEvenInPlayback);
     void executeMouseClick(rogueEvent *theEvent);
     void executeKeystroke(signed long keystroke, boolean controlKey, boolean shiftKey);
+    // iOS port (iBrogue): translate a raw physical keystroke to the canonical engine keystroke for the
+    // active keyboard scheme. Identity for CLASSIC. Applied in the platform bridge before recording.
+    signed long applyKeyboardScheme(signed long keystroke, boolean *controlKey, boolean *shiftKey);
+    // iOS port (iBrogue): platform-bridge persistence hooks (implemented in CEBridge.mm). Seed persists
+    // the last run's seed across launches; keyboard-scheme persists the Classic/Modern choice; the
+    // text-input hook pre-fills + shows the on-screen keyboard for seed/save entry.
+    uint64_t ceLoadPersistedSeed(void);
+    void cePersistLastSeed(uint64_t seed);
+    void cePersistKeyboardScheme(int scheme);
+    void ceRequestTextInput(const char *defaultText, boolean numeric);
     boolean placeStairs(pos *upStairsLoc);
     void initializeLevel(pos upStairsLoc);
     void startLevel (short oldLevelNumber, short stairDirection);

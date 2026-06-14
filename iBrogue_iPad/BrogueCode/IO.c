@@ -353,11 +353,9 @@ short actionMenu(short x, boolean playingBack) {
         buttons[buttonCount].flags &= ~B_ENABLED;
         buttonCount++;
         
-        if (KEYBOARD_LABELS) {
-            sprintf(buttons[buttonCount].text, "  %sQ: %sQuit %s  ",    yellowColorEscape, whiteColorEscape, (playingBack ? "to title screen" : "without saving"));
-        } else {
-            sprintf(buttons[buttonCount].text, "  Quit %s  ",    (playingBack ? "to title screen" : "without saving"));
-        }
+        // iOS port (iBrogue): quit is menu-only on tablet (the 'Q' keystroke is disabled in
+        // applyKeyboardScheme), so never advertise a 'Q:' hotkey -- the button still triggers on tap.
+        sprintf(buttons[buttonCount].text, "  Quit %s  ",    (playingBack ? "to title screen" : "without saving"));
         buttons[buttonCount].hotkey[0] = QUIT_KEY;
         buttonCount++;
         
@@ -2350,6 +2348,53 @@ boolean pauseBrogue(short milliseconds) {
     return interrupted;
 }
 
+// iOS port (iBrogue): keyboard-scheme translation — mirrors the BrogueCE engine. Maps the raw physical
+// keystroke to the canonical engine key for the active scheme, before recording, so recordings stay
+// scheme-independent. Called from the platform bridge (RogueDriver.mm) on raw hardware keys only.
+signed long applyKeyboardScheme(signed long keystroke, boolean *controlKey, boolean *shiftKey) {
+    (void)controlKey;
+    (void)shiftKey;
+    // Quit is menu-only on tablet -- a stray hardware 'Q' must never abandon the run. The on-screen
+    // menu's Quit button synthesizes QUIT_KEY directly (raw == false) and bypasses this. Both schemes.
+    if (keystroke == QUIT_KEY) {
+        return UNKNOWN_KEY;
+    }
+    switch (rogueKeyboardScheme) {
+        case KEYBOARD_SCHEME_MODERN:
+            // Right-hand 3x3 grid (uio / jkl / m,.) + displaced commands; run rides on the real
+            // Shift/Ctrl flags. The whole left hand + Shift+commands pass through unchanged.
+            switch (keystroke) {
+                case 'u': return UPLEFT_KEY;
+                case 'i': return UP_KEY;
+                case 'o': return UPRIGHT_KEY;
+                case 'j': return LEFT_KEY;
+                case 'k': return PERIOD_KEY;
+                case 'l': return RIGHT_KEY;
+                case 'm': return DOWNLEFT_KEY;
+                case ',': return DOWN_KEY;
+                case '.': return DOWNRIGHT_KEY;
+                case 'U': return UPLEFT_KEY;
+                case 'I': return UP_KEY;
+                case 'O': return UPRIGHT_KEY;
+                case 'J': return LEFT_KEY;
+                case 'K': return PERIOD_KEY;
+                case 'L': return RIGHT_KEY;
+                case 'M': return DOWNLEFT_KEY;
+                case '<': return DOWN_KEY;
+                case '>': return DOWNRIGHT_KEY;
+                case 'e': return INVENTORY_KEY;
+                case 'E': return EQUIP_KEY;
+                case 'p': return MESSAGE_ARCHIVE_KEY;
+                case 'P': return ASCEND_KEY;
+                case ':': return DESCEND_KEY;
+                default:  return keystroke;
+            }
+        case KEYBOARD_SCHEME_CLASSIC:
+        default:
+            return keystroke;
+    }
+}
+
 void nextBrogueEvent(rogueEvent *returnEvent, boolean textInput, boolean colorsDance, boolean realInputEvenInPlayback) {
     rogueEvent recordingInput;
     boolean repeatAgain;
@@ -2721,7 +2766,8 @@ boolean getInputTextString(char *inputText,
         plotCharWithColor((suffix[0] ? suffix[0] : ' '), x + charNum, y, &black, &white);
         
         // SETH: custom function
-        requestKeyboardInput(defaultEntry);
+        // iOS port (iBrogue): pass numeric so seed entry gets a number pad (mirrors BrogueCE seed-entry).
+        requestKeyboardInput(defaultEntry, textEntryType == TEXT_INPUT_NUMBERS);
         
         keystroke = nextKeyPress(true);
         if (keystroke == DELETE_KEY && charNum > 0) {
@@ -3728,13 +3774,15 @@ char nextKeyPress(boolean textInput) {
 
 #define BROGUE_HELP_LINE_COUNT    33
 
+// iOS port (iBrogue): scheme-aware keyboard reference (mirrors the BrogueCE engine). Renders the
+// active scheme (Classic vi keys or the Modern right-hand grid); Tab toggles between them in place
+// (persisted). Quit is omitted from both (menu-only on tablet). See docs/design/keyboard-schemes.md.
 void printHelpScreen() {
     short i, j;
     cellDisplayBuffer dbuf[COLS][ROWS], rbuf[COLS][ROWS];
-    char helpText[BROGUE_HELP_LINE_COUNT][DCOLS*3] = {
+    const char classicHelp[BROGUE_HELP_LINE_COUNT][DCOLS*3] = {
         "",
-        "",
-        "          -- Commands --",
+        "          -- Keyboard: Classic (vi keys) --",
         "",
         "         mouse  ****move cursor (including to examine monsters and terrain)",
         "         click  ****travel",
@@ -3746,7 +3794,6 @@ void printHelpScreen() {
         " a/e/r/t/d/c/R  ****apply/equip/remove/throw/drop/call/relabel an item",
         "i, right-click  ****view inventory",
         "             D  ****list discovered items",
-        "",
         "             z  ****rest once",
         "             Z  ****rest for 100 turns or until something happens",
         "             s  ****search for secret doors and traps",
@@ -3754,47 +3801,97 @@ void printHelpScreen() {
         "             x  ****auto-explore (control-x: fast forward)",
         "             A  ****autopilot (control-A: fast forward)",
         "             M  ****display old messages",
-        "",
         "             S  ****suspend game and quit",
         "             O  ****open saved game",
         "             V  ****view saved recording",
-        "             Q  ****quit to title screen",
-        "",
         "             \\  ****disable/enable color effects",
         "             ]  ****display/hide stealth range",
         "   <space/esc>  ****clear message or cancel command",
+        "         (quit from the menu button)",
         "",
-        "        -- Tap to continue --"
+        "",
+        "  -- Tab: switch to the Modern (grid) layout --",
+        "",
+        "        -- Tap or space to continue --",
+        ""
     };
-    
-    // Replace the "****"s with color escapes.
-    for (i=0; i<BROGUE_HELP_LINE_COUNT; i++) {
-        for (j=0; helpText[i][j]; j++) {
-            if (helpText[i][j] == '*') {
-                j = encodeMessageColor(helpText[i], j, &white);
+    const char modernHelp[BROGUE_HELP_LINE_COUNT][DCOLS*3] = {
+        "",
+        "       -- Keyboard: Modern (right-hand grid) --",
+        "",
+        "     u i o      ****move / attack -- press the key in that direction:",
+        "     j k l      ****  u=up-left  i=up  o=up-right   j=left  l=right",
+        "     m , .      ****  m=down-left  ,=down  .=down-right   k=wait",
+        "   arrow keys   ****also move or attack (hold shift or control to run)",
+        "      <return>  ****enable keyboard cursor control",
+        "   <space/esc>  ****disable keyboard cursor control",
+        "",
+        "  a/r/t/d/c/R  ****apply/remove/throw/drop/call/relabel an item",
+        "       shift-E  ****equip an item",
+        "e, right-click  ****view inventory",
+        "             D  ****list discovered items",
+        "             z  ****rest once   (k = wait one turn)",
+        "             Z  ****rest for 100 turns or until something happens",
+        "             s  ****search for secret doors and traps",
+        "shift-P / shift-:  ****travel up / down stairs",
+        "             x  ****auto-explore (control-x: fast forward)",
+        "             A  ****autopilot (control-A: fast forward)",
+        "             p  ****display old messages",
+        "             S  ****suspend game and quit",
+        "             O  ****open saved game",
+        "             V  ****view saved recording",
+        "             \\  ****disable/enable color effects",
+        "             ]  ****display/hide stealth range",
+        "   <space/esc>  ****clear message or cancel command",
+        "         (quit from the menu button)",
+        "",
+        "  -- Tab: switch to the Classic (vi keys) layout --",
+        "",
+        "        -- Tap or space to continue --",
+        ""
+    };
+
+    char helpText[BROGUE_HELP_LINE_COUNT][DCOLS*3];
+    rogueEvent theEvent;
+    boolean done = false;
+
+    do {
+        for (i=0; i<BROGUE_HELP_LINE_COUNT; i++) {
+            strcpy(helpText[i], (rogueKeyboardScheme == KEYBOARD_SCHEME_MODERN) ? modernHelp[i] : classicHelp[i]);
+            for (j=0; helpText[i][j]; j++) {
+                if (helpText[i][j] == '*') {
+                    j = encodeMessageColor(helpText[i], j, &white);
+                }
             }
         }
-    }
-    
-    clearDisplayBuffer(dbuf);
-    
-    // Print the text to the dbuf.
-    for (i=0; i<BROGUE_HELP_LINE_COUNT && i < ROWS; i++) {
-        printString(helpText[i], mapToWindowX(1), i, &itemMessageColor, &black, dbuf);
-    }
-    
-    // Set the dbuf opacity.
-    for (i=0; i<DCOLS; i++) {
-        for (j=0; j<ROWS; j++) {
-            //plotCharWithColor(' ', mapToWindowX(i), j, &black, &black);
-            dbuf[mapToWindowX(i)][j].opacity = INTERFACE_OPACITY;
+
+        clearDisplayBuffer(dbuf);
+        for (i=0; i<BROGUE_HELP_LINE_COUNT && i < ROWS; i++) {
+            printString(helpText[i], mapToWindowX(1), i, &itemMessageColor, &black, dbuf);
         }
-    }
-    
-    // Display.
-    overlayDisplayBuffer(dbuf, rbuf);
-    waitForAcknowledgment();
-    overlayDisplayBuffer(rbuf, 0);
+        for (i=0; i<DCOLS; i++) {
+            for (j=0; j<ROWS; j++) {
+                dbuf[mapToWindowX(i)][j].opacity = INTERFACE_OPACITY;
+            }
+        }
+
+        // Draw the layout (saving the underlying screen into rbuf), read one event, then restore.
+        overlayDisplayBuffer(dbuf, rbuf);
+        nextBrogueEvent(&theEvent, false, false, false);
+        overlayDisplayBuffer(rbuf, 0);
+
+        // Tab toggles the scheme in place (persisted); tap/space/esc dismisses; other keys ignored.
+        if (theEvent.eventType == KEYSTROKE && theEvent.param1 == TAB_KEY) {
+            rogueKeyboardScheme = (rogueKeyboardScheme == KEYBOARD_SCHEME_MODERN)
+                                  ? KEYBOARD_SCHEME_CLASSIC : KEYBOARD_SCHEME_MODERN;
+            persistKeyboardScheme((int)rogueKeyboardScheme);
+        } else if (theEvent.eventType == MOUSE_UP
+                   || (theEvent.eventType == KEYSTROKE
+                       && (theEvent.param1 == ACKNOWLEDGE_KEY || theEvent.param1 == ESCAPE_KEY))) {
+            done = true;
+        }
+    } while (!done);
+
     updateFlavorText();
     updateMessageDisplay();
 }

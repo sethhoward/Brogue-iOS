@@ -142,7 +142,7 @@ boolean pauseForMilliseconds(short milliseconds) {
 	return hasEvent;
 }
 
-void nextKeyOrMouseEvent(rogueEvent *returnEvent, __unused boolean textInput, boolean colorsDance) {
+void nextKeyOrMouseEvent(rogueEvent *returnEvent, boolean textInput, boolean colorsDance) {
 	short x, y;
     // Match the current cell layout: bottom strip reserved during gameplay,
     // and left/right insets reserved for the iPhone notch / dynamic island.
@@ -172,12 +172,22 @@ void nextKeyOrMouseEvent(rogueEvent *returnEvent, __unused boolean textInput, bo
         }
         
         if ([brogueViewController hasKeyEvent]) {
+            // iOS port (iBrogue): the queue now carries real Shift/Ctrl state and a `raw` flag (this
+            // replaces the old byte-only dequeKeyEvent — modifiers used to be hardcoded to 0 here, which
+            // is why Shift/Ctrl-run never worked on iOS).
+            BOOL shift = NO, control = NO, raw = NO;
+            int32_t key = [brogueViewController dequeKeyEventWithShift:&shift control:&control raw:&raw];
             returnEvent->eventType = KEYSTROKE;
-            returnEvent->param1 = [brogueViewController dequeKeyEvent];
-            //printf("\nKey pressed: %i", returnEvent->param1);
             returnEvent->param2 = 0;
-            returnEvent->controlKey = 0;//([theEvent modifierFlags] & NSControlKeyMask ? 1 : 0);
-            returnEvent->shiftKey = 0;//([theEvent modifierFlags] & NSShiftKeyMask ? 1 : 0);
+            returnEvent->controlKey = control ? 1 : 0;
+            returnEvent->shiftKey = shift ? 1 : 0;
+            // Remap raw hardware character keys through the active keyboard scheme (skipped during text
+            // entry). Synthesized on-screen keys (raw==NO) are already canonical. See docs/design/keyboard-schemes.md.
+            if (raw && !textInput) {
+                returnEvent->param1 = applyKeyboardScheme(key, &returnEvent->controlKey, &returnEvent->shiftKey);
+            } else {
+                returnEvent->param1 = key;
+            }
             break;
         }
         if (brogueViewController.hasTouchEvent) {
@@ -220,8 +230,11 @@ void nextKeyOrMouseEvent(rogueEvent *returnEvent, __unused boolean textInput, bo
 
 #pragma mark - bridge
 
-void requestKeyboardInput(char *string) {
-    [brogueViewController requestTextInputFor:[NSString stringWithUTF8String:string]];
+// iOS port (iBrogue): `numeric` selects a number pad for digit-only entry (seeds);
+// `string` is the engine's default, which pre-fills the field so backspace can
+// clear it.
+void requestKeyboardInput(char *string, boolean numeric) {
+    [brogueViewController requestTextInputFor:[NSString stringWithUTF8String:string] numeric:(BOOL)numeric];
 }
 
 void setBrogueGameEvent(CBrogueGameEvent brogueGameEvent) {
@@ -380,6 +393,43 @@ short getHighScoresList(rogueHighScoresEntry returnList[HIGH_SCORES_COUNT]) {
 // date instead.
 
 // TODO: going to assume every save highscore qualifies as an end game screen.
+
+// iOS port (iBrogue): persist the most recent run's seed (previousGameSeed) so the
+// title screen's seeded-game prompt can pre-fill it across app launches; iOS kills
+// backgrounded apps, which would otherwise reset it to 0 each launch. Stored as an
+// NSNumber so the full unsigned long seed range round-trips losslessly.
+static NSString * const kLastSeedKey = @"last game seed";
+
+void persistLastSeed(unsigned long seed) {
+    [[NSUserDefaults standardUserDefaults] setObject:@((unsigned long long)seed) forKey:kLastSeedKey];
+    [[NSUserDefaults standardUserDefaults] synchronize];
+}
+
+unsigned long loadPersistedSeed(void) {
+    NSNumber *n = [[NSUserDefaults standardUserDefaults] objectForKey:kLastSeedKey];
+    return n ? (unsigned long)[n unsignedLongLongValue] : 0;
+}
+
+// iOS port (iBrogue): persist/restore the chosen keyboard scheme (Classic / Modern), defaulting to
+// CLASSIC when absent or out of range. Mirrors the BrogueCE bridge's cePersistKeyboardScheme.
+static NSString * const kKeyboardSchemeKey = @"keyboard scheme";
+
+void persistKeyboardScheme(int scheme) {
+    [[NSUserDefaults standardUserDefaults] setInteger:(NSInteger)scheme forKey:kKeyboardSchemeKey];
+    [[NSUserDefaults standardUserDefaults] synchronize];
+}
+
+enum keyboardScheme loadPersistedKeyboardScheme(void) {
+    NSUserDefaults *d = [NSUserDefaults standardUserDefaults];
+    if ([d objectForKey:kKeyboardSchemeKey] == nil) {
+        return KEYBOARD_SCHEME_CLASSIC;
+    }
+    NSInteger stored = [d integerForKey:kKeyboardSchemeKey];
+    if (stored < KEYBOARD_SCHEME_CLASSIC || stored >= KEYBOARD_SCHEME_COUNT) {
+        return KEYBOARD_SCHEME_CLASSIC;
+    }
+    return (enum keyboardScheme)stored;
+}
 
 boolean saveHighScore(rogueHighScoresEntry theEntry) {
 	NSMutableArray *scoresArray, *textArray, *datesArray;

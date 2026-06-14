@@ -1164,6 +1164,17 @@ enum tileFlags {
 
 #define UNKNOWN_KEY            (128+19)
 
+// iOS port (iBrogue): selectable keyboard schemes — see docs/design/keyboard-schemes.md and the matching
+// block in the BrogueCE engine. CLASSIC is identity (vi keys); MODERN is a right-hand 3x3 grid for
+// keyboards without a numpad. A scheme remaps physical keys to canonical keys before recording, so
+// recordings stay scheme-independent. Default CLASSIC.
+enum keyboardScheme {
+    KEYBOARD_SCHEME_CLASSIC = 0,
+    KEYBOARD_SCHEME_MODERN,
+    KEYBOARD_SCHEME_COUNT
+};
+extern enum keyboardScheme rogueKeyboardScheme; // active scheme; defined in Globals.c, default CLASSIC
+
 #define min(x, y)        (((x) < (y)) ? (x) : (y))
 #define max(x, y)        (((x) > (y)) ? (x) : (y))
 #define clamp(x, low, hi)    (min(hi, max(x, low))) // pins x to the [y, z] interval
@@ -2755,6 +2766,15 @@ extern "C" {
     void nextBrogueEvent(rogueEvent *returnEvent, boolean textInput, boolean colorsDance, boolean realInputEvenInPlayback);
     void executeMouseClick(rogueEvent *theEvent);
     void executeKeystroke(signed long keystroke, boolean controlKey, boolean shiftKey);
+    // iOS port (iBrogue): translate a raw physical keystroke to the canonical engine keystroke for the
+    // active keyboard scheme (identity for CLASSIC); applied in the platform bridge before recording.
+    signed long applyKeyboardScheme(signed long keystroke, boolean *controlKey, boolean *shiftKey);
+    // iOS port (iBrogue): platform-bridge persistence (implemented in RogueDriver.mm) — last run's seed
+    // and the Classic/Modern keyboard-scheme choice, persisted across launches.
+    unsigned long loadPersistedSeed(void);
+    void persistLastSeed(unsigned long seed);
+    enum keyboardScheme loadPersistedKeyboardScheme(void);
+    void persistKeyboardScheme(int scheme);
     void initializeLevel();
     void startLevel (short oldLevelNumber, short stairDirection);
     void updateMinersLightRadius();
@@ -3227,7 +3247,7 @@ extern "C" {
     } CBrogueGameEvent;
     
     void setBrogueGameEvent(CBrogueGameEvent brogueGameState);
-    void requestKeyboardInput(char *string);
+    void requestKeyboardInput(char *string, boolean numeric); // iOS port (iBrogue): numeric -> number pad
 
     // iOS port (iBrogue): title-menu entries that open native screens.
     void showFileManagementScreen(void);
