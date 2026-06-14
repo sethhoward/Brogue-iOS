@@ -28,6 +28,18 @@ covers the separate Classic engine that ships in the app target).
 
 ## Change log
 
+### 2026-06-14 — Tag the welcome line with the engine flavor (iOS port)
+
+**What.** With three selectable engines, the opening adventure-log line now ends with `… Dungeons of
+Doom! (BrogueCE)` so it's obvious which one is running. Display-only (a `message()` string, not an
+input), so recordings/saves are unaffected.
+
+**Upstream note.** This is an intentional divergence from faithful BrogueCE. It is marked
+`// iOS port (iBrogue):` in `welcome()` so it can be re-applied after pulling an upstream CE release
+(merging `origin/master`, which would otherwise revert it).
+
+**Where.** `welcome()` in `RogueMain.c`.
+
 ### 2026-06-14 — Backport: seed persistence + selectable keyboard schemes + modifier plumbing
 
 **What.** Backported from the `se-game-mode` line (keeping this branch free of the gameplay WIP):

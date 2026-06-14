@@ -32,6 +32,14 @@ See `BrogueCE/Engine/IOS_MODIFICATIONS.md` (faithful CE) and
 
 ## Change log
 
+### 2026-06-14 — Tag the welcome line with the engine flavor (iOS port)
+
+**What.** With three selectable engines, the opening adventure-log line now ends with `… Dungeons of
+Doom! (Brogue SE)` so it's obvious which one is running. Display-only (a `message()` string, not an
+input), so recordings/saves are unaffected. Marked `// iOS port (Brogue SE):` in `welcome()`.
+
+**Where.** `welcome()` in `RogueMain.c`.
+
 ### 2026-06-14 — Selectable keyboard schemes (Classic / Modern) + scheme-aware help screen (iOS port)
 
 **What.** Adds an opt-in **Modern** keyboard layout alongside the stock **Classic** (vi-keys) layout,

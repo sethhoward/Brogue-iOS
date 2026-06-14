@@ -23,6 +23,14 @@ future maintainers (human or AI) don't mistake an intentional port change for a 
 
 ## Change log
 
+### 2026-06-14 — Tag the welcome line with the engine flavor (iOS port)
+
+**What.** With three selectable engines, the opening adventure-log line now ends with the engine
+flavor in parens — `… Dungeons of Doom! (Brogue)` for this (Classic) engine — so it's obvious which
+one is running. Display-only (a `message()` string, not an input), so recordings/saves are unaffected.
+
+**Where.** `welcome()` in `RogueMain.mm`.
+
 ### 2026-06-14 — Backport: seed persistence + selectable keyboard schemes + modifier plumbing
 
 **What.** Backported from the `se-game-mode` line (without the gameplay WIP), mirroring the BrogueCE

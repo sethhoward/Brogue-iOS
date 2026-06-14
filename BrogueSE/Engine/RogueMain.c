@@ -158,7 +158,9 @@ static const char *getOrdinalSuffix(int number) {
 
 static void welcome() {
     char buf[DCOLS*3], buf2[DCOLS*3];
-    message("Hello and welcome, adventurer, to the Dungeons of Doom!", 0);
+    // iOS port (Brogue SE): tag the welcome line with the engine flavor so it's clear
+    // which of the three selectable engines (Classic / BrogueCE / Brogue SE) is running.
+    message("Hello and welcome, adventurer, to the Dungeons of Doom! (Brogue SE)", 0);
     strcpy(buf, "Retrieve the ");
     encodeMessageColor(buf, strlen(buf), &itemMessageColor);
     strcat(buf, "Amulet of Yendor");
