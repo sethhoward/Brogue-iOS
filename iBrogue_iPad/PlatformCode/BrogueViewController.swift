@@ -679,11 +679,6 @@ final class BrogueViewController: UIViewController {
     override func viewDidLoad() {
         super.viewDidLoad()
 
-        #if SE_ENABLED
-        // One-time move of pre-split CE data into SE's directory (see the function).
-        BrogueViewController.migrateCEDataToSEIfNeeded()
-        #endif
-
         currentEngine = BrogueViewController.persistedEngine()
         setupVersionChooser()
         setupOptionsButton()
@@ -1375,45 +1370,6 @@ final class BrogueViewController: UIViewController {
         }
         UserDefaults.standard.set(value, forKey: Self.engineDefaultsKey)
     }
-
-    #if SE_ENABLED
-    /// One-time migration of pre-split data from `Documents/ce` into `Documents/se`.
-    ///
-    /// Before the SE split, the modified ("firehose") engine that is now Brogue SE
-    /// shipped under the "CE" slot and wrote its saves/recordings to `Documents/ce`.
-    /// After the split, BrogueCE reverts to the faithful upstream engine (still
-    /// `Documents/ce`) and SE owns `Documents/se`. So whatever sits in `Documents/ce`
-    /// at the moment of the split was produced by what is now SE and belongs to it.
-    ///
-    /// Runs once (guarded by a UserDefaults flag): moves the existing contents of
-    /// `ce/` into `se/`, leaving `ce/` clean for the pristine CE engine. Existing
-    /// files in `se/` are never clobbered (SE wins), and a fresh install (no `ce/`)
-    /// is a no-op.
-    private static func migrateCEDataToSEIfNeeded() {
-        let key = "se did migrate ce data"
-        let defaults = UserDefaults.standard
-        guard !defaults.bool(forKey: key) else { return }
-        defer { defaults.set(true, forKey: key) }   // one-shot regardless of outcome
-
-        let fm = FileManager.default
-        guard let documents = fm.urls(for: .documentDirectory, in: .userDomainMask).first else { return }
-        let ceDir = documents.appendingPathComponent("ce")
-        let seDir = documents.appendingPathComponent("se")
-
-        guard let entries = try? fm.contentsOfDirectory(at: ceDir, includingPropertiesForKeys: nil),
-              !entries.isEmpty else {
-            return   // no ce/ directory or nothing to migrate
-        }
-        if !fm.fileExists(atPath: seDir.path) {
-            try? fm.createDirectory(at: seDir, withIntermediateDirectories: true)
-        }
-        for src in entries {
-            let dst = seDir.appendingPathComponent(src.lastPathComponent)
-            if fm.fileExists(atPath: dst.path) { continue }   // don't overwrite existing SE data
-            try? fm.moveItem(at: src, to: dst)
-        }
-    }
-    #endif
 
     /// Builds the title-only "‹ engine ›" chip. Swipe or tap it to switch engines.
     private func setupVersionChooser() {
