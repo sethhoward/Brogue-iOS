@@ -27,6 +27,15 @@
 #include "Rogue.h"
 #include "IncludeGlobals.h"
 
+// iOS port (iBrogue): reports the player's window cell to the host after each
+// screen refresh so the iPhone pinch-zoom can auto-follow. Defined in the
+// Obj-C bridge (RogueDriver.mm).
+extern void iosSetPlayerWindowLocation(short windowX, short windowY);
+
+// iOS port (iBrogue): reports whether a creature/item description box is showing
+// in the cursor loop, so the host can suspend pinch-zoom to 1×. Bridge dedupes.
+extern void setBrogueExamining(boolean examining);
+
 // Populates path[][] with a list of coordinates starting at origin and traversing down the map. Returns the number of steps in the path.
 short getPlayerPathOnMap(short path[1000][2], short **map, short originX, short originY) {
     short dir, x, y, steps;
@@ -421,6 +430,11 @@ void initializeMenuButtons(buttonState *state, brogueButton buttons[5]) {
         buttons[i].y = ROWS - 1;
         buttons[i].flags |= B_WIDE_CLICK_AREA;
         buttons[i].flags &= ~B_KEYPRESS_HIGHLIGHT;
+        // iOS port (iBrogue): the bottom buttons keep the default 2-cell (wide)
+        // tap area on rows 32-33. The iPhone affordance is now the host-drawn
+        // bottom tap-band (see BrogueViewController), so the bar no longer steals
+        // the bottom dungeon row (window row 31) — that row is pure map again and
+        // is included in the iPhone pinch-zoom.
     }
     
     buttonCount = 0;
@@ -519,6 +533,10 @@ void recordCurrentCreatureHealths() {
         monst->previousHealthPoints = monst->currentHP;
     }
 }
+
+// Set when the on-screen Explore button is tapped, so a single tap auto-explores
+// immediately instead of the desktop two-step (tap once to preview, tap again to go).
+static boolean exploreImmediately = false;
 
 // This is basically the main loop for the game.
 void mainInputLoop() {
@@ -687,7 +705,12 @@ void mainInputLoop() {
                 
                 printLocationDescription(cursor[0], cursor[1]);
             }
-            
+
+            // iOS port (iBrogue): tell the host whether a description box is up so the
+            // iPhone pinch-zoom can suspend to 1× while one lingers (moveCursor blocks
+            // below while it's shown). Host debounces, so a tap-through doesn't flicker.
+            setBrogueExamining(textDisplayed);
+
             // Get the input!
             rogue.playbackMode = playingBack;
             doEvent = moveCursor(&targetConfirmed, &canceled, &tabKey, cursor, &theEvent, &state, !textDisplayed, rogue.cursorMode, true);
@@ -705,6 +728,13 @@ void mainInputLoop() {
                     doEvent = true;
                 }
             } else if (state.buttonChosen > -1) {
+                // A single tap on the on-screen Explore button should auto-explore
+                // immediately rather than just previewing the path. Keyboard 'x' (which
+                // arrives as KEYSTROKE) is unaffected.
+                if (theEvent.eventType == MOUSE_UP
+                    && buttons[state.buttonChosen].hotkey[0] == EXPLORE_KEY) {
+                    exploreImmediately = true;
+                }
                 theEvent.eventType = KEYSTROKE;
                 theEvent.param1 = buttons[state.buttonChosen].hotkey[0];
                 theEvent.param2 = 0;
@@ -752,7 +782,11 @@ void mainInputLoop() {
                     doEvent = false;
                 }
         } while (!targetConfirmed && !canceled && !doEvent && !rogue.gameHasEnded);
-        
+
+        // iOS port (iBrogue): cursor interaction ended (action/cancel) — clear the
+        // examine state so the host restores any suspended pinch-zoom.
+        setBrogueExamining(false);
+
         if (coordinatesAreInMap(oldTargetLoc[0], oldTargetLoc[1])) {
             refreshDungeonCell(oldTargetLoc[0], oldTargetLoc[1]);                        // Remove old cursor.
         }
@@ -1776,6 +1810,9 @@ void commitDraws() {
             }
         }
     }
+    // iOS port (iBrogue): feed the player's window cell to the host for the
+    // iPhone pinch-zoom auto-follow (deduped host-side).
+    iosSetPlayerWindowLocation(mapToWindowX(player.xLoc), mapToWindowY(player.yLoc));
 }
 
 // Debug feature: display the level to the screen without regard to lighting, field of view, etc.
@@ -2249,7 +2286,9 @@ void exploreKey(const boolean controlKey) {
     short **exploreMap;
     enum directions dir;
     boolean tooDark = false;
-    
+    boolean forceExplore = exploreImmediately;  // consume the one-shot
+    exploreImmediately = false;
+
     // fight any adjacent enemies first
     dir = adjacentFightingDir();
     if (dir == NO_DIRECTION) {
@@ -2291,7 +2330,8 @@ void exploreKey(const boolean controlKey) {
         message("It's too dark to explore!", false);
     } else if (x == player.xLoc && y == player.yLoc) {
         message("I see no path for further exploration.", false);
-    } else if (proposeOrConfirmLocation(finalX, finalY, "I see no path for further exploration.")) {
+    } else if (proposeOrConfirmLocation(finalX, finalY, "I see no path for further exploration.")
+               || forceExplore) {
         explore(controlKey ? 1 : 20); // Do the exploring until interrupted.
         hideCursor();
         exploreKey(controlKey);
@@ -2471,7 +2511,19 @@ void executeKeystroke(signed long keystroke, boolean controlKey, boolean shiftKe
             apply(NULL, true);
             break;
         case THROW_KEY:
-            throwCommand(NULL);
+            throwCommand(NULL, false);
+            break;
+        case RETHROW_KEY:
+            // iOS port (iBrogue): rethrow the last thrown item, auto-aiming at the
+            // last target. Ported from BrogueCE so a shortcut bound to RETHROW_KEY
+            // (e.g. carried over from playing CE) works in Classic instead of no-opping.
+            // When there's no valid item to rethrow, fall through to a normal throw
+            // prompt rather than doing nothing.
+            if (rogue.lastItemThrown != NULL && itemIsCarried(rogue.lastItemThrown)) {
+                throwCommand(rogue.lastItemThrown, true);
+            } else {
+                throwCommand(NULL, false);
+            }
             break;
         case RELABEL_KEY:
             relabel(NULL);

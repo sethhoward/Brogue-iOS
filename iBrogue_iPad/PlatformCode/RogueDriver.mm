@@ -30,6 +30,7 @@
 #include "Rogue.h"
 #import "GameCenterManager.h"
 #import <QuartzCore/QuartzCore.h>
+#import "Brogue-Swift.h"
 
 #define kRateScore 3000
 
@@ -42,6 +43,15 @@ static CGColorSpaceRef _colorSpace;
 // quick and easy bridge for C/C++ code. Could be cleaned up.
 static SKViewPort *skviewPort;
 static BrogueViewController *brogueViewController;
+
+// In-process engine switching: when set, the bridge unblocks the title-screen
+// input wait and the engine's titleMenu hook returns rogue.nextGame = NG_QUIT,
+// so rogueMain() exits and the Classic engine thread can be torn down. Defined
+// with C linkage so the engine (MainMenu.c) can extern it.
+volatile boolean classicTerminationRequested = false;
+extern "C" void setClassicTerminationRequested(BOOL requested) {
+    classicTerminationRequested = requested ? true : false;
+}
 
 @implementation RogueDriver 
 
@@ -96,14 +106,35 @@ void plotChar(uchar inputChar,
     CGColorRelease(foreColor);
 }
 
+// iOS port (iBrogue): Combat.c calls this when the player takes damage. C
+// linkage so the C engine resolves the unmangled symbol.
+extern "C" void iosPlayerTookDamage(int severity) {
+    [brogueViewController playerTookDamage:severity];
+}
+
+// iOS port (iBrogue): commitDraws() reports the player's WINDOW cell here every
+// refresh so the iPhone pinch-zoom can auto-follow. Deduped against the last
+// reported cell so the (frequent) commitDraws calls don't spam the main queue.
+extern "C" void iosSetPlayerWindowLocation(short windowX, short windowY) {
+    static short lastX = -1, lastY = -1;
+    if (windowX == lastX && windowY == lastY) return;
+    lastX = windowX;
+    lastY = windowY;
+    [brogueViewController setPlayerWindowX:windowX y:windowY];
+}
+
 __unused void pausingTimerStartsNow() {}
 
 // Returns true if the player interrupted the wait with a keystroke; otherwise false.
 boolean pauseForMilliseconds(short milliseconds) {
     BOOL hasEvent = NO;
-    
+
     [NSThread sleepForTimeInterval:milliseconds/1000.];
-    
+
+    if (classicTerminationRequested) {
+        return true; // wake the title loop so it can observe the request
+    }
+
     if (brogueViewController.hasTouchEvent || brogueViewController.hasKeyEvent) {
         hasEvent = YES;
     }
@@ -113,13 +144,27 @@ boolean pauseForMilliseconds(short milliseconds) {
 
 void nextKeyOrMouseEvent(rogueEvent *returnEvent, __unused boolean textInput, boolean colorsDance) {
 	short x, y;
-    float width = [[UIScreen mainScreen] bounds].size.width;
-    float height = [[UIScreen mainScreen] bounds].size.height;
+    // Match the current cell layout: bottom strip reserved during gameplay,
+    // and left/right insets reserved for the iPhone notch / dynamic island.
+    float width = skviewPort.effectiveWidthPoints;
+    float height = skviewPort.effectiveHeightPoints;
+    float leftInset = skviewPort.leftInsetPoints;
     
     for(;;) {
         // we should be ok to block here. We don't seem to call pauseForMilli and this at the same time
         // 60Hz
         [NSThread sleepForTimeInterval:0.016667];
+
+        // Engine-switch requested: unblock with a benign keystroke so the title
+        // loop iterates and its termination hook returns NG_QUIT.
+        if (classicTerminationRequested) {
+            returnEvent->eventType = KEYSTROKE;
+            returnEvent->param1 = 0;
+            returnEvent->param2 = 0;
+            returnEvent->controlKey = 0;
+            returnEvent->shiftKey = 0;
+            return;
+        }
         
         if (colorsDance) {
             shuffleTerrainColors(3, true);
@@ -154,8 +199,13 @@ void nextKeyOrMouseEvent(rogueEvent *returnEvent, __unused boolean textInput, bo
                         break;
                 }
                 
-                x = COLS * float(touch.location.x) / width;
-                y = ROWS * float(touch.location.y) / height;
+                // Invert pinch-zoom (iPhone) so the engine sees the cell under
+                // the finger; identity at 1× / outside the map. Same inverse as
+                // the Swift getCellCoords and the CE bridge.
+                CGPoint loc = [skviewPort unzoomedPoint:touch.location];
+                float xInPlay = MAX(float(loc.x) - leftInset, 0.0f);
+                x = COLS * xInPlay / width;
+                y = ROWS * float(loc.y) / height;
                 
                 returnEvent->param1 = x;
                 returnEvent->param2 = y;
@@ -178,6 +228,25 @@ void setBrogueGameEvent(CBrogueGameEvent brogueGameEvent) {
     brogueViewController.lastBrogueGameEvent = (BrogueGameEvent)brogueGameEvent;
 }
 
+// iOS port (iBrogue): IO.c's mainInputLoop calls this each cursor frame with
+// whether a creature/item description box is showing, so the host can suspend
+// pinch-zoom to 1×. Deduped (the loop polls at frame rate) so we only forward
+// state changes. Mirrors CE's ceSetExamining.
+extern "C" void setBrogueExamining(boolean examining) {
+    static boolean last = false;
+    if (examining == last) return;
+    last = examining;
+    [brogueViewController setExamining:(BOOL)examining];
+}
+
+void showFileManagementScreen() {
+    [brogueViewController presentFileManagementScreen];
+}
+
+void showGameCenterScreen() {
+    [brogueViewController presentGameCenterScreen];
+}
+
 boolean controlKeyIsDown() {
     if (brogueViewController.seedKeyDown) {
         return 1;
@@ -191,7 +260,7 @@ boolean shiftKeyIsDown() {
 }
 
 void submitAchievementForCharString(char *achievementKey) {
-    [[GameCenterManager sharedInstance] submitAchievement:[NSString stringWithUTF8String:achievementKey] percentComplete:100.];
+    [[GameCenter shared] submitAchievement:[NSString stringWithUTF8String:achievementKey] percentComplete:100.];
 }
 
 #pragma mark - OSX->iOS implementation
@@ -341,7 +410,7 @@ boolean saveHighScore(rogueHighScoresEntry theEntry) {
 	}
 
     if (theEntry.score > 0) {
-        [[GameCenterManager sharedInstance] reportScore:theEntry.score forCategory:kBrogueHighScoreLeaderBoard];
+        [[GameCenter shared] reportScore:theEntry.score leaderboardID:kBrogueHighScoreLeaderBoard];
     }
     
 	if (minIndex == -1) { // didn't qualify

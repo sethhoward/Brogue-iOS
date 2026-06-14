@@ -207,12 +207,21 @@ short processButtonInput(buttonState *state, boolean *canceled, rogueEvent *even
 		for (i=0; i < state->buttonCount; i++) {
 			if ((state->buttons[i].flags & B_DRAW)
 				&& (state->buttons[i].flags & B_ENABLED)
-				&& (state->buttons[i].y == y || ((state->buttons[i].flags & B_WIDE_CLICK_AREA) && abs(state->buttons[i].y - y) <= 1))
+				&& (state->buttons[i].y == y
+					|| ((state->buttons[i].flags & B_WIDE_CLICK_AREA) && abs(state->buttons[i].y - y) <= 1)
+					|| ((state->buttons[i].flags & B_TALL_CLICK_AREA)
+						&& (state->buttons[i].y - y) >= 0 && (state->buttons[i].y - y) <= 2))
 				&& x >= state->buttons[i].x
 				&& x < state->buttons[i].x + strLenWithoutEscapes(state->buttons[i].text)) {
 				
 				state->buttonFocused = i;
-				if (event->eventType == MOUSE_DOWN) {
+				// Set on press, and also drag the press along with the finger
+				// while a touch is active (MOUSE_ENTERED_CELL with something
+				// already depressed) so the pressed highlight follows the drag.
+				// A bare hover (nothing depressed) still only highlights, never
+				// presses.
+				if (event->eventType == MOUSE_DOWN
+					|| (event->eventType == MOUSE_ENTERED_CELL && state->buttonDepressed >= 0)) {
 					state->buttonDepressed = i; // Keeps track of which button is down at the moment. Cleared on mouseup.
 				}
 				break;

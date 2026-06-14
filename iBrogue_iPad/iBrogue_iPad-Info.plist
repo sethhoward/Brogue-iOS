@@ -32,20 +32,34 @@
 	<array>
 		<string>Arial Unicode.ttf</string>
 		<string>MONACO.TTF</string>
+		<string>BrogueCE.ttf</string>
 	</array>
+	<key>UIApplicationSceneManifest</key>
+	<dict>
+		<key>UIApplicationSupportsMultipleScenes</key>
+		<false/>
+		<key>UISceneConfigurations</key>
+		<dict>
+			<key>UIWindowSceneSessionRoleApplication</key>
+			<array>
+				<dict>
+					<key>UISceneConfigurationName</key>
+					<string>Default Configuration</string>
+					<key>UISceneDelegateClassName</key>
+					<string>SceneDelegate</string>
+				</dict>
+			</array>
+		</dict>
+	</dict>
 	<key>UIFileSharingEnabled</key>
-	<true/>
-	<key>UILaunchStoryboardName</key>
-	<string>ViewController</string>
-	<key>UIMainStoryboardFile</key>
-	<string>Main</string>
-	<key>UIMainStoryboardFile~ipad</key>
-	<string>Main</string>
+	<false/>
+	<key>UILaunchScreen</key>
+	<dict/>
 	<key>UIPrerenderedIcon</key>
 	<true/>
 	<key>UIRequiredDeviceCapabilities</key>
 	<array>
-		<string>armv7</string>
+		<string>arm64</string>
 		<string>gamekit</string>
 	</array>
 	<key>UIRequiresFullScreen</key>
@@ -57,12 +71,7 @@
 		<string>UIInterfaceOrientationLandscapeLeft</string>
 		<string>UIInterfaceOrientationLandscapeRight</string>
 	</array>
-	<key>UISupportedInterfaceOrientations~ipad</key>
-	<array>
-		<string>UIInterfaceOrientationLandscapeRight</string>
-		<string>UIInterfaceOrientationLandscapeLeft</string>
-	</array>
 	<key>UIViewControllerBasedStatusBarAppearance</key>
-	<false/>
+	<true/>
 </dict>
 </plist>

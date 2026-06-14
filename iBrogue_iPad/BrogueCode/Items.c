@@ -2925,7 +2925,7 @@ char displayInventory(unsigned short categoryMask,
                             drop(theItem);
                             break;
                         case THROW_KEY:
-                            throwCommand(theItem);
+                            throwCommand(theItem, false);
                             break;
                         case RELABEL_KEY:
                             relabel(theItem);
@@ -3282,13 +3282,11 @@ void aggravateMonsters(short distance, short x, short y, const color *flashColor
             }
         }
     }
-    freeGrid(grid);
-    
     if (player.xLoc == x && player.yLoc == y) {
         player.status[STATUS_AGGRAVATING] = player.maxStatus[STATUS_AGGRAVATING] = distance;
         rogue.aggroRange = currentAggroValue();
     }
-    
+
     if (grid[player.xLoc][player.yLoc] >= 0 && grid[player.xLoc][player.yLoc] <= distance) {
         discover(x, y);
         discoverCell(x, y);
@@ -3297,6 +3295,8 @@ void aggravateMonsters(short distance, short x, short y, const color *flashColor
             message("You hear a piercing shriek; something must have triggered a nearby alarm.", false);
         }
     }
+
+    freeGrid(grid);
 }
 
 // Simple line algorithm (maybe this is Bresenham?) that returns a list of coordinates
@@ -5718,13 +5718,13 @@ void throwItem(item *theItem, creature *thrower, short targetLoc[2], short maxDi
     refreshDungeonCell(dropLoc[0], dropLoc[1]);
 }
 
-void throwCommand(item *theItem) {
+void throwCommand(item *theItem, boolean autoThrow) {
     item *thrownItem;
     char buf[COLS], theName[COLS];
     unsigned char command[10];
     short maxDistance, zapTarget[2], originLoc[2], quantity;
-    boolean autoTarget;
-    
+    boolean autoTarget, autoThrew = false;
+
     command[0] = THROW_KEY;
     if (theItem == NULL) {
         theItem = promptForItemOfType((ALL_ITEMS), 0, 0,
@@ -5768,7 +5768,24 @@ void throwCommand(item *theItem) {
     temporaryMessage(buf, false);
     maxDistance = (12 + 2 * max(rogue.strength - player.weaknessAmount - 12, 2));
     autoTarget = (theItem->category & (WEAPON | POTION)) ? true : false;
-    if (chooseTarget(zapTarget, maxDistance, true, autoTarget, false, false, &red)) {
+
+    // iOS port (iBrogue): rethrow (autoThrow) auto-aims at the last target and
+    // skips the targeting prompt, mirroring BrogueCE's throwCommand autoThrow path.
+    // The predicate matches chooseTarget's own auto-target gate below.
+    if (autoThrow
+        && rogue.lastTarget
+        && canSeeMonster(rogue.lastTarget)
+        && rogue.lastTarget->creatureState != MONSTER_ALLY
+        && rogue.lastTarget->depth == rogue.depthLevel
+        && !(rogue.lastTarget->bookkeepingFlags & MB_IS_DYING)
+        && openPathBetween(player.xLoc, player.yLoc, rogue.lastTarget->xLoc, rogue.lastTarget->yLoc)) {
+
+        zapTarget[0] = rogue.lastTarget->xLoc;
+        zapTarget[1] = rogue.lastTarget->yLoc;
+        autoThrew = true;
+    }
+
+    if (autoThrew || chooseTarget(zapTarget, maxDistance, true, autoTarget, false, false, &red)) {
         if ((theItem->flags & ITEM_EQUIPPED) && theItem->quantity <= 1) {
             unequipItem(theItem, false);
         }
@@ -5793,9 +5810,12 @@ void throwCommand(item *theItem) {
     }
     
     // Now decrement or delete the thrown item out of the inventory.
+    // iOS port (iBrogue): save the last thrown item so the rethrow command can repeat it.
     if (theItem->quantity > 1) {
         theItem->quantity--;
+        rogue.lastItemThrown = theItem;
     } else {
+        rogue.lastItemThrown = NULL;
         removeItemFromChain(theItem, packItems);
         deleteItem(theItem);
     }

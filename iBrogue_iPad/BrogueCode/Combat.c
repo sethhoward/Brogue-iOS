@@ -25,6 +25,11 @@
 #include "Rogue.h"
 #include "IncludeGlobals.h"
 
+// iOS port (iBrogue): host hook for a haptic when the player takes damage.
+// severity: 0 = ordinary hit, 1 = survived but now under 40% health, 2 = fatal.
+// Defined in RogueDriver.mm; no-op on devices without a haptic engine.
+extern void iosPlayerTookDamage(int severity);
+
 
 /* Combat rules:
  * Each combatant has an accuracy rating. This is the percentage of their attacks that will ordinarily hit;
@@ -1517,6 +1522,22 @@ boolean inflictDamage(creature *attacker, creature *defender,
         }
     }
     
+    // iOS port (iBrogue): haptic when the player actually loses HP (suppressed
+    // during recording playback). Scaled by severity — fatal blow, a hit that
+    // leaves the player under 40% health (the low-health flash threshold), or an
+    // ordinary hit. The host honors its haptics setting.
+    if (defender == &player && damage > 0 && !rogue.playbackMode) {
+        int severity;
+        if (defender->currentHP <= damage) {
+            severity = 2; // fatal
+        } else if ((defender->currentHP - damage) * 100 < defender->info.maxHP * 40) {
+            severity = 1; // survives, but now under 40% health
+        } else {
+            severity = 0; // ordinary hit
+        }
+        iosPlayerTookDamage(severity);
+    }
+
     if (defender->currentHP <= damage) { // killed
         killCreature(defender, false);
         anyoneWantABite(defender);

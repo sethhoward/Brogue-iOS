@@ -73,9 +73,6 @@
 // set to false to allow multiple loads from the same saved file:
 #define DELETE_SAVE_FILE_AFTER_LOADING    true
 
-// set to false to disable references to keystrokes (e.g. for a tablet port)
-#define KEYBOARD_LABELS false
-
 //#define BROGUE_ASSERTS  false      // introduces several assert()s -- useful to find certain array overruns and other bugs
 //#define AUDIT_RNG             // VERY slow, but sometimes necessary to debug out-of-sync recording errors
 //#define GENERATE_FONT_FILES    // Displays font in grid upon startup, which can be screen-captured into font files for PC.
@@ -87,6 +84,16 @@
 
 #define false                    0
 #define true                    1
+
+// Runtime flag: prompts include keystroke hints when a hardware keyboard is connected.
+// Set from the Swift layer via setKeyboardLabelsEnabled().
+extern boolean KEYBOARD_LABELS;
+void setKeyboardLabelsEnabled(boolean enabled);
+
+// Runtime flag: true on iPhone. Set from the Swift layer via setPhoneLayout().
+// Used to opt iPhone-only layout tweaks into the engine without #ifdefs.
+extern boolean PHONE_LAYOUT;
+void setPhoneLayout(boolean enabled);
 
 #define Fl(N)                    (1 << (N))
 #define FP_BASE 16 // Don't change this without recalculating all of the power tables throughout the code!
@@ -1117,6 +1124,7 @@ enum tileFlags {
 #define UNEQUIP_KEY            'r'
 #define APPLY_KEY            'a'
 #define THROW_KEY            't'
+#define RETHROW_KEY         'T'
 #define RELABEL_KEY         'R'
 #define TRUE_COLORS_KEY        '\\'
 #define AGGRO_DISPLAY_KEY   ']'
@@ -2257,6 +2265,7 @@ typedef struct playerCharacter {
     
     short cursorLoc[2];                    // used for the return key functionality
     creature *lastTarget;                // to keep track of the last monster the player has thrown at or zapped
+    item *lastItemThrown;                // iOS port (iBrogue): last thrown item, for the rethrow command
     short rewardRoomsGenerated;            // to meter the number of reward machines
     short machineNumber;                // so each machine on a level gets a unique number
     short sidebarLocationList[ROWS*2][2];    // to keep track of which location each line of the sidebar references
@@ -2561,6 +2570,7 @@ enum BUTTON_FLAGS {
     B_HOVER_ENABLED            = Fl(3),
     B_WIDE_CLICK_AREA        = Fl(4),
     B_KEYPRESS_HIGHLIGHT    = Fl(5),
+    B_TALL_CLICK_AREA       = Fl(6),    // iPhone: extend the click area 2 rows upward
 };
 
 typedef struct buttonState {
@@ -3044,7 +3054,7 @@ extern "C" {
     void toggleMonsterDormancy(creature *monst);
     void monsterDetails(char buf[], creature *monst);
     void makeMonsterDropItem(creature *monst);
-    void throwCommand(item *theItem);
+    void throwCommand(item *theItem, boolean autoThrow);
     void relabel(item *theItem);
     void apply(item *theItem, boolean recordCommands);
     boolean itemCanBeCalled(item *theItem);
@@ -3218,7 +3228,11 @@ extern "C" {
     
     void setBrogueGameEvent(CBrogueGameEvent brogueGameState);
     void requestKeyboardInput(char *string);
-    
+
+    // iOS port (iBrogue): title-menu entries that open native screens.
+    void showFileManagementScreen(void);
+    void showGameCenterScreen(void);
+
 #if defined __cplusplus
 }
 #endif
