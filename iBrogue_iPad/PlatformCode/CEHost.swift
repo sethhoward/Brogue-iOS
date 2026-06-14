@@ -44,7 +44,11 @@ final class CEHost: NSObject, BrogueCEHost {
     // MARK: Input
 
     func hasKeyEvent() -> Bool { viewController?.hasKeyEvent() ?? false }
-    func dequeueKeyEvent() -> UInt8 { viewController?.dequeKeyEvent() ?? 0 }
+    func dequeueKeyEvent(withShift shift: UnsafeMutablePointer<ObjCBool>,
+                         control: UnsafeMutablePointer<ObjCBool>,
+                         raw: UnsafeMutablePointer<ObjCBool>) -> Int32 {
+        viewController?.dequeKeyEvent(shift: shift, control: control, raw: raw) ?? 0
+    }
     func hasTouchEvent() -> Bool { viewController?.hasTouchEvent() ?? false }
 
     func dequeueTouchEvent(_ outLocation: UnsafeMutablePointer<CGPoint>,
@@ -63,6 +67,10 @@ final class CEHost: NSObject, BrogueCEHost {
 
     func setAtTitle(_ atTitle: Bool) {
         viewController?.setCEAtTitle(atTitle)
+    }
+
+    func requestTextInput(_ defaultText: String, numeric: Bool) {
+        viewController?.requestTextInput(for: defaultText, numeric: numeric)
     }
 
     func presentFileManagement() {

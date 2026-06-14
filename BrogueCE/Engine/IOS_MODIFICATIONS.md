@@ -28,6 +28,29 @@ covers the separate Classic engine that ships in the app target).
 
 ## Change log
 
+### 2026-06-14 — Backport: seed persistence + selectable keyboard schemes + modifier plumbing
+
+**What.** Backported from the `se-game-mode` line (keeping this branch free of the gameplay WIP):
+
+- **Seed persistence** — `ceLoadPersistedSeed`/`cePersistLastSeed` (NSUserDefaults, in `CEBridge.mm`),
+  restored in `rogueMain` and kept in sync from `Recordings.c`; the seed-entry text prompt is pre-filled
+  and uses a number pad (`ceRequestTextInput`).
+- **Hardware keyboard modifiers** — the iOS key queue now carries real Shift/Ctrl + a `raw` flag (it was
+  byte-only with modifiers hardcoded to 0), so Shift/Ctrl-run works; arrows are scheme-independent.
+- **Selectable keyboard schemes** — `enum keyboardScheme` + `rogueKeyboardScheme` (default CLASSIC) +
+  `applyKeyboardScheme()`; the Modern right-hand grid (`uio/jkl/m,.`), Shift/Ctrl-run, displaced
+  inventory/equip/messages/stairs, quit-removed-on-tablet, and the scheme-aware `printHelpScreen` with
+  a Tab toggle (persisted via `cePersistKeyboardScheme`). Translation runs in the bridge on `raw`
+  hardware keys only, so on-screen controls aren't remapped; recordings stay canonical.
+- **Renderer** — the animation-glitch fix in `RogueScene.swift`.
+
+Full design + rationale: `docs/design/keyboard-schemes.md`. Default is Classic, so behavior is unchanged
+until the player opts in via `?` → Tab.
+
+**Where.** `Rogue.h`, `GlobalsBase.c`, `IO.c` (`applyKeyboardScheme`, `printHelpScreen`, `actionMenu`),
+`RogueMain.c`, `Recordings.c`, `CEBridge.mm`, `BrogueCEHost.h`; platform files
+(`BrogueViewController.swift`/`CEHost.swift`/`RogueDriver.mm`/`RogueScene.swift`) shared with Classic.
+
 ### 2026-06-11 — Button-drag highlight follows the finger
 
 **What.** While dragging a touch across a menu/inventory (`MOUSE_ENTERED_CELL` with a

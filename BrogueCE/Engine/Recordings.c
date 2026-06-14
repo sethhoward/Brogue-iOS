@@ -533,6 +533,7 @@ void initRecording() {
         lengthOfPlaybackFile    = recallNumber(4);
         seedRandomGenerator(rogue.seed);
         previousGameSeed = rogue.seed;
+        cePersistLastSeed(previousGameSeed); // iOS port (iBrogue): keep the persisted seed in sync
 
         if (fileExists(annotationPathname)) {
             loadNextAnnotation();

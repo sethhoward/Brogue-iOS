@@ -31,7 +31,9 @@
 #include <time.h>
 
 int rogueMain() {
-    previousGameSeed = 0;
+    // iOS port (iBrogue): restore the last-played seed (persisted across app launches) so the
+    // seeded-game prompt pre-fills it; upstream resets to 0.
+    previousGameSeed = ceLoadPersistedSeed();
     mainBrogueJunction();
     return rogue.gameExitStatusCode;
 }
