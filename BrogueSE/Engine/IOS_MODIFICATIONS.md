@@ -1,13 +1,17 @@
-# iOS modifications to the BrogueCE engine
+# iOS modifications to the Brogue SE engine
 
-The code in `BrogueCE/Engine/` is a vendored copy of the upstream **BrogueCE 1.15**
-engine, compiled into the embedded `BrogueCE.framework` and driven by the iOS host
-through `CEBridge.mm`. This document records iOS-specific modifications layered on
-top of the vendored engine C, so the divergence from upstream stays legible and
-future maintainers (human or AI) don't mistake an intentional port change for a bug.
+> **Brogue SE** (`BrogueSE/Engine/`, embedded `BrogueSE.framework`, driven by `SEBridge.mm`)
+> is a **fork of BrogueCE 1.15** and the home of all original "firehose" gameplay. It started as
+> a verbatim copy of `BrogueCE/Engine/`, so the entries below were inherited from the CE port and
+> still mention `BrogueCE` / `CEBridge.mm` / `ce_*`; in this tree the equivalents are
+> `BrogueSE` / `SEBridge.mm` / (for SE-specific entry points) `se_*`. Unlike CE, SE **never merges
+> back to upstream**, so this log's role is internal divergence-tracking, not upstream
+> cherry-picking. SE-specific bridge changes are marked `// iOS port (Brogue SE):`.
 
-This is the CE counterpart to `iBrogue_iPad/BrogueCode/IOS_MODIFICATIONS.md` (which
-covers the separate Classic engine that ships in the app target).
+The code here records iOS-specific modifications layered on the engine C, so the divergence stays
+legible and future maintainers (human or AI) don't mistake an intentional port change for a bug.
+See `BrogueCE/Engine/IOS_MODIFICATIONS.md` (faithful CE) and
+`iBrogue_iPad/BrogueCode/IOS_MODIFICATIONS.md` (Classic) for the other two engines.
 
 ## Conventions
 
