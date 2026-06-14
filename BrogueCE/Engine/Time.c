@@ -907,14 +907,19 @@ void burnItem(item *theItem) {
             theItem->quantity == 1 ? "s" : "");
     x = theItem->loc.x;
     y = theItem->loc.y;
+    // iOS port (iBrogue): announce the destruction and, if the player witnesses it, glimpse the item's
+    // good/bad polarity (not its kind) -- the scroll-side analogue of the potion fire-erasure tell. Both
+    // must run BEFORE the instance is freed below; revealPolarityOnFieryDestruction reads theItem->kind
+    // and persists the reveal at the kind level. Order: destruction line first, then the insight.
+    if (playerCanSee(x, y)) {
+        messageWithColor(buf2, &itemMessageColor, 0);
+        revealPolarityOnFieryDestruction(theItem);
+    }
     removeItemFromChain(theItem, floorItems);
     deleteItem(theItem);
     pmap[x][y].flags &= ~(HAS_ITEM | ITEM_DETECTED);
     if (pmap[x][y].flags & (ANY_KIND_OF_VISIBLE | DISCOVERED | ITEM_DETECTED)) {
         refreshDungeonCell((pos){ x, y });
-    }
-    if (playerCanSee(x, y)) {
-        messageWithColor(buf2, &itemMessageColor, 0);
     }
     spawnDungeonFeature(x, y, &(dungeonFeatureCatalog[DF_ITEM_FIRE]), true, false);
 }

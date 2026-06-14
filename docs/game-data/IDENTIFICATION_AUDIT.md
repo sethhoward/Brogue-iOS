@@ -1,9 +1,11 @@
 # Identification Audit — BrogueCE 1.15 (iOS port)
 
 How an item, or just its **polarity**, becomes known on the `feature/potion-id-rework` branch.
-Engine: `BrogueCE/Engine/` (`Items.c`, `Combat.c`, `Time.c`, `Globals*.c`, `Rogue.h`). Every
-mechanic is cited `file:line` and flagged **[vanilla]** (stock BrogueCE) or **[iOS]** (a port
-modification, marked in source with `// iOS port (iBrogue):`).
+Engine: `BrogueCE/Engine/` (`Items.c`, `Combat.c`, `Time.c`, `Movement.c`, `Globals*.c`, `Rogue.h`).
+Every mechanic is cited `file:line` and flagged **[vanilla]** (stock BrogueCE) or **[iOS]** (a port
+modification, marked in source with `// iOS port (iBrogue):`). A few carry **[pending]** — built on
+this branch but not yet playtest-signed-off, so behavior/tuning may still change; see
+[../design/identification-future-ideas.md](../design/identification-future-ideas.md).
 
 This documents the *current* behavior. For the change history and rationale, see
 [IOS_MODIFICATIONS.md](../../BrogueCE/Engine/IOS_MODIFICATIONS.md); for base item stats and the
@@ -110,7 +112,7 @@ creation ([Items.c:280,290,358](../../BrogueCE/Engine/Items.c)) and counted down
 
 See the [tuning table](#8-tuning-reference) for the per-variant values. A non-positive ring also
 auto-IDs by elimination on equip (upstream issue #683; see
-[pr-notes-ring-equip-deduction issue 683.md](../pr-notes-ring-equip-deduction%20issue%20683.md)).
+[pr-notes-ring-equip-deduction issue 683.md](../notes/pr-notes-ring-equip-deduction%20issue%20683.md)).
 
 ---
 
@@ -168,7 +170,32 @@ reward:
 - "Fire only if it helps": the payment is never consumed unless the offered item actually gains
   information ([Items.c:8380,8394](../../BrogueCE/Engine/Items.c)). RNG-free.
 
-See [pr-notes-insight-altar phase 7.md](../pr-notes-insight-altar%20phase%207.md).
+See [pr-notes-insight-altar phase 7.md](../notes/pr-notes-insight-altar%20phase%207.md).
+
+### 5f. Witnessing a scroll burn **[iOS · pending]**
+`revealPolarityOnFieryDestruction()` ([Items.c:8115](../../BrogueCE/Engine/Items.c)), called from
+`burnItem()` ([Time.c:901](../../BrogueCE/Engine/Time.c)) before the item is freed, gated on
+`playerCanSee`. The **scroll-side mirror of §5c's fire-erasure**: scrolls are the only
+`ITEM_FLAMMABLE` item, and you never burn one on purpose, so the insight comes from *witnessing* the
+accident (incineration burst, fire trap, flaming gas). Reveals **polarity only** (`detectMagicOnItem`,
+persisted at the kind level so it survives the item's deletion), then escalates (§3a) / runs the
+elimination pass (§3b): *"as it burns you glimpse a benevolent/malevolent aura curling in the smoke."*
+No-op on already-identified, neutral, or already-polarity-known kinds. No RNG.
+
+### 5g. Freed-captive reaction **[iOS · pending]**
+`captiveReactToPack()` ([Items.c:8146](../../BrogueCE/Engine/Items.c)), called from `freeCaptive()`
+([Movement.c:534](../../BrogueCE/Engine/Movement.c)). On rescue, the captive reacts to what it senses
+in your pack — revealing the **polarity** (not the kind) of the first unidentified item of the
+relevant sign whose aura you don't already know:
+- **Monkey** (`MK_MONKEY`) → covets a **benevolent** item: *"the monkey eyes <item> in your pack
+  covetously."* Leans on `itemMagicPolarity`, **not** the narrow steal profile (§7a), so any good
+  ring/staff/charm counts.
+- **Any other captive** → recoils from a **malevolent** item: *"the … shies warily from <item>."* A
+  free curse-warning. **Silent no-op when you carry no malevolent item** (by design).
+
+One tell per rescue; polarity reveal only (no escalation). Picks the first eligible item in pack order
+(`itemMagicPolarity` is only ±1/0 — no finer gradient). No RNG. Also fires for tunnel-freed captives
+(`freeCaptivesEmbeddedAt` → `freeCaptive`), but not for clone-made allies.
 
 ---
 
@@ -179,6 +206,13 @@ Both share `applyPolarityInsightToRandomItem()`
 §3a), then run the elimination pass (§3b). The random pick is action-triggered and replay-stable
 (saves are recordings).
 
+> **Eligibility guard.** "Already known" is tested with `itemIdentityFullyKnown()`, not the bare
+> per-item `ITEM_IDENTIFIED` flag: a **scroll/potion** is fully known once its *kind* is identified
+> (no per-item enchant), so a copy with a clear instance flag still counts as known and is excluded —
+> otherwise insight would re-"identify" it. Rings/wands/staffs keep a per-item enchant, so for them
+> only the instance flag counts and they stay eligible until fully ID'd. Shared by every polarity
+> selection guard (rest, eating, detect-magic drink/throw, the insight altar, and the §5f/§5g tells).
+
 ### 6a. Rest insight
 `gainPolarityInsightFromRest()` ([Items.c:8178–8217](../../BrogueCE/Engine/Items.c)), called once
 per rested turn from `playerTurnEnded` ([Time.c:2693](../../BrogueCE/Engine/Time.c), gated on
@@ -186,14 +220,14 @@ per rested turn from `playerTurnEnded` ([Time.c:2693](../../BrogueCE/Engine/Time
 `100 × N` consecutive rested turns (intervals 100, 200, 300…; cumulative 100, 300, 600…), keyed off
 reveals earned so far. **Favors potions** when any eligible potion exists. A ring of wisdom
 accelerates it ~10%/level (clamped). See
-[pr-notes-rest-polarity-insight phase 8.md](../pr-notes-rest-polarity-insight%20phase%208.md).
+[pr-notes-rest-polarity-insight phase 8.md](../notes/pr-notes-rest-polarity-insight%20phase%208.md).
 
 ### 6b. Eating insight
 `gainScrollInsightFromEating()` ([Items.c:8224–8250](../../BrogueCE/Engine/Items.c)), called from
 `eat()` ([Items.c:7574](../../BrogueCE/Engine/Items.c)). A safe meal — **nothing in the
 `MONSTER_TRACKING_SCENT` (hunting) state** ([Items.c:8226](../../BrogueCE/Engine/Items.c)) — is a
 calm moment to study one random unknown **scroll** (scrolls only; potions are the rest channel's
-job). See [pr-notes-eat-scroll-insight phase 9.md](../pr-notes-eat-scroll-insight%20phase%209.md).
+job). See [pr-notes-eat-scroll-insight phase 9.md](../notes/pr-notes-eat-scroll-insight%20phase%209.md).
 
 ---
 
@@ -211,7 +245,8 @@ against a data-driven `stealProfile` ([Globals.c:1131–1152](../../BrogueCE/Eng
   runics (+25), dislikes food (−8). An item the imp wanted is *probably* good/enchanted.
 
 See [reusable-components.md](../guides/reusable-components.md) (the steal component) and
-[IOS_MODIFICATIONS.md](../../BrogueCE/Engine/IOS_MODIFICATIONS.md) "Deductive thievery".
+[IOS_MODIFICATIONS.md](../../BrogueCE/Engine/IOS_MODIFICATIONS.md) "Deductive thievery". A *freed*
+monkey gives a separate, **direct** polarity tell — see §5g (it uses polarity, not this steal profile).
 
 ### 7b. Empty-bottle capture **[iOS]**
 `fillEmptyBottle()` ([Items.c:6730](../../BrogueCE/Engine/Items.c)): capturing a gas/liquid (or a
@@ -260,7 +295,7 @@ One place for every scalar, so balancing doesn't mean spelunking ten files.
 - [TERRAIN_AUDIT.md](TERRAIN_AUDIT.md) — the empty-bottle capture map and gap analysis.
 - [IOS_MODIFICATIONS.md](../../BrogueCE/Engine/IOS_MODIFICATIONS.md) — per-change history & rationale
   for every **[iOS]** mechanic above.
-- Phase notes (in `docs/`): `potion-id-rework-plan.md` (master plan),
+- Phase notes (in `docs/notes/`): `potion-id-rework-plan.md` (master plan),
   `pr-notes-potion-throw-good-effects phase 1+2.md`, `pr-notes-potion-bolt-detonation phase 3.md`,
   `pr-notes-insight-altar phase 7.md`, `pr-notes-rest-polarity-insight phase 8.md`,
   `pr-notes-eat-scroll-insight phase 9.md`, `pr-notes-ring-equip-deduction issue 683.md`.

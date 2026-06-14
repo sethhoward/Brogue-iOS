@@ -1020,6 +1020,100 @@ give the kind away on their own, so those keep full ID. (Player request.)
 RNG difference. The visibility gate keys on deterministic state. Same release-time
 `recordingVersionString` bump as the rest of the v2 work.
 
+### 2026-06-13 — Witnessing a scroll burn reveals its polarity (the scroll-side fire-erasure tell)
+
+**What.** When a flammable item is destroyed by fire **in the player's view**, you glimpse its good/bad
+**polarity** (not its kind): *"as it burns you glimpse a malevolent aura curling in the smoke — its magic
+was ill."* Scrolls are the only `ITEM_FLAMMABLE` item, so in practice this is scrolls caught by an
+incineration burst, a fire trap, or flaming gas. It is the scroll-side analogue of the potion
+fire-erasure tell above — you never burn a scroll on purpose, so the insight comes from *witnessing* the
+accident, not from a deliberate sacrifice. The reveal escalates through the usual machinery: it persists
+at the kind level (`magicPolarityRevealed`), arms the item for a later full ID via the escalation rule,
+and runs the elimination pass (`tryIdentifyLastItemKinds`). Already-identified, neutral-polarity, or
+already-polarity-known kinds glimpse nothing.
+
+**Why.** Scrolls had no destruction tell — potions get fully ID'd (or polarity-revealed) when thrown,
+shattered, or detonated, but a burning scroll just vanished with no information. This closes that
+asymmetry without adding a new player verb. First implemented item from
+`docs/design/identification-future-ideas.md` (idea A); environmental-hazard reveal, to be extended to
+acid later.
+
+**Where.**
+- `Items.c`: new non-static `revealPolarityOnFieryDestruction(item *)` (beside `detectMagicOnItem`).
+  Gates on `HAS_INTRINSIC_POLARITY`, not yet `ITEM_IDENTIFIED`, and non-neutral `itemMagicPolarity`;
+  captures `magicPolarityRevealed` *before* calling `detectMagicOnItem`, then (only if newly revealed)
+  runs `tryIdentifyLastItemKinds(HAS_INTRINSIC_POLARITY)` and prints the polarity-colored aura line.
+  Returns true on a fresh glimpse. Lives in `Items.c` for access to the `static` detect/identify helpers.
+- `Time.c`: `burnItem` now prints the destruction message and calls `revealPolarityOnFieryDestruction`
+  **before** `deleteItem` frees the instance (the helper reads `theItem->kind`), both gated on the
+  existing `playerCanSee`. Order: destruction line, then the insight.
+- `Rogue.h`: forward declaration beside `burnItem`.
+
+**Determinism.** No RNG added; the reveal is a deterministic, action-triggered state change driven by the
+deterministic fire-processing path, gated on deterministic visibility. Saves are recordings — no new
+struct fields, replay-safe.
+
+### 2026-06-13 — A freed captive senses a pack item's polarity (monkey covets, others recoil)
+
+**What.** Freeing a captive now reveals the good/bad **polarity** (not the kind) of one item in your
+pack: a **monkey**, a thief at heart, eyes your best loot — *"the monkey eyes a scroll titled 'XYZ' in
+your pack covetously."* (a **benevolent** item) — while **any other** rescued creature recoils from the
+worst thing you carry — *"the goblin shies warily from a [potion] in your pack."* (a **malevolent**
+item). One tell per rescue, polarity only (no full ID), targeting the first carried item of the relevant
+sign whose aura you don't already know. Because the two signs can never land on the same item, the
+monkey's covet and the generic recoil are complementary, not competing. Silent no-op when nothing of that
+sign is sensed — by design, especially the malevolent recoil when you carry no curses.
+
+**Why.** First pass at the "ally/captive tell" idea from
+`docs/design/identification-future-ideas.md` (ideas B + D). Rescue → reward is a core Brogue pattern, and
+this gives captives a non-combat value. It leans on **polarity** rather than the monkey's narrow
+`rateItemStealDesirability` profile (which only flags food / life / strength), so *any* good item — a
+ring, staff, charm — can catch the monkey's eye. Bonding is too slow to rely on, so the trigger is the
+moment of **rescue**, not a developed bond.
+
+**Where.**
+- `Items.c`: new non-static `captiveReactToPack(creature *freed)` (beside
+  `revealPolarityOnFieryDestruction`). Picks the sensed sign from `monsterID` (`MK_MONKEY` → benevolent,
+  else malevolent), scans `packItems` for the first `HAS_INTRINSIC_POLARITY`, not-`ITEM_IDENTIFIED` item
+  of that sign whose polarity isn't already known, then `detectMagicOnItem` + `tryIdentifyLastItemKinds`
+  and prints the monster/item-named, polarity-colored line. Lives in `Items.c` for the `static`
+  detect/identify helpers and the `MAGIC_POLARITY_*` constants (both file-local to `Items.c`).
+- `Movement.c`: `freeCaptive` calls `captiveReactToPack(monst)` after the "you free the grateful…"
+  message. This also covers tunnel-freed captives (`freeCaptivesEmbeddedAt` → `freeCaptive`); it does
+  *not* fire for captives turned ally by cloning (`becomeAllyWith` directly), which isn't a rescue.
+- `Rogue.h`: forward declaration beside `revealPolarityOnFieryDestruction`.
+
+**Determinism.** No RNG (`itemMagicPolarity` is only ±1/0, so there is no finer "strongest" gradient —
+first-in-pack-order is the deterministic choice). Action-triggered state change; saves are recordings, no
+new struct fields, replay-safe.
+
+### 2026-06-13 — Fix: insight channels re-"identified" an already-known scroll/potion
+
+**What.** Eating (and, latently, resting, detect-magic drink/throw, and the insight altar) could pick an
+item whose **kind was already fully identified** and announce *"…and finally identify <X>."* again —
+reported after a fully-identified scroll of enchanting was "studied" while eating.
+
+**Why.** The selection guards tested only the per-**item** `ITEM_IDENTIFIED` flag, but flavored
+consumables record full identity at the **kind** level (`scrollTable[kind].identified` /
+`potionTable[kind].identified`). `identify()` stamps the instance flag only on the *one* item it is
+handed (`Items.c` `identify`), so a *copy* of an already-identified scroll/potion (kind known, instance
+flag clear — e.g. a leftover from a stack, or one picked up after the kind was learned) passed the
+"unidentified" filter, got selected, and `revealOrIdentifyPolarityItem` saw its polarity as known (the
+kind table says so) and called `identify()` redundantly, firing the bogus message.
+
+**Where.** `Items.c`: new `static boolean itemIdentityFullyKnown(const item *)` — true if the instance
+flag is set, **or** (for `SCROLL`/`POTION`) the kind table is identified. Rings/wands/staffs still carry a
+per-item enchant/charge count, so for them kind-knowledge isn't full knowledge and only the instance flag
+counts — they remain eligible so insight can still finish them. Replaced the bare `flags & ITEM_IDENTIFIED`
+test with `itemIdentityFullyKnown` in every polarity-bearing selection/escalation guard:
+`applyPolarityInsightToRandomItem` (rest + eating; both the potion pre-scan and the eligibility scan),
+`quaffDetectMagic`, `throwDetectMagicOnFloor` (kept the separate `ITEM_MAGIC_DETECTED` floor check),
+`performInsightSacrifice` (the payment "gamble" test and the insight-item guard), and the two new tells
+(`revealPolarityOnFieryDestruction`, `captiveReactToPack`).
+
+**Determinism.** Pure guard tightening; no RNG, no new state, replay-safe. Narrows which items the
+existing deterministic draws consider.
+
 ### 2026-06-13 — A potion thrown into deep water floats away instead of shattering
 
 **What.** A potion that lands on an open **deep-water** tile (no creature or wall struck) no longer
@@ -1100,7 +1194,7 @@ identify — purely a message.
 Because bad potions detonate-and-halt while good ones glow-and-pass, a zap becomes a *costed polarity probe*:
 one charge reveals (by observation) the leading run of benevolent potions up to the first bad one, which
 detonates dangerously and is consumed. Bounded and expensive, not the old free mass-ID. Recorded in
-`KNOWN_CAVEATS.md`. Backport note in `docs/fork-backport-tweaks.md` (branch `potion-bolt-detonation`).
+`KNOWN_CAVEATS.md`. Backport note in `docs/notes/fork-backport-tweaks.md` (branch `potion-bolt-detonation`).
 
 ### 2026-06-10 — Potion-ID tuning: faster first rest-reveal, and detonating potions absorb the bolt
 
@@ -1134,7 +1228,7 @@ detonates a potion; like the Phase 3 / #842 detonation it diverges only as a dir
 player's action (zapping a location that holds a dropped bad potion), so it replays identically. Saves are
 recordings. See `KNOWN_CAVEATS.md` for the accepted side effect (a dropped bad potion can now shield a
 monster directly behind it from that bolt). Both tweaks are tuning refinements of existing fork-branch
-features and should be backported to those branches — see `docs/fork-backport-tweaks.md`.
+features and should be backported to those branches — see `docs/notes/fork-backport-tweaks.md`.
 
 ### 2026-06-10 — Deductive thievery: monkeys and imps steal by preference (upstream PR #849)
 
@@ -1282,7 +1376,7 @@ feature is not variant-gated, so the hint is accurate in every variant) now hint
 food notes that "a meal taken in peace, with nothing on the hunt for you, settles the mind enough to study
 an unidentified scroll…", and the mango that eating "undisturbed" affords "a quiet moment to divine the
 nature of an unknown scroll." Description-only; no logic change. Backport with the feature — see
-`docs/fork-backport-tweaks.md` (branch `eat-scroll-insight`).
+`docs/notes/fork-backport-tweaks.md` (branch `eat-scroll-insight`).
 
 **Determinism.** `eat()` is one command per keystroke (no `autoRest`-style per-turn re-recording), the
 reveal is RNG-free, and there's no new stored state — so it's reconstructed identically on replay (saves
@@ -1393,7 +1487,11 @@ creature now applies that potion's effect to the creature it shatters on. A new
 defined just above `drinkPotion`, forward-declared above `throwItem`) carries the per-kind logic. It
 always applies the mechanical effect, but returns `true` only when a *player-visible* tell was
 produced — which is what drives `autoIdentify`:
-- strength → permanent +maxHP/+currentHP buff (≈half a life potion; "muscles bulge"),
+- strength → reuses the empowerment system (`empowerMonster` + `EMPOWERMENT_LIGHT` flare, the same
+  effect as the empowerment bolt/wand/altar): a permanent all-round combat boost + full heal, with
+  `empowerMonster`'s own "looks stronger" tell. Skipped on `MONST_INANIMATE`/`MONST_INVULNERABLE`
+  targets (no effect, no ID), mirroring the bolt. The ally-only `newPowerCount` talent-learning side
+  effect is gated on `MONSTER_ALLY` elsewhere, so it's inert on an enemy and a bonus on an ally,
 - haste → "speeds up"; levitation → "floats into the air",
 - life → full panacea heal of the struck creature **and**, on shatter, a healing-spore gas cloud
   (a new `DF_LIFE_POTION_CLOUD` that spawns the existing bloodwort `HEALING_CLOUD`); life auto-IDs
@@ -1417,7 +1515,8 @@ iOS divergence.
 **Where.** `Items.c` — forward prototype above `throwItem`; `applyPotionEffectToCreature` defined
 between `detectMagicOnItem` and `drinkPotion`; a new block at the top of the potion-shatter `if` in
 `throwItem` (the good-potion effect, plus a `POTION_LIFE` case that spawns the cloud). Reuses `heal`,
-`haste`, `imbueInvisibility`, `extinguishFireOnCreature`, `spawnDungeonFeature`. `Rogue.h` —
+`haste`, `imbueInvisibility`, `extinguishFireOnCreature`, `spawnDungeonFeature`, and `empowerMonster`
++ `createFlare` (`Monsters.c`) for strength. `Rogue.h` —
 `DF_LIFE_POTION_CLOUD` appended to the `dungeonFeatureType` enum before `NUMBER_DUNGEON_FEATURES`.
 `Globals.c` — a matching `{HEALING_CLOUD, GAS, 350, 0, 0}` row appended to `dungeonFeatureCatalog`
 (clone of the bloodwort pod-burst). The catalog and enum are shared across the Brogue/Rapid/Bullet

@@ -8103,6 +8103,93 @@ static void detectMagicOnItem(item *theItem) {
     }
 }
 
+// iOS port (iBrogue): "is there nothing left to learn about this item's identity?" The per-item
+// ITEM_IDENTIFIED flag alone is NOT a reliable answer for flavored consumables: once a SCROLL or POTION
+// *kind* is identified, every copy of that kind is fully known (there is no per-item enchant to learn),
+// yet identify() only stamps the one instance it is handed -- so a copy you didn't personally identify
+// keeps a clear instance flag while its kind table says "identified". Testing only the instance flag let
+// the insight/detect channels re-"identify" an already-known scroll or potion (the spurious "finally
+// identify" message). Rings, wands and staffs still carry a per-item enchant/charge count, so for them
+// kind-knowledge is not full knowledge and only the instance flag counts here.
+static boolean itemIdentityFullyKnown(const item *theItem) {
+    if (theItem->flags & ITEM_IDENTIFIED) {
+        return true;
+    }
+    if (theItem->category & (SCROLL | POTION)) {
+        itemTable *table = tableForItemCategory(theItem->category);
+        return table && table[theItem->kind].identified;
+    }
+    return false;
+}
+
+// iOS port (iBrogue): witnessing a flammable item consumed by fire reveals its good/bad POLARITY but
+// not its kind -- the flames erase the tell, exactly like the potion fire-erasure case in
+// shatterPotionAtLoc. Scrolls are the only ITEM_FLAMMABLE item, so this is the scroll-side analogue of
+// throwing/detonating a potion: you don't burn a scroll on purpose, but when one is caught in fire (a
+// trap, an incineration burst, flaming gas) the moment of destruction still leaks its nature. Called
+// from burnItem (Time.c) just before the instance is freed; the caller has already confirmed the player
+// can see the spot. detectMagicOnItem records the reveal at the KIND level, so it persists across the
+// run even though the item itself is about to be deleted. Deterministic (no RNG); returns true (and
+// prints the aura line) only when a previously-unknown polarity was glimpsed.
+boolean revealPolarityOnFieryDestruction(item *theItem) {
+    if (!(theItem->category & HAS_INTRINSIC_POLARITY)
+        || itemIdentityFullyKnown(theItem)
+        || itemMagicPolarity(theItem) == MAGIC_POLARITY_NEUTRAL) {
+
+        return false; // nothing to glimpse: no intrinsic polarity, already fully known, or neutral
+    }
+    itemTable *table = tableForItemCategory(theItem->category);
+    const boolean polarityWasKnown = table[theItem->kind].magicPolarityRevealed;
+    detectMagicOnItem(theItem); // reveals (and persists) the KIND's polarity; not a full ID
+    if (polarityWasKnown) {
+        return false; // already sensed this kind's aura; the fire told us nothing new
+    }
+    tryIdentifyLastItemKinds(HAS_INTRINSIC_POLARITY);
+    const boolean benevolent = (itemMagicPolarity(theItem) == MAGIC_POLARITY_BENEVOLENT);
+    messageWithColor(benevolent
+        ? "as it burns you glimpse a benevolent aura curling in the smoke -- its magic was good."
+        : "as it burns you glimpse a malevolent aura curling in the smoke -- its magic was ill.",
+        (benevolent ? &goodMessageColor : &badMessageColor), 0);
+    return true;
+}
+
+// iOS port (iBrogue): a freed captive reacts to the magic it senses in your pack, revealing the good/bad
+// POLARITY (never the kind) of one carried item whose aura you don't yet know. A monkey -- a thief at
+// heart -- is drawn to your best loot and points out a BENEVOLENT item; every other rescued creature
+// recoils from the most threatening thing you carry and points out a MALEVOLENT one. The two signs can
+// never collide on the same item, so the monkey's covet and the generic recoil are complementary tells.
+// Polarity reveal only -- no full ID, no escalation -- to keep the "it eyes your satchel" flavor honest.
+// Deterministic: itemMagicPolarity is only ever +1/0/-1 (no finer gradient to sort on), so it reveals the
+// first eligible item in pack order; no RNG. Silent no-op when nothing of that sign has a still-unknown
+// aura (acceptable -- especially the malevolent recoil when you carry no curses). Called from freeCaptive.
+void captiveReactToPack(creature *freed) {
+    const int sensedPolarity = (freed->info.monsterID == MK_MONKEY)
+        ? MAGIC_POLARITY_BENEVOLENT : MAGIC_POLARITY_MALEVOLENT;
+    for (item *theItem = packItems->nextItem; theItem != NULL; theItem = theItem->nextItem) {
+        if (!(theItem->category & HAS_INTRINSIC_POLARITY)
+            || itemIdentityFullyKnown(theItem)
+            || itemMagicPolarity(theItem) != sensedPolarity
+            || itemMagicPolarityIsKnown(theItem, sensedPolarity)) {
+
+            continue; // no intrinsic polarity, already fully known, wrong sign, or aura already sensed
+        }
+        detectMagicOnItem(theItem); // reveal (and persist) the kind's polarity; not a full ID
+        tryIdentifyLastItemKinds(HAS_INTRINSIC_POLARITY);
+
+        char monstName[COLS], theName[COLS * 3], buf[COLS * 3];
+        monsterName(monstName, freed, false);
+        itemName(theItem, theName, false, true, NULL); // unidentified name -- we revealed polarity, not kind
+        if (sensedPolarity == MAGIC_POLARITY_BENEVOLENT) {
+            sprintf(buf, "the %s eyes %s in your pack covetously.", monstName, theName);
+            messageWithColor(buf, &goodMessageColor, 0);
+        } else {
+            sprintf(buf, "the %s shies warily from %s in your pack.", monstName, theName);
+            messageWithColor(buf, &badMessageColor, 0);
+        }
+        return; // one tell per rescue
+    }
+}
+
 // iOS port (iBrogue): act on one polarity-bearing item for an insight effect — reveal its good/bad
 // polarity if still hidden, or fully identify it if its polarity is already known. Returns true if it
 // was a full identification. Shared by resting/eating (applyPolarityInsightToRandomItem) and the potion
@@ -8132,7 +8219,7 @@ static item *applyPolarityInsightToRandomItem(unsigned short categoryMask, boole
     for (item *it = packItems->nextItem; it != NULL; it = it->nextItem) {
         if ((it->category & categoryMask)
             && (it->category & HAS_INTRINSIC_POLARITY)
-            && !(it->flags & ITEM_IDENTIFIED)
+            && !itemIdentityFullyKnown(it)
             && itemMagicPolarity(it) != MAGIC_POLARITY_NEUTRAL
             && (it->category & POTION)) {
             anyPotion = true;
@@ -8145,7 +8232,7 @@ static item *applyPolarityInsightToRandomItem(unsigned short categoryMask, boole
          it = it->nextItem) {
         if (!(it->category & categoryMask)
             || !(it->category & HAS_INTRINSIC_POLARITY)
-            || (it->flags & ITEM_IDENTIFIED)
+            || itemIdentityFullyKnown(it)
             || itemMagicPolarity(it) == MAGIC_POLARITY_NEUTRAL
             || (potionsOnly && !(it->category & POTION))) {
             continue;
@@ -8265,7 +8352,7 @@ static void quaffDetectMagic(item *exclude) {
     for (item *theItem = packItems->nextItem; theItem != NULL; theItem = theItem->nextItem) {
         if (theItem != exclude
             && (theItem->category & HAS_INTRINSIC_POLARITY)
-            && !(theItem->flags & ITEM_IDENTIFIED)
+            && !itemIdentityFullyKnown(theItem)
             && itemMagicPolarity(theItem) != MAGIC_POLARITY_NEUTRAL
             && count < (int)(sizeof(eligible) / sizeof(eligible[0]))) {
 
@@ -8316,7 +8403,8 @@ static void throwDetectMagicOnFloor(void) {
     int count = 0;
     for (item *theItem = floorItems->nextItem; theItem != NULL; theItem = theItem->nextItem) {
         if ((theItem->category & HAS_INTRINSIC_POLARITY)
-            && !(theItem->flags & (ITEM_IDENTIFIED | ITEM_MAGIC_DETECTED))
+            && !itemIdentityFullyKnown(theItem)
+            && !(theItem->flags & ITEM_MAGIC_DETECTED)
             && itemMagicPolarity(theItem) != MAGIC_POLARITY_NEUTRAL
             && count < (int)(sizeof(eligible) / sizeof(eligible[0]))) {
 
@@ -8379,9 +8467,9 @@ static boolean performInsightSacrifice(short machineNumber) {
     }
 
     char theName[COLS * 3], buf[COLS * 3];
-    if (!(paymentItem->flags & ITEM_IDENTIFIED)) {
+    if (!itemIdentityFullyKnown(paymentItem)) {
         // Gambled an unknown offering -> fully identify the insight item.
-        if (insightItem->flags & ITEM_IDENTIFIED) {
+        if (itemIdentityFullyKnown(insightItem)) {
             return false; // already fully known; don't waste the sacrifice
         }
         identify(insightItem);
@@ -8393,7 +8481,7 @@ static boolean performInsightSacrifice(short machineNumber) {
         // is already known) escalate to a full identification, like resting/eating/detect magic.
         const boolean polarityKnown = itemMagicPolarityIsKnown(insightItem, MAGIC_POLARITY_BENEVOLENT)
                                    || itemMagicPolarityIsKnown(insightItem, MAGIC_POLARITY_MALEVOLENT);
-        if ((insightItem->flags & ITEM_IDENTIFIED)
+        if (itemIdentityFullyKnown(insightItem)
             || ((insightItem->flags & ITEM_MAGIC_DETECTED) && !polarityKnown)) {
             // Fully known already, or already revealed as having no good/bad polarity -> nothing to gain.
             return false;
@@ -8530,17 +8618,18 @@ static boolean applyPotionEffectToCreature(creature *monst, short potionKind, sh
             // Silent here: when thrown, the healing-spore cloud message is the tell (see throwItem).
             heal(monst, 100, true); // full panacea; heal() prints nothing when panacea is true
             return visible;
-        case POTION_STRENGTH: {
-            // No monster strength stat: stand in a permanent durability buff (~half a life potion).
-            short buff = potionTable[POTION_LIFE].range.upperBound / 2; // info is a per-creature copy
-            monst->info.maxHP += buff;
-            monst->currentHP += buff;
-            if (visible) {
-                sprintf(buf, "%s's muscles bulge.", mName);
-                combatMessage(buf, NULL);
+        case POTION_STRENGTH:
+            // No monster strength stat, so reuse the empowerment system (the bolt/wand/altar effect):
+            // a permanent all-round combat boost + full heal. empowerMonster prints its own visible
+            // "looks stronger" tell; its only ally-specific side effect (newPowerCount talent-learning)
+            // is gated on MONSTER_ALLY elsewhere, so it's harmless on an enemy and a bonus on an ally.
+            // Skip inanimate/invulnerable targets (turrets, totems), mirroring the empowerment bolt.
+            if (monst->info.flags & (MONST_INANIMATE | MONST_INVULNERABLE)) {
+                return false;
             }
+            empowerMonster(monst);
+            createFlare(monst->loc.x, monst->loc.y, EMPOWERMENT_LIGHT);
             return visible;
-        }
         case POTION_HASTE_SELF:
             haste(monst, magnitude); // silent for monsters
             if (visible) {

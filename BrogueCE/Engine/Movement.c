@@ -535,6 +535,11 @@ void freeCaptive(creature *monst) {
     monsterName(monstName, monst, false);
     sprintf(buf, "you free the grateful %s and gain a faithful ally.", monstName);
     message(buf, 0);
+    // iOS port (iBrogue): the freed captive reacts to the magic it senses in your pack -- a monkey covets
+    // a benevolent item, any other creature recoils from a malevolent one -- revealing that item's
+    // polarity. Polarity logic (and the MAGIC_POLARITY_* constants) lives in Items.c; silent no-op when
+    // there is nothing of the relevant sign to sense.
+    captiveReactToPack(monst);
 }
 
 boolean freeCaptivesEmbeddedAt(short x, short y) {

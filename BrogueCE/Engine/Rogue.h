@@ -75,25 +75,25 @@
 // When 1, guarantees a single gold goblin on depth 2 (early, to reach it fast while testing), bypassing
 // the random spawn roll, and telepathically reveals it so it can be tracked on the map while it flees.
 // Set to 0 for normal random behavior.
-#define D_ALWAYS_SPAWN_GOLD_GOBLIN      1
+#define D_ALWAYS_SPAWN_GOLD_GOBLIN      0
 
 // iOS port (iBrogue): start with a high-enchant staff of frost for playtesting (freeze/slow/ice bridges/
 // frozen foliage/push). Granted deterministically in initializeRogue, so it is recording-safe. Flip to 0 to ship.
-#define D_FROST_STAFF_START             1//(WIZARD_MODE && 0)
+#define D_FROST_STAFF_START             0//(WIZARD_MODE && 0)
 
 // iOS port (iBrogue): start with a +3 ring of light for playtesting (ally emboldenment aura + invisible
 // reveal). Granted deterministically in initializeRogue, so it is recording-safe. Equip it to see the
 // effect. Flip to 0 to ship.
-#define D_LIGHT_RING_START              1//(WIZARD_MODE && 0)
+#define D_LIGHT_RING_START              0//(WIZARD_MODE && 0)
 
 // iOS port (iBrogue): start with a strong (+10) charm of health for playtesting -- a near-full heal on a
 // short cooldown. Granted deterministically in initializeRogue, so it is recording-safe. Flip to 0 to ship.
-#define D_HEAL_CHARM_START              1//(WIZARD_MODE && 0)
+#define D_HEAL_CHARM_START              0//(WIZARD_MODE && 0)
 
 // iOS port (iBrogue): start with a +50 leather armor for playtesting -- effectively invulnerable, to test
 // without dying. Granted deterministically in initializeRogue, so it is recording-safe. Equip it to wear
 // it. Flip to 0 to ship.
-#define D_LEATHER_ARMOR_START           1//(WIZARD_MODE && 0)
+#define D_LEATHER_ARMOR_START           0//(WIZARD_MODE && 0)
 
 // If enabled, runs a benchmark for the performance of repeatedly updating the screen at the start of the game.
 // #define SCREEN_UPDATE_BENCHMARK
@@ -3688,6 +3688,8 @@ extern "C" {
     void discoverCell(const short x, const short y);
     void updateVision(boolean refreshDisplay);
     void burnItem(item *theItem);
+    boolean revealPolarityOnFieryDestruction(item *theItem); // iOS port (iBrogue): scroll fire-erasure polarity tell
+    void captiveReactToPack(creature *freed); // iOS port (iBrogue): freed captive senses a pack item's polarity
     void activateMachine(short machineNumber);
     boolean circuitBreakersPreventActivation(short machineNumber);
     void promoteTile(short x, short y, enum dungeonLayers layer, boolean useFireDF);
