@@ -149,7 +149,22 @@ extension BrogueGameEvent {
 // MARK: - BrogueViewController
 
 /// Which engine is currently driving the shared rendering surface.
-enum EngineKind { case classic, ce }
+///
+/// `.se` (Brogue SE) is a fork of the CE engine living in its own framework; it is
+/// only available in builds that define `SE_ENABLED`, so the case is compiled out of
+/// shipping builds along with the rest of the SE selector.
+enum EngineKind {
+    case classic, ce
+    #if SE_ENABLED
+    case se
+    #endif
+
+    /// SE runs through the same CEHost bridge and presents the same in-engine UI as
+    /// CE, so most "is this the CE engine?" UI checks should treat SE like CE. Only
+    /// truly engine-specific things (Game Center, the ce_*/se_* entry points) branch
+    /// on the exact case.
+    var isCEFamily: Bool { self != .classic }
+}
 
 final class BrogueViewController: UIViewController {
     /// Retains the BrogueCE host adapter for the lifetime of the CE engine thread.
@@ -160,6 +175,9 @@ final class BrogueViewController: UIViewController {
     private var engineThread: Thread?
     /// Set while a title-screen engine swap is in flight (awaiting clean exit).
     private var switchPending = false
+    /// The engine to boot once the outgoing one exits during a swap. Captured at
+    /// request time so the 3-way cycle can move to a specific target (not just flip).
+    private var pendingTargetEngine: EngineKind?
     /// The title-screen version-chooser chip and its label.
     private var versionChooser: UIView?
     private var versionChooserLabel: UILabel?
@@ -661,6 +679,11 @@ final class BrogueViewController: UIViewController {
     override func viewDidLoad() {
         super.viewDidLoad()
 
+        #if SE_ENABLED
+        // One-time move of pre-split CE data into SE's directory (see the function).
+        BrogueViewController.migrateCEDataToSEIfNeeded()
+        #endif
+
         currentEngine = BrogueViewController.persistedEngine()
         setupVersionChooser()
         setupOptionsButton()
@@ -1143,20 +1166,61 @@ final class BrogueViewController: UIViewController {
             thread.stackSize = 400 * 8192
             thread.start()
             engineThread = thread
+
+        #if SE_ENABLED
+        case .se:
+            // Brogue SE engine, in its own embedded framework. Same CEHost bridge as
+            // CE; only the entry point differs (se_start vs ce_start).
+            let host = CEHost(viewPort: skViewPort, viewController: self)
+            ceHost = host
+            let thread = Thread { [weak self] in
+                se_start(host)
+                self?.engineDidExit()
+            }
+            thread.stackSize = 400 * 8192
+            thread.start()
+            engineThread = thread
+        #endif
         }
     }
 
-    /// Requests an in-place swap to the other engine. Only meaningful at the
-    /// title screen: injects the Quit keystroke so the active engine unwinds out
-    /// of its main-menu loop and `rogueMain` returns cleanly.
-    @objc func requestEngineSwitch() {
+    /// Engines in title-screen cycling order (Classic → BrogueCE → Brogue SE).
+    /// SE is only present in `SE_ENABLED` builds, so otherwise this is the original
+    /// two-engine cycle.
+    private static let engineCycle: [EngineKind] = {
+        #if SE_ENABLED
+        return [.classic, .ce, .se]
+        #else
+        return [.classic, .ce]
+        #endif
+    }()
+
+    /// Cycles to the next/previous engine in lineage order (wrapping). `forward`
+    /// advances Classic → CE → SE; `!forward` goes the other way.
+    private func cycleEngine(forward: Bool) {
+        let cycle = Self.engineCycle
+        guard let idx = cycle.firstIndex(of: currentEngine) else { return }
+        let n = cycle.count
+        let target = cycle[forward ? (idx + 1) % n : (idx - 1 + n) % n]
+        requestEngineSwitch(to: target)
+    }
+
+    /// Requests an in-place swap to `target`. Only meaningful at the title screen:
+    /// injects the Quit keystroke so the active engine unwinds out of its main-menu
+    /// loop and `rogueMain` returns cleanly; `engineDidExit` then boots `target`.
+    func requestEngineSwitch(to target: EngineKind) {
         // Only switch from a title screen — the engine's terminate hook lives in
         // its title loop, so requesting it mid-game would hang the engine.
-        guard atTitle, !switchPending else { return }
+        guard atTitle, !switchPending, target != currentEngine else { return }
         switchPending = true
+        pendingTargetEngine = target
         switch currentEngine {
         case .ce:
             ce_requestTermination()
+        #if SE_ENABLED
+        case .se:
+            se_requestTermination()
+        #endif
         case .classic:
             setClassicTerminationRequested(true)
         }
@@ -1273,8 +1337,10 @@ final class BrogueViewController: UIViewController {
             self.switchPending = false
             self.engineThread = nil
             self.ceHost = nil
-            // Swap to the other engine in place, and remember the choice.
-            self.currentEngine = (self.currentEngine == .ce) ? .classic : .ce
+            // Boot the engine captured at request time (the 3-way cycle's target),
+            // and remember the choice.
+            self.currentEngine = self.pendingTargetEngine ?? self.currentEngine
+            self.pendingTargetEngine = nil
             self.persistEngine()
             self.updateVersionChooserLabel()
             self.startEngine()
@@ -1286,13 +1352,68 @@ final class BrogueViewController: UIViewController {
     private static let engineDefaultsKey = "selectedEngine"
 
     /// The engine to boot on launch — the last one played, defaulting to Classic.
+    /// A persisted "se" only resolves to SE in SE_ENABLED builds; otherwise it
+    /// falls back to Classic so a shipping build never lands in a hidden engine.
     private static func persistedEngine() -> EngineKind {
-        return UserDefaults.standard.string(forKey: engineDefaultsKey) == "ce" ? .ce : .classic
+        switch UserDefaults.standard.string(forKey: engineDefaultsKey) {
+        case "ce": return .ce
+        #if SE_ENABLED
+        case "se": return .se
+        #endif
+        default: return .classic
+        }
     }
 
     private func persistEngine() {
-        UserDefaults.standard.set(currentEngine == .ce ? "ce" : "classic", forKey: Self.engineDefaultsKey)
+        let value: String
+        switch currentEngine {
+        case .classic: value = "classic"
+        case .ce: value = "ce"
+        #if SE_ENABLED
+        case .se: value = "se"
+        #endif
+        }
+        UserDefaults.standard.set(value, forKey: Self.engineDefaultsKey)
     }
+
+    #if SE_ENABLED
+    /// One-time migration of pre-split data from `Documents/ce` into `Documents/se`.
+    ///
+    /// Before the SE split, the modified ("firehose") engine that is now Brogue SE
+    /// shipped under the "CE" slot and wrote its saves/recordings to `Documents/ce`.
+    /// After the split, BrogueCE reverts to the faithful upstream engine (still
+    /// `Documents/ce`) and SE owns `Documents/se`. So whatever sits in `Documents/ce`
+    /// at the moment of the split was produced by what is now SE and belongs to it.
+    ///
+    /// Runs once (guarded by a UserDefaults flag): moves the existing contents of
+    /// `ce/` into `se/`, leaving `ce/` clean for the pristine CE engine. Existing
+    /// files in `se/` are never clobbered (SE wins), and a fresh install (no `ce/`)
+    /// is a no-op.
+    private static func migrateCEDataToSEIfNeeded() {
+        let key = "se did migrate ce data"
+        let defaults = UserDefaults.standard
+        guard !defaults.bool(forKey: key) else { return }
+        defer { defaults.set(true, forKey: key) }   // one-shot regardless of outcome
+
+        let fm = FileManager.default
+        guard let documents = fm.urls(for: .documentDirectory, in: .userDomainMask).first else { return }
+        let ceDir = documents.appendingPathComponent("ce")
+        let seDir = documents.appendingPathComponent("se")
+
+        guard let entries = try? fm.contentsOfDirectory(at: ceDir, includingPropertiesForKeys: nil),
+              !entries.isEmpty else {
+            return   // no ce/ directory or nothing to migrate
+        }
+        if !fm.fileExists(atPath: seDir.path) {
+            try? fm.createDirectory(at: seDir, withIntermediateDirectories: true)
+        }
+        for src in entries {
+            let dst = seDir.appendingPathComponent(src.lastPathComponent)
+            if fm.fileExists(atPath: dst.path) { continue }   // don't overwrite existing SE data
+            try? fm.moveItem(at: src, to: dst)
+        }
+    }
+    #endif
 
     /// Builds the title-only "‹ engine ›" chip. Swipe or tap it to switch engines.
     private func setupVersionChooser() {
@@ -1333,11 +1454,14 @@ final class BrogueViewController: UIViewController {
             stack.trailingAnchor.constraint(equalTo: chip.trailingAnchor, constant: -16),
         ])
 
-        for direction in [UISwipeGestureRecognizer.Direction.left, .right] {
-            let swipe = UISwipeGestureRecognizer(target: self, action: #selector(versionChooserActivated))
-            swipe.direction = direction
-            chip.addGestureRecognizer(swipe)
-        }
+        // Swipe direction maps to the lineage cycle: left → next (Classic→CE→SE),
+        // right → previous. A tap advances forward, same as a left swipe.
+        let swipeLeft = UISwipeGestureRecognizer(target: self, action: #selector(versionChooserSwipedNext))
+        swipeLeft.direction = .left
+        chip.addGestureRecognizer(swipeLeft)
+        let swipeRight = UISwipeGestureRecognizer(target: self, action: #selector(versionChooserSwipedPrev))
+        swipeRight.direction = .right
+        chip.addGestureRecognizer(swipeRight)
         chip.addGestureRecognizer(UITapGestureRecognizer(target: self, action: #selector(versionChooserActivated)))
 
         versionChooser = chip
@@ -1346,7 +1470,15 @@ final class BrogueViewController: UIViewController {
     }
 
     @objc private func versionChooserActivated() {
-        requestEngineSwitch()
+        cycleEngine(forward: true)
+    }
+
+    @objc private func versionChooserSwipedNext() {
+        cycleEngine(forward: true)
+    }
+
+    @objc private func versionChooserSwipedPrev() {
+        cycleEngine(forward: false)
     }
 
     // MARK: - Title-screen options (universal, Classic + CE)
@@ -1521,11 +1653,19 @@ final class BrogueViewController: UIViewController {
     private func presentEngineInfo() {
         guard presentedViewController == nil else { return }
 
-        let isCE = (currentEngine == .ce)
+        let title: String
+        let blocks: [InfoBlock]
+        switch currentEngine {
+        case .classic: title = "About Brogue";    blocks = Self.classicInfoBlocks()
+        case .ce:      title = "About BrogueCE";   blocks = Self.ceInfoBlocks()
+        #if SE_ENABLED
+        case .se:      title = "About Brogue SE";  blocks = Self.seInfoBlocks()
+        #endif
+        }
 
         let content = UIViewController()
         content.view.backgroundColor = .systemBackground
-        content.title = isCE ? "About BrogueCE" : "About Brogue"
+        content.title = title
         content.navigationItem.rightBarButtonItem =
             UIBarButtonItem(barButtonSystemItem: .done, target: self, action: #selector(dismissEngineInfo))
 
@@ -1535,7 +1675,7 @@ final class BrogueViewController: UIViewController {
         textView.alwaysBounceVertical = true
         textView.backgroundColor = .clear
         textView.textContainerInset = UIEdgeInsets(top: 8, left: 12, bottom: 24, right: 12)
-        textView.attributedText = BrogueViewController.infoAttributedText(isCE ? Self.ceInfoBlocks() : Self.classicInfoBlocks())
+        textView.attributedText = BrogueViewController.infoAttributedText(blocks)
         content.view.addSubview(textView)
         NSLayoutConstraint.activate([
             textView.topAnchor.constraint(equalTo: content.view.safeAreaLayoutGuide.topAnchor),
@@ -1666,6 +1806,29 @@ final class BrogueViewController: UIViewController {
         ]
     }
 
+    #if SE_ENABLED
+    /// Short description of Brogue SE — the experimental fork built on BrogueCE.
+    private static func seInfoBlocks() -> [InfoBlock] {
+        return [
+            .note("Brogue SE (\"Seth's Edition\") is an experimental fork of BrogueCE — a sandbox for new items, monsters, and mechanics. Switch engines from the title screen to compare."),
+            .heading("What's different"),
+            .note("SE builds on BrogueCE 1.15 and adds original content. Balance is a work in progress and changes often."),
+            .section("New content"),
+            .bullets([
+                "A reworked item-identification system: rest to reveal polarity, study scrolls, and altars of insight that trade one item's identity for another's.",
+                "The gold goblin — a treasure-hoarder you chase down before it escapes upstairs.",
+                "The staff of frost, the empty bottle, themed potion sets, and electrified water.",
+                "Tuned ally and ring behavior (light, awareness, wisdom).",
+            ]),
+            .section("Saves & scores"),
+            .bullets([
+                "SE keeps its own saves, recordings, and local high scores, separate from Classic and BrogueCE.",
+                "SE runs are not posted to Game Center while the design is in flux.",
+            ]),
+        ]
+    }
+    #endif
+
     /// Short description of the original Brogue (the "Classic" engine).
     private static func classicInfoBlocks() -> [InfoBlock] {
         return [
@@ -1681,7 +1844,13 @@ final class BrogueViewController: UIViewController {
     }
 
     private func updateVersionChooserLabel() {
-        versionChooserLabel?.text = (currentEngine == .ce) ? "BrogueCE" : "Brogue"
+        switch currentEngine {
+        case .classic: versionChooserLabel?.text = "Brogue"
+        case .ce:      versionChooserLabel?.text = "BrogueCE"
+        #if SE_ENABLED
+        case .se:      versionChooserLabel?.text = "Brogue SE"
+        #endif
+        }
     }
 
     private func updateVersionChooserVisibility() {
@@ -1730,7 +1899,7 @@ extension BrogueViewController: UIContextMenuInteractionDelegate {
     /// Commands offered in the rebind menus for the active engine. CE-only
     /// commands (e.g. re-throw) are dropped while Classic is running.
     private func availableCommands() -> [Command] {
-        BrogueViewController.commandCatalog.filter { currentEngine == .ce || !$0.ceOnly }
+        BrogueViewController.commandCatalog.filter { currentEngine.isCEFamily || !$0.ceOnly }
     }
 
     private func rebindMenu(forSlot slot: Int) -> UIMenu {
@@ -2719,7 +2888,7 @@ extension BrogueViewController {
         // Never while pinching / two-finger panning the map — the magnifier would
         // fight the gesture and lag behind the moving cells.
         guard !zoomGestureInProgress else { return false }
-        let engineAllowsMagnifier = (currentEngine == .ce)
+        let engineAllowsMagnifier = currentEngine.isCEFamily
             ? (gameplayControlsActive || isTargeting)
             : lastBrogueGameEvent.canShowMagnifyingGlass
         guard engineAllowsMagnifier, pointIsInPlayArea(point: point) else {
@@ -2940,13 +3109,17 @@ extension BrogueViewController {
         updateKeyboardLabels(GCKeyboard.coalesced != nil)
     }
 
-    // Toggle in-game hotkey labels in BOTH engines so the setting is correct whichever one is
+    // Toggle in-game hotkey labels in ALL engines so the setting is correct whichever one is
     // active and survives an engine switch. Classic reads a runtime global via
-    // setKeyboardLabelsEnabled(); CE reads its own framework global via ce_setKeyboardLabelsEnabled().
-    // Both are plain global writes, safe to call regardless of which engine is currently running.
+    // setKeyboardLabelsEnabled(); CE/SE each read their own framework global via
+    // ce_/se_setKeyboardLabelsEnabled(). All are plain global writes into their own image,
+    // safe to call regardless of which engine is currently running.
     private func updateKeyboardLabels(_ enabled: Bool) {
         setKeyboardLabelsEnabled(enabled ? 1 : 0)
         ce_setKeyboardLabelsEnabled(enabled ? 1 : 0)
+        #if SE_ENABLED
+        se_setKeyboardLabelsEnabled(enabled ? 1 : 0)
+        #endif
     }
 
     override func pressesBegan(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
