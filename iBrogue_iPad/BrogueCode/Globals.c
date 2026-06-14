@@ -51,6 +51,10 @@ void setKeyboardLabelsEnabled(boolean enabled) {
     KEYBOARD_LABELS = enabled;
 }
 
+// iOS port (iBrogue): active keyboard scheme (see enum keyboardScheme in Rogue.h). Default CLASSIC so
+// existing behavior and recordings are unchanged until the player opts in. Mirrors the BrogueCE engine.
+enum keyboardScheme rogueKeyboardScheme = KEYBOARD_SCHEME_CLASSIC;
+
 boolean PHONE_LAYOUT = false;
 
 void setPhoneLayout(boolean enabled) {

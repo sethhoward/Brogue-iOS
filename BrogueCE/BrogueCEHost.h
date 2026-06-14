@@ -41,7 +41,10 @@ NS_ASSUME_NONNULL_BEGIN
 
 // --- Input source -----------------------------------------------------------
 - (BOOL)hasKeyEvent;
-- (uint8_t)dequeueKeyEvent;
+// iOS port (iBrogue): returns the next key code and fills its modifier state and `raw` flag. `raw` is
+// YES only for hardware character keys eligible for keyboard-scheme remapping (the bridge runs those
+// through applyKeyboardScheme); synthesized on-screen keys are already canonical (raw NO).
+- (int32_t)dequeueKeyEventWithShift:(BOOL *)shift control:(BOOL *)control raw:(BOOL *)raw;
 - (BOOL)hasTouchEvent;
 // Returns NO if there is no pending touch. Otherwise fills `outLocation` (in
 // points) and `outPhase` (a UITouch.Phase raw value).
@@ -110,6 +113,11 @@ void ce_start(id<BrogueCEHost> host);
 // so rogueMain() returns and the engine thread can exit (used for in-process
 // engine switching). Only meaningful while the engine is at the title screen.
 void ce_requestTermination(void);
+
+// iOS port (iBrogue): toggles the engine's in-game hotkey labels (KEYBOARD_LABELS).
+// The host calls this on GCKeyboard connect/disconnect so CE shows keyboard shortcut
+// hints only when a hardware keyboard is attached, mirroring the Classic engine.
+void ce_setKeyboardLabelsEnabled(int enabled);
 
 #ifdef __cplusplus
 }

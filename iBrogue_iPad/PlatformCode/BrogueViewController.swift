@@ -175,7 +175,16 @@ final class BrogueViewController: UIViewController {
     fileprivate var touchEvents = [UIBrogueTouchEvent]()
     fileprivate var lastTouchLocation = CGPoint()
     @objc fileprivate var directionsViewController: DirectionControlsViewController?
-    fileprivate var keyEvents = [UInt8]()
+    // iOS port (iBrogue): a queued key carries its modifier state and a `raw` flag. `raw` is true only
+    // for real hardware character keys that the active keyboard scheme should remap; synthesized input
+    // (on-screen d-pad/buttons, ESC, text entry, arrows) is already canonical and passes through.
+    fileprivate struct QueuedKeyEvent {
+        let code: UInt8
+        let shift: Bool
+        let control: Bool
+        let raw: Bool
+    }
+    fileprivate var keyEvents = [QueuedKeyEvent]()
     fileprivate var magnifierTimer: Timer?
     fileprivate var inputRequestString: String?
 
@@ -2803,19 +2812,34 @@ extension BrogueViewController {
         }
     }
     
+    // Synthesized/canonical input (on-screen controls, ESC button, text entry): never scheme-remapped.
     fileprivate func addKeyEvent(event: UInt8) {
+        addKeyEvent(code: event, shift: false, control: false, raw: false)
+    }
+
+    // iOS port (iBrogue): full hardware-key enqueue carrying modifiers and the `raw` (scheme-eligible) flag.
+    fileprivate func addKeyEvent(code: UInt8, shift: Bool, control: Bool, raw: Bool) {
         synchronized {
-            keyEvents.append(event)
+            keyEvents.append(QueuedKeyEvent(code: code, shift: shift, control: control, raw: raw))
         }
     }
 
-    // cannot be optional for backward compat
-    @objc func dequeKeyEvent() -> UInt8 {
+    // iOS port (iBrogue): returns the key code and fills the modifier/raw flags. Replaces the old
+    // byte-only dequeKeyEvent so the bridges can set rogueEvent.controlKey/shiftKey and decide whether
+    // to run the key through the active keyboard scheme. cannot be optional for backward compat.
+    @objc(dequeKeyEventWithShift:control:raw:)
+    func dequeKeyEvent(shift: UnsafeMutablePointer<ObjCBool>,
+                       control: UnsafeMutablePointer<ObjCBool>,
+                       raw: UnsafeMutablePointer<ObjCBool>) -> Int32 {
         synchronized {
             guard !keyEvents.isEmpty else {
                 fatalError("Deque Key, queue is empty")
             }
-            return keyEvents.removeFirst()
+            let event = keyEvents.removeFirst()
+            shift.pointee = ObjCBool(event.shift)
+            control.pointee = ObjCBool(event.control)
+            raw.pointee = ObjCBool(event.raw)
+            return Int32(event.code)
         }
     }
 
@@ -2905,22 +2929,31 @@ extension BrogueViewController {
         center.addObserver(self, selector: #selector(keyboardDidDisconnect),
                            name: .GCKeyboardDidDisconnect, object: nil)
         // Set initial state in case a keyboard is already connected at launch.
-        setKeyboardLabelsEnabled(GCKeyboard.coalesced != nil ? 1 : 0)
+        updateKeyboardLabels(GCKeyboard.coalesced != nil)
     }
 
     @objc private func keyboardDidConnect(_ note: Notification) {
-        setKeyboardLabelsEnabled(1)
+        updateKeyboardLabels(true)
     }
 
     @objc private func keyboardDidDisconnect(_ note: Notification) {
-        setKeyboardLabelsEnabled(GCKeyboard.coalesced != nil ? 1 : 0)
+        updateKeyboardLabels(GCKeyboard.coalesced != nil)
+    }
+
+    // Toggle in-game hotkey labels in BOTH engines so the setting is correct whichever one is
+    // active and survives an engine switch. Classic reads a runtime global via
+    // setKeyboardLabelsEnabled(); CE reads its own framework global via ce_setKeyboardLabelsEnabled().
+    // Both are plain global writes, safe to call regardless of which engine is currently running.
+    private func updateKeyboardLabels(_ enabled: Bool) {
+        setKeyboardLabelsEnabled(enabled ? 1 : 0)
+        ce_setKeyboardLabelsEnabled(enabled ? 1 : 0)
     }
 
     override func pressesBegan(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
         var handledAny = false
         for press in presses {
-            if let byte = brogueByte(for: press) {
-                addKeyEvent(event: byte)
+            if let k = brogueKey(for: press) {
+                addKeyEvent(code: k.code, shift: k.shift, control: k.control, raw: k.raw)
                 handledAny = true
             }
         }
@@ -2929,29 +2962,37 @@ extension BrogueViewController {
         }
     }
 
-    /// Maps a UIPress to the byte Brogue's input loop expects.
-    /// Arrow keys map to vi-style hjkl since the event queue is byte-sized.
-    private func brogueByte(for press: UIPress) -> UInt8? {
+    /// Maps a UIPress to the key code Brogue's input loop expects, plus its modifier state and whether
+    /// it is eligible for keyboard-scheme remapping (`raw`).
+    ///
+    /// Special/canonical keys (ESC, return, delete, tab, space) and arrow keys are NOT remapped
+    /// (`raw: false`): arrows send canonical lowercase movement letters so they mean the same direction
+    /// in every scheme, with Shift/Ctrl riding along via the modifier flags to trigger running. Real
+    /// printable character keys are `raw: true` so the active scheme can remap them in the bridge.
+    private func brogueKey(for press: UIPress) -> (code: UInt8, shift: Bool, control: Bool, raw: Bool)? {
         guard let key = press.key else { return nil }
+        let mods = key.modifierFlags
+        let shift = mods.contains(.shift)
+        let control = mods.contains(.control)
 
         switch key.keyCode {
-        case .keyboardEscape:            return kESC_Key
-        case .keyboardReturnOrEnter:     return kReturnKey
-        case .keyboardDeleteOrBackspace: return kDeleteKey
-        case .keyboardTab:               return kTabKey
-        case .keyboardUpArrow:           return UInt8(ascii: "K")
-        case .keyboardDownArrow:         return UInt8(ascii: "J")
-        case .keyboardLeftArrow:         return UInt8(ascii: "H")
-        case .keyboardRightArrow:        return UInt8(ascii: "L")
-        case .keyboardSpacebar:          return UInt8(ascii: " ")
+        case .keyboardEscape:            return (kESC_Key, shift, control, false)
+        case .keyboardReturnOrEnter:     return (kReturnKey, shift, control, false)
+        case .keyboardDeleteOrBackspace: return (kDeleteKey, shift, control, false)
+        case .keyboardTab:               return (kTabKey, shift, control, false)
+        case .keyboardUpArrow:           return (UInt8(ascii: "k"), shift, control, false)
+        case .keyboardDownArrow:         return (UInt8(ascii: "j"), shift, control, false)
+        case .keyboardLeftArrow:         return (UInt8(ascii: "h"), shift, control, false)
+        case .keyboardRightArrow:        return (UInt8(ascii: "l"), shift, control, false)
+        case .keyboardSpacebar:          return (UInt8(ascii: " "), shift, control, false)
         default:
             break
         }
 
-        // Fall back to the printable characters the user actually typed.
-        // `characters` reflects modifiers (shift, etc.) so "k" vs "K" arrives correctly.
+        // A real printable character key — eligible for keyboard-scheme remapping. `characters`
+        // reflects shift (so "k" vs "K" arrives correctly); the scheme + run logic uses the flags.
         if let scalar = key.characters.unicodeScalars.first, scalar.isASCII {
-            return UInt8(scalar.value)
+            return (UInt8(scalar.value), shift, control, true)
         }
         return nil
     }

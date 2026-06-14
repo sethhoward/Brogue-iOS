@@ -23,6 +23,39 @@ future maintainers (human or AI) don't mistake an intentional port change for a 
 
 ## Change log
 
+### 2026-06-14 — Selectable keyboard schemes (Classic / Modern) + modifier plumbing (iOS port)
+
+**What.** Adds the opt-in **Modern** keyboard layout (right-hand 3×3 grid) beside the stock **Classic**
+vi-keys layout, mirroring the BrogueCE engine. Full design + rationale: `docs/design/keyboard-schemes.md`;
+the engine-side details are logged in `BrogueCE/Engine/IOS_MODIFICATIONS.md`. This file covers the
+**shared platform layer** and the Classic engine.
+
+- **Modifier plumbing (shared, fixes both engines).** The host key queue in `BrogueViewController` was
+  byte-only and both bridges hardcoded `controlKey = shiftKey = 0`, so Shift/Ctrl-run never worked on
+  iOS. The queue now stores a `QueuedKeyEvent { code, shift, control, raw }`; `pressesBegan`/`brogueKey`
+  read `UIKey.modifierFlags` and mark real hardware character keys `raw = true` (on-screen controls,
+  ESC, arrows stay `raw = false`). Arrow keys now send canonical lowercase `hjkl` (scheme-independent),
+  not the old uppercase byte hack. `dequeKeyEvent` became
+  `dequeKeyEvent(shift:control:raw:) -> Int32` (`@objc dequeKeyEventWithShift:control:raw:`); `CEHost`
+  and the `BrogueCEHost` protocol updated to match. `RogueDriver.mm` (Classic) and `CEBridge.mm` (CE)
+  set the event's modifier flags from the dequeued values and call `applyKeyboardScheme()` on `raw`
+  keys only, skipping text entry.
+- **Classic engine scheme support.** `enum keyboardScheme` + `rogueKeyboardScheme` (`Rogue.h` /
+  `Globals.c`, default CLASSIC) and `applyKeyboardScheme()` (`IO.c`) mirror BrogueCE: the Modern grid
+  `uio/jkl/m,.` (center `k` = wait, Shift/Ctrl = run), inventory→`e`, equip→Shift+`E`, messages→`p`,
+  stairs→Shift+`P`/`:`. A `QUIT_KEY` guard makes quit menu-only in both schemes; `actionMenu` drops the
+  `Q:` hotkey label. `printHelpScreen` renders the active scheme and toggles with **Tab** (persisted).
+- **Persistence.** `persistKeyboardScheme()` / `loadPersistedKeyboardScheme()` (`RogueDriver.mm`,
+  NSUserDefaults key `"keyboard scheme"`); restored in `RogueMain.mm` next to the seed restore.
+
+**Why.** The numpad/vi assumption is unfriendly on Magic Keyboards and laptops. The modifier plumbing
+was a prerequisite (and a long-standing latent bug — Classic Shift-run never worked on iOS). Recording
+stays canonical because actions self-record canonical keys, so saves/seeds are unaffected.
+
+**Where.** `BrogueViewController.swift` (queue + `addKeyEvent`/`dequeKeyEvent` + `brogueKey` +
+`pressesBegan`), `CEHost.swift`, `RogueDriver.mm` (`nextKeyOrMouseEvent`, persistence), `Rogue.h`,
+`Globals.c`, `IO.c` (`applyKeyboardScheme`, `printHelpScreen`, `actionMenu`), `RogueMain.mm` (restore).
+
 ### 2026-06-13 — Seed-entry keyboard: use a number pad (iOS port)
 
 **What.** The pre-filled text dialog (`requestKeyboardInput` → `getInputTextString`) already passed

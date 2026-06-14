@@ -105,9 +105,9 @@
 #define DELETE_SAVE_FILE_AFTER_LOADING  true
 
 // set to false to disable references to keystrokes (e.g. for a tablet port)
-#ifdef BROGUE_TABLET
-#define KEYBOARD_LABELS false
-#else
+// iOS port (iBrogue): on tablet, KEYBOARD_LABELS is now a runtime variable rather than a hardcoded
+// false (see below, after the `boolean` typedef). The non-tablet default stays a compile-time true.
+#ifndef BROGUE_TABLET
 #define KEYBOARD_LABELS true
 #endif
 
@@ -126,6 +126,15 @@
 
 #define false                   0
 #define true                    1
+
+#ifdef BROGUE_TABLET
+// iOS port (iBrogue): runtime-mutable on tablet (instead of a hardcoded false) so an attached
+// hardware keyboard can turn in-game hotkey labels on, and detaching turns them back off. The host
+// drives it via ce_setKeyboardLabelsEnabled() on GCKeyboard connect/disconnect, mirroring the
+// Classic engine's setKeyboardLabelsEnabled(). Defaults false (touch-only) until the host reports
+// a keyboard. Defined in GlobalsBase.c.
+extern boolean KEYBOARD_LABELS;
+#endif
 
 #define Fl(N)                   ((unsigned long) 1 << (N))
 
@@ -1298,6 +1307,18 @@ enum tileFlags {
 #define PRINTSCREEN_KEY     '\054'
 
 #define UNKNOWN_KEY         (128+19)
+
+// iOS port (iBrogue): selectable keyboard schemes. A "scheme" remaps the physical keys the player
+// presses to the engine's canonical key constants (above) at the input layer, before recording, so
+// recordings stay scheme-independent (saves/seeds/leaderboard are unaffected). CLASSIC is the stock
+// vi-key layout (identity mapping); MODERN is a right-hand 3x3 directional grid (uio/jkl/m,.) for
+// laptops/Magic Keyboards without a numpad. See docs/design/keyboard-schemes.md. Default CLASSIC.
+enum keyboardScheme {
+    KEYBOARD_SCHEME_CLASSIC = 0,
+    KEYBOARD_SCHEME_MODERN,
+    KEYBOARD_SCHEME_COUNT
+};
+extern enum keyboardScheme rogueKeyboardScheme; // active scheme; defined in GlobalsBase.c, default CLASSIC
 
 #define min(x, y)       (((x) < (y)) ? (x) : (y))
 #define max(x, y)       (((x) > (y)) ? (x) : (y))
@@ -3189,6 +3210,8 @@ extern "C" {
     // "New Seeded Game" prompt can pre-fill it across app launches.
     uint64_t ceLoadPersistedSeed(void);
     void cePersistLastSeed(uint64_t seed);
+    // iOS port (iBrogue): persist the chosen keyboard scheme (enum keyboardScheme) across launches.
+    void cePersistKeyboardScheme(int scheme);
     // iOS port (iBrogue): pre-fill + show the on-screen keyboard for text entry;
     // numeric selects a number pad for seed entry.
     void ceRequestTextInput(const char *defaultText, boolean numeric);
@@ -3293,6 +3316,10 @@ extern "C" {
     void nextBrogueEvent(rogueEvent *returnEvent, boolean textInput, boolean colorsDance, boolean realInputEvenInPlayback);
     void executeMouseClick(rogueEvent *theEvent);
     void executeKeystroke(signed long keystroke, boolean controlKey, boolean shiftKey);
+    // iOS port (iBrogue): translate a raw physical keystroke to the canonical engine keystroke for the
+    // active keyboard scheme (see enum keyboardScheme). Identity for CLASSIC. May adjust the modifier
+    // flags (e.g. to flag a run). Applied in nextBrogueEvent before recording, so recordings stay canonical.
+    signed long applyKeyboardScheme(signed long keystroke, boolean *controlKey, boolean *shiftKey);
     boolean placeStairs(pos *upStairsLoc);
     void initializeLevel(pos upStairsLoc);
     void startLevel (short oldLevelNumber, short stairDirection);

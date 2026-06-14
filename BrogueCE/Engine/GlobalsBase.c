@@ -44,6 +44,14 @@ playerCharacter rogue;
 const gameConstants *gameConst;
 int gameVariant = VARIANT_BROGUE;
 CBrogueGameEvent uiMode = CBrogueGameEventInMenu;
+#ifdef BROGUE_TABLET
+// iOS port (iBrogue): runtime-mutable in-game hotkey-label flag (see Rogue.h). Starts false
+// (touch-only); the host sets it via ce_setKeyboardLabelsEnabled() when a hardware keyboard is present.
+boolean KEYBOARD_LABELS = false;
+#endif
+// iOS port (iBrogue): active keyboard scheme (see enum keyboardScheme in Rogue.h). Default CLASSIC
+// (stock vi-key layout) so existing behavior and recordings are unchanged until the player opts in.
+enum keyboardScheme rogueKeyboardScheme = KEYBOARD_SCHEME_CLASSIC;
 char uiTextEntry[BROGUE_FILENAME_MAX];
 creatureList *monsters;
 creatureList *dormantMonsters;

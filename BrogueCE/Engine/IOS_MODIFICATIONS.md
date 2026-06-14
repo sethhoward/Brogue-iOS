@@ -28,6 +28,64 @@ covers the separate Classic engine that ships in the app target).
 
 ## Change log
 
+### 2026-06-14 — Selectable keyboard schemes (Classic / Modern) + scheme-aware help screen (iOS port)
+
+**What.** Adds an opt-in **Modern** keyboard layout alongside the stock **Classic** (vi-keys) layout,
+selectable from the help screen and persisted. Full design: `docs/design/keyboard-schemes.md`.
+
+- **Scheme model.** `enum keyboardScheme { KEYBOARD_SCHEME_CLASSIC, KEYBOARD_SCHEME_MODERN, COUNT }`
+  (`Rogue.h`) + global `rogueKeyboardScheme` (`GlobalsBase.c`, default CLASSIC). A scheme is a
+  physical→canonical key map applied by `applyKeyboardScheme()` (`IO.c`). CLASSIC is identity.
+- **Where translation runs (and why it's recording-safe).** Brogue records *actions*, not raw keys
+  (`recordKeystroke(directionKeys[dir])`, `REST_KEY`, …), so recordings are already canonical. The
+  scheme is applied in the **platform bridge** (`CEBridge.mm` `nextKeyOrMouseEvent`), *not* in the
+  engine input loop, because only the bridge can tell a raw hardware keystroke from a synthesized one:
+  the on-screen d-pad/buttons enqueue canonical keys (`raw == NO`) that must **not** be remapped, while
+  hardware character keys (`raw == YES`) are run through `applyKeyboardScheme`. Recordings, seeds and
+  the leaderboard are unaffected by the active scheme.
+- **Modern layout.** Right-hand 3×3 grid `uio / jkl / m,.` (center `k` = wait), Shift/Ctrl + grid =
+  run on all 8 directions. Displaced commands: inventory→`e`, equip→Shift+`E`, messages→`p`,
+  ascend→Shift+`P`, descend→Shift+`:`. The entire left hand (`a`pply/`d`rop/`s`earch/`w`/`z`/`x`/`c`/…
+  and every Shift+command) is untouched (identity).
+- **Quit removed on tablet.** A guard in `applyKeyboardScheme` maps a hardware `QUIT_KEY` to
+  `UNKNOWN_KEY` in **both** schemes — quit is menu-only. The on-screen menu's Quit button synthesizes
+  `QUIT_KEY` directly (`raw == NO`) so it still works; `actionMenu` no longer advertises a `Q:` hotkey.
+- **Scheme-aware help screen + toggle.** `printHelpScreen` (`?` / the keyboard-gated menu Help entry)
+  now renders the *active* scheme (the Classic command list or the Modern grid) and toggles between
+  them with **Tab** (persisted), dismissing on space/esc/click. No new menu item was added.
+- **Persistence.** `cePersistKeyboardScheme()` / `ceLoadPersistedKeyboardScheme()` (`CEBridge.mm`,
+  NSUserDefaults key `"ce keyboard scheme"`); restored in `ce_start`, mirroring the graphics-mode and
+  seed persistence.
+
+**Why.** The stock layout assumes a numpad and vi movement, which is unintuitive on Magic
+Keyboards/laptops. The Modern grid gives a spatial directional pad with no numpad; the indirection
+layer is built so an arbitrary-remap feature is a later increment, and so the whole thing is
+backportable to desktop Brogue (the engine owns the scheme table; each platform calls it on its real
+keyboard input). Deferred: arbitrary user remapping; per-key key-repeat (a separate platform concern).
+
+**Where.** `Rogue.h` (enum + `rogueKeyboardScheme` extern + `applyKeyboardScheme`/`cePersistKeyboardScheme`
+decls), `GlobalsBase.c` (global), `IO.c` (`applyKeyboardScheme`, scheme-aware `printHelpScreen`,
+`actionMenu` Quit label), `CEBridge.mm` (modifier+`raw` dequeue, scheme call, persistence, `ce_start`
+restore), `BrogueCEHost.h` (`dequeueKeyEventWithShift:control:raw:`). Platform-side modifier plumbing
+is logged in the Classic tree's IOS_MODIFICATIONS.md (shared `BrogueViewController`/`CEHost`).
+
+### 2026-06-14 — Hardware keyboard modifiers (Shift/Ctrl) now reach the engine (iOS port)
+
+**What.** The iOS host key queue was byte-only, and both bridges hardcoded `controlKey = shiftKey = 0`
+for keystrokes — so Shift/Ctrl-run never worked on iOS in *either* engine. The queue
+(`BrogueViewController`) now carries the key code plus real `shift`/`control` flags (read from
+`UIKey.modifierFlags`) and a `raw` flag (true only for hardware character keys eligible for
+keyboard-scheme remapping). `CEBridge.mm` sets `returnEvent->controlKey`/`shiftKey` from the dequeued
+modifiers. Arrow keys now send canonical lowercase movement letters (scheme-independent) instead of the
+old uppercase-`HJKL` byte hack, with run carried by the modifier flags. `BrogueCEHost`'s
+`dequeueKeyEvent` became `dequeueKeyEventWithShift:control:raw:`.
+
+**Why.** Prerequisite for Shift/Ctrl-run in the Modern scheme; also fixes Classic Shift/Ctrl-run on
+iOS, which had silently never worked. The byte-only queue was legacy, not a platform limit.
+
+**Where.** `CEBridge.mm` (`nextKeyOrMouseEvent`), `BrogueCEHost.h`. Swift/Classic side (the shared
+`BrogueViewController` queue, `CEHost.swift`, `RogueDriver.mm`) is logged in the Classic tree.
+
 ### 2026-06-14 — Altars of insight: depths 5 & 15 only, with a carry-forward schedule
 
 **What.** Two changes to the guaranteed altars-of-insight reward room (see the 2026-06-10 entry below):
@@ -64,6 +122,35 @@ field is set deterministically during level generation → save-safe (saves are 
 *does* shift seed output relative to the old schedule on any level where placement now happens that didn't
 before (and removes the depth-25 draw); warrants the same release-time `recordingVersionString` treatment
 as the original altar feature. Rapid/Bullet untouched.
+
+### 2026-06-14 — In-game hotkey labels follow an attached hardware keyboard (iOS port)
+
+**What.** On the tablet port, CE's `KEYBOARD_LABELS` was a hardcoded compile-time `false`
+(`#ifdef BROGUE_TABLET`), so the engine's in-game keyboard shortcut hints — the hotkey letters on
+sidebar/menu buttons and prompt text like *"Press space to continue"* — **never appeared**, even
+with a hardware keyboard attached. The Classic engine, by contrast, exposes `KEYBOARD_LABELS` as a
+runtime global that the Swift layer toggles on `GCKeyboard` connect/disconnect, so Classic shows the
+labels when a keyboard is present. CE had no way to receive that signal.
+
+CE now mirrors Classic: `KEYBOARD_LABELS` becomes a runtime-mutable variable on tablet (default
+`false` = touch-only), and the host drives it via a new `ce_setKeyboardLabelsEnabled()` bridge entry
+point on the same `GCKeyboard` connect/disconnect notifications. The non-tablet (desktop) build keeps
+the original compile-time `#define KEYBOARD_LABELS true`. The flag is display-only (never game
+state), so making it dynamic is save/replay-safe.
+
+- **`Rogue.h`**: under `#ifdef BROGUE_TABLET`, replace `#define KEYBOARD_LABELS false` with
+  `extern boolean KEYBOARD_LABELS;` (declared after the `boolean` typedef); the `#else` desktop
+  default stays `#define KEYBOARD_LABELS true`.
+- **`GlobalsBase.c`**: define `boolean KEYBOARD_LABELS = false;` (tablet only).
+- **`BrogueCEHost.h` / `CEBridge.mm`**: new exported `void ce_setKeyboardLabelsEnabled(int enabled)`
+  that sets the global.
+- **Swift (`BrogueViewController.swift`)**: a new `updateKeyboardLabels(_:)` helper drives *both*
+  engines (`setKeyboardLabelsEnabled` for Classic + `ce_setKeyboardLabelsEnabled` for CE) from the
+  hardware-keyboard observer, so the labels are correct whichever engine is active and survive an
+  engine switch.
+
+**Why.** Reported: on iPad CE the keyboard shortcuts don't appear when a keyboard is attached. Root
+cause was the compile-time flag; fix matches the long-standing Classic behavior.
 
 ### 2026-06-13 — Seed-entry keyboard: pre-fill the field + use a number pad (iOS port)
 
