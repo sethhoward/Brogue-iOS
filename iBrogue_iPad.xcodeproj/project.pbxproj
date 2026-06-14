@@ -19,6 +19,8 @@
 		C532C8A61971AB8800695956 /* DirectionControlsViewController.m in Sources */ = {isa = PBXBuildFile; fileRef = C532C8A41971AB8800695956 /* DirectionControlsViewController.m */; };
 		C556D4032FD0CDEF00D81184 /* BrogueCE.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = C556D3FB2FD0CDEE00D81184 /* BrogueCE.framework */; };
 		C556D4042FD0CDEF00D81184 /* BrogueCE.framework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = C556D3FB2FD0CDEE00D81184 /* BrogueCE.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
+		5E000000000000000000000B /* BrogueSE.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 5E0000000000000000000009 /* BrogueSE.framework */; };
+		5E000000000000000000000C /* BrogueSE.framework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = 5E0000000000000000000009 /* BrogueSE.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 		C556D4512FD0D39600D81184 /* CEHost.swift in Sources */ = {isa = PBXBuildFile; fileRef = C556D4502FD0D39600D81184 /* CEHost.swift */; };
 		C57A962916D7EAD500C233F1 /* UIKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = C57A962816D7EAD500C233F1 /* UIKit.framework */; };
 		C57A962B16D7EAD500C233F1 /* Foundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = C57A962A16D7EAD500C233F1 /* Foundation.framework */; };
@@ -88,6 +90,13 @@
 			remoteGlobalIDString = C556D3FA2FD0CDEE00D81184;
 			remoteInfo = BrogueCE;
 		};
+		5E000000000000000000000D /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = C57A961D16D7EAD500C233F1 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 5E0000000000000000000001;
+			remoteInfo = BrogueSE;
+		};
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXCopyFilesBuildPhase section */
@@ -98,6 +107,7 @@
 			dstSubfolderSpec = 10;
 			files = (
 				C556D4042FD0CDEF00D81184 /* BrogueCE.framework in Embed Frameworks */,
+				5E000000000000000000000C /* BrogueSE.framework in Embed Frameworks */,
 			);
 			name = "Embed Frameworks";
 			runOnlyForDeploymentPostprocessing = 0;
@@ -124,6 +134,7 @@
 		C532C8A31971AB8800695956 /* DirectionControlsViewController.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = DirectionControlsViewController.h; sourceTree = "<group>"; };
 		C532C8A41971AB8800695956 /* DirectionControlsViewController.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = DirectionControlsViewController.m; sourceTree = "<group>"; };
 		C556D3FB2FD0CDEE00D81184 /* BrogueCE.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = BrogueCE.framework; sourceTree = BUILT_PRODUCTS_DIR; };
+		5E0000000000000000000009 /* BrogueSE.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = BrogueSE.framework; sourceTree = BUILT_PRODUCTS_DIR; };
 		C556D4502FD0D39600D81184 /* CEHost.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CEHost.swift; sourceTree = "<group>"; };
 		C57A962516D7EAD500C233F1 /* Brogue.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Brogue.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		C57A962816D7EAD500C233F1 /* UIKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = UIKit.framework; path = System/Library/Frameworks/UIKit.framework; sourceTree = SDKROOT; };
@@ -197,10 +208,18 @@
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		C556D3FC2FD0CDEE00D81184 /* BrogueCE */ = {isa = PBXFileSystemSynchronizedRootGroup; explicitFileTypes = {}; explicitFolders = (); path = BrogueCE; sourceTree = "<group>"; };
+		5E000000000000000000000A /* BrogueSE */ = {isa = PBXFileSystemSynchronizedRootGroup; explicitFileTypes = {}; explicitFolders = (); path = BrogueSE; sourceTree = "<group>"; };
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
 		C556D3F82FD0CDEE00D81184 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		5E0000000000000000000004 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -214,6 +233,7 @@
 				C52B092716E5853900675CC7 /* GameKit.framework in Frameworks */,
 				C57A967516DBF1CE00C233F1 /* QuartzCore.framework in Frameworks */,
 				C556D4032FD0CDEF00D81184 /* BrogueCE.framework in Frameworks */,
+				5E000000000000000000000B /* BrogueSE.framework in Frameworks */,
 				C57A962916D7EAD500C233F1 /* UIKit.framework in Frameworks */,
 				C57A962B16D7EAD500C233F1 /* Foundation.framework in Frameworks */,
 				C57A962D16D7EAD500C233F1 /* CoreGraphics.framework in Frameworks */,
@@ -253,6 +273,7 @@
 				C57A967416DBF1CE00C233F1 /* QuartzCore.framework */,
 				C57A962E16D7EAD500C233F1 /* iBrogue_iPad */,
 				C556D3FC2FD0CDEE00D81184 /* BrogueCE */,
+				5E000000000000000000000A /* BrogueSE */,
 				C57A962716D7EAD500C233F1 /* Frameworks */,
 				C57A962616D7EAD500C233F1 /* Products */,
 			);
@@ -263,6 +284,7 @@
 			children = (
 				C57A962516D7EAD500C233F1 /* Brogue.app */,
 				C556D3FB2FD0CDEE00D81184 /* BrogueCE.framework */,
+				5E0000000000000000000009 /* BrogueSE.framework */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -408,6 +430,13 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		5E0000000000000000000002 /* Headers */ = {
+			isa = PBXHeadersBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXHeadersBuildPhase section */
 
 /* Begin PBXNativeTarget section */
@@ -434,6 +463,29 @@
 			productReference = C556D3FB2FD0CDEE00D81184 /* BrogueCE.framework */;
 			productType = "com.apple.product-type.framework";
 		};
+		5E0000000000000000000001 /* BrogueSE */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 5E0000000000000000000006 /* Build configuration list for PBXNativeTarget "BrogueSE" */;
+			buildPhases = (
+				5E0000000000000000000002 /* Headers */,
+				5E0000000000000000000003 /* Sources */,
+				5E0000000000000000000004 /* Frameworks */,
+				5E0000000000000000000005 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				5E000000000000000000000A /* BrogueSE */,
+			);
+			name = BrogueSE;
+			packageProductDependencies = (
+			);
+			productName = BrogueSE;
+			productReference = 5E0000000000000000000009 /* BrogueSE.framework */;
+			productType = "com.apple.product-type.framework";
+		};
 		C57A962416D7EAD500C233F1 /* iBrogue_iPad */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = C57A964816D7EAD500C233F1 /* Build configuration list for PBXNativeTarget "iBrogue_iPad" */;
@@ -447,6 +499,7 @@
 			);
 			dependencies = (
 				C556D4022FD0CDEF00D81184 /* PBXTargetDependency */,
+				5E000000000000000000000E /* PBXTargetDependency */,
 			);
 			name = iBrogue_iPad;
 			productName = iBrogue_iPad;
@@ -465,6 +518,9 @@
 				ORGANIZATIONNAME = "Seth howard";
 				TargetAttributes = {
 					C556D3FA2FD0CDEE00D81184 = {
+						CreatedOnToolsVersion = 26.5;
+					};
+					5E0000000000000000000001 = {
 						CreatedOnToolsVersion = 26.5;
 					};
 					C57A962416D7EAD500C233F1 = {
@@ -493,12 +549,20 @@
 			targets = (
 				C57A962416D7EAD500C233F1 /* iBrogue_iPad */,
 				C556D3FA2FD0CDEE00D81184 /* BrogueCE */,
+				5E0000000000000000000001 /* BrogueSE */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
 		C556D3F92FD0CDEE00D81184 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		5E0000000000000000000005 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -545,6 +609,13 @@
 
 /* Begin PBXSourcesBuildPhase section */
 		C556D3F72FD0CDEE00D81184 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		5E0000000000000000000003 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -601,6 +672,11 @@
 			target = C556D3FA2FD0CDEE00D81184 /* BrogueCE */;
 			targetProxy = C556D4012FD0CDEF00D81184 /* PBXContainerItemProxy */;
 		};
+		5E000000000000000000000E /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 5E0000000000000000000001 /* BrogueSE */;
+			targetProxy = 5E000000000000000000000D /* PBXContainerItemProxy */;
+		};
 /* End PBXTargetDependency section */
 
 /* Begin PBXVariantGroup section */
@@ -615,6 +691,124 @@
 /* End PBXVariantGroup section */
 
 /* Begin XCBuildConfiguration section */
+		5E0000000000000000000007 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				BUILD_LIBRARY_FOR_DISTRIBUTION = YES;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				"CODE_SIGN_IDENTITY[sdk=iphoneos*]" = "iPhone Developer";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				DYLIB_COMPATIBILITY_VERSION = 1;
+				DYLIB_CURRENT_VERSION = 1;
+				DYLIB_INSTALL_NAME_BASE = "@rpath";
+				ENABLE_MODULE_VERIFIER = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "Copyright © 2026 Seth howard. All rights reserved.";
+				INSTALL_PATH = "$(LOCAL_LIBRARY_DIR)/Frameworks";
+				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+				MARKETING_VERSION = 1.0;
+				MODULE_VERIFIER_SUPPORTED_LANGUAGES = "objective-c objective-c++";
+				MODULE_VERIFIER_SUPPORTED_LANGUAGE_STANDARDS = "gnu17 gnu++20";
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				PRODUCT_BUNDLE_IDENTIFIER = com.sandoze.BrogueSE;
+				PRODUCT_NAME = "$(TARGET_NAME:c99extidentifier)";
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_INSTALL_MODULE = YES;
+				SWIFT_INSTALL_OBJC_HEADER = NO;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				VERSIONING_SYSTEM = "apple-generic";
+				VERSION_INFO_PREFIX = "";
+			};
+			name = Debug;
+		};
+		5E0000000000000000000008 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				BUILD_LIBRARY_FOR_DISTRIBUTION = YES;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CODE_SIGN_IDENTITY = "iPhone Distribution";
+				"CODE_SIGN_IDENTITY[sdk=iphoneos*]" = "iPhone Developer";
+				CODE_SIGN_STYLE = Automatic;
+				COPY_PHASE_STRIP = NO;
+				CURRENT_PROJECT_VERSION = 1;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				DYLIB_COMPATIBILITY_VERSION = 1;
+				DYLIB_CURRENT_VERSION = 1;
+				DYLIB_INSTALL_NAME_BASE = "@rpath";
+				ENABLE_MODULE_VERIFIER = YES;
+				ENABLE_NS_ASSERTIONS = NO;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "Copyright © 2026 Seth howard. All rights reserved.";
+				INSTALL_PATH = "$(LOCAL_LIBRARY_DIR)/Frameworks";
+				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+				MARKETING_VERSION = 1.0;
+				MODULE_VERIFIER_SUPPORTED_LANGUAGES = "objective-c objective-c++";
+				MODULE_VERIFIER_SUPPORTED_LANGUAGE_STANDARDS = "gnu17 gnu++20";
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				PRODUCT_BUNDLE_IDENTIFIER = com.sandoze.BrogueSE;
+				PRODUCT_NAME = "$(TARGET_NAME:c99extidentifier)";
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_INSTALL_MODULE = YES;
+				SWIFT_INSTALL_OBJC_HEADER = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				VERSIONING_SYSTEM = "apple-generic";
+				VERSION_INFO_PREFIX = "";
+			};
+			name = Release;
+		};
 		C556D4062FD0CDEF00D81184 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -928,6 +1122,15 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
+		5E0000000000000000000006 /* Build configuration list for PBXNativeTarget "BrogueSE" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				5E0000000000000000000007 /* Debug */,
+				5E0000000000000000000008 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
 		C556D4052FD0CDEF00D81184 /* Build configuration list for PBXNativeTarget "BrogueCE" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
