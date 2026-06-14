@@ -54,10 +54,6 @@ short staffHasteDuration(fixpt enchant)        {return ((int) (2 + enchant * 4 /
 short staffBladeCount(fixpt enchant)           {return ((int) (enchant * 3 / 2 / FP_FACTOR));}
 short staffDiscordDuration(fixpt enchant)      {return ((int) (enchant * 4 / FP_FACTOR));}
 short staffEntrancementDuration(fixpt enchant) {return ((int) (enchant * 3 / FP_FACTOR));}
-// iOS port (iBrogue): staff of frost. Hard-freeze scales slowly like the paralysis runic (it is the strongest
-// effect in the game); the slow tail is capped at 20 so it never exceeds a dedicated wand of slowness (30).
-short staffFreezeDuration(fixpt enchant)       {return (max(2, (int) (2 + (enchant / 2 / FP_FACTOR))));}
-short staffFreezeSlowDuration(fixpt enchant)   {return (min(20, max(10, (int) (enchant * 3 / FP_FACTOR))));}
 int staffProtection(fixpt enchant) {
     return 130 * fp_pow(FP_FACTOR * 140 / 100, enchant / FP_FACTOR - 2) / FP_FACTOR;
 }

@@ -1164,10 +1164,10 @@ enum tileFlags {
 
 #define UNKNOWN_KEY            (128+19)
 
-// iOS port (iBrogue): selectable keyboard schemes — see the matching block in the BrogueCE engine's
-// Rogue.h and docs/design/keyboard-schemes.md. A scheme remaps physical keys to canonical engine keys
-// at the input layer (before recording), so recordings stay scheme-independent. CLASSIC is identity
-// (stock vi keys); MODERN is the right-hand 3x3 grid for keyboards without a numpad. Default CLASSIC.
+// iOS port (iBrogue): selectable keyboard schemes — see docs/design/keyboard-schemes.md and the matching
+// block in the BrogueCE engine. CLASSIC is identity (vi keys); MODERN is a right-hand 3x3 grid for
+// keyboards without a numpad. A scheme remaps physical keys to canonical keys before recording, so
+// recordings stay scheme-independent. Default CLASSIC.
 enum keyboardScheme {
     KEYBOARD_SCHEME_CLASSIC = 0,
     KEYBOARD_SCHEME_MODERN,
@@ -2682,13 +2682,6 @@ extern "C" {
     boolean shiftKeyIsDown();
     short getHighScoresList(rogueHighScoresEntry returnList[HIGH_SCORES_COUNT]);
     boolean saveHighScore(rogueHighScoresEntry theEntry);
-    // iOS port (iBrogue): persist/restore the most recent run's seed so the
-    // title screen's seeded-game prompt can pre-fill it across app launches.
-    unsigned long loadPersistedSeed(void);
-    void persistLastSeed(unsigned long seed);
-    // iOS port (iBrogue): persist/restore the chosen keyboard scheme (enum keyboardScheme) across launches.
-    enum keyboardScheme loadPersistedKeyboardScheme(void);
-    void persistKeyboardScheme(int scheme);
     void initializeBrogueSaveLocation();
     fileEntry *listFiles(short *fileCount, char **dynamicMemoryBuffer);
     void initializeLaunchArguments(enum NGCommands *command, char *path, unsigned long *seed);
@@ -2774,9 +2767,14 @@ extern "C" {
     void executeMouseClick(rogueEvent *theEvent);
     void executeKeystroke(signed long keystroke, boolean controlKey, boolean shiftKey);
     // iOS port (iBrogue): translate a raw physical keystroke to the canonical engine keystroke for the
-    // active keyboard scheme. Identity for CLASSIC. Applied in nextBrogueEvent before recording. See
-    // docs/design/keyboard-schemes.md and the matching BrogueCE implementation.
+    // active keyboard scheme (identity for CLASSIC); applied in the platform bridge before recording.
     signed long applyKeyboardScheme(signed long keystroke, boolean *controlKey, boolean *shiftKey);
+    // iOS port (iBrogue): platform-bridge persistence (implemented in RogueDriver.mm) — last run's seed
+    // and the Classic/Modern keyboard-scheme choice, persisted across launches.
+    unsigned long loadPersistedSeed(void);
+    void persistLastSeed(unsigned long seed);
+    enum keyboardScheme loadPersistedKeyboardScheme(void);
+    void persistKeyboardScheme(int scheme);
     void initializeLevel();
     void startLevel (short oldLevelNumber, short stairDirection);
     void updateMinersLightRadius();

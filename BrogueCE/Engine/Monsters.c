@@ -152,12 +152,6 @@ void initializeMonster(creature *monst, boolean itemPossible) {
         monst->carriedItem = NULL;
     }
 
-    // iOS port (iBrogue): loot component -- any genuinely-generated creature with a lootProfile is its loot
-    // bearer (sheds loot on hit, drops the death hoard). cloneMonster() clears this so clones are loot-less.
-    // For every other monster info.loot is NULL, so this is false and nothing reads it (no behavior change).
-    monst->looter.isBearer = (monst->info.loot != NULL);
-    monst->looter.bonusDropped = false;
-
     initializeGender(monst);
 
     if (!(monst->info.flags & MONST_INANIMATE) || (monst->info.abilityFlags & MA_ENTER_SUMMONS)) {
@@ -177,9 +171,6 @@ boolean monsterRevealed(creature *monst) {
     } else if (monst->status[STATUS_ENTRANCED]) {
         return true;
     } else if (player.status[STATUS_TELEPATHIC] && !(monst->info.flags & MONST_INANIMATE)) {
-        return true;
-    } else if (playerLightRevealsMonster(monst)) {
-        // iOS port (iBrogue): a worn ring of light exposes invisible enemies in its glow (dim -> flicker, bright -> full).
         return true;
     }
     return false;
@@ -215,13 +206,6 @@ boolean monsterIsHidden(const creature *monst, const creature *observer) {
     }
     if (observer && monstersAreTeammates(monst, observer)) {
         // Teammates can always see each other.
-        return false;
-    }
-    // iOS port (iBrogue): the player's ring of light fully exposes an invisible enemy standing in its bright core.
-    // Shared sight: the player and the player's allies benefit; an invisible player is never revealed to enemies.
-    if (observer
-        && (observer == &player || monstersAreTeammates(observer, &player))
-        && playerLightRevealsMonster(monst) >= 2) {
         return false;
     }
     if ((monst->status[STATUS_INVISIBLE] && !pmapAt(monst->loc)->layers[GAS])) {
@@ -266,104 +250,6 @@ boolean canDirectlySeeMonster(creature *monst) {
         return true;
     }
     return false;
-}
-
-// iOS port (iBrogue): Ring of light ally aura & invisible-creature reveal.
-// See BrogueCE/Engine/IOS_MODIFICATIONS.md. All magnitudes are intentionally tunable.
-#define EMBOLDEN_LINGER             3   // turns the "emboldened" status persists after an ally leaves the light
-#define EMBOLDEN_DEFENSE_CAP        20  // defense bonus asymptote (~2 ally empowerments; empowerMonster grants +10)
-#define EMBOLDEN_ACCURACY_BONUS     8   // small flat accuracy nudge (consistency, never damage)
-#define EMBOLDEN_REGEN_PERCENT_CAP  300 // extra regeneration % asymptote while emboldened (recovery-paced, not combat sustain)
-
-// Front-loaded, diminishing-toward-a-ceiling curve: cap * E/(E+1). ~half at +1, ~80% at +3, never exceeds cap.
-static short emboldenmentCurve(short cap, short enchant) {
-    if (enchant <= 0) {
-        return 0;
-    }
-    return cap * enchant / (enchant + 1);
-}
-
-// Defense modifier for an emboldened ally. Positive ring buffs; cursed (negative) ring applies a mild penalty (inversion-lite).
-short emboldenmentDefenseBonus(const creature *monst) {
-    if (!monst->status[STATUS_EMBOLDENED]) {
-        return 0;
-    }
-    if (rogue.lightRingBonus > 0) {
-        return emboldenmentCurve(EMBOLDEN_DEFENSE_CAP, rogue.lightRingBonus);
-    } else if (rogue.lightRingBonus < 0) {
-        return -emboldenmentCurve(EMBOLDEN_DEFENSE_CAP, -rogue.lightRingBonus) / 2; // gentler than the buff
-    }
-    return 0;
-}
-
-// Small flat accuracy nudge for an emboldened ally (positive ring only). No damage bonus, ever.
-short emboldenmentAccuracyBonus(const creature *monst) {
-    if (monst->status[STATUS_EMBOLDENED] && rogue.lightRingBonus > 0) {
-        return EMBOLDEN_ACCURACY_BONUS;
-    }
-    return 0;
-}
-
-// Whether the player's worn ring of light exposes an otherwise-invisible enemy, and how clearly.
-// Graded by the light's own falloff: bright core -> full visibility; dim fade -> flicker; beyond -> nothing.
-// Scoped to invisible *enemies* only (not the player, not allies, not submerged/dormant). One-directional:
-// only the player and allies benefit; it never reveals an invisible player to monsters.
-// Returns 0 = not revealed, 1 = flicker (dim light), 2 = full (bright light).
-short playerLightRevealsMonster(const creature *monst) {
-    short radius, dist;
-    if (rogue.lightRingBonus <= 0) {
-        return 0;
-    }
-    if (monst == &player || !monst->status[STATUS_INVISIBLE]) {
-        return 0;
-    }
-    if (monst->bookkeepingFlags & (MB_SUBMERGED | MB_IS_DORMANT)) {
-        return 0;
-    }
-    if (!monstersAreEnemies(&player, monst)) {
-        return 0;
-    }
-    if (!(pmapAt(monst->loc)->flags & IN_FIELD_OF_VIEW)) {
-        return 0;
-    }
-    radius = rogue.minersLight.lightRadius.lowerBound;
-    if (radius < 1) {
-        return 0;
-    }
-    dist = distanceBetween(player.loc, monst->loc);
-    if (dist > radius) {
-        return 0;
-    }
-    // Inner 60% of the radius is the "bright core" (full visibility); the dim fade ring only flickers.
-    return (5 * dist <= 3 * radius) ? 2 : 1;
-}
-
-// Refreshes the "emboldened" status on allies standing in the player's light (or, for a cursed ring,
-// marks them for the inversion-lite penalty). Idempotent and derived purely from current game state, so
-// it is safe to call from the display pipeline and replays deterministically. Driven once per vision update.
-void updateAllyEmboldenment() {
-    short radius;
-    if (rogue.lightRingBonus == 0) {
-        return; // no ring of light worn (or net-neutral pair)
-    }
-    radius = rogue.minersLight.lightRadius.lowerBound;
-    if (radius < 1) {
-        return;
-    }
-    for (creatureIterator it = iterateCreatures(monsters); hasNextCreature(it);) {
-        creature *monst = nextCreature(&it);
-        if (monst->creatureState != MONSTER_ALLY) {
-            continue;
-        }
-        if ((pmapAt(monst->loc)->flags & IN_FIELD_OF_VIEW)
-            && distanceBetween(player.loc, monst->loc) <= radius) {
-
-            monst->status[STATUS_EMBOLDENED] = EMBOLDEN_LINGER;
-            if (monst->maxStatus[STATUS_EMBOLDENED] < EMBOLDEN_LINGER) {
-                monst->maxStatus[STATUS_EMBOLDENED] = EMBOLDEN_LINGER;
-            }
-        }
-    }
 }
 
 void monsterName(char *buf, creature *monst, boolean includeArticle) {
@@ -685,7 +571,6 @@ creature *cloneMonster(creature *monst, boolean announce, boolean placeClone) {
     newMonst->mapToMe = NULL;
     newMonst->safetyMap = NULL;
     newMonst->carriedItem = NULL;
-    newMonst->looter.isBearer = false; // iOS port (iBrogue): cloned looters carry no hoard and shed no loot
     if (monst->carriedMonster) {
         creature *parentMonst = cloneMonster(monst->carriedMonster, false, false); // Also clone the carriedMonster
         removeCreature(monsters, parentMonst); // The cloned create will be added to the world, which we immediately undo.
@@ -1821,10 +1706,6 @@ static void wanderToward(creature *monst, pos destination) {
     }
 }
 
-// iOS port (iBrogue): base % chance to sense a pursuer giving up the chase; the ring of awareness
-// (rogue.awarenessBonus, +20/enchant) is added on top. Kept high so the typical character -- who
-// invests nothing in awareness -- still notices most of the time; the ring pushes it to a near-certainty.
-#define SENSE_LOST_TRAIL_BASE_CHANCE 50
 void updateMonsterState(creature *monst) {
     short x, y, closestFearedEnemy;
     boolean awareOfPlayer;
@@ -1885,18 +1766,6 @@ void updateMonsterState(creature *monst) {
         }
     } else if (monst->creatureState == MONSTER_TRACKING_SCENT && !awareOfPlayer) {
         // if tracking scent, but the scent is weaker than the scent detection threshold, begin wandering.
-        // iOS port (iBrogue): when a pursuer gives up the chase, you get an awareness-scaled chance to
-        // sense it -- no line of sight required. Chance is SENSE_LOST_TRAIL_BASE_CHANCE plus
-        // rogue.awarenessBonus (ring of awareness, +20/enchant), clamped to [0,100]. The base is set
-        // high so it triggers readily even for the typical character who invests nothing in awareness;
-        // the ring just pushes it toward certainty. Rolled only here, at the hunting->wandering
-        // transition, so it doesn't spam.
-        if (rand_percent(clamp(SENSE_LOST_TRAIL_BASE_CHANCE + rogue.awarenessBonus, 0, 100))) {
-            char theMonsterName[COLS], senseBuf[COLS * 2];
-            monsterName(theMonsterName, monst, true);
-            sprintf(senseBuf, "you sense that %s has lost your trail.", theMonsterName);
-            message(senseBuf, 0);
-        }
         monst->creatureState = MONSTER_WANDERING;
         wanderToward(monst, monst->lastSeenPlayerAt);
     } else if (monst->creatureState == MONSTER_TRACKING_SCENT
@@ -1963,13 +1832,7 @@ void decrementMonsterStatus(creature *monst) {
         && monst->info.turnsBetweenRegen > 0
         && !monst->status[STATUS_POISONED]) {
 
-        long regenStep = 1000;
-        // iOS port (iBrogue): ring of light. An emboldened ally mends faster in your light -- recovery-paced
-        // (capped extra regeneration), never enough to out-heal focused damage in a real fight.
-        if (monst->status[STATUS_EMBOLDENED] && rogue.lightRingBonus > 0) {
-            regenStep += 1000L * emboldenmentCurve(EMBOLDEN_REGEN_PERCENT_CAP, rogue.lightRingBonus) / 100;
-        }
-        if ((monst->turnsUntilRegen -= regenStep) <= 0) {
+        if ((monst->turnsUntilRegen -= 1000) <= 0) {
             monst->currentHP++;
             monst->previousHealthPoints++;
             monst->turnsUntilRegen += monst->info.turnsBetweenRegen * 1000;
@@ -2274,7 +2137,6 @@ static boolean creatureEligibleForSwarming(creature *monst) {
         || monst->status[STATUS_CONFUSED]
         || monst->status[STATUS_STUCK]
         || monst->status[STATUS_PARALYZED]
-        || monst->status[STATUS_FROZEN] // iOS port (iBrogue): staff of frost
         || monst->status[STATUS_MAGICAL_FEAR]
         || monst->status[STATUS_LIFESPAN_REMAINING] == 1
         || (monst->bookkeepingFlags & (MB_SEIZED | MB_SEIZING))) {
@@ -3083,26 +2945,22 @@ void unAlly(creature *monst) {
 }
 
 boolean monsterFleesFrom(creature *monst, creature *defender) {
-    // iOS port (iBrogue): cherry-picked from upstream BrogueCE PR #803 (unmerged as of 2026-06) --
-    // allies keep their distance from invulnerable monsters out to 6 tiles (was effectively 4), so a
-    // following party isn't decimated charging revenants/stone guardians. Drop this hunk if/when the
-    // PR lands upstream and the vendored engine is refreshed.
-    const short dist = distanceBetween(monst->loc, defender->loc);
+    const short x = monst->loc.x;
+    const short y = monst->loc.y;
 
     if (!monsterWillAttackTarget(defender, monst)) {
         return false;
     }
 
-    if (dist <= 6 // Stay farther away from invulnerable monsters
-        && (defender->info.flags & (MONST_IMMUNE_TO_WEAPONS | MONST_INVULNERABLE))
+    if (distanceBetween((pos){x, y}, defender->loc) >= 4) {
+        return false;
+    }
+
+    if ((defender->info.flags & (MONST_IMMUNE_TO_WEAPONS | MONST_INVULNERABLE))
         && !(defender->info.flags & MONST_IMMOBILE)) {
         // Don't charge if the monster is damage-immune and is NOT immobile;
         // i.e., keep distance from revenants and stone guardians but not mirror totems.
         return true;
-    }
-
-    if (dist >= 4) {
-        return false;
     }
 
     if (monst->creatureState == MONSTER_ALLY && !monst->status[STATUS_DISCORDANT]
@@ -3139,16 +2997,6 @@ static boolean allyFlees(creature *ally, creature *closestEnemy) {
         return false;
     }
 
-    // iOS port (iBrogue): a cursed ring of light unsettles nearby allies, who break sooner (inversion-lite).
-    if (ally->status[STATUS_EMBOLDENED] && rogue.lightRingBonus < 0
-        && distanceBetween((pos){x, y}, closestEnemy->loc) < 10
-        && (100 * ally->currentHP / ally->info.maxHP <= 50)) {
-        return true;
-    }
-
-    // iOS port (iBrogue): an emboldened ally still retreats at low HP, but moveAlly() redirects that
-    // retreat into a rally *behind* the player (using the player as a shield, where it heals in the light)
-    // rather than scattering to the generic safety map. So the trigger here is the vanilla one.
     if (distanceBetween((pos){x, y}, closestEnemy->loc) < 10
         && (100 * ally->currentHP / ally->info.maxHP <= 33)
         && ally->info.turnsBetweenRegen > 0
@@ -3184,43 +3032,6 @@ static void monsterMillAbout(creature *monst, short movementChance) {
             moveMonsterPassivelyTowards(monst, targetLoc, false);
         }
     }
-}
-
-// iOS port (iBrogue): ring of light. Picks the cell an emboldened ally should rally to when it would
-// otherwise flee: a passable tile adjacent to the player, on the far side from the threat, so the
-// player's body shields it while it heals in the light. "Farthest player-adjacent cell from the threat"
-// naturally resolves to directly behind the player, and degrades gracefully when the player isn't
-// between them (it just picks the safest nearby tile). Returns INVALID_POS if none is reachable, in
-// which case the caller falls back to a normal flee.
-static pos allyRallyShieldCell(creature *monst, creature *threat) {
-    pos best = INVALID_POS;
-    short bestDist = -1;
-    enum directions dir;
-
-    for (dir = 0; dir < DIRECTION_COUNT; dir++) {
-        const short nx = player.loc.x + nbDirs[dir][0];
-        const short ny = player.loc.y + nbDirs[dir][1];
-        const pos c = (pos){ nx, ny };
-        creature *occupant;
-        short d;
-
-        if (!coordinatesAreInMap(nx, ny)
-            || cellHasTerrainFlag(c, T_OBSTRUCTS_PASSABILITY)
-            || monsterAvoids(monst, c)
-            || diagonalBlocked(player.loc.x, player.loc.y, nx, ny, false)) {
-            continue;
-        }
-        occupant = monsterAtLoc(c);
-        if (occupant && occupant != monst && !canPass(monst, occupant)) {
-            continue;
-        }
-        d = distanceBetween(c, threat->loc);
-        if (d > bestDist) {
-            bestDist = d;
-            best = c;
-        }
-    }
-    return best;
 }
 
 /// @brief Handles the given allied monster's turn under normal circumstances
@@ -3278,7 +3089,7 @@ static void moveAlly(creature *monst) {
             && distanceBetween((pos){x, y}, target->loc) < shortestDistance
             && traversiblePathBetween(monst, target->loc.x, target->loc.y)
             && (!cellHasTerrainFlag(target->loc, T_OBSTRUCTS_PASSABILITY) || (target->info.flags & MONST_ATTACKABLE_THRU_WALLS))
-            && (!target->status[STATUS_INVISIBLE] || playerLightRevealsMonster(target) || rand_percent(33))) { // iOS port (iBrogue): light-revealed invisibles are reliably engaged
+            && (!target->status[STATUS_INVISIBLE] || rand_percent(33))) {
 
             shortestDistance = distanceBetween((pos){x, y}, target->loc);
             closestMonster = target;
@@ -3287,23 +3098,6 @@ static void moveAlly(creature *monst) {
 
     // Weak allies in the presence of enemies seek safety;
     if (allyFlees(monst, closestMonster)) {
-        // iOS port (iBrogue): ring of light. Rather than scatter to the generic safety map (which leads
-        // an emboldened ally *out* of your light, abandoning the defense/regen keeping it alive), it
-        // rallies to a tile behind you -- shielded by your body and bathed in the light, where it heals
-        // and waits to re-engage. Falls through to a normal flee if no such tile is reachable.
-        if (monst->status[STATUS_EMBOLDENED] && rogue.lightRingBonus > 0) {
-            const pos shield = allyRallyShieldCell(monst, closestMonster);
-            if (isPosInMap(shield)) {
-                if (posEq(monst->loc, shield)) {
-                    return; // already tucked in behind the player; hold position and heal (turn already consumed)
-                }
-                // willingToAttackPlayer = false: route *around* the player to the sheltered cell, never into them.
-                if (moveMonsterPassivelyTowards(monst, shield, false)) {
-                    return;
-                }
-            }
-            // couldn't reach a sheltered cell (player surrounded or walled in); fall through to normal flee.
-        }
         if (monsterHasBoltEffect(monst, BE_BLINKING)
             && ((monst->info.flags & MONST_ALWAYS_USE_ABILITY) || rand_percent(30))
             && monsterBlinkToSafety(monst)) {
@@ -3344,10 +3138,6 @@ static void moveAlly(creature *monst) {
         leashLength = 10;
     } else {
         leashLength = 4;
-    }
-    // iOS port (iBrogue): ring of light. Emboldened allies will engage anything within your light.
-    if (monst->status[STATUS_EMBOLDENED] && rogue.lightRingBonus > 0) {
-        leashLength = max(leashLength, (short) rogue.minersLight.lightRadius.lowerBound);
     }
     if (shortestDistance == 1) {
         if (closestMonster->movementSpeed < monst->movementSpeed
@@ -3395,8 +3185,7 @@ static void moveAlly(creature *monst) {
                     && distanceBetween((pos){x, y}, target->loc) < shortestDistance
                     && traversiblePathBetween(monst, target->loc.x, target->loc.y)
                     && (!monsterAvoids(monst, target->loc) || (target->info.flags & MONST_ATTACKABLE_THRU_WALLS))
-                    && (!attackWouldBeFutile(monst, target)) // iOS port (iBrogue): cherry-picked from upstream PR #803 -- don't blink toward a target it can't hurt
-                    && (!target->status[STATUS_INVISIBLE] || playerLightRevealsMonster(target) || ((monst->info.flags & MONST_ALWAYS_USE_ABILITY) || rand_percent(33)))) { // iOS port (iBrogue): light-revealed invisibles are reliably engaged
+                    && (!target->status[STATUS_INVISIBLE] || ((monst->info.flags & MONST_ALWAYS_USE_ABILITY) || rand_percent(33)))) {
 
                     enemyMap[target->loc.x][target->loc.y] = 0;
                     costMap[target->loc.x][target->loc.y] = 1;
@@ -3527,353 +3316,6 @@ static boolean updateMonsterCorpseAbsorption(creature *monst) {
     return false;
 }
 
-// iOS port (iBrogue): reusable "fleeing creature" component (docs/guides/reusable-components.md). A
-// creatureType with a non-NULL fleeAI (fleeProfile, in Rogue.h) runs fleeAITakesTurn() below in place of
-// the normal monster AI; the gold goblin is the first consumer. Per-creature tuning is in the profile;
-// this is the one shared knob.
-#define FLEER_REROUTE_COMMIT 3   // turns a fleer sticks with the reroute once its exit is blocked (anti-dither)
-
-// iOS port (iBrogue): the stair this profile treats as the escape, and (for rerouting when it's
-// blocked) the other stair to run toward.
-static pos fleerPrimaryExit(const creature *monst, const fleeProfile *p) {
-    if (p->exit == FLEE_EXIT_DOWN) return rogue.downLoc;
-    if (p->exit == FLEE_EXIT_UP)   return rogue.upLoc;
-    return (distanceBetween(monst->loc, rogue.upLoc) <= distanceBetween(monst->loc, rogue.downLoc))
-           ? rogue.upLoc : rogue.downLoc; // FLEE_EXIT_NEAREST
-}
-static pos fleerRerouteTarget(const creature *monst, const fleeProfile *p) {
-    return posEq(fleerPrimaryExit(monst, p), rogue.upLoc) ? rogue.downLoc : rogue.upLoc;
-}
-
-// iOS port (iBrogue): a fleer reached its exit stair and escapes the level. Administrative death removes
-// it cleanly (no drops/corpse/FX), so any carried hoard is forfeit. The closure message shows when the
-// escape is in plain view, or off-screen only with a ring of awareness (rogue.awarenessBonus > 0).
-static void fleerEscape(creature *monst, const fleeProfile *p) {
-    if (canDirectlySeeMonster(monst) || rogue.awarenessBonus > 0) {
-        const char *dir = posEq(fleerPrimaryExit(monst, p), rogue.downLoc) ? "down" : "up";
-        char buf[COLS], monstName[COLS];
-        monsterName(monstName, monst, true);
-        snprintf(buf, COLS, "%s scrambles %s the stairs and is gone.", monstName, dir);
-        resolvePronounEscapes(buf, monst);
-        message(buf, 0);
-    }
-    killCreature(monst, true);
-}
-
-// iOS port (iBrogue): routing field to `target` that swings wide around the player -- one cost map
-// folding "get to the exit" and "keep your distance" into a single decision (the engine's AI does one
-// thing per turn). Walls/hazards/stairs and the player's own tile are impassable; cells within `berth`
-// of the player carry a steep extra cost that fades with distance, so the cheapest route to `target`
-// detours around the player rather than brushing past. The penalty is a smooth gradient, so the route
-// shifts smoothly as the player moves (no flicker) and the fleer keeps moving toward the exit without
-// brute-forcing past. Only a true 1-wide chokepoint leaves the fleer's side at 30000 (unreachable).
-static void monsterFleeDistanceMap(creature *monst, pos target, short berth, short berthCost, short **distanceMap) {
-    short **costMap = allocGrid();
-    for (int i = 0; i < DCOLS; i++) {
-        for (int j = 0; j < DROWS; j++) {
-            const pos p = (pos){ i, j };
-            if (posEq(p, target)) {
-                // The destination MUST be enterable, or dijkstraScan (which only seeds from cells with
-                // cost > 0) never propagates its distance-0 and the whole map reads unreachable. Stairs
-                // are normally monsterAvoids()'d, so exempt the target; the fleer still won't stand on it
-                // (nextStep re-checks monsterAvoids; escape is by adjacency).
-                costMap[i][j] = 1;
-            } else if (cellHasTerrainFlag(p, T_OBSTRUCTS_PASSABILITY)) {
-                costMap[i][j] = cellHasTerrainFlag(p, T_OBSTRUCTS_DIAGONAL_MOVEMENT) ? PDS_OBSTRUCTION : PDS_FORBIDDEN;
-            } else if (monsterAvoids(monst, p)) {
-                costMap[i][j] = PDS_FORBIDDEN;
-            } else {
-                const int toPlayer = distanceBetween(p, player.loc);
-                costMap[i][j] = (toPlayer <= berth) ? 1 + (berth - toPlayer + 1) * berthCost : 1;
-            }
-        }
-    }
-    costMap[player.loc.x][player.loc.y] = PDS_FORBIDDEN; // never route through the player
-
-    fillGrid(distanceMap, 30000);
-    distanceMap[target.x][target.y] = 0;
-    dijkstraScan(distanceMap, costMap, true);
-    freeGrid(costMap);
-}
-
-// iOS port (iBrogue): next step toward `target` along that field. NO_DIRECTION only when `target` is
-// genuinely unreachable from the fleer's side (player holding a 1-wide chokepoint).
-static short monsterStepTowardAvoidingPlayer(creature *monst, pos target, short berth, short berthCost) {
-    short **distanceMap = allocGrid();
-    monsterFleeDistanceMap(monst, target, berth, berthCost, distanceMap);
-    short dir = nextStep(distanceMap, monst->loc, monst, false);
-    freeGrid(distanceMap);
-    return dir;
-}
-
-// iOS port (iBrogue): true once the fleer has reached its exit stair. Monsters can never stand on a
-// stair tile (see monsterAvoids), so "reached" means adjacent.
-static boolean fleerAtExit(const creature *monst, const fleeProfile *p) {
-    return distanceBetween(monst->loc, fleerPrimaryExit(monst, p)) <= 1;
-}
-
-// iOS port (iBrogue): take one flee step. The up stairs (its only escape) are the first target, routed
-// along the blended head-home/keep-distance field. If that route is open it takes it -- swinging wide
-// around the player thanks to the proximity penalty, never brute-forcing past. If the player has blocked
-// it (their body in a doorway, a fire/gas wall, a 1-wide pinch), the up-stairs field returns nothing, and
-// rather than HOLDING in the player's eyeline for free hits -- a block is temporary; it only persists
-// while the goblin lets it -- the goblin stays elusive: it reroutes toward the **down stairs** as a
-// lower-priority target through the SAME keep-distance field, so it runs for open ground (a real
-// destination, never a dead-end corner) and keeps its distance, forcing the player to abandon the block
-// to give chase. Both targets are reached only adjacently (monsters can't stand on stairs); only the up
-// stairs are an actual escape -- the down stairs are purely a place to run to. A block commits it to the
-// reroute for a few turns so it doesn't visibly flip up/down as the player jockeys on and off the route,
-// and it retargets the up stairs the moment that route truly clears. If even the down stairs are walled
-// off from it (both routes blocked at once), it falls to the engine's safety map as a last resort.
-// Returns true if it moved.
-static boolean fleeStepToExit(creature *monst, const fleeProfile *p) {
-    const pos prevLoc = monst->loc;
-    short dir = NO_DIRECTION;
-
-    if (monst->fleer.fleeCommit <= 0) {
-        dir = monsterStepTowardAvoidingPlayer(monst, fleerPrimaryExit(monst, p), p->playerBerth, p->berthCost);
-        if (dir == NO_DIRECTION) {
-            monst->fleer.fleeCommit = FLEER_REROUTE_COMMIT; // exit blocked; commit to the reroute
-        }
-    }
-
-    if (dir == NO_DIRECTION) {
-        if (monst->fleer.fleeCommit > 0) {
-            monst->fleer.fleeCommit--;
-        }
-        if (p->rerouteWhenBlocked) {
-            dir = monsterStepTowardAvoidingPlayer(monst, fleerRerouteTarget(monst, p), p->playerBerth, p->berthCost);
-        }
-        if (dir == NO_DIRECTION) {
-            dir = nextStep(getSafetyMap(monst), monst->loc, monst, true); // last resort
-            if (dir != NO_DIRECTION) {
-                const pos step = (pos){ monst->loc.x + nbDirs[dir][0], monst->loc.y + nbDirs[dir][1] };
-                if (pmapAt(step)->flags & HAS_PLAYER) {
-                    dir = NO_DIRECTION;
-                }
-            }
-        }
-    }
-
-    if (dir != NO_DIRECTION) {
-        moveMonster(monst, nbDirs[dir][0], nbDirs[dir][1]);
-    }
-    return !posEq(monst->loc, prevLoc);
-}
-
-// iOS port (iBrogue): keep maximum distance from the player -- flee to the farthest-from-player cell via
-// the engine's safety map. A fleer in its keep-distance phase uses this; it heads for no exit. Returns
-// true if it moved.
-static boolean monsterKeepDistanceStep(creature *monst) {
-    const pos prevLoc = monst->loc;
-    const short dir = nextStep(getSafetyMap(monst), monst->loc, monst, true);
-    if (dir != NO_DIRECTION) {
-        const pos step = (pos){ monst->loc.x + nbDirs[dir][0], monst->loc.y + nbDirs[dir][1] };
-        if (!(pmapAt(step)->flags & HAS_PLAYER)) {
-            moveMonster(monst, nbDirs[dir][0], nbDirs[dir][1]);
-        }
-    }
-    return !posEq(monst->loc, prevLoc);
-}
-
-// iOS port (iBrogue): a fleer flings a feature (e.g. a hallucinogen flask -> fungal screen) onto the
-// tile it just vacated -- cover dropped between itself and the pursuer, right where they will follow.
-static void monsterTossFeatureBehind(creature *monst, enum dungeonFeatureTypes dfType, pos vacatedTile) {
-    spawnDungeonFeature(vacatedTile.x, vacatedTile.y, &dungeonFeatureCatalog[dfType], true, false);
-    if (canSeeMonster(monst)) {
-        char buf[COLS], monstName[COLS];
-        monsterName(monstName, monst, true);
-        snprintf(buf, COLS, "%s flings a flask to the ground and it erupts behind $HIMHER!", monstName);
-        resolvePronounEscapes(buf, monst);
-        message(buf, 0);
-    }
-}
-
-// iOS port (iBrogue): the reusable flee-component turn logic (the generalized gold goblin AI), driven
-// entirely by the creature's fleeProfile -- no per-monster code. Dormant until it shares sight with the
-// player (when FLEE_ON_SIGHT) or is hurt; then it runs continuously, never pausing within sight (its
-// timer is topped up while it can see the player and runs on for fleeMemoryTurns after losing sight).
-// Two phases by health: at/above breakForExitBelowHpPct it merely keeps its distance (letting the player
-// wear it down); below it, it breaks for the exit, and only then can reaching the exit escape it. On the
-// first break step it flings its tossFeature behind for cover.
-static void fleeAITakesTurn(creature *monst, const fleeProfile *p) {
-    monst->ticksUntilTurn = monst->movementSpeed;
-
-    // Spotting the player (line of sight is mutual) commits it to flight and keeps the timer full.
-    if (p->trigger == FLEE_ON_SIGHT && canDirectlySeeMonster(monst)) {
-        monst->fleer.triggered = true;
-        monst->fleer.fleeTurns = p->fleeMemoryTurns;
-        monst->creatureState = MONSTER_FLEEING;
-    }
-
-    // Dormant (never triggered), or it has lost the player and calmed down: hold still.
-    if (!monst->fleer.triggered || monst->fleer.fleeTurns <= 0) {
-        return;
-    }
-    monst->fleer.fleeTurns--;
-
-    if (monst->currentHP * 100 >= monst->info.maxHP * p->breakForExitBelowHpPct) {
-        // At/above the break threshold: just keep distance; don't run for the exit (or escape, or toss).
-        monsterKeepDistanceStep(monst);
-        return;
-    }
-
-    // Wounded: break for the exit. Reaching it -- adjacent, since monsters can't stand on a stair tile --
-    // escapes. Checked before the step so it doesn't bounce off a tile it can't enter, and again after so
-    // it leaves the moment it arrives.
-    if (fleerAtExit(monst, p)) {
-        fleerEscape(monst, p);
-        return;
-    }
-    const pos vacatedTile = monst->loc;
-    fleeStepToExit(monst, p);
-    if (fleerAtExit(monst, p)) {
-        fleerEscape(monst, p);
-        return;
-    }
-
-    // On the first break step it actually moves, fling the cover feature onto the just-vacated tile
-    // (by definition a valid cell: clear now, or holding the player). Once per fleer.
-    if (!monst->fleer.threwToss && p->tossFeature != 0 && !posEq(monst->loc, vacatedTile)) {
-        monst->fleer.threwToss = true;
-        monsterTossFeatureBehind(monst, p->tossFeature, vacatedTile);
-    }
-}
-
-// iOS port (iBrogue): generic flee-component damage trigger, called from inflictDamage() for any
-// creature with a fleeAI. Any wound commits it to fleeing and refreshes its timer, regardless of the
-// profile's primary trigger. (Entity-specific damage reactions -- e.g. the gold goblin's gold/loot --
-// run separately, alongside this.)
-void fleerNoteDamage(creature *monst) {
-    const fleeProfile *p = monst->info.fleeAI;
-    if (!p) {
-        return;
-    }
-    monst->fleer.triggered = true;
-    monst->fleer.fleeTurns = p->fleeMemoryTurns;
-    monst->creatureState = MONSTER_FLEEING;
-}
-
-// iOS port (iBrogue): reusable loot component (see docs/guides/reusable-components.md). A creature with a
-// lootProfile sheds gold/items as it is struck and scatters a hoard on death, all data-driven. This is
-// NET-NEW loot, separate from the engine's carried-item system (MONST_CARRY_ITEM_*, which assigns one item
-// from the dungeon's item budget at level-gen). The gold goblin is the first/reference consumer; its config
-// lives in goldGoblinLoot (Globals.c). Determinism: every roll uses the substantive RNG (rand_range), so a
-// looter's drops are replay-safe and identical on a shared seed.
-
-// Drop an item at the creature's own tile if free, otherwise on a nearby open tile; if there is nowhere
-// clear, the item is discarded rather than stacked onto an existing one. Lays the live "trail" behind a fleer.
-static void monsterShedItem(creature *monst, item *theItem) {
-    pos loc = monst->loc;
-    if (pmapAt(loc)->flags & HAS_ITEM) {
-        if (!getQualifyingLocNear(&loc, monst->loc, true, NULL,
-                                  (T_OBSTRUCTS_ITEMS | T_PATHING_BLOCKER),
-                                  (HAS_ITEM | HAS_STAIRS), true, false)) {
-            deleteItem(theItem);
-            return;
-        }
-    }
-    placeItemAt(theItem, loc);
-}
-
-// Scatter one item onto an open tile near origin; discard it if there is no room. Used for the death hoard.
-static void monsterScatterItem(item *theItem, pos origin) {
-    pos loc;
-    if (getQualifyingLocNear(&loc, origin, true, NULL,
-                             (T_OBSTRUCTS_ITEMS | T_PATHING_BLOCKER),
-                             (HAS_ITEM | HAS_STAIRS), true, false)) {
-        placeItemAt(theItem, loc);
-    } else {
-        deleteItem(theItem);
-    }
-}
-
-// A depth-scaled pile of gold: rand_range(loPerDepth * depth, hiPerDepth * depth).
-static item *lootGoldPile(short loPerDepth, short hiPerDepth) {
-    item *gold = generateItem(GOLD, -1);
-    gold->quantity = rand_range(loPerDepth * rogue.depthLevel, hiPerDepth * rogue.depthLevel);
-    gold->originDepth = rogue.depthLevel;
-    return gold;
-}
-
-// Roll one item from a weighted loot table: a single rand_range against the weight sum, walked in row order
-// (so a table summing to 100 consumes exactly one rand_range(1, 100), preserving any prior call sequence).
-// The table is terminated by a {0}-weight sentinel row -- self-delimiting, so there is no separate count to
-// keep in sync. kind -1 = honest random roll (natural enchant/runic/curse); a specific kind forces that item.
-static item *rollLootTable(const lootEntry *table) {
-    short total = 0, count = 0;
-    while (table[count].weight > 0) {
-        total += table[count].weight;
-        count++;
-    }
-    const short roll = rand_range(1, total);
-    short cumulative = 0;
-    for (short i = 0; i < count; i++) {
-        cumulative += table[i].weight;
-        if (roll <= cumulative) {
-            return generateItem(table[i].category, table[i].kind);
-        }
-    }
-    return generateItem(table[count - 1].category, table[count - 1].kind); // safety; unreachable for a positive-weight table
-}
-
-// iOS port (iBrogue): loot-component per-hit shedding, called from inflictDamage() alongside the generic
-// fleerNoteDamage() flight trigger. Only a discrete attack sheds loot (attacker != NULL; fire/gas/poison
-// pass NULL, so a damage-over-time effect can't farm it), and only for the genuine bearer (clones & debug
-// spawns have isBearer = false). The first non-lethal blow that drops the creature below its bonusBelowHpPct
-// sheds the one-time bonus item (healing and re-wounding will not repeat it); every other discrete hit sheds
-// a gold trail. `damage` is the post-shield amount, not yet subtracted, so resulting HP is currentHP - damage.
-void monsterShedLootOnHit(creature *monst, creature *attacker, short damage) {
-    const lootProfile *loot = monst->info.loot;
-    if (!loot || !monst->looter.isBearer || attacker == NULL) {
-        return;
-    }
-
-    const short hpAfter = monst->currentHP - damage;
-    if (loot->bonusBelowHpPct > 0
-        && !monst->looter.bonusDropped
-        && hpAfter > 0
-        && hpAfter * 100 < monst->info.maxHP * loot->bonusBelowHpPct) {
-
-        monst->looter.bonusDropped = true;
-        monsterShedItem(monst, generateItem(loot->bonusCategory, loot->bonusKind));
-    } else if (loot->hitGoldLoPerDepth > 0 || loot->hitGoldHiPerDepth > 0) {
-        monsterShedItem(monst, lootGoldPile(loot->hitGoldLoPerDepth, loot->hitGoldHiPerDepth));
-    }
-}
-
-// iOS port (iBrogue): loot-component death hoard -- one marquee item (weighted roll), a burst of depth-scaled
-// gold piles, and an optional depth-gated thrown-weapon stack, all scattered around the corpse. Called from
-// killCreature() on a normal (non-administrative) death, for the genuine bearer only, so clones and debug
-// spawns (isBearer = false) drop nothing. Net-new loot by design.
-void monsterDropDeathLoot(creature *monst) {
-    const lootProfile *loot = monst->info.loot;
-    if (!loot) {
-        return;
-    }
-    const pos origin = monst->loc;
-    const int depth = rogue.depthLevel;
-
-    if (loot->marquee && loot->marquee[0].weight > 0) {
-        monsterScatterItem(rollLootTable(loot->marquee), origin);
-    }
-
-    if (loot->deathGoldPilesHi > 0) {
-        const int piles = rand_range(loot->deathGoldPilesLo, loot->deathGoldPilesHi);
-        for (int i = 0; i < piles; i++) {
-            monsterScatterItem(lootGoldPile(loot->deathGoldLoPerDepth, loot->deathGoldHiPerDepth), origin);
-        }
-    }
-
-    if (loot->thrown.category) {
-        const boolean late = depth >= loot->thrown.lateDepth;
-        item *thrown = generateItem(loot->thrown.category, late ? loot->thrown.lateKind : loot->thrown.earlyKind);
-        thrown->quantity = late ? rand_range(loot->thrown.lateQtyLo, loot->thrown.lateQtyHi)
-                                : rand_range(loot->thrown.earlyQtyLo, loot->thrown.earlyQtyHi);
-        monsterScatterItem(thrown, origin);
-    }
-}
-
 void monstersTurn(creature *monst) {
     short x, y, dir, shortestDistance;
     boolean alreadyAtBestScent;
@@ -3896,8 +3338,8 @@ void monstersTurn(creature *monst) {
 
     applyInstantTileEffectsToCreature(monst); // Paralysis, confusion etc. take effect before the monster can move.
 
-    // if the monster is paralyzed, frozen, entranced or chained, this is where its turn ends.
-    if (monst->status[STATUS_PARALYZED] || monst->status[STATUS_FROZEN] || monst->status[STATUS_ENTRANCED] || (monst->bookkeepingFlags & MB_CAPTIVE)) { // iOS port (iBrogue): staff of frost
+    // if the monster is paralyzed, entranced or chained, this is where its turn ends.
+    if (monst->status[STATUS_PARALYZED] || monst->status[STATUS_ENTRANCED] || (monst->bookkeepingFlags & MB_CAPTIVE)) {
         monst->ticksUntilTurn = monst->movementSpeed;
         if ((monst->bookkeepingFlags & MB_CAPTIVE) && monst->carriedItem) {
             makeMonsterDropItem(monst);
@@ -3910,26 +3352,6 @@ void monstersTurn(creature *monst) {
     }
 
     monst->ticksUntilTurn = monst->movementSpeed / 3; // will be later overwritten by movement or attack
-
-    // iOS port (iBrogue): any creature with a flee component runs its reusable dormant->flee AI in place
-    // of the normal hunting/fleeing logic below. (Paralysis, entrancement and captivity already returned
-    // above.) Data-driven: the behavior comes from the catalog's fleeAI profile, not a per-monster branch.
-    // Exception -- discord overrides the flee component: a discordant fleer turns on whatever is nearest
-    // (handled by the normal discord/hunting logic below), so the player can use discord to break off an
-    // escape. We drop it out of FLEEING state here so that logic engages (the discord pass deliberately
-    // skips fleeing monsters); the flee AI re-asserts itself -- on sight, or via its remaining flee timer --
-    // once discord wears off, since we leave fleer.triggered/fleeTurns untouched.
-    // NOTE for future flee-creatures: this early dispatch also bypasses the normal per-turn tail below
-    // (updateMonsterState, scent/state transitions, and any MONST DFType aura). The gold goblin needs none
-    // of those; a fleer that does must fold them into the flee component rather than rely on this path.
-    if (monst->info.fleeAI) {
-        if (monst->status[STATUS_DISCORDANT]) {
-            monst->creatureState = MONSTER_TRACKING_SCENT;
-        } else {
-            fleeAITakesTurn(monst, monst->info.fleeAI);
-            return;
-        }
-    }
 
     x = monst->loc.x;
     y = monst->loc.y;
@@ -4211,7 +3633,6 @@ boolean canPass(creature *mover, creature *blocker) {
     if (blocker->status[STATUS_CONFUSED]
         || blocker->status[STATUS_STUCK]
         || blocker->status[STATUS_PARALYZED]
-        || blocker->status[STATUS_FROZEN] // iOS port (iBrogue): staff of frost — a frozen creature is a rigid block, not displaceable
         || blocker->status[STATUS_ENTRANCED]
         || mover->status[STATUS_ENTRANCED]) {
 

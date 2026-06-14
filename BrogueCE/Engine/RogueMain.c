@@ -31,8 +31,8 @@
 #include <time.h>
 
 int rogueMain() {
-    // iOS port (iBrogue): restore the last-played seed (persisted across app
-    // launches) so the seeded-game prompt pre-fills it; upstream resets to 0.
+    // iOS port (iBrogue): restore the last-played seed (persisted across app launches) so the
+    // seeded-game prompt pre-fills it; upstream resets to 0.
     previousGameSeed = ceLoadPersistedSeed();
     mainBrogueJunction();
     return rogue.gameExitStatusCode;
@@ -236,7 +236,6 @@ void initializeRogue(uint64_t seed) {
     if (!rogue.playbackMode) {
         rogue.seed = seedRandomGenerator(seed);
         previousGameSeed = rogue.seed;
-        cePersistLastSeed(previousGameSeed); // iOS port (iBrogue): remember across launches
     }
 
 #ifdef SCREEN_UPDATE_BENCHMARK
@@ -293,7 +292,6 @@ void initializeRogue(uint64_t seed) {
     }
 
     rogue.rewardRoomsGenerated = 0;
-    rogue.goldGoblinSpawned = false; // iOS port (iBrogue): meter the gold goblin to once per run
 
     // pre-shuffle the random terrain colors
     oldRNG = rogue.RNG;
@@ -452,50 +450,6 @@ void initializeRogue(uint64_t seed) {
         rogue.playbackOmniscience = 1;
     }
 
-    if (D_FROST_STAFF_START) {
-        // iOS port (iBrogue): playtest grant for the staff of frost. Added deterministically here (not as a
-        // recorded input), so it reconstructs identically on replay. The staff table is shared across variants,
-        // so STAFF_FREEZE is always valid. Combine with its normal frequency for ordinary drops too.
-        theItem = generateItem(STAFF, STAFF_FREEZE);
-        theItem->enchant1 = theItem->charges = 10;
-        theItem->flags |= (ITEM_IDENTIFIED | ITEM_MAX_CHARGES_KNOWN);
-        identify(theItem);
-        theItem = addItemToPack(theItem);
-    }
-
-    if (D_LIGHT_RING_START) {
-        // iOS port (iBrogue): playtest grant for the reworked ring of light. Added deterministically here
-        // (not as a recorded input), so it reconstructs identically on replay. Equip it to activate the
-        // ally aura and invisible-reveal.
-        theItem = generateItem(RING, RING_LIGHT);
-        theItem->enchant1 = 3;
-        theItem->flags &= ~ITEM_CURSED;
-        identify(theItem);
-        theItem = addItemToPack(theItem);
-    }
-
-    if (D_HEAL_CHARM_START) {
-        // iOS port (iBrogue): playtest grant for a strong charm of health. Added deterministically here
-        // (not as a recorded input), so it reconstructs identically on replay.
-        theItem = generateItem(CHARM, CHARM_HEALTH);
-        theItem->enchant1 = 10;
-        theItem->charges = 0; // ready to use immediately
-        theItem->flags |= ITEM_IDENTIFIED;
-        identify(theItem);
-        theItem = addItemToPack(theItem);
-    }
-
-    if (D_LEATHER_ARMOR_START) {
-        // iOS port (iBrogue): playtest grant for a +50 leather armor (near-invulnerable, so you can test
-        // without dying). Added deterministically here (not as a recorded input), so it reconstructs
-        // identically on replay. Equip it to wear it.
-        theItem = generateItem(ARMOR, LEATHER_ARMOR);
-        theItem->enchant1 = 50;
-        theItem->flags &= ~(ITEM_CURSED | ITEM_RUNIC);
-        identify(theItem);
-        theItem = addItemToPack(theItem);
-    }
-
     DEBUG {
         theItem = generateItem(RING, RING_CLAIRVOYANCE);
         theItem->enchant1 = max(DROWS, DCOLS);
@@ -592,25 +546,6 @@ static void updateColors() {
     }
 }
 
-// iOS port (iBrogue): ring of awareness. The base chance (before the +20/enchant awareness bonus) that a
-// ring-wearer senses a level's room machine on first arrival. Tunable; see IOS_MODIFICATIONS.md.
-#define AWARENESS_MACHINE_SENSE_BASE 25
-
-// iOS port (iBrogue): ring of awareness. Whether the current level holds a room machine -- a hand-built
-// set-piece (reward vault, altar, captive room, guardian puzzle, etc.), detected via the
-// IS_IN_ROOM_MACHINE cell flag, which persists for the life of the level.
-static boolean levelContainsRoomMachine(void) {
-    short i, j;
-    for (i = 0; i < DCOLS; i++) {
-        for (j = 0; j < DROWS; j++) {
-            if (pmap[i][j].flags & IS_IN_ROOM_MACHINE) {
-                return true;
-            }
-        }
-    }
-    return false;
-}
-
 void startLevel(short oldLevelNumber, short stairDirection) {
     uint64_t oldSeed;
     item *theItem;
@@ -672,7 +607,6 @@ void startLevel(short oldLevelNumber, short stairDirection) {
                     && !(cellHasTerrainFlag((pos){ x, y }, T_OBSTRUCTS_PASSABILITY))
                     && !monst->status[STATUS_ENTRANCED]
                     && !monst->status[STATUS_PARALYZED]
-                    && !monst->status[STATUS_FROZEN] // iOS port (iBrogue): staff of frost — a frozen monster can't follow you up/down stairs
                     && (mapToStairs[monst->loc.x][monst->loc.y] < 30000 || monst->creatureState == MONSTER_ALLY || monst == rogue.yendorWarden)) {
 
                     monst->status[STATUS_ENTERS_LEVEL_IN] = clamp(mapToStairs[monst->loc.x][monst->loc.y] * monst->movementSpeed / 100 + 1, 1, 150);
@@ -804,20 +738,6 @@ void startLevel(short oldLevelNumber, short stairDirection) {
 
         // re-seed the RNG
         seedRandomGenerator(oldSeed);
-
-        // iOS port (iBrogue): ring of awareness -- on first arriving at a level, a perceptive character may
-        // sense that it holds a room machine (a vault/altar/captive/guardian set-piece). Existence only:
-        // never reveals location, nor whether it's reward or danger. Positive-only and truthful (it never
-        // fires falsely, so silence is ambiguous). The rand_percent draw is gated on wearing the ring AND a
-        // machine existing, so players without the ring draw no RNG here and keep vanilla behavior. A cursed
-        // ring of awareness (negative bonus) senses nothing. Rolled here on the gameplay RNG stream so it's
-        // deterministic; like any gameplay change it diverges replays from pre-change recordings.
-        if (rogue.awarenessBonus > 0
-            && levelContainsRoomMachine()
-            && rand_percent(min(100, AWARENESS_MACHINE_SENSE_BASE + rogue.awarenessBonus))) {
-
-            messageWithColor("you sense that something of significance lies hidden on this level.", &backgroundMessageColor, 0);
-        }
 
         //logLevel();
 
@@ -1252,32 +1172,6 @@ void gameOver(char *killedBy, boolean useCustomPhrasing) {
     strcat(highScoreText, ".");
 
     strcpy(theEntry.description, highScoreText);
-
-    // iOS port (iBrogue): personal debug readout — rested turns per level, appended to the on-screen
-    // recap buffer only. The high-score text (theEntry.description) is already captured above, so this
-    // never touches the saved record. Length-guarded to stay within buf[200].
-    {
-        char restDbg[200] = "";
-        unsigned long totalRestReveals = 0;
-        for (short d = 1; d <= rogue.deepestLevel; d++) {
-            totalRestReveals += levels[d].restRevealsOnLevel;
-        }
-        for (short d = 1; d <= rogue.deepestLevel && strlen(buf) + strlen(restDbg) < 150; d++) {
-            if (levels[d].restTurnsOnLevel > 0) {
-                char one[40];
-                // per level: turns rested : polarity reveals earned by resting
-                sprintf(one, "%s%i:%lu/%lu", (restDbg[0] ? " " : ""), d, levels[d].restTurnsOnLevel, levels[d].restRevealsOnLevel);
-                strcat(restDbg, one);
-            }
-        }
-        if (restDbg[0]) {
-            char tail[48];
-            strcat(buf, "  [rest turns/IDs per lvl: ");
-            strcat(buf, restDbg);
-            sprintf(tail, "; rest IDs total: %lu]", totalRestReveals);
-            strcat(buf, tail);
-        }
-    }
 
     if (!rogue.quit) {
         printString(buf, (COLS - strLenWithoutEscapes(buf)) / 2, ROWS / 2, &gray, &black, 0);

@@ -90,32 +90,6 @@ void drawButton(brogueButton *button, enum buttonDrawStates highlight, screenDis
             applyColorAverage(&bColor, &bColorMid, midPercent);
         }
 
-        // iOS port (iBrogue): subtle inventory progress bar, drawn behind the text. Only in the
-        // button's normal (un-highlighted) state, so the focus/press highlight always wins. Chunky,
-        // button-style look: the bar color's strength steps up in fixed-width chunks (rather than a
-        // smooth per-cell fade) and blends toward the bar color — never toward black — so the dim end
-        // is always visible. Runs dark->light along the fill (flipped for count-down bars).
-        if (highlight == BUTTON_NORMAL
-            && (button->flags & B_DRAW_PROGRESS_BAR)
-            && i < button->barFillCells) {
-
-            // Leave a 1-cell gap at each segment boundary so a segmented bar (known staff charges)
-            // reads as discrete chunks; continuous bars have barSegmentCells == 0.
-            const boolean isSegmentGap = (button->barSegmentCells >= 2)
-                                         && (i > 0) && (i % button->barSegmentCells == 0);
-            if (!isSegmentGap) {
-                const short numChunks = max(1, (button->barFillCells + INVENTORY_BAR_CHUNK_WIDTH - 1)
-                                               / INVENTORY_BAR_CHUNK_WIDTH);
-                short t = (numChunks > 1) ? (100 * (i / INVENTORY_BAR_CHUNK_WIDTH) / (numChunks - 1)) : 100;
-                if (button->flags & B_PROGRESS_BAR_FLIP) {
-                    t = 100 - t;
-                }
-                const short strength = INVENTORY_BAR_TINT_MIN
-                                       + (INVENTORY_BAR_TINT_MAX - INVENTORY_BAR_TINT_MIN) * t / 100;
-                applyColorAverage(&bColor, &button->barColor, strength);
-            }
-        }
-
         if (highlight == BUTTON_PRESSED) {
             applyColorAverage(&fColor, &bColor, 30);
         }

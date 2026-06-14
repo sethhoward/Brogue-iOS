@@ -27,8 +27,8 @@
 #include <time.h>
 
 void rogueMain() {
-    // iOS port (iBrogue): restore the last-played seed (persisted across app
-    // launches) so the seeded-game prompt pre-fills it; upstream resets to 0.
+    // iOS port (iBrogue): restore the last-played seed (persisted across app launches) so the
+    // seeded-game prompt pre-fills it; upstream resets to 0.
     previousGameSeed = loadPersistedSeed();
     // iOS port (iBrogue): restore the player's chosen keyboard scheme (Classic / Modern).
     rogueKeyboardScheme = loadPersistedKeyboardScheme();
@@ -240,7 +240,6 @@ void initializeRogue(unsigned long seed) {
     if (!rogue.playbackMode) {
         rogue.seed = seedRandomGenerator(seed);
         previousGameSeed = rogue.seed;
-        persistLastSeed(previousGameSeed); // iOS port (iBrogue): remember across launches
     }
     
     //benchmark();

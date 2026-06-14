@@ -2348,54 +2348,46 @@ boolean pauseBrogue(short milliseconds) {
     return interrupted;
 }
 
-// iOS port (iBrogue): keyboard-scheme translation — see the matching function in the BrogueCE engine
-// and docs/design/keyboard-schemes.md. Maps the raw physical keystroke to the canonical engine key for
-// the active scheme, before recording/dispatch, so recordings stay scheme-independent. CLASSIC is
-// identity; MODERN is filled in a later step (identity for now, so this lands as a pure no-op).
+// iOS port (iBrogue): keyboard-scheme translation — mirrors the BrogueCE engine. Maps the raw physical
+// keystroke to the canonical engine key for the active scheme, before recording, so recordings stay
+// scheme-independent. Called from the platform bridge (RogueDriver.mm) on raw hardware keys only.
 signed long applyKeyboardScheme(signed long keystroke, boolean *controlKey, boolean *shiftKey) {
     (void)controlKey;
     (void)shiftKey;
-    // iOS port (iBrogue): quit is menu-only on tablet -- a stray hardware 'Q' must never abandon the
-    // run. The on-screen menu's Quit button synthesizes QUIT_KEY directly (raw == false) and bypasses
-    // this translation, so it still works. Applies in both schemes.
+    // Quit is menu-only on tablet -- a stray hardware 'Q' must never abandon the run. The on-screen
+    // menu's Quit button synthesizes QUIT_KEY directly (raw == false) and bypasses this. Both schemes.
     if (keystroke == QUIT_KEY) {
-        return UNKNOWN_KEY; // inert; executeKeystroke has no case for it
+        return UNKNOWN_KEY;
     }
     switch (rogueKeyboardScheme) {
         case KEYBOARD_SCHEME_MODERN:
-            // Right-hand 3x3 directional grid (uio / jkl / m,.) + displaced commands. Mirrors the
-            // BrogueCE engine; see docs/design/keyboard-schemes.md. The real Shift/Ctrl state is
-            // already in the modifier flags, so movement "run" works via executeKeystroke's
-            // controlKey||shiftKey check -- we only translate the character to the canonical key.
-            // Unmapped keys (the whole left hand + every Shift+command) pass through unchanged.
+            // Right-hand 3x3 grid (uio / jkl / m,.) + displaced commands; run rides on the real
+            // Shift/Ctrl flags. The whole left hand + Shift+commands pass through unchanged.
             switch (keystroke) {
-                // movement grid (unshifted)
                 case 'u': return UPLEFT_KEY;
                 case 'i': return UP_KEY;
                 case 'o': return UPRIGHT_KEY;
                 case 'j': return LEFT_KEY;
-                case 'k': return PERIOD_KEY;       // center = wait in place
+                case 'k': return PERIOD_KEY;
                 case 'l': return RIGHT_KEY;
                 case 'm': return DOWNLEFT_KEY;
                 case ',': return DOWN_KEY;
                 case '.': return DOWNRIGHT_KEY;
-                // movement grid (shifted/Ctrl => run; modifier flag already set, just map the direction)
                 case 'U': return UPLEFT_KEY;
                 case 'I': return UP_KEY;
                 case 'O': return UPRIGHT_KEY;
                 case 'J': return LEFT_KEY;
                 case 'K': return PERIOD_KEY;
                 case 'L': return RIGHT_KEY;
-                case 'M': return DOWNLEFT_KEY;     // Shift+m (run); overrides default M = message archive
-                case '<': return DOWN_KEY;         // Shift+, (run down)
-                case '>': return DOWNRIGHT_KEY;    // Shift+. (run down-right)
-                // displaced commands
-                case 'e': return INVENTORY_KEY;    // inventory moves off 'i' (now UP)
-                case 'E': return EQUIP_KEY;        // Shift+E = equip
-                case 'p': return MESSAGE_ARCHIVE_KEY; // messages move off 'M' (now run-down-left)
-                case 'P': return ASCEND_KEY;       // Shift+P = ascend stairs (shift-gated for safety)
-                case ':': return DESCEND_KEY;      // Shift+; = descend stairs
-                default:  return keystroke;        // left hand + everything else unchanged
+                case 'M': return DOWNLEFT_KEY;
+                case '<': return DOWN_KEY;
+                case '>': return DOWNRIGHT_KEY;
+                case 'e': return INVENTORY_KEY;
+                case 'E': return EQUIP_KEY;
+                case 'p': return MESSAGE_ARCHIVE_KEY;
+                case 'P': return ASCEND_KEY;
+                case ':': return DESCEND_KEY;
+                default:  return keystroke;
             }
         case KEYBOARD_SCHEME_CLASSIC:
         default:
@@ -2435,10 +2427,6 @@ void nextBrogueEvent(rogueEvent *returnEvent, boolean textInput, boolean colorsD
         do {
             nextKeyOrMouseEvent(returnEvent, textInput, colorsDance); // No mouse clicks outside of the window will register.
         } while (returnEvent->eventType == MOUSE_UP && !coordinatesAreInWindow(returnEvent->param1, returnEvent->param2));
-        // iOS port (iBrogue): keyboard-scheme translation is applied in the platform bridge
-        // (RogueDriver.mm nextKeyOrMouseEvent), not here — only the bridge can distinguish a raw
-        // hardware keystroke from a synthesized on-screen one (the latter must not be remapped). The
-        // event is already canonical by the time it reaches here. See docs/design/keyboard-schemes.md.
         // recording done elsewhere
     }
     
@@ -2778,6 +2766,7 @@ boolean getInputTextString(char *inputText,
         plotCharWithColor((suffix[0] ? suffix[0] : ' '), x + charNum, y, &black, &white);
         
         // SETH: custom function
+        // iOS port (iBrogue): pass numeric so seed entry gets a number pad (mirrors BrogueCE seed-entry).
         requestKeyboardInput(defaultEntry, textEntryType == TEXT_INPUT_NUMBERS);
         
         keystroke = nextKeyPress(true);
@@ -3785,10 +3774,9 @@ char nextKeyPress(boolean textInput) {
 
 #define BROGUE_HELP_LINE_COUNT    33
 
-// iOS port (iBrogue): the help screen is now the scheme-aware keyboard reference (mirrors the BrogueCE
-// engine). It renders the active keyboard scheme (Classic vi keys or the Modern right-hand grid), and
-// Tab toggles between the two in place (persisted). Quit is omitted from both (menu-only on tablet;
-// see applyKeyboardScheme). See docs/design/keyboard-schemes.md.
+// iOS port (iBrogue): scheme-aware keyboard reference (mirrors the BrogueCE engine). Renders the
+// active scheme (Classic vi keys or the Modern right-hand grid); Tab toggles between them in place
+// (persisted). Quit is omitted from both (menu-only on tablet). See docs/design/keyboard-schemes.md.
 void printHelpScreen() {
     short i, j;
     cellDisplayBuffer dbuf[COLS][ROWS], rbuf[COLS][ROWS];
@@ -3868,7 +3856,6 @@ void printHelpScreen() {
     boolean done = false;
 
     do {
-        // Copy the active scheme's text into a mutable buffer and replace the "****"s with color escapes.
         for (i=0; i<BROGUE_HELP_LINE_COUNT; i++) {
             strcpy(helpText[i], (rogueKeyboardScheme == KEYBOARD_SCHEME_MODERN) ? modernHelp[i] : classicHelp[i]);
             for (j=0; helpText[i][j]; j++) {
@@ -3893,8 +3880,7 @@ void printHelpScreen() {
         nextBrogueEvent(&theEvent, false, false, false);
         overlayDisplayBuffer(rbuf, 0);
 
-        // Tab toggles the scheme in place (persisted); anything else dismisses. Tab is delivered raw
-        // (never scheme-remapped), so it stays the toggle regardless of the active scheme.
+        // Tab toggles the scheme in place (persisted); tap/space/esc dismisses; other keys ignored.
         if (theEvent.eventType == KEYSTROKE && theEvent.param1 == TAB_KEY) {
             rogueKeyboardScheme = (rogueKeyboardScheme == KEYBOARD_SCHEME_MODERN)
                                   ? KEYBOARD_SCHEME_CLASSIC : KEYBOARD_SCHEME_MODERN;
@@ -3902,7 +3888,7 @@ void printHelpScreen() {
         } else if (theEvent.eventType == MOUSE_UP
                    || (theEvent.eventType == KEYSTROKE
                        && (theEvent.param1 == ACKNOWLEDGE_KEY || theEvent.param1 == ESCAPE_KEY))) {
-            done = true; // tap / space / esc dismisses; other keys are ignored (matches waitForAcknowledgment)
+            done = true;
         }
     } while (!done);
 

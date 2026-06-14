@@ -44,15 +44,15 @@ playerCharacter rogue;
 const gameConstants *gameConst;
 int gameVariant = VARIANT_BROGUE;
 CBrogueGameEvent uiMode = CBrogueGameEventInMenu;
+char uiTextEntry[BROGUE_FILENAME_MAX];
 #ifdef BROGUE_TABLET
-// iOS port (iBrogue): runtime-mutable in-game hotkey-label flag (see Rogue.h). Starts false
-// (touch-only); the host sets it via ce_setKeyboardLabelsEnabled() when a hardware keyboard is present.
+// iOS port (iBrogue): runtime in-game hotkey-label flag (see Rogue.h). Default false (touch-only); the
+// host sets it via ce_setKeyboardLabelsEnabled() when a hardware keyboard is present.
 boolean KEYBOARD_LABELS = false;
 #endif
-// iOS port (iBrogue): active keyboard scheme (see enum keyboardScheme in Rogue.h). Default CLASSIC
-// (stock vi-key layout) so existing behavior and recordings are unchanged until the player opts in.
+// iOS port (iBrogue): active keyboard scheme (see enum keyboardScheme in Rogue.h). Default CLASSIC so
+// existing behavior and recordings are unchanged until the player opts in.
 enum keyboardScheme rogueKeyboardScheme = KEYBOARD_SCHEME_CLASSIC;
-char uiTextEntry[BROGUE_FILENAME_MAX];
 creatureList *monsters;
 creatureList *dormantMonsters;
 creatureList purgatory;     // used to hold dead allies awaiting resurrection

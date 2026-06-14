@@ -411,38 +411,13 @@ item *makeItemInto(item *theItem, unsigned long itemCategory, short itemKind) {
     return theItem;
 }
 
-// iOS port (iBrogue): which potion kinds are absent this run (the inactive themed set). Set in
-// shuffleFlavors from rogue.activePotionSet; consulted by generation (chooseKind below) and the
-// Discoveries screen (IO.c, via potionKindAbsentThisSeed). Not serialized -- recomputed each game/
-// replay from the seed, so it stays deterministic.
-static boolean potionAbsentThisSeed[64];
-
-boolean potionKindAbsentThisSeed(short kind) {
-    if (kind < 0 || kind >= (short)(sizeof(potionAbsentThisSeed) / sizeof(potionAbsentThisSeed[0]))) {
-        return false;
-    }
-    return potionAbsentThisSeed[kind];
-}
-
 short chooseKind(const itemTable *theTable, short numKinds) {
     short i, totalFrequencies = 0, randomFrequency;
-    // iOS port (iBrogue): the inactive themed set's potions never generate, even though their table
-    // frequency stays 10. Skip them here so they're excluded from the weighted draw.
-    const boolean isPotion = (theTable == potionTable);
     for (i=0; i<numKinds; i++) {
-        if (isPotion && potionAbsentThisSeed[i]) {
-            continue;
-        }
         totalFrequencies += max(0, theTable[i].frequency);
     }
     randomFrequency = rand_range(1, totalFrequencies);
-    for (i=0; ; i++) {
-        if (isPotion && potionAbsentThisSeed[i]) {
-            continue;
-        }
-        if (randomFrequency <= theTable[i].frequency) {
-            break;
-        }
+    for (i=0; randomFrequency > theTable[i].frequency; i++) {
         randomFrequency -= max(0, theTable[i].frequency);
     }
     return i;
@@ -703,24 +678,7 @@ void populateItems(pos upstairs) {
         short theCategory = ALL_ITEMS & ~GOLD; // gold is placed separately, below, so it's not a punishment
         short theKind = -1;
 
-        // Item generation has TWO independent paths, and the itemTable `frequency` only controls the
-        // first:
-        //   1. Weighted random pick (chooseKind), using itemTable[kind].frequency as the weight. A
-        //      frequency of 0 means this path NEVER picks that kind.
-        //   2. The metered-generation system here: a curated pacing track (meteredItemsGenerationTable +
-        //      rogue.meteredItems) for items that must appear on a schedule rather than by luck. For its
-        //      entries with incrementFrequency != 0 it accrues a running frequency each depth (see the
-        //      rogue.meteredItems[j].frequency += incrementFrequency above) and writes it back into the
-        //      itemTable below, plus it can hard-guarantee a spawn by depth (levelGuarantee /
-        //      itemNumberGuarantee, further down).
-        // This is why potions of life/strength (and the scroll of enchanting) appear despite their
-        // itemTable frequency being 0: that 0 is just a placeholder ("frequency is dynamically adjusted"
-        // in the tables) -- the meter sets their real frequency at runtime. It is ALSO why the
-        // empty-bottle v2 capture-only potions (acid/webbing/steam/ice/water) are guaranteed to never
-        // generate: they are frequency 0 AND deliberately absent from meteredItemsGenerationTable, so
-        // nothing here ever overrides their 0. Frequency 0 + metered = guaranteed pacing; frequency 0 +
-        // unmetered = never generated (capture-only). To make one drop in the wild, give it a non-zero
-        // itemTable frequency or add a metered entry.
+        // Set metered item itemTable frequency to memory.
         for (int j = 0; j < gameConst->numberMeteredItems; j++) {
             if (meteredItemsGenerationTable[j].incrementFrequency != 0) {
                 if (j >= gameConst->numberScrollKinds) {
@@ -1236,12 +1194,6 @@ static boolean swapItemEnchants(const short machineNumber) {
     return false;
 }
 
-// iOS port (iBrogue): the altars-of-insight machine; defined below near detectMagicOnItem.
-static boolean performInsightSacrifice(short machineNumber);
-
-// iOS port (iBrogue): the altars-of-transference machine; defined below near performInsightSacrifice.
-static boolean performEnchantTransfer(short machineNumber);
-
 void updateFloorItems() {
     short x, y;
     char buf[DCOLS*3], buf2[DCOLS*3];
@@ -1335,44 +1287,6 @@ void updateFloorItems() {
 
             if (!circuitBreakersPreventActivation(pmap[x][y].machineNumber)
                 && swapItemEnchants(pmap[x][y].machineNumber)) {
-
-                activateMachine(pmap[x][y].machineNumber);
-            }
-        }
-
-        // iOS port (iBrogue): sibling of the commutation block — the altars-of-insight machine.
-        if (cellHasTMFlag((pos){ x, y }, TM_INSIGHT_ACTIVATION)
-            && pmap[x][y].machineNumber) {
-
-            while (nextItem != NULL
-                   && pmap[x][y].machineNumber == pmapAt(nextItem->loc)->machineNumber
-                   && cellHasTMFlag(nextItem->loc, TM_INSIGHT_ACTIVATION)) {
-
-                // Skip future items in this machine so we don't update the consumed offering.
-                nextItem = nextItem->nextItem;
-            }
-
-            if (!circuitBreakersPreventActivation(pmap[x][y].machineNumber)
-                && performInsightSacrifice(pmap[x][y].machineNumber)) {
-
-                activateMachine(pmap[x][y].machineNumber);
-            }
-        }
-
-        // iOS port (iBrogue): sibling of the commutation block — the altars-of-transference machine.
-        if (cellHasTMFlag((pos){ x, y }, TM_TRANSFER_ENCHANT_ACTIVATION)
-            && pmap[x][y].machineNumber) {
-
-            while (nextItem != NULL
-                   && pmap[x][y].machineNumber == pmapAt(nextItem->loc)->machineNumber
-                   && cellHasTMFlag(nextItem->loc, TM_TRANSFER_ENCHANT_ACTIVATION)) {
-
-                // Skip future items in this machine so we don't update the consumed donor.
-                nextItem = nextItem->nextItem;
-            }
-
-            if (!circuitBreakersPreventActivation(pmap[x][y].machineNumber)
-                && performEnchantTransfer(pmap[x][y].machineNumber)) {
 
                 activateMachine(pmap[x][y].machineNumber);
             }
@@ -1631,12 +1545,7 @@ void itemName(item *theItem, char *root, boolean includeDetails, boolean include
             break;
         case POTION:
             if (potionTable[theItem->kind].identified || rogue.playbackOmniscience) {
-                if (theItem->kind == POTION_DETECT_MAGIC) {
-                    // iOS port (iBrogue): the empty bottle reads as just "empty bottle(s)", not "potion of empty bottle".
-                    sprintf(root, "empty bottle%s", pluralization);
-                } else {
-                    sprintf(root, "potion%s of %s", pluralization, potionTable[theItem->kind].name);
-                }
+                sprintf(root, "potion%s of %s", pluralization, potionTable[theItem->kind].name);
             } else if (potionTable[theItem->kind].called) {
                 sprintf(root, "potion%s called %s%s%s",
                         pluralization,
@@ -2863,87 +2772,6 @@ static boolean displayMagicCharForItem(item *theItem) {
     }
 }
 
-// iOS port (iBrogue): compute the subtle progress bar drawn behind an inventory row, if any. The bar
-// spans the full row `track` width (the padded inventory width) so "full" is the same length on every
-// row and progress is directly comparable. Purely cosmetic — reads item state only, touches no RNG or
-// game state. Sets B_DRAW_PROGRESS_BAR on the button.
-//   - Weapon/armor/ring: countdown to auto-ID (charges/threshold), equipped & unidentified only.
-//   - Staff: charge level including partial recharge. Pre-ID it tracks a single charge (full when one
-//     is ready, else the recharge progress toward it) so the true capacity is never revealed; once
-//     identified the bar is split into `enchant1` equal segments (one per charge) that fill in turn,
-//     each topped off by partial recharge.
-//   - Charm: recharge progress, shown only while on cooldown.
-//   - Wands and everything else: no bar.
-static void setInventoryProgressBar(item *theItem, brogueButton *button, short track) {
-    short pct = -1; // -1 == no bar; otherwise 0..100 fill of the full-width track
-    short segCells = 0; // >= 2 divides the bar into segments (known staff charges)
-    const color *barColor = &gray;
-
-    if (track <= 0) {
-        return;
-    }
-
-    if (theItem->category & (WEAPON | ARMOR | RING)) {
-        // Countdown to auto-identification, only while equipped/worn and still unidentified.
-        if ((theItem->flags & ITEM_EQUIPPED)
-            && !(theItem->flags & ITEM_IDENTIFIED)
-            && theItem->charges > 0) {
-
-            short threshold = (theItem->category & WEAPON) ? gameConst->weaponKillsToAutoID
-                            : (theItem->category & ARMOR)  ? gameConst->armorDelayToAutoID
-                                                           : gameConst->ringDelayToAutoID;
-            if (threshold > 0) {
-                pct = theItem->charges * 100 / threshold;
-                barColor = &gray;
-            }
-        }
-    } else if (theItem->category & STAFF) {
-        // Partial recharge progress toward the next charge, [0,99]. enchant2 counts down to 0 (= next
-        // charge gained); staffChargeDuration is the nominal per-charge interval.
-        const short dur = staffChargeDuration(theItem);
-        short partialPct = (theItem->charges < theItem->enchant1 && dur > 0)
-                           ? clamp((dur - theItem->enchant2) * 100 / dur, 0, 99)
-                           : 0;
-        if (theItem->flags & ITEM_IDENTIFIED) {
-            // Max known: split the bar into one segment per charge; fill whole segments per charge,
-            // plus partial recharge into the next. pct = (whole charges + partial recharge) / max.
-            pct = (theItem->enchant1 > 0)
-                  ? (theItem->charges * 100 + partialPct) / theItem->enchant1
-                  : 0;
-            if (theItem->enchant1 >= 2) {
-                segCells = track / theItem->enchant1;
-            }
-        } else if (theItem->charges >= 1) {
-            // Max hidden: track a single charge — a charge is ready -> full bar (never reveals how
-            // many are stockpiled).
-            pct = 100;
-        } else {
-            // Max hidden, no charge ready: show recharge progress toward the next (single) charge.
-            pct = partialPct;
-        }
-        barColor = &teal;
-    } else if (theItem->category & CHARM) {
-        // Recharge progress; shown only while on cooldown (charges counts down to 0 = ready).
-        short delay = charmRechargeDelay(theItem->kind, theItem->enchant1);
-        if (theItem->charges > 0 && delay > 0) {
-            pct = (delay - theItem->charges) * 100 / delay;
-            barColor = theItem->foreColor ? theItem->foreColor : &itemColor;
-        }
-    }
-
-    if (pct >= 0) {
-        pct = clamp(pct, 0, 100);
-        // Round up so any nonzero progress shows at least one cell, and a full bar fills the track.
-        short fillCells = clamp((pct * track + 99) / 100, 0, track);
-        if (fillCells > 0) {
-            button->flags |= B_DRAW_PROGRESS_BAR;
-            button->barColor = *barColor;
-            button->barFillCells = fillCells;
-            button->barSegmentCells = segCells;
-        }
-    }
-}
-
 char displayInventory(unsigned short categoryMask,
                       unsigned long requiredFlags,
                       unsigned long forbiddenFlags,
@@ -3171,13 +2999,6 @@ char displayInventory(unsigned short categoryMask,
             m++;
         }
         buttons[i].text[m] = '\0';
-
-        // iOS port (iBrogue): add the subtle progress bar behind item rows now that they're padded to a
-        // uniform width (maxLength), so every bar shares the same full-length track. Item rows are
-        // indices [0, itemNumber); later indices are separators / info lines.
-        if (i < itemNumber) {
-            setInventoryProgressBar(itemList[i], &buttons[i], maxLength);
-        }
 
         // Display the button. This would be redundant with the button loop,
         // except that we want the display to stick around until we get rid of it.
@@ -4543,49 +4364,6 @@ enum boltType boltForItem(item *theItem) {
 // *autoID will be set to true. (AutoID can be null.)
 // If the effect causes the level's lighting or vision to change, *lightingChanged
 // will be set to true. (LightingChanged can be null.)
-// iOS port (iBrogue): a fire/lightning bolt crossing a dropped bad potion detonates it (helper defined near throwItem)
-static boolean shatterPotionAtLoc(item *theItem, short x, short y, boolean fiery);
-static void detectMagicOnItem(item *theItem); // iOS port (iBrogue): fire-detonation polarity reveal (defined below near quaffDetectMagic)
-
-// iOS port (iBrogue): staff-of-frost freeze semantics, applied to one creature. Anything fiery or
-// currently ablaze is too hot to freeze solid -- the cold merely douses it and leaves it sluggish.
-// Otherwise it freezes solid (a paralysis-like lock) for freezeTurns and thaws into STATUS_SLOWED, with
-// the slow tail layered underneath the freeze so exactly slowTurns remain when the ice breaks (no
-// remembered state). Shared by the BE_FREEZE bolt (staff of frost, which passes staffFreeze*Duration)
-// and the empty-bottle v2 frost cloud (T_CAUSES_FREEZE, which calls this each turn with fixed counts).
-// The message/flash fire only on the transition INTO frozen (or a real dousing), so a per-turn gas
-// caller never spams. Returns true if anything observable happened (used by the bolt for auto-ID).
-boolean freezeCreature(creature *monst, short freezeTurns, short slowTurns) {
-    if (monst->info.flags & (MONST_INANIMATE | MONST_INVULNERABLE)) {
-        return false;
-    }
-    if ((monst->info.flags & MONST_FIERY) || monst->status[STATUS_BURNING]) {
-        const boolean wasBurning = monst->status[STATUS_BURNING];
-        if (wasBurning) {
-            extinguishFireOnCreature(monst);
-        }
-        slow(monst, slowTurns);
-        // MONST_FIERY creatures relight every turn, so only flash on an actual dousing (avoids per-turn spam in a cloud).
-        if (wasBurning && canDirectlySeeMonster(monst) && boltCatalog[BOLT_FREEZE].backColor) {
-            flashMonster(monst, boltCatalog[BOLT_FREEZE].backColor, 100);
-        }
-        return true;
-    }
-    const boolean wasFrozen = (monst->status[STATUS_FROZEN] > 0);
-    monst->status[STATUS_FROZEN] = monst->maxStatus[STATUS_FROZEN] =
-        max(monst->status[STATUS_FROZEN], freezeTurns);
-    slow(monst, max(monst->status[STATUS_SLOWED], freezeTurns + slowTurns));
-    if (!wasFrozen) { // transition into frozen: message + flash once, not every turn in a cloud
-        if (monst == &player) {
-            message("the cold encases you in ice!", 0);
-        }
-        if (canDirectlySeeMonster(monst) && boltCatalog[BOLT_FREEZE].backColor) {
-            flashMonster(monst, boltCatalog[BOLT_FREEZE].backColor, 100);
-        }
-    }
-    return true;
-}
-
 static boolean updateBolt(bolt *theBolt, creature *caster, short x, short y,
                    boolean boltInView, boolean alreadyReflected,
                    boolean *autoID, boolean *lightingChanged) {
@@ -4718,15 +4496,6 @@ static boolean updateBolt(bolt *theBolt, creature *caster, short x, short y,
                     flashMonster(monst, boltCatalog[BOLT_SLOW].backColor, 100);
                 }
                 if (autoID) {
-                    *autoID = true;
-                }
-                break;
-            case BE_FREEZE:
-                // iOS port (iBrogue): staff of frost. Freeze semantics extracted to freezeCreature(),
-                // shared with the empty-bottle v2 frost cloud. Duration scales with bolt magnitude.
-                if (freezeCreature(monst,
-                                   staffFreezeDuration(theBolt->magnitude * FP_FACTOR),
-                                   staffFreezeSlowDuration(theBolt->magnitude * FP_FACTOR)) && autoID) {
                     *autoID = true;
                 }
                 break;
@@ -4923,68 +4692,6 @@ static boolean updateBolt(bolt *theBolt, creature *caster, short x, short y,
         spawnDungeonFeature(x, y, &dungeonFeatureCatalog[theBolt->pathDF], true, false);
     }
 
-    // iOS port (iBrogue): staff of frost. The cold sweeps out any terrain fire the ray crosses (ice quenches
-    // flame -- the mirror of "fire melts the staff's ice"), carving a firebreak along the bolt's path.
-    if (theBolt->boltEffect == BE_FREEZE) {
-        if (extinguishFireOnTile(x, y) && autoID) {
-            *autoID = true;
-        }
-    }
-
-    // iOS port (iBrogue): a fire/lightning bolt crossing a DROPPED bad potion detonates it in place,
-    // spawning the potion's normal shatter signature. Placed before the BF_FIERY exposeTileToFire below
-    // so a fire bolt ignites the freshly-spawned flammable terrain — a gas cloud, or the fungal forest
-    // from a hallucination potion (violent) — while lightning leaves it unignited (gentle). Item teardown
-    // mirrors burnItem (Time.c).
-    if (theBolt->flags & (BF_FIERY | BF_ELECTRIC)) {
-        item *floorPotion = itemAtLoc((pos){ x, y });
-        if (floorPotion && (floorPotion->category & POTION)) {
-            if (floorPotion->kind == POTION_DETECT_MAGIC) {
-                // iOS port (iBrogue): a fired lightning/fire bolt crossing a DROPPED empty bottle is
-                // caught by it — the bottle fills with that essence (lightning -> speed, fire ->
-                // incineration), becoming an identified potion, and the bolt is absorbed exactly as a
-                // detonation absorbs it. Checked before shatterPotionAtLoc so the bottle captures
-                // rather than being treated as an inert (benevolent) flask the bolt passes through.
-                if (theBolt->flags & BF_ELECTRIC) {
-                    fillEmptyBottle(floorPotion, POTION_HASTE_SELF,
-                        "the bottle snares the crackling arc -- caged lightning fizzes against the glass.");
-                } else {
-                    fillEmptyBottle(floorPotion, POTION_INCINERATION,
-                        "flame roars into the bottle and coils there, straining at the stopper.");
-                }
-                if (autoID) {
-                    *autoID = true; // the visible capture identifies the firing staff/wand
-                }
-                terminateBolt = true; // the bottle drinks the bolt, just as a detonation absorbs it
-            } else if (shatterPotionAtLoc(floorPotion, x, y, (theBolt->flags & BF_FIERY) != 0)) {
-                removeItemFromChain(floorPotion, floorItems);
-                deleteItem(floorPotion);
-                pmap[x][y].flags &= ~(HAS_ITEM | ITEM_DETECTED);
-                if (lightingChanged) {
-                    *lightingChanged = true; // relight darkness/descent this turn
-                }
-                if (autoID) {
-                    *autoID = true; // staff/wand identifies from the visible detonation
-                }
-                // iOS port (iBrogue): the violent detonation absorbs the bolt — it halts here instead of
-                // piercing onward (lightning normally passes through everything via BF_PASSES_THRU_CREATURES).
-                // This caps each bolt at a single detonation, closing the "drop every bad potion in a row and
-                // clear the whole line with one zap" exploit. We only flag termination; updateBolt still falls
-                // through to the exposeTileToFire/exposeTileToElectricity calls below before returning, so a
-                // fire bolt ignites the freshly-spawned flammable terrain at this tile before the bolt stops.
-                terminateBolt = true;
-            } else if (playerCanSee(x, y)) {
-                // iOS port (iBrogue): the eight benevolent potions have no shatter signature, so a bolt
-                // passes through the flask harmlessly — it is neither destroyed nor does it halt the bolt.
-                // Give that inert reaction a line of feedback instead of a silent no-op. (Accepted tradeoff:
-                // bad potions detonate-and-halt while good ones glow-and-pass, so a zap is a costed polarity
-                // probe rather than a free mass-ID — see KNOWN_CAVEATS.md. Gated on visibility so an
-                // off-screen monster bolt crossing a dropped potion doesn't print a phantom message.)
-                message("the bolt passes through the flask and its fluid glows warmly.", 0);
-            }
-        }
-    }
-
     if ((theBolt->flags & BF_FIERY)
         && exposeTileToFire(x, y, true)) {
 
@@ -5108,179 +4815,6 @@ static void detonateBolt(bolt *theBolt, creature *caster, short x, short y, bool
     }
 }
 
-// iOS port (iBrogue): "electrified water". When an electric bolt (lightning or spark)
-// directly strikes a creature standing in water, the charge spreads through the entire
-// connected body of water and shocks everything else standing in it (including submerged
-// eels and the player), with damage diminishing by flood-fill distance from the strike.
-// See BrogueCE/Engine/IOS_MODIFICATIONS.md. The falloff fraction is the main tuning knob.
-#define WATER_SHOCK_FALLOFF_PERCENT 75  // per-ring multiplier applied to damage (geometric)
-#define WATER_SHOCK_MAX_RINGS       128 // safety cap on precomputed falloff table
-#define WATER_SHOCK_STUN_DURATION   3   // turns of paralysis inflicted on anything the shock damages
-
-// iOS port (iBrogue): a tile conducts the shock iff it is water (deep or shallow). Both deep
-// and shallow water carry TM_ALLOWS_SUBMERGING and TM_EXTINGUISHES_FIRE; bog, lava, cooling
-// lava and the sacrificial pit share TM_ALLOWS_SUBMERGING but not TM_EXTINGUISHES_FIRE, so the
-// pair of flags excludes them while matching deep/shallow/sloshing/luminescent water.
-static boolean isConductiveWater(pos loc) {
-    return cellHasTMFlag(loc, TM_ALLOWS_SUBMERGING) && cellHasTMFlag(loc, TM_EXTINGUISHES_FIRE);
-}
-
-// iOS port (iBrogue): a creature is in contact with the water (and therefore both able to
-// trigger and vulnerable to the shock) only if it is standing in conductive water and not
-// hovering above it. Mirrors the eel/kraken "in deep water" contact test in monstersAreEnemies().
-static boolean creatureContactsWater(creature *monst) {
-    return monst
-        && !(monst->status[STATUS_LEVITATING])
-        && !(monst->info.flags & MONST_FLIES)
-        && isConductiveWater(monst->loc);
-}
-
-// iOS port (iBrogue): spread an electric bolt's charge through the connected body of water and
-// shock every creature standing in it. `sources` are the in-water tiles the bolt directly struck.
-static void electrifyWater(bolt *theBolt, creature *caster, const pos *sources, short numSources) {
-    short i, j, r, d, nx, ny, qHead = 0, qTail = 0, maxRing = 0, cutoffRing = 0;
-    char buf[COLS];
-    fixpt ringMult[WATER_SHOCK_MAX_RINGS];
-    const color *boltColor = theBolt->backColor;
-    const short maxRoll = staffDamageHigh(theBolt->magnitude * FP_FACTOR);
-
-    if (numSources <= 0) {
-        return;
-    }
-
-    // Precompute the geometric falloff multiplier per ring, and find the furthest ring that can
-    // still deal at least 1 damage even on a maximum roll. Beyond that the spread (and flash) stop.
-    ringMult[0] = FP_FACTOR;
-    for (r = 1; r < WATER_SHOCK_MAX_RINGS; r++) {
-        ringMult[r] = ringMult[r - 1] * WATER_SHOCK_FALLOFF_PERCENT / 100;
-        if ((long long) maxRoll * ringMult[r] / FP_FACTOR >= 1) {
-            cutoffRing = r;
-        } else {
-            break;
-        }
-    }
-
-    // Multi-source breadth-first flood fill over connected water tiles (8-connected). The distance
-    // grid records each tile's ring distance to the nearest strike point ("nearest source wins").
-    short **dist = allocGrid();
-    pos *queue = malloc(sizeof(pos) * DCOLS * DROWS);
-    fillGrid(dist, -1);
-
-    for (i = 0; i < numSources; i++) {
-        if (isConductiveWater(sources[i]) && dist[sources[i].x][sources[i].y] < 0) {
-            dist[sources[i].x][sources[i].y] = 0;
-            queue[qTail++] = sources[i];
-        }
-    }
-
-    while (qHead < qTail) {
-        pos cur = queue[qHead++];
-        d = dist[cur.x][cur.y];
-        if (d >= cutoffRing) {
-            continue; // a creature one ring further out could not take >=1 damage; don't expand
-        }
-        for (nx = cur.x - 1; nx <= cur.x + 1; nx++) {
-            for (ny = cur.y - 1; ny <= cur.y + 1; ny++) {
-                if (coordinatesAreInMap(nx, ny)
-                    && dist[nx][ny] < 0
-                    && isConductiveWater((pos){ nx, ny })) {
-
-                    dist[nx][ny] = d + 1;
-                    if (d + 1 > maxRing) {
-                        maxRing = d + 1;
-                    }
-                    queue[qTail++] = (pos){ nx, ny };
-                }
-            }
-        }
-    }
-
-    // Cosmetic shockwave: flash the conducting tiles ring by ring, dimming with distance. Purely
-    // visual; it consumes no RNG and is decoupled from the (deterministic) damage resolution below.
-    boolean witnessed = false;
-    for (r = 1; r <= maxRing; r++) {
-        boolean ringInView = false;
-        for (i = 0; i < DCOLS; i++) {
-            for (j = 0; j < DROWS; j++) {
-                if (dist[i][j] == r && playerCanSee(i, j)) {
-                    short intensity = (short) ((long long) 70 * ringMult[r] / FP_FACTOR);
-                    hiliteCell(i, j, boltColor, max(15, intensity), false);
-                    ringInView = witnessed = true;
-                }
-            }
-        }
-        if (ringInView && !rogue.playbackFastForward) {
-            if (pauseAnimation(16, PAUSE_BEHAVIOR_DEFAULT)) {
-                break;
-            }
-        }
-    }
-    for (i = 0; i < DCOLS; i++) {
-        for (j = 0; j < DROWS; j++) {
-            if (dist[i][j] > 0 && playerCanSee(i, j)) {
-                refreshDungeonCell((pos){ i, j });
-            }
-        }
-    }
-
-    if (witnessed) {
-        sprintf(buf, "the water crackles with electricity");
-        combatMessage(buf, boltColor);
-    }
-
-    // Resolve damage. Iterate creatures in monster-list order (then the player) so the RNG draws
-    // are deterministic for save/replay. Each shocked creature rolls its own lightning damage,
-    // scaled by the falloff for its distance. Sources (ring 0) already took the direct bolt hit.
-    for (creatureIterator it = iterateCreatures(monsters); hasNextCreature(it);) {
-        creature *monst = nextCreature(&it);
-        if (monst->info.flags & MONST_INVULNERABLE) {
-            continue;
-        }
-        d = dist[monst->loc.x][monst->loc.y];
-        if (d == 0 && creatureContactsWater(monst)) {
-            // iOS port (iBrogue): the directly-struck creature already took the bolt's damage above (ring 0
-            // is excluded from the spread damage to avoid double-hitting it), but it is standing in the same
-            // electrified water, so the shock still stuns it -- a creature struck by lightning in water is
-            // briefly paralyzed.
-            monst->status[STATUS_PARALYZED] = monst->maxStatus[STATUS_PARALYZED] =
-                max(monst->status[STATUS_PARALYZED], WATER_SHOCK_STUN_DURATION);
-        } else if (d >= 1 && creatureContactsWater(monst)) {
-            short dmg = (short) ((long long) staffDamage(theBolt->magnitude * FP_FACTOR) * ringMult[d] / FP_FACTOR);
-            if (dmg >= 1) {
-                if (inflictDamage(caster, monst, dmg, boltColor, false)) {
-                    killCreature(monst, false);
-                } else {
-                    // iOS port (iBrogue): the shock stuns anything it damages.
-                    monst->status[STATUS_PARALYZED] = monst->maxStatus[STATUS_PARALYZED] =
-                        max(monst->status[STATUS_PARALYZED], WATER_SHOCK_STUN_DURATION);
-                }
-            }
-        }
-    }
-    d = dist[player.loc.x][player.loc.y];
-    if (d == 0 && creatureContactsWater(&player)) {
-        // iOS port (iBrogue): the player, directly struck in water, took the bolt's damage already (ring 0
-        // is out of the spread); the shock through the water still stuns -- symmetric with monsters.
-        player.status[STATUS_PARALYZED] = player.maxStatus[STATUS_PARALYZED] =
-            max(player.status[STATUS_PARALYZED], WATER_SHOCK_STUN_DURATION);
-    } else if (d >= 1 && creatureContactsWater(&player)) {
-        short dmg = (short) ((long long) staffDamage(theBolt->magnitude * FP_FACTOR) * ringMult[d] / FP_FACTOR);
-        if (dmg >= 1) {
-            inflictDamage(caster, &player, dmg, boltColor, false);
-            if (player.currentHP <= 0) {
-                gameOver("Electrocuted in water", true);
-            } else {
-                // iOS port (iBrogue): the shock stuns anything it damages, the player included.
-                player.status[STATUS_PARALYZED] = player.maxStatus[STATUS_PARALYZED] =
-                    max(player.status[STATUS_PARALYZED], WATER_SHOCK_STUN_DURATION);
-            }
-        }
-    }
-
-    free(queue);
-    freeGrid(dist);
-}
-
 // returns whether the bolt effect should autoID any staff or wand it came from, if it came from a staff or wand
 boolean zap(pos originLoc, pos targetLoc, bolt *theBolt, boolean hideDetails, boolean reverseBoltDir) {
     pos listOfCoordinates[MAX_BOLT_LENGTH];
@@ -5294,10 +4828,6 @@ boolean zap(pos originLoc, pos targetLoc, bolt *theBolt, boolean hideDetails, bo
     boolean boltInView;
     const color *boltColor;
     fixpt boltLightRadius;
-    // iOS port (iBrogue): electrified water — tiles where this electric bolt directly struck a
-    // creature standing in water; seeds the post-bolt flood-fill shock. See electrifyWater().
-    pos electricStrikes[MAX_BOLT_LENGTH];
-    short numElectricStrikes = 0;
 
     enum displayGlyph theChar;
     color foreColor, backColor, multColor;
@@ -5423,23 +4953,6 @@ boolean zap(pos originLoc, pos targetLoc, bolt *theBolt, boolean hideDetails, bo
                 autoIdentify(rogue.armor);
             }
             continue;
-        }
-
-        // iOS port (iBrogue): electrified water — note when an electric damage bolt directly hits a
-        // creature standing in water, so the connected body can be shocked once the bolt resolves.
-        // Checked before updateBolt() (which may kill/remove the creature). Submerged creatures can't
-        // be struck directly here (they seed nothing), but they are still shocked by the flood below.
-        if ((theBolt->flags & BF_ELECTRIC)
-            && theBolt->boltEffect == BE_DAMAGE
-            && numElectricStrikes < MAX_BOLT_LENGTH) {
-
-            creature *waterMonst = monsterAtLoc((pos){ x, y });
-            if (waterMonst
-                && !(waterMonst->bookkeepingFlags & MB_SUBMERGED)
-                && creatureContactsWater(waterMonst)) {
-
-                electricStrikes[numElectricStrikes++] = (pos){ x, y };
-            }
         }
 
         if (updateBolt(theBolt, shootingMonst, x, y, boltInView, alreadyReflected, &autoID, &lightingChanged)) {
@@ -5663,13 +5176,6 @@ boolean zap(pos originLoc, pos targetLoc, bolt *theBolt, boolean hideDetails, bo
             }
         }
     }
-
-    // iOS port (iBrogue): electrified water — once the bolt has fully resolved, spread the charge
-    // through any body of water it struck and shock everything else standing in it.
-    if (numElectricStrikes > 0) {
-        electrifyWater(theBolt, shootingMonst, electricStrikes, numElectricStrikes);
-    }
-
     return autoID;
 }
 
@@ -6585,315 +6091,6 @@ static boolean hitMonsterWithProjectileWeapon(creature *thrower, creature *monst
     }
 }
 
-// iOS port (iBrogue): empty-bottle v2 potion of ice -- a freezing cloud (creatures caught in it freeze
-// then thaw to slow; it also douses flame via the gas tile's TM_EXTINGUISHES_FIRE), plus a water sheet
-// wherever the cloud lands on water (the staff-of-frost water freeze; the water-freeze DFs only
-// propagate over water, so they no-op on dry land). Shared by the thrown/bolt-detonated shatter and the
-// uncork-in-hand drink path.
-static void spawnFrostCloud(short x, short y) {
-    spawnDungeonFeature(x, y, &dungeonFeatureCatalog[DF_FREEZING_CLOUD_POTION], true, false);
-    spawnDungeonFeature(x, y, &dungeonFeatureCatalog[DF_DEEP_WATER_FREEZE], true, false);
-    spawnDungeonFeature(x, y, &dungeonFeatureCatalog[DF_SHALLOW_WATER_FREEZE], true, false);
-}
-
-// iOS port (iBrogue): spawn a bad/cloud potion's shatter signature at (x,y) and refresh the cell.
-// Returns true for the cloud/explosion/terrain kinds, false otherwise. Shared by throwItem and the
-// bolt-detonation hook in updateBolt so the kind->DF mapping lives in one place. The kind-specific
-// message is DEFERRED (stored in shatterMsg, printed below) so a fire detonation can suppress it.
-//
-// `fiery` = the trigger was fire (a fire bolt, or an incendiary dart) rather than lightning / a plain
-// dart-javelin / a hand-throw. A fire trigger instantly ignites a freshly-spawned FLAMMABLE GAS cloud,
-// erasing the visible tell -- so for those kinds we DON'T fully identify or name the potion; we print a
-// generic "volatile flask" line and reveal only its POLARITY (good/bad), gated on the player seeing it.
-// Every other signature is self-evident (a non-flammable cloud, distinctive terrain like honey's mire or
-// wort's healing cloud, a hole, a flood, or fire itself) and fully identifies as before. The "erased by
-// fire" test is data-driven -- the GAS layer's own flammability -- so any future potion auto-classifies.
-static boolean shatterPotionAtLoc(item *theItem, short x, short y, boolean fiery) {
-    const char *shatterMsg = NULL;
-    switch (theItem->kind) {
-        case POTION_POISON:
-            spawnDungeonFeature(x, y, &dungeonFeatureCatalog[DF_POISON_GAS_CLOUD_POTION], true, false);
-            shatterMsg = "the flask shatters and a deadly purple cloud billows out!";
-            break;
-        case POTION_CONFUSION:
-            spawnDungeonFeature(x, y, &dungeonFeatureCatalog[DF_CONFUSION_GAS_CLOUD_POTION], true, false);
-            shatterMsg = "the flask shatters and a multi-hued cloud billows out!";
-            break;
-        case POTION_PARALYSIS:
-            spawnDungeonFeature(x, y, &dungeonFeatureCatalog[DF_PARALYSIS_GAS_CLOUD_POTION], true, false);
-            shatterMsg = "the flask shatters and a cloud of pink gas billows out!";
-            break;
-        case POTION_INCINERATION:
-            spawnDungeonFeature(x, y, &dungeonFeatureCatalog[DF_INCINERATION_POTION], true, false);
-            shatterMsg = "the flask shatters and its contents burst violently into flame!";
-            break;
-        case POTION_DARKNESS:
-            spawnDungeonFeature(x, y, &dungeonFeatureCatalog[DF_DARKNESS_POTION], true, false);
-            shatterMsg = "the flask shatters and the lights in the area start fading.";
-            break;
-        case POTION_DESCENT:
-            spawnDungeonFeature(x, y, &dungeonFeatureCatalog[DF_HOLE_POTION], true, false);
-            shatterMsg = "as the flask shatters, the ground vanishes!";
-            break;
-        case POTION_LICHEN:
-            spawnDungeonFeature(x, y, &dungeonFeatureCatalog[DF_LICHEN_PLANTED], true, false);
-            shatterMsg = "the flask shatters and deadly spores spill out!";
-            break;
-        case POTION_HALLUCINATION:
-            // iOS port (iBrogue): port of upstream PR #842 — a thrown hallucination potion blooms a
-            // luminescent fungal forest (flammable, a light source, and a line-of-sight blocker). Sharing
-            // this with the bolt-detonation hook means a lightning bolt over a dropped hallucination potion
-            // simply spawns the forest, while a fire bolt's exposeTileToFire (in updateBolt, run right after
-            // this) ignites the flammable growth.
-            spawnDungeonFeature(x, y, &dungeonFeatureCatalog[DF_FUNGUS_FOREST], true, false);
-            shatterMsg = "the flask shatters and a luminescent fungal forest blooms forth!";
-            break;
-        // iOS port (iBrogue): themed-set potions that leave a tile signature when thrown or bolt-hit.
-        case POTION_HONEY:
-            spawnDungeonFeature(x, y, &dungeonFeatureCatalog[DF_NET], true, false);
-            shatterMsg = "the flask shatters into a sticky golden mire!";
-            break;
-        case POTION_VOMIT:
-            spawnDungeonFeature(x, y, &dungeonFeatureCatalog[DF_ROT_GAS_PUFF], true, false);
-            shatterMsg = "the flask shatters and a reeking cloud of nausea billows out!";
-            break;
-        case POTION_WORT:
-            spawnDungeonFeature(x, y, &dungeonFeatureCatalog[DF_LIFE_POTION_CLOUD], true, false);
-            shatterMsg = "the flask shatters and a cloud of healing spores bursts out!";
-            break;
-        // iOS port (iBrogue): empty-bottle v2 capture-only cloud/terrain potions. (Acid's creature
-        // weaken and ice's freeze are handled in throwItem's struck-creature path; this is the
-        // empty-ground / bolt-detonation signature -- acid leaves a splatter, ice falls through.)
-        case POTION_STEAM:
-            spawnDungeonFeature(x, y, &dungeonFeatureCatalog[DF_STEAM_PUFF], true, false);
-            shatterMsg = "the flask shatters and a searing cloud of steam boils out!";
-            break;
-        case POTION_WATER:
-            spawnDungeonFeature(x, y, &dungeonFeatureCatalog[DF_FLOOD], true, false);
-            shatterMsg = "the flask shatters and water gushes out, flooding the area!";
-            break;
-        case POTION_WEBBING:
-            spawnDungeonFeature(x, y, &dungeonFeatureCatalog[DF_WEB_LARGE], true, false);
-            shatterMsg = "the flask shatters and bursts into a tangle of grasping web!";
-            break;
-        case POTION_ACID:
-            spawnDungeonFeature(x, y, &dungeonFeatureCatalog[DF_ACID_BLOOD], true, false);
-            shatterMsg = "the flask shatters and acid sprays across the ground!";
-            break;
-        case POTION_ICE:
-            spawnFrostCloud(x, y);
-            shatterMsg = "the flask shatters into a cloud of biting frost!";
-            break;
-        default:
-            return false;
-    }
-
-    // Did a fire trigger just erase this kind's tell? A flammable GAS cloud (poison/confusion/paralysis/
-    // vomit) ignites into indistinguishable flame the same instant -- checked on the GAS layer
-    // specifically, so honey's flammable SURFACE net doesn't qualify. Incineration is the one extra case:
-    // its tell IS fire (it spawns PLAIN_FIRE), which a fire trigger's own flame completely masks -- you
-    // can't tell an incinerated potion from the fire bolt / incendiary-dart burst that set it off -- so it
-    // joins the erased set explicitly (its fire tile sits on the SURFACE layer, and matching that flag
-    // broadly would wrongly catch any potion detonated on already-burning ground).
-    const boolean fireErasedKind = fiery
-        && ((pmap[x][y].layers[GAS] != NOTHING
-             && (tileCatalog[pmap[x][y].layers[GAS]].flags & T_IS_FLAMMABLE))
-            || theItem->kind == POTION_INCINERATION);
-
-    if (fireErasedKind && !potionTable[theItem->kind].identified) {
-        // Contents lost to the flame: reveal only the volatility (polarity), never the kind, and only if
-        // the player perceives the burst. The cloud was still spawned above (the explosion); we just don't
-        // name it.
-        if (playerCanSee(x, y)) {
-            const boolean polarityWasKnown = potionTable[theItem->kind].magicPolarityRevealed;
-            detectMagicOnItem(theItem); // reveals the KIND's polarity (persists across the run; not a full ID)
-            if (!polarityWasKnown) {
-                tryIdentifyLastItemKinds(HAS_INTRINSIC_POLARITY);
-                const boolean benevolent = (itemMagicPolarity(theItem) == MAGIC_POLARITY_BENEVOLENT);
-                messageWithColor(benevolent
-                    ? "the volatile flask bursts into flame -- you sense its contents were benevolent."
-                    : "the volatile flask bursts into flame -- you sense its contents were malevolent.",
-                    (benevolent ? &goodMessageColor : &badMessageColor), 0);
-            } else {
-                message("the volatile flask bursts into flame.", 0);
-            }
-        }
-    } else {
-        if (shatterMsg) {
-            message(shatterMsg, 0);
-        }
-        autoIdentify(theItem);
-    }
-    refreshDungeonCell((pos){ x, y });
-    return true;
-}
-
-// iOS port (iBrogue): the empty bottle (POTION_DETECT_MAGIC slot) captures a dungeon element and
-// becomes the matching, already-identified potion. Shared by the stand-in capture (Time.c) and the
-// bolt capture (updateBolt). Prints the supplied flavor line, then auto-identifies the new kind so
-// any matching unidentified potions in the pack become known too. Returns true if the bottle filled.
-boolean fillEmptyBottle(item *bottle, short newPotionKind, const char *flavorText) {
-    if (!bottle || !(bottle->category & POTION) || bottle->kind != POTION_DETECT_MAGIC) {
-        return false;
-    }
-    bottle->kind = newPotionKind;
-    // iOS port (iBrogue): a captured potion is real and known now, so un-hide its kind (matters for wort,
-    // which is producible by capture even in runs where its themed set is otherwise absent).
-    if (newPotionKind >= 0 && newPotionKind < (short)(sizeof(potionAbsentThisSeed) / sizeof(potionAbsentThisSeed[0]))) {
-        potionAbsentThisSeed[newPotionKind] = false;
-    }
-    if (flavorText) {
-        messageWithColor(flavorText, &itemMessageColor, 0);
-    }
-    autoIdentify(bottle); // identify the new kind + fold matching pack potions into the known count
-    return true;
-}
-
-// iOS port (iBrogue): maps the catchable gas/liquid on a tile to the potion an empty bottle becomes
-// when applied there. Returns the potion kind (and sets *flavorText) if the tile holds a catchable
-// element, else -1. Used by the empty-bottle apply path in drinkPotion.
-static short emptyBottleCaptureKindForTile(short x, short y, const char **flavorText) {
-    const pos loc = (pos){ x, y };
-    // empty-bottle v2 precedence (see docs/design/empty-bottle-v2.md): GAS first -- it's in the air
-    // around you and the most perishable, so grab it before it dissipates. Then, if levitating, the
-    // float-only skim targets (lava/chasm); otherwise the standing SURFACE pass beats the LIQUID
-    // pass (GAS > SURFACE > LIQUID). Each branch sets *flavorText and returns a potion kind, else -1.
-    if (pmap[x][y].layers[GAS] != NOTHING && pmap[x][y].volume > 0) {
-        switch (pmap[x][y].layers[GAS]) {
-            case POISON_GAS:
-                *flavorText = "acrid purple vapor curls into the bottle and stains the glass.";
-                return POTION_POISON;
-            case CONFUSION_GAS:
-                *flavorText = "a shifting iridescent haze pours into the bottle until your eyes swim.";
-                return POTION_CONFUSION;
-            case PARALYSIS_GAS:
-                *flavorText = "a sluggish grey gas seeps into the bottle and goes still.";
-                return POTION_PARALYSIS;
-            case ROT_GAS:
-                *flavorText = "fetid spores drift into the bottle, already furring the glass with lichen.";
-                return POTION_LICHEN;
-            case STENCH_SMOKE_GAS:
-                *flavorText = "a reeking smoke coils into the bottle and curdles there.";
-                return POTION_VOMIT;
-            case METHANE_GAS:
-                *flavorText = "explosive swamp gas hisses into the bottle under pressure.";
-                return POTION_INCINERATION;
-            case STEAM:
-                *flavorText = "scalding steam fogs the glass as it crowds into the bottle.";
-                return POTION_STEAM;
-            case DARKNESS_CLOUD:
-                *flavorText = "the bottle swallows a wisp of darkness; light bends around the stopper.";
-                return POTION_DARKNESS;
-            case HEALING_CLOUD:
-                // iOS port (iBrogue): capturing wort always yields the wort cloud potion (even in runs
-                // where its themed set is otherwise absent); fillEmptyBottle un-hides the kind.
-                *flavorText = "luminous wort spores swirl into the bottle and settle into a glowing draught.";
-                return POTION_WORT;
-            default:
-                break;
-        }
-    }
-
-    // Levitation skim: hazards you can't survive on foot, captured only while floating over them.
-    // Floating means you aren't touching the floor, so no standing surface/liquid capture applies.
-    if (player.status[STATUS_LEVITATING]) {
-        if (cellHasTerrainFlag(loc, T_LAVA_INSTA_DEATH)) {
-            *flavorText = "you skim the bottle across the molten surface and it fills with fire.";
-            return POTION_INCINERATION;
-        }
-        if (cellHasTerrainFlag(loc, T_AUTO_DESCENT)) {
-            *flavorText = "you cork a breath of the empty air above the drop.";
-            return POTION_DESCENT;
-        }
-        return -1;
-    }
-
-    // Standing SURFACE pass (beats LIQUID).
-    switch (pmap[x][y].layers[SURFACE]) {
-        case EMBERS:
-            // iOS port (iBrogue): embers are the residue of fire-immune creatures (salamander,
-            // flamedancer, phoenix, ...) -- bottle the essence of a thing that can't burn.
-            *flavorText = "you scoop the dying embers into the bottle before they cool to ash.";
-            return POTION_FIRE_IMMUNITY;
-        case ACID_SPLATTER:
-            *flavorText = "hissing acid eats at the bottle as you scoop it from the floor.";
-            return POTION_ACID;
-        case SPIDERWEB:
-        case NETTING:
-            *flavorText = "you wind the clinging strands into the bottle.";
-            return POTION_WEBBING;
-        default:
-            break;
-    }
-
-    // Standing LIQUID pass.
-    if (cellHasTerrainFlag(loc, T_IS_DEEP_WATER)
-        || cellHasTerrainType(loc, SHALLOW_WATER)
-        || cellHasTerrainType(loc, FLOOD_WATER_SHALLOW)) {
-        *flavorText = "you dip the bottle until water sloshes inside.";
-        return POTION_WATER;
-    }
-    if (cellHasTerrainType(loc, ICE_DEEP) || cellHasTerrainType(loc, ICE_SHALLOW)) {
-        *flavorText = "you chip a sliver of ice into the bottle.";
-        return POTION_ICE;
-    }
-    if (cellHasTerrainType(loc, ACTIVE_BRIMSTONE) || cellHasTerrainType(loc, INERT_BRIMSTONE)) {
-        *flavorText = "you scrape smoldering brimstone into the bottle.";
-        return POTION_INCINERATION;
-    }
-    return -1;
-}
-
-// iOS port (iBrogue): empty-bottle v2 contextual capture hint. While carrying an empty bottle, name
-// the exact potion the tile underfoot would yield (or, if levitating, the hazard below) -- once per
-// capture kind per game, so it never nags. Pure messaging keyed off the same capture mapping used to
-// actually fill the bottle, so the hint and the result can never drift apart. No RNG and no state
-// beyond the per-kind hinted bitmask, so it's replay-safe. Called from playerTurnEnded.
-void showEmptyBottleCaptureHint(void) {
-    boolean carryingEmptyBottle = false;
-    for (item *theItem = packItems->nextItem; theItem != NULL; theItem = theItem->nextItem) {
-        if ((theItem->category & POTION) && theItem->kind == POTION_DETECT_MAGIC) {
-            carryingEmptyBottle = true;
-            break;
-        }
-    }
-    if (!carryingEmptyBottle) {
-        return;
-    }
-    const char *flavor = NULL;
-    short captureKind = emptyBottleCaptureKindForTile(player.loc.x, player.loc.y, &flavor);
-    if (captureKind < 0 || captureKind >= 32 || (rogue.emptyBottleHintedKinds & (1UL << captureKind))) {
-        return;
-    }
-    rogue.emptyBottleHintedKinds |= (1UL << captureKind);
-    char buf[COLS * 2];
-    sprintf(buf, "your empty bottle could capture this -- it would become a potion of %s.",
-            potionTable[captureKind].name);
-    messageWithColor(buf, &itemMessageColor, 0);
-}
-
-// iOS port (iBrogue): thrown good potions apply their effect to the struck creature (helper defined below)
-static boolean applyPotionEffectToCreature(creature *monst, short potionKind, short magnitude);
-// iOS port (iBrogue): a thrown potion of detect magic senses floor items instead of pack items (defined below near quaffDetectMagic)
-static void throwDetectMagicOnFloor(void);
-
-// iOS port (iBrogue): detonate a dropped bad/cloud potion lying at (x,y), exactly as a bolt's detonation
-// does -- spawn the potion's shatter signature (gas cloud / terrain burst) and remove the flask. Used by
-// thrown incendiary darts (whose own blast then ignites the flammable cloud, like a fire bolt) and thrown
-// darts/javelins (which leave the cloud unignited, like a lightning bolt). Mirrors the remove/delete the
-// bolt hook does after shatterPotionAtLoc. Returns true if a potion detonated; good potions (no shatter
-// signature) and the empty bottle are left untouched (a dart isn't a bolt, so it can't capture).
-static boolean detonateFloorPotionAt(short x, short y, boolean fiery) {
-    item *floorPotion = itemAtLoc((pos){ x, y });
-    if (floorPotion && (floorPotion->category & POTION) && shatterPotionAtLoc(floorPotion, x, y, fiery)) {
-        removeItemFromChain(floorPotion, floorItems);
-        deleteItem(floorPotion);
-        pmap[x][y].flags &= ~(HAS_ITEM | ITEM_DETECTED);
-        return true;
-    }
-    return false;
-}
-
 static void throwItem(item *theItem, creature *thrower, pos targetLoc, short maxDistance) {
     short i, numCells;
     creature *monst = NULL;
@@ -7006,103 +6203,57 @@ static void throwItem(item *theItem, creature *thrower, pos targetLoc, short max
         }
     }
 
-    // iOS port (iBrogue): a potion lobbed INTO deep water doesn't shatter -- it bobs on the surface and
-    // rides the current to shore via the game's own item drift (the T_MOVES_ITEMS sweep in
-    // updateFloorItems), so you can wade out and recover it rather than wasting it. Only when it actually
-    // lands on open water: a potion that strikes a creature or a wall over the water still shatters there.
-    if ((theItem->category & POTION)
-        && !hitSomethingSolid
-        && !(pmap[x][y].flags & (HAS_MONSTER | HAS_PLAYER))
-        && cellHasTerrainFlag((pos){ x, y }, T_IS_DEEP_WATER)) {
-
-        if (playerCanSee(x, y)) {
-            message("the flask splashes into the water and bobs away on the current.", 0);
-        }
-        pos dropLoc;
-        getQualifyingLocNear(&dropLoc, (pos){ x, y }, true, 0, (T_OBSTRUCTS_ITEMS | T_OBSTRUCTS_PASSABILITY), (HAS_ITEM), false, false);
-        placeItemAt(theItem, dropLoc);
-        refreshDungeonCell(dropLoc);
-        return;
-    }
-
     if ((theItem->category & POTION) && (hitSomethingSolid || !cellHasTerrainFlag((pos){ x, y }, T_AUTO_DESCENT))) {
-        // iOS port (iBrogue): a thrown good potion applies its effect to the struck creature, and a
-        // visible tell auto-identifies it. Effect-always / tell-gated; falls through to the existing
-        // bad-potion shatter / harmless-splash paths below when there's no tell.
-        creature *struck = (pmap[x][y].flags & (HAS_MONSTER | HAS_PLAYER)) ? monsterAtLoc((pos){ x, y }) : NULL;
-        short potionMag = potionTable[theItem->kind].range.upperBound; // fixed magnitude (good potions: lo==hi)
-        // iOS port (iBrogue): a thrown potion of detect magic turns its insight OUTWARD -- instead of
-        // reading items in your pack (the drink), it senses 1-2 random undiscovered magic items lying on
-        // the dungeon floor, revealing their polarity (and location) on the map. Fires wherever it lands
-        // (creature or bare ground), then auto-IDs and is consumed.
-        if (theItem->kind == POTION_DETECT_MAGIC2) {
-            throwDetectMagicOnFloor();
-            autoIdentify(theItem);
-            refreshDungeonCell((pos){ x, y });
-            deleteItem(theItem);
-            return;
-        }
-        // iOS port (iBrogue): a thrown potion of life bursts into a healing-spore cloud (its signature)
-        // and IDs unconditionally on shatter, like the gas potions. A direct hit also gets the instant
-        // panacea heal from the helper; the cloud adds the lingering area heal.
-        if (theItem->kind == POTION_LIFE) {
-            if (struck) {
-                applyPotionEffectToCreature(struck, POTION_LIFE, potionMag);
+        if (theItem->kind == POTION_CONFUSION || theItem->kind == POTION_POISON
+            || theItem->kind == POTION_PARALYSIS || theItem->kind == POTION_INCINERATION
+            || theItem->kind == POTION_DARKNESS || theItem->kind == POTION_LICHEN
+            || theItem->kind == POTION_DESCENT) {
+            switch (theItem->kind) {
+                case POTION_POISON:
+                    strcpy(buf, "the flask shatters and a deadly purple cloud billows out!");
+                    spawnDungeonFeature(x, y, &dungeonFeatureCatalog[DF_POISON_GAS_CLOUD_POTION], true, false);
+                    message(buf, 0);
+                    break;
+                case POTION_CONFUSION:
+                    strcpy(buf, "the flask shatters and a multi-hued cloud billows out!");
+                    spawnDungeonFeature(x, y, &dungeonFeatureCatalog[DF_CONFUSION_GAS_CLOUD_POTION], true, false);
+                    message(buf, 0);
+                    break;
+                case POTION_PARALYSIS:
+                    strcpy(buf, "the flask shatters and a cloud of pink gas billows out!");
+                    spawnDungeonFeature(x, y, &dungeonFeatureCatalog[DF_PARALYSIS_GAS_CLOUD_POTION], true, false);
+                    message(buf, 0);
+                    break;
+                case POTION_INCINERATION:
+                    strcpy(buf, "the flask shatters and its contents burst violently into flame!");
+                    message(buf, 0);
+                    spawnDungeonFeature(x, y, &dungeonFeatureCatalog[DF_INCINERATION_POTION], true, false);
+                    break;
+                case POTION_DARKNESS:
+                    strcpy(buf, "the flask shatters and the lights in the area start fading.");
+                    spawnDungeonFeature(x, y, &dungeonFeatureCatalog[DF_DARKNESS_POTION], true, false);
+                    message(buf, 0);
+                    break;
+                case POTION_DESCENT:
+                    strcpy(buf, "as the flask shatters, the ground vanishes!");
+                    message(buf, 0);
+                    spawnDungeonFeature(x, y, &dungeonFeatureCatalog[DF_HOLE_POTION], true, false);
+                    break;
+                case POTION_LICHEN:
+                    strcpy(buf, "the flask shatters and deadly spores spill out!");
+                    message(buf, 0);
+                    spawnDungeonFeature(x, y, &dungeonFeatureCatalog[DF_LICHEN_PLANTED], true, false);
+                    break;
             }
-            spawnDungeonFeature(x, y, &dungeonFeatureCatalog[DF_LIFE_POTION_CLOUD], true, false);
-            message("the flask shatters and a cloud of healing spores bursts out!", 0);
-            autoIdentify(theItem);
-            refreshDungeonCell((pos){ x, y });
-            deleteItem(theItem);
-            return;
-        }
-        // iOS port (iBrogue): a thrown venom potion poisons the creature it strikes; on empty ground it
-        // shatters harmlessly (venom has no shatterPotionAtLoc signature, so it falls through below).
-        if (theItem->kind == POTION_VENOM && struck) {
-            addPoison(struck, potionMag, 1);
-            monsterName(buf3, struck, true);
-            sprintf(buf, "the flask shatters and douses %s in searing venom!", buf3);
-            message(buf, 0);
-            autoIdentify(theItem);
-            refreshDungeonCell((pos){ x, y });
-            deleteItem(theItem);
-            return;
-        }
-        // iOS port (iBrogue): empty-bottle v2 potion of acid -- a direct hit corrodes the creature
-        // (weaken: defense -25/pt plus reduced accuracy & damage) and leaves an acid splatter. On empty
-        // ground it falls through to shatterPotionAtLoc (splatter only).
-        if (theItem->kind == POTION_ACID && struck) {
-            weaken(struck, potionMag);
-            spawnDungeonFeature(x, y, &dungeonFeatureCatalog[DF_ACID_BLOOD], true, false);
-            monsterName(buf3, struck, true);
-            sprintf(buf, "the flask shatters and acid sears %s!", buf3);
-            message(buf, 0);
-            autoIdentify(theItem);
-            refreshDungeonCell((pos){ x, y });
-            deleteItem(theItem);
-            return;
-        }
-        // iOS port (iBrogue): empty-bottle v2 potion of ice now bursts into a freezing CLOUD rather than
-        // a single-target hit -- handled (for any target, struck or empty ground, and for the
-        // bolt-detonation trap) by shatterPotionAtLoc below.
-        // iOS port (iBrogue): gate on actual benevolent polarity rather than a kind-index boundary, since
-        // good potions are no longer contiguous at the front of the enum. Good potions with no creature
-        // effect (e.g. honey/wort/detect-magic/empty bottle) return false here and fall through to shatter.
-        if (struck
-            && potionTable[theItem->kind].magicPolarity == MAGIC_POLARITY_BENEVOLENT
-            && applyPotionEffectToCreature(struck, theItem->kind, potionMag)) {
 
             autoIdentify(theItem);
+
             refreshDungeonCell((pos){ x, y });
-            deleteItem(theItem);
-            return;
-        }
-        // iOS port (iBrogue): bad/cloud-potion shatter extracted to shatterPotionAtLoc (shared with the
-        // bolt-detonation hook in updateBolt). Returns true (signature spawned + flask auto-identified)
-        // for the cloud/explosion kinds and hallucination's fungal forest; otherwise falls through to the
-        // harmless-splash branch.
-        if (shatterPotionAtLoc(theItem, x, y, false)) { // hand-thrown: deliberate use -> full ID (not fiery)
-            // bad/cloud potion: its shatter signature was spawned and the flask auto-identified
+
+            //if (pmap[x][y].flags & (HAS_MONSTER | HAS_PLAYER)) {
+            //  monst = monsterAtLoc((pos){ x, y });
+            //  applyInstantTileEffectsToCreature(monst);
+            //}
         } else {
             if (cellHasTerrainFlag((pos){ x, y }, T_OBSTRUCTS_PASSABILITY)) {
                 strcpy(buf2, "against");
@@ -7114,27 +6265,24 @@ static void throwItem(item *theItem, creature *thrower, pos targetLoc, short max
             sprintf(buf, "the flask shatters and %s liquid splashes harmlessly %s %s.",
                     potionTable[theItem->kind].flavor, buf2, tileText(x, y));
             message(buf, 0);
+            // hallucination is the only malevolent potion that splashes harmlessly when thrown
+            if (theItem->kind == POTION_HALLUCINATION) {
+                if (theItem->flags & ITEM_MAGIC_DETECTED
+                    || (magicPolarityRevealedItemKindCount(theItem->category, 1) == gameConst->numberGoodPotionKinds)) {
+                    autoIdentify(theItem);
+                }
+            }
         }
         deleteItem(theItem);
         return; // potions disappear when they break
     }
     if ((theItem->category & WEAPON) && theItem->kind == INCENDIARY_DART) {
-        // iOS port (iBrogue): an incendiary dart detonates a dropped bad/cloud potion like a FIRE bolt --
-        // the potion's cloud spawns first, then the dart's own blast (DF_DART_EXPLOSION, fire) ignites it
-        // for a violent burst.
-        detonateFloorPotionAt(x, y, true); // fiery: the dart's blast ignites the cloud (fire-bolt style)
         spawnDungeonFeature(x, y, &dungeonFeatureCatalog[DF_DART_EXPLOSION], true, false);
         if (pmap[x][y].flags & (HAS_MONSTER | HAS_PLAYER)) {
             exposeCreatureToFire(monsterAtLoc((pos){ x, y }));
         }
         deleteItem(theItem);
         return;
-    }
-    // iOS port (iBrogue): a thrown dart or javelin detonates a dropped bad/cloud potion like a LIGHTNING
-    // bolt -- the cloud blooms but nothing ignites it (no fire is applied here). The weapon then drops as
-    // usual below.
-    if ((theItem->category & WEAPON) && (theItem->kind == DART || theItem->kind == JAVELIN)) {
-        detonateFloorPotionAt(x, y, false); // non-fiery: cloud blooms unignited (lightning-bolt style)
     }
     pos dropLoc;
     getQualifyingLocNear(&dropLoc, (pos){ x, y }, true, 0, (T_OBSTRUCTS_ITEMS | T_OBSTRUCTS_PASSABILITY), (HAS_ITEM), false, false);
@@ -7576,7 +6724,6 @@ boolean eat(item *theItem, boolean recordCommands) {
 
     consumePackItem(theItem);
 
-    gainScrollInsightFromEating(); // iOS port (iBrogue): a safe meal reveals one unknown scroll's polarity
     return true;
 }
 
@@ -8103,589 +7250,8 @@ static void detectMagicOnItem(item *theItem) {
     }
 }
 
-// iOS port (iBrogue): "is there nothing left to learn about this item's identity?" The per-item
-// ITEM_IDENTIFIED flag alone is NOT a reliable answer for flavored consumables: once a SCROLL or POTION
-// *kind* is identified, every copy of that kind is fully known (there is no per-item enchant to learn),
-// yet identify() only stamps the one instance it is handed -- so a copy you didn't personally identify
-// keeps a clear instance flag while its kind table says "identified". Testing only the instance flag let
-// the insight/detect channels re-"identify" an already-known scroll or potion (the spurious "finally
-// identify" message). Rings, wands and staffs still carry a per-item enchant/charge count, so for them
-// kind-knowledge is not full knowledge and only the instance flag counts here.
-static boolean itemIdentityFullyKnown(const item *theItem) {
-    if (theItem->flags & ITEM_IDENTIFIED) {
-        return true;
-    }
-    if (theItem->category & (SCROLL | POTION)) {
-        itemTable *table = tableForItemCategory(theItem->category);
-        return table && table[theItem->kind].identified;
-    }
-    return false;
-}
-
-// iOS port (iBrogue): witnessing a flammable item consumed by fire reveals its good/bad POLARITY but
-// not its kind -- the flames erase the tell, exactly like the potion fire-erasure case in
-// shatterPotionAtLoc. Scrolls are the only ITEM_FLAMMABLE item, so this is the scroll-side analogue of
-// throwing/detonating a potion: you don't burn a scroll on purpose, but when one is caught in fire (a
-// trap, an incineration burst, flaming gas) the moment of destruction still leaks its nature. Called
-// from burnItem (Time.c) just before the instance is freed; the caller has already confirmed the player
-// can see the spot. detectMagicOnItem records the reveal at the KIND level, so it persists across the
-// run even though the item itself is about to be deleted. Deterministic (no RNG); returns true (and
-// prints the aura line) only when a previously-unknown polarity was glimpsed.
-boolean revealPolarityOnFieryDestruction(item *theItem) {
-    if (!(theItem->category & HAS_INTRINSIC_POLARITY)
-        || itemIdentityFullyKnown(theItem)
-        || itemMagicPolarity(theItem) == MAGIC_POLARITY_NEUTRAL) {
-
-        return false; // nothing to glimpse: no intrinsic polarity, already fully known, or neutral
-    }
-    itemTable *table = tableForItemCategory(theItem->category);
-    const boolean polarityWasKnown = table[theItem->kind].magicPolarityRevealed;
-    detectMagicOnItem(theItem); // reveals (and persists) the KIND's polarity; not a full ID
-    if (polarityWasKnown) {
-        return false; // already sensed this kind's aura; the fire told us nothing new
-    }
-    tryIdentifyLastItemKinds(HAS_INTRINSIC_POLARITY);
-    const boolean benevolent = (itemMagicPolarity(theItem) == MAGIC_POLARITY_BENEVOLENT);
-    messageWithColor(benevolent
-        ? "as it burns you glimpse a benevolent aura curling in the smoke -- its magic was good."
-        : "as it burns you glimpse a malevolent aura curling in the smoke -- its magic was ill.",
-        (benevolent ? &goodMessageColor : &badMessageColor), 0);
-    return true;
-}
-
-// iOS port (iBrogue): a freed captive reacts to the magic it senses in your pack, revealing the good/bad
-// POLARITY (never the kind) of one carried item whose aura you don't yet know. A monkey -- a thief at
-// heart -- is drawn to your best loot and points out a BENEVOLENT item; every other rescued creature
-// recoils from the most threatening thing you carry and points out a MALEVOLENT one. The two signs can
-// never collide on the same item, so the monkey's covet and the generic recoil are complementary tells.
-// Polarity reveal only -- no full ID, no escalation -- to keep the "it eyes your satchel" flavor honest.
-// Deterministic: itemMagicPolarity is only ever +1/0/-1 (no finer gradient to sort on), so it reveals the
-// first eligible item in pack order; no RNG. Silent no-op when nothing of that sign has a still-unknown
-// aura (acceptable -- especially the malevolent recoil when you carry no curses). Called from freeCaptive.
-void captiveReactToPack(creature *freed) {
-    const int sensedPolarity = (freed->info.monsterID == MK_MONKEY)
-        ? MAGIC_POLARITY_BENEVOLENT : MAGIC_POLARITY_MALEVOLENT;
-    for (item *theItem = packItems->nextItem; theItem != NULL; theItem = theItem->nextItem) {
-        if (!(theItem->category & HAS_INTRINSIC_POLARITY)
-            || itemIdentityFullyKnown(theItem)
-            || itemMagicPolarity(theItem) != sensedPolarity
-            || itemMagicPolarityIsKnown(theItem, sensedPolarity)) {
-
-            continue; // no intrinsic polarity, already fully known, wrong sign, or aura already sensed
-        }
-        detectMagicOnItem(theItem); // reveal (and persist) the kind's polarity; not a full ID
-        tryIdentifyLastItemKinds(HAS_INTRINSIC_POLARITY);
-
-        char monstName[COLS], theName[COLS * 3], buf[COLS * 3];
-        monsterName(monstName, freed, false);
-        itemName(theItem, theName, false, true, NULL); // unidentified name -- we revealed polarity, not kind
-        if (sensedPolarity == MAGIC_POLARITY_BENEVOLENT) {
-            sprintf(buf, "the %s eyes %s in your pack covetously.", monstName, theName);
-            messageWithColor(buf, &goodMessageColor, 0);
-        } else {
-            sprintf(buf, "the %s shies warily from %s in your pack.", monstName, theName);
-            messageWithColor(buf, &badMessageColor, 0);
-        }
-        return; // one tell per rescue
-    }
-}
-
-// iOS port (iBrogue): act on one polarity-bearing item for an insight effect — reveal its good/bad
-// polarity if still hidden, or fully identify it if its polarity is already known. Returns true if it
-// was a full identification. Shared by resting/eating (applyPolarityInsightToRandomItem) and the potion
-// of detect magic (quaffDetectMagic).
-static boolean revealOrIdentifyPolarityItem(item *theItem) {
-    const boolean polarityKnown = itemMagicPolarityIsKnown(theItem, MAGIC_POLARITY_BENEVOLENT)
-                               || itemMagicPolarityIsKnown(theItem, MAGIC_POLARITY_MALEVOLENT);
-    if (polarityKnown) {
-        identify(theItem); // already sensed -> escalate to a full ID
-    } else {
-        detectMagicOnItem(theItem);
-    }
-    return polarityKnown;
-}
-
-// iOS port (iBrogue): shared selection for the passive insight events (resting, eating). Picks a RANDOM
-// eligible pack item -- unidentified, non-neutral, polarity-bearing, matching categoryMask -- and either
-// reveals its good/bad polarity (if still hidden) or, if its polarity is already known, fully identifies
-// it. The pool deliberately INCLUDES polarity-known items, so insight escalates "sensed" items into full
-// IDs. favorPotions restricts the pool to potions whenever any eligible potion exists (resting favors
-// potions first). Sets *outFullID; returns the affected item, or NULL if nothing was eligible. The random
-// pick is a substantive, action-triggered draw, reproduced identically on replay.
-static item *applyPolarityInsightToRandomItem(unsigned short categoryMask, boolean favorPotions, boolean *outFullID) {
-    item *eligible[32];
-    int count = 0;
-    boolean anyPotion = false;
-    for (item *it = packItems->nextItem; it != NULL; it = it->nextItem) {
-        if ((it->category & categoryMask)
-            && (it->category & HAS_INTRINSIC_POLARITY)
-            && !itemIdentityFullyKnown(it)
-            && itemMagicPolarity(it) != MAGIC_POLARITY_NEUTRAL
-            && (it->category & POTION)) {
-            anyPotion = true;
-            break;
-        }
-    }
-    const boolean potionsOnly = (favorPotions && anyPotion);
-    for (item *it = packItems->nextItem;
-         it != NULL && count < (int)(sizeof(eligible) / sizeof(eligible[0]));
-         it = it->nextItem) {
-        if (!(it->category & categoryMask)
-            || !(it->category & HAS_INTRINSIC_POLARITY)
-            || itemIdentityFullyKnown(it)
-            || itemMagicPolarity(it) == MAGIC_POLARITY_NEUTRAL
-            || (potionsOnly && !(it->category & POTION))) {
-            continue;
-        }
-        eligible[count++] = it;
-    }
-    if (count == 0) {
-        return NULL;
-    }
-    item *target = eligible[rand_range(0, count - 1)];
-    const boolean polarityKnown = revealOrIdentifyPolarityItem(target);
-    tryIdentifyLastItemKinds(HAS_INTRINSIC_POLARITY);
-    if (outFullID) {
-        *outFullID = polarityKnown;
-    }
-    return target;
-}
-
-// iOS port (iBrogue): passive polarity insight while resting. Each rested turn accrues toward a
-// threshold that escalates with the number of reveals already earned this game (a flat step), so early
-// reveals come quickly and later ones cost more rest. On reaching the threshold, a random eligible pack
-// item (potions favored first) is revealed or, if already sensed, fully identified -- see
-// applyPolarityInsightToRandomItem. The random pick is action-triggered, reconstructed identically on
-// replay (Brogue saves are recordings; see the call site in playerTurnEnded).
-//
-// Schedule (step = 100): reveal N needs 100*N consecutive rested turns since the last reveal, i.e.
-// intervals 100, 200, 300, 400, ... (cumulative 100, 300, 600, 1000, ...). Keyed off reveals earned, not
-// kinds known, so the always-identified empty bottle / hidden themed-set potions can't skew the pacing.
-//
-// A worn ring of wisdom hastens this: ~10% faster per ring level (rogue.wisdomBonus, the effective
-// enchant of equipped wisdom rings). Cursed (negative) wisdom slows it. Clamped so it speeds up by at
-// most 80% and slows by at most 2x, and the threshold never drops below 1 rested turn.
-#define REST_INSIGHT_STEP_TURNS   100
-
-void gainPolarityInsightFromRest(void) {
-    rogue.restTurnsSinceInsight++;
-    unsigned long revealsSoFar = 0; // total polarity reveals earned by resting this game
-    for (short d = 1; d <= rogue.deepestLevel; d++) {
-        revealsSoFar += levels[d].restRevealsOnLevel;
-    }
-    unsigned long threshold = (unsigned long)REST_INSIGHT_STEP_TURNS * (revealsSoFar + 1);
-    // iOS port (iBrogue): ring of wisdom reduces the rest-insight threshold by ~10% per ring level.
-    long reductionPct = 10L * rogue.wisdomBonus;
-    if (reductionPct > 80)   reductionPct = 80;   // never faster than 20% of base
-    if (reductionPct < -100) reductionPct = -100; // never slower than 2x base
-    threshold = max(1UL, threshold * (unsigned long)(100 - reductionPct) / 100);
-    if (rogue.restTurnsSinceInsight < threshold) {
-        return;
-    }
-
-    // Reveal/identify a random eligible pack item, favoring potions first.
-    boolean fullID = false;
-    item *target = applyPolarityInsightToRandomItem(HAS_INTRINSIC_POLARITY, true /* favor potions */, &fullID);
-    if (target == NULL) {
-        return; // nothing eligible yet; hold the milestone until an unknown item appears
-    }
-
-    char theName[COLS * 3], buf[COLS * 3];
-    if (fullID) {
-        itemName(target, theName, true, true, NULL);
-        sprintf(buf, "while resting, you finally identify %s.", theName);
-        messageWithColor(buf, &itemMessageColor, 0);
-    } else {
-        const boolean benevolent = (itemMagicPolarity(target) == MAGIC_POLARITY_BENEVOLENT);
-        itemName(target, theName, false, true, NULL);
-        sprintf(buf, "while resting, you sense the %s aura of %s.",
-                (benevolent ? "benevolent" : "malevolent"), theName);
-        messageWithColor(buf, (benevolent ? &goodMessageColor : &badMessageColor), 0);
-    }
-    levels[rogue.depthLevel].restRevealsOnLevel++; // iOS port (iBrogue): debug death-recap tally (reveal or full ID)
-
-    rogue.restTurnsSinceInsight = 0;
-    rogue.disturbed = true; // interrupt any auto-rest so the discovery is noticed
-}
-
-// iOS port (iBrogue): eating a meal with nothing hunting you is a calm moment to study a SCROLL — it
-// reveals the good/bad polarity of a random still-unknown scroll, or fully identifies a random scroll
-// whose polarity you already know (scrolls only; see applyPolarityInsightToRandomItem). Gated on no
-// creature in the (Hunting) state. The random pick is action-triggered (called from eat() on a successful
-// meal), reconstructed identically on replay.
-void gainScrollInsightFromEating(void) {
-    // Only when nothing is hunting you — you need a calm moment to study.
-    for (creatureIterator it = iterateCreatures(monsters); hasNextCreature(it);) {
-        if (nextCreature(&it)->creatureState == MONSTER_TRACKING_SCENT) {
-            return;
-        }
-    }
-
-    boolean fullID = false;
-    item *target = applyPolarityInsightToRandomItem(SCROLL, false /* scrolls only, no potion favoring */, &fullID);
-    if (target == NULL) {
-        return; // no eligible scroll to study
-    }
-
-    if (fullID) {
-        char theName[COLS * 3], buf[COLS * 3];
-        itemName(target, theName, true, true, NULL);
-        sprintf(buf, "you study a scroll intently while eating, and finally identify %s.", theName);
-        messageWithColor(buf, &itemMessageColor, 0);
-    } else {
-        const boolean benevolent = (itemMagicPolarity(target) == MAGIC_POLARITY_BENEVOLENT);
-        messageWithColor(benevolent
-                         ? "you study a scroll intently while eating; it radiates a benevolent aura."
-                         : "you study a scroll intently while eating; it radiates a malevolent aura.",
-                         (benevolent ? &goodMessageColor : &badMessageColor), 0);
-    }
-}
-
-// iOS port (iBrogue): the returning potion of detect magic. Acts on 1-2 (random) unidentified,
-// polarity-bearing items in the pack (excluding the potion being drunk), chosen at random -- revealing
-// each one's good/bad polarity, or fully identifying it if its polarity is already known (same
-// reveal-or-escalate rule as resting/eating). A weaker, fleeting version of the old whole-pack reveal.
-// The random pick is a substantive action-triggered draw, reproduced identically on replay.
-static void quaffDetectMagic(item *exclude) {
-    item *eligible[32];
-    int count = 0;
-    for (item *theItem = packItems->nextItem; theItem != NULL; theItem = theItem->nextItem) {
-        if (theItem != exclude
-            && (theItem->category & HAS_INTRINSIC_POLARITY)
-            && !itemIdentityFullyKnown(theItem)
-            && itemMagicPolarity(theItem) != MAGIC_POLARITY_NEUTRAL
-            && count < (int)(sizeof(eligible) / sizeof(eligible[0]))) {
-
-            eligible[count++] = theItem;
-        }
-    }
-    if (count == 0) {
-        message("you sense no magic left to discern among your possessions.", 0);
-        return;
-    }
-    // iOS port (iBrogue): a worn ring of wisdom widens the spread, from 1-2 to 1-(2 + ring level).
-    const int maxReveals = max(1, 2 + (int)rogue.wisdomBonus);
-    const int toReveal = min(rand_range(1, maxReveals), count);
-    boolean wasFullID[32] = { false }; // sized to match `eligible`; toReveal <= count <= 32
-    // Partial Fisher-Yates: pick `toReveal` distinct eligible items; reveal each one's polarity, or fully
-    // identify it if already sensed.
-    for (int i = 0; i < toReveal; i++) {
-        const int j = rand_range(i, count - 1);
-        item *tmp = eligible[i]; eligible[i] = eligible[j]; eligible[j] = tmp;
-        wasFullID[i] = revealOrIdentifyPolarityItem(eligible[i]);
-    }
-    tryIdentifyLastItemKinds(HAS_INTRINSIC_POLARITY);
-
-    char theName[COLS * 3], buf[COLS * 3];
-    for (int i = 0; i < toReveal; i++) {
-        if (wasFullID[i]) {
-            itemName(eligible[i], theName, true, true, NULL);
-            sprintf(buf, "you recognize %s.", theName);
-            messageWithColor(buf, &itemMessageColor, 0);
-        } else {
-            const boolean benevolent = (itemMagicPolarity(eligible[i]) == MAGIC_POLARITY_BENEVOLENT);
-            itemName(eligible[i], theName, false, true, NULL);
-            sprintf(buf, "you sense the %s aura of %s.", (benevolent ? "benevolent" : "malevolent"), theName);
-            messageWithColor(buf, (benevolent ? &goodMessageColor : &badMessageColor), 0);
-        }
-    }
-}
-
-// iOS port (iBrogue): a THROWN potion of detect magic turns its insight outward, onto the dungeon
-// floor, rather than the pack (quaffDetectMagic). It senses the same 1-2 base count (widened by a worn
-// ring of wisdom, like the drink) of random undiscovered, polarity-bearing items lying on this level,
-// revealing each one's good/bad polarity AND its location on the map (the ITEM_DETECTED cell flag, so
-// the aura glyph shows even for items you haven't found yet) -- the classic "detect magic on the level"
-// feel. Items already identified or already magic-detected are skipped. Action-triggered RNG (the throw),
-// reproduced identically on replay; mirrors quaffDetectMagic's draws.
-static void throwDetectMagicOnFloor(void) {
-    item *eligible[64];
-    int count = 0;
-    for (item *theItem = floorItems->nextItem; theItem != NULL; theItem = theItem->nextItem) {
-        if ((theItem->category & HAS_INTRINSIC_POLARITY)
-            && !itemIdentityFullyKnown(theItem)
-            && !(theItem->flags & ITEM_MAGIC_DETECTED)
-            && itemMagicPolarity(theItem) != MAGIC_POLARITY_NEUTRAL
-            && count < (int)(sizeof(eligible) / sizeof(eligible[0]))) {
-
-            eligible[count++] = theItem;
-        }
-    }
-    if (count == 0) {
-        message("the flask shatters, but no undiscovered magic stirs anywhere on this level.", 0);
-        return;
-    }
-    const int maxReveals = max(1, 2 + (int)rogue.wisdomBonus); // same 1-2 base as the drink (+ ring of wisdom)
-    const int toReveal = min(rand_range(1, maxReveals), count);
-    // Partial Fisher-Yates: pick `toReveal` distinct floor items and detect each.
-    for (int i = 0; i < toReveal; i++) {
-        const int j = rand_range(i, count - 1);
-        item *tmp = eligible[i]; eligible[i] = eligible[j]; eligible[j] = tmp;
-        detectMagicOnItem(eligible[i]);
-        if (itemMagicPolarity(eligible[i])) {
-            pmapAt(eligible[i]->loc)->flags |= ITEM_DETECTED; // show the aura glyph on the map
-            refreshDungeonCell(eligible[i]->loc);
-        }
-    }
-    tryIdentifyLastItemKinds(HAS_INTRINSIC_POLARITY);
-    char buf[COLS * 2];
-    sprintf(buf, "the flask shatters in a burst of insight -- you sense the aura%s of %i hidden item%s on this level.",
-            (toReveal == 1 ? "" : "s"), toReveal, (toReveal == 1 ? "" : "s"));
-    messageWithColor(buf, &itemMessageColor, 0);
-}
-
-// iOS port (iBrogue): the altars-of-insight machine. When both linked altars hold items, reveal the item
-// on the insight altar and consume the item on the offering altar. Sacrificing an UNidentified item fully
-// identifies the insight item; paying with an identified item reveals the insight item's polarity, or (if
-// its good/bad polarity is already known) escalates to a full identification — matching the reveal-or-ID
-// rule used by resting/eating/detect magic. "Fire only if it helps": never consume the payment unless the
-// insight item would actually gain information. RNG-free.
-static boolean performInsightSacrifice(short machineNumber) {
-    item *insightItem = NULL, *paymentItem = NULL;
-    pos paymentLoc = INVALID_POS;
-
-    for (short i = 0; i < DCOLS; i++) {
-        for (short j = 0; j < DROWS; j++) {
-            if (pmap[i][j].machineNumber != machineNumber
-                || !cellHasTMFlag((pos){ i, j }, TM_INSIGHT_ACTIVATION)) {
-                continue;
-            }
-            item *theItem = itemAtLoc((pos){ i, j });
-            if (theItem == NULL) {
-                continue;
-            }
-            if (pmap[i][j].layers[DUNGEON] == INSIGHT_ALTAR_INSIGHT) {
-                insightItem = theItem;
-            } else if (pmap[i][j].layers[DUNGEON] == INSIGHT_ALTAR_PAYMENT) {
-                paymentItem = theItem;
-                paymentLoc = (pos){ i, j };
-            }
-        }
-    }
-    if (insightItem == NULL || paymentItem == NULL) {
-        return false; // need an item on both altars
-    }
-
-    char theName[COLS * 3], buf[COLS * 3];
-    if (!itemIdentityFullyKnown(paymentItem)) {
-        // Gambled an unknown offering -> fully identify the insight item.
-        if (itemIdentityFullyKnown(insightItem)) {
-            return false; // already fully known; don't waste the sacrifice
-        }
-        identify(insightItem);
-        itemName(insightItem, theName, true, true, NULL);
-        sprintf(buf, "the altar consumes your offering; the other item is revealed to be %s.", theName);
-        messageWithColor(buf, &itemMessageColor, 0);
-    } else {
-        // Paid with a known item -> reveal the insight item's polarity/aura, or (if its good/bad polarity
-        // is already known) escalate to a full identification, like resting/eating/detect magic.
-        const boolean polarityKnown = itemMagicPolarityIsKnown(insightItem, MAGIC_POLARITY_BENEVOLENT)
-                                   || itemMagicPolarityIsKnown(insightItem, MAGIC_POLARITY_MALEVOLENT);
-        if (itemIdentityFullyKnown(insightItem)
-            || ((insightItem->flags & ITEM_MAGIC_DETECTED) && !polarityKnown)) {
-            // Fully known already, or already revealed as having no good/bad polarity -> nothing to gain.
-            return false;
-        }
-        if (revealOrIdentifyPolarityItem(insightItem)) {
-            // Polarity was already known -> the altar completes the identification.
-            tryIdentifyLastItemKinds(insightItem->category);
-            itemName(insightItem, theName, true, true, NULL);
-            sprintf(buf, "the altar consumes your offering; the other item is revealed to be %s.", theName);
-            messageWithColor(buf, &itemMessageColor, 0);
-        } else {
-            tryIdentifyLastItemKinds(insightItem->category);
-            const int polarity = itemMagicPolarity(insightItem);
-            const char *aura = (polarity == MAGIC_POLARITY_BENEVOLENT) ? "a benevolent"
-                             : (polarity == MAGIC_POLARITY_MALEVOLENT) ? "a malevolent" : "no magical";
-            const color *auraColor = (polarity == MAGIC_POLARITY_BENEVOLENT) ? &goodMessageColor
-                                   : (polarity == MAGIC_POLARITY_MALEVOLENT) ? &badMessageColor : &itemMessageColor;
-            sprintf(buf, "the altar consumes your offering; you sense %s aura around the other item.", aura);
-            messageWithColor(buf, auraColor, 0);
-        }
-    }
-
-    // Consume the payment; leave the revealed item on its altar for pickup.
-    removeItemFromChain(paymentItem, floorItems);
-    pmap[paymentLoc.x][paymentLoc.y].flags &= ~(HAS_ITEM | ITEM_DETECTED);
-    deleteItem(paymentItem);
-    refreshDungeonCell(paymentLoc);
-    return true;
-}
-
-// iOS port (iBrogue): the altars-of-transference machine. When both linked altars hold items, drain the
-// donor's enchantment and add it to the recipient (additive concentration -- net enchantment is conserved),
-// then consume the donor. The recipient's enchant only ever moves up, and the donor vanishes entirely, so
-// none of swapItemToEnchantLevel's shatter cases (staff < 2, charm < 1, wand < 0) can apply. Rules:
-//   - both items must be present and swappable (same eligibility as the commutation altar);
-//   - the recipient's enchant level must be KNOWN -- otherwise stay primed (you always understand the item
-//     you are improving, and can read the result on it afterward);
-//   - sacrificing a donor with an unknown enchant is the gamble -- it might be cursed -- and the donor is
-//     identified as it is consumed so the gamble resolves visibly;
-//   - a donor whose enchant is KNOWN and non-positive is refused (pure-downside misclick guard): only the
-//     unknown donor can ever lower the recipient.
-// "Fire only if it helps" (except the deliberate unknown-donor gamble). RNG-free.
-static boolean performEnchantTransfer(short machineNumber) {
-    item *recipientItem = NULL, *donorItem = NULL;
-    pos donorLoc = INVALID_POS;
-
-    for (short i = 0; i < DCOLS; i++) {
-        for (short j = 0; j < DROWS; j++) {
-            if (pmap[i][j].machineNumber != machineNumber
-                || !cellHasTMFlag((pos){ i, j }, TM_TRANSFER_ENCHANT_ACTIVATION)) {
-                continue;
-            }
-            item *theItem = itemAtLoc((pos){ i, j });
-            if (theItem == NULL) {
-                continue;
-            }
-            if (pmap[i][j].layers[DUNGEON] == TRANSFER_ALTAR_RECIPIENT) {
-                recipientItem = theItem;
-            } else if (pmap[i][j].layers[DUNGEON] == TRANSFER_ALTAR_DONOR) {
-                donorItem = theItem;
-                donorLoc = (pos){ i, j };
-            }
-        }
-    }
-    if (recipientItem == NULL || donorItem == NULL) {
-        return false; // need an item on both altars
-    }
-    if (!itemIsSwappable(recipientItem) || !itemIsSwappable(donorItem)) {
-        return false; // only enchantable gear can take part; leave the items for the player to reclaim
-    }
-    if (!enchantLevelKnown(recipientItem)) {
-        return false; // must know the item being improved; stay primed
-    }
-    if (enchantLevelKnown(donorItem) && effectiveEnchantLevel(donorItem) <= 0) {
-        return false; // knowingly draining a +0 or cursed donor is pure downside; refuse the misclick
-    }
-
-    char donorName[COLS * 3], recipientName[COLS * 3], buf[COLS * 3];
-
-    // Resolve the gamble: reveal an unidentified donor as it is consumed, so the player learns what they
-    // sacrificed (and why the recipient changed the way it did).
-    const short delta = effectiveEnchantLevel(donorItem);
-    if (!enchantLevelKnown(donorItem)) {
-        identify(donorItem);
-    }
-    itemName(donorItem, donorName, true, true, NULL);
-
-    // A positive donor always raises the recipient. A gambled (unknown) donor can be negative, and a deep
-    // enough drop will shatter a staff/charm recipient -- predict that here, because swapItemToEnchantLevel
-    // unlinks the item when it shatters, so we must not name it afterward. (Recipients are never wands:
-    // CAN_BE_SWAPPED excludes them; only staffs and charms have a shatter floor.)
-    const short newEnchant = effectiveEnchantLevel(recipientItem) + delta;
-    const boolean recipientShatters = ((recipientItem->category & STAFF) && newEnchant < 2)
-                                   || ((recipientItem->category & CHARM) && newEnchant < 1);
-
-    if (recipientShatters) {
-        // The (negative) surge destroys the very item being empowered; swapItemToEnchantLevel emits the
-        // "shatters from the strain!" message itself.
-        sprintf(buf, "the altar consumes %s and forces its enchantment into the other item.", donorName);
-        messageWithColor(buf, &badMessageColor, 0);
-        swapItemToEnchantLevel(recipientItem, newEnchant, true);
-    } else {
-        // Add the donor's enchantment to the recipient (which stays identified afterward).
-        swapItemToEnchantLevel(recipientItem, newEnchant, true);
-        itemName(recipientItem, recipientName, true, true, NULL);
-
-        const color *resultColor = (delta > 0) ? &goodMessageColor
-                                 : (delta < 0) ? &badMessageColor : &itemMessageColor;
-        sprintf(buf, "the altar consumes %s and pours its enchantment into %s.", donorName, recipientName);
-        messageWithColor(buf, resultColor, 0);
-    }
-
-    // Consume the donor; leave the empowered recipient on its altar for pickup.
-    removeItemFromChain(donorItem, floorItems);
-    pmap[donorLoc.x][donorLoc.y].flags &= ~(HAS_ITEM | ITEM_DETECTED);
-    deleteItem(donorItem);
-    refreshDungeonCell(donorLoc);
-    return true;
-}
-
-// iOS port (iBrogue): apply a thrown good potion's effect to the creature it shatters on.
-// Returns true only when a player-visible tell was produced (drives autoIdentify). The mechanical
-// effect always applies; visibility just gates the tell + ID. Telepathy/detect-magic and bad
-// potions return false. The player is never targeted (a thrown good potion shouldn't self-buff).
-static boolean applyPotionEffectToCreature(creature *monst, short potionKind, short magnitude) {
-    char buf[COLS], mName[COLS];
-    if (monst == &player) {
-        return false;
-    }
-    boolean visible = canSeeMonster(monst); // line-of-sight or telepathy
-    monsterName(mName, monst, true);
-    switch (potionKind) {
-        case POTION_LIFE:
-            // Silent here: when thrown, the healing-spore cloud message is the tell (see throwItem).
-            heal(monst, 100, true); // full panacea; heal() prints nothing when panacea is true
-            return visible;
-        case POTION_STRENGTH:
-            // No monster strength stat, so reuse the empowerment system (the bolt/wand/altar effect):
-            // a permanent all-round combat boost + full heal. empowerMonster prints its own visible
-            // "looks stronger" tell; its only ally-specific side effect (newPowerCount talent-learning)
-            // is gated on MONSTER_ALLY elsewhere, so it's harmless on an enemy and a bonus on an ally.
-            // Skip inanimate/invulnerable targets (turrets, totems), mirroring the empowerment bolt.
-            if (monst->info.flags & (MONST_INANIMATE | MONST_INVULNERABLE)) {
-                return false;
-            }
-            empowerMonster(monst);
-            createFlare(monst->loc.x, monst->loc.y, EMPOWERMENT_LIGHT);
-            return visible;
-        case POTION_HASTE_SELF:
-            haste(monst, magnitude); // silent for monsters
-            if (visible) {
-                sprintf(buf, "%s speeds up.", mName);
-                combatMessage(buf, NULL);
-            }
-            return visible;
-        case POTION_LEVITATION:
-            monst->status[STATUS_LEVITATING] = monst->maxStatus[STATUS_LEVITATING] = magnitude;
-            if (visible) {
-                sprintf(buf, "%s floats into the air.", mName);
-                combatMessage(buf, NULL);
-            }
-            return visible;
-        case POTION_INVISIBILITY:
-            // imbueInvisibility flashes the monster and returns its own visibility-gated auto-ID.
-            return imbueInvisibility(monst, magnitude); // duration = potion magnitude, not the bolt's
-        case POTION_FIRE_IMMUNITY: {
-            boolean alreadyImmune = monst->status[STATUS_IMMUNE_TO_FIRE]
-                                    || (monst->info.flags & MONST_IMMUNE_TO_FIRE); // capture before set
-            monst->status[STATUS_IMMUNE_TO_FIRE] = monst->maxStatus[STATUS_IMMUNE_TO_FIRE] = magnitude;
-            // Only a visible signature if we actually snuff flames the player can see, on a creature
-            // that wasn't already immune (otherwise the potion changed nothing observable -> no ID).
-            if (!alreadyImmune
-                && monst->status[STATUS_BURNING]
-                && !(monst->info.flags & MONST_FIERY)
-                && visible) {
-                extinguishFireOnCreature(monst); // no monster-side visual on its own, so refresh here
-                refreshDungeonCell(monst->loc);
-                return true;
-            }
-            return false;
-        }
-        case POTION_TELEPATHY:
-            // iOS port (iBrogue): a thrown potion of telepathy bonds you to the struck creature alone --
-            // permanently revealing it (and its surroundings) on the map wherever it roams, via the same
-            // MB_TELEPATHICALLY_REVEALED flag used for ally bonds. Drinking reveals every creature on the
-            // level but only briefly; throwing trades that breadth for a single permanent bond. Inanimate
-            // things (turrets/totems) are excluded, matching the drink's flavor; the flask then splashes
-            // harmlessly. Returning true consumes + auto-IDs the potion (see throwItem).
-            if (monst->info.flags & MONST_INANIMATE) {
-                return false;
-            }
-            monst->bookkeepingFlags |= MB_TELEPATHICALLY_REVEALED;
-            refreshDungeonCell(monst->loc);
-            if (visible) {
-                sprintf(buf, "you bond with %s's mind; you will always sense where it lurks.", mName);
-                combatMessage(buf, NULL);
-            }
-            return true;
-        default: // POTION_DETECT_MAGIC (player-only) and any bad potion
-            return false;
-    }
-}
-
 boolean drinkPotion(item *theItem) {
+    item *tempItem = NULL;
     char buf[1000] = "";
     int magnitude;
 
@@ -8781,27 +7347,52 @@ boolean drinkPotion(item *theItem) {
             spawnDungeonFeature(player.loc.x, player.loc.y, &dungeonFeatureCatalog[DF_LICHEN_PLANTED], true, false);
             break;
         case POTION_DETECT_MAGIC: {
-            // iOS port (iBrogue): applying the empty bottle (which replaces potion of detect magic)
-            // captures the catchable gas/liquid on the player's tile, transforming the bottle into the
-            // matching identified potion (a turn passes; the bottle is NOT consumed — it becomes that
-            // potion). With nothing here to capture it stays a benign empty bottle and no turn is spent.
-            // (Lightning/fire are captured separately by zapping a dropped bottle — see updateBolt.)
-            const char *captureFlavor = NULL;
-            short captureKind = emptyBottleCaptureKindForTile(player.loc.x, player.loc.y, &captureFlavor);
-            if (captureKind >= 0) {
-                recordApplyItemCommand(theItem);
-                fillEmptyBottle(theItem, captureKind, captureFlavor);
-                // The bottle mutates in place, so it never went through the pickup/stack path: re-add it
-                // via addItemToPack so the new potion merges into an existing same-kind stack instead of
-                // taking a bespoke inventory slot. (Unlink first, or addItemToPack would match it to
-                // itself.) addItemToPack either stacks-and-frees theItem or re-adds it under its now-free
-                // letter, so the slot count never grows.
-                removeItemFromChain(theItem, packItems);
-                addItemToPack(theItem);
-                return true; // turn passes; theItem is now the captured potion, merged into the pack
+            boolean hadEffectOnLevel = false;
+            boolean hadEffectOnPack = false;
+            for (tempItem = floorItems->nextItem; tempItem != NULL; tempItem = tempItem->nextItem) {
+                if (tempItem->category & CAN_BE_DETECTED) {
+                    detectMagicOnItem(tempItem);
+                    if (itemMagicPolarity(tempItem)) {
+                        pmapAt(tempItem->loc)->flags |= ITEM_DETECTED;
+                        hadEffectOnLevel = true;
+                        refreshDungeonCell(tempItem->loc);
+                    }
+                }
             }
-            message("the bottle is empty, and there is nothing here to capture.", 0);
-            return false; // benign — stays in your pack, no turn spent
+            for (creatureIterator it = iterateCreatures(monsters); hasNextCreature(it);) {
+                creature *monst = nextCreature(&it);
+                if (monst->carriedItem && (monst->carriedItem->category & CAN_BE_DETECTED)) {
+                    detectMagicOnItem(monst->carriedItem);
+                    if (itemMagicPolarity(monst->carriedItem)) {
+                        hadEffectOnLevel = true;
+                        refreshDungeonCell(monst->loc);
+                    }
+                }
+            }
+            for (tempItem = packItems->nextItem; tempItem != NULL; tempItem = tempItem->nextItem) {
+                if (tempItem->category & CAN_BE_DETECTED) {
+                    detectMagicOnItem(tempItem);
+                    if (itemMagicPolarity(tempItem)) {
+                        if (tempItem != theItem && (tempItem->flags & ITEM_MAGIC_DETECTED)) {
+                            // Don't allow the potion of detect magic to detect itself.
+                            hadEffectOnPack = true;
+                        }
+                    }
+                }
+            }
+            if (hadEffectOnLevel || hadEffectOnPack) {
+                tryIdentifyLastItemKinds(HAS_INTRINSIC_POLARITY);
+                if (hadEffectOnLevel && hadEffectOnPack) {
+                    message("you can somehow feel the presence of magic on the level and in your pack.", 0);
+                } else if (hadEffectOnLevel) {
+                    message("you can somehow feel the presence of magic on the level.", 0);
+                } else {
+                    message("you can somehow feel the presence of magic in your pack.", 0);
+                }
+            } else {
+                message("you can somehow feel the absence of magic on the level and in your pack.", 0);
+            }
+            break;
         }
         case POTION_HASTE_SELF:
             haste(&player, magnitude);
@@ -8816,52 +7407,6 @@ boolean drinkPotion(item *theItem) {
         case POTION_INVISIBILITY:
             player.status[STATUS_INVISIBLE] = player.maxStatus[STATUS_INVISIBLE] = magnitude;
             message("you shiver as a chill runs up your spine.", 0);
-            break;
-        // iOS port (iBrogue): themed-set potions + returning detect magic.
-        case POTION_HONEY:
-            // STATUS_REGENERATING lasts `magnitude` (~20) turns; Time.c meters ~20% of max HP across it.
-            player.status[STATUS_REGENERATING] = player.maxStatus[STATUS_REGENERATING] = magnitude;
-            message("the honey's warmth spreads through you, and your wounds slowly begin to close.", 0);
-            break;
-        case POTION_VOMIT:
-            spawnDungeonFeature(player.loc.x, player.loc.y, &dungeonFeatureCatalog[DF_ROT_GAS_PUFF], true, false);
-            message("you gag as a reeking cloud boils out of the open flask!", 0);
-            break;
-        case POTION_WORT:
-            spawnDungeonFeature(player.loc.x, player.loc.y, &dungeonFeatureCatalog[DF_LIFE_POTION_CLOUD], true, false);
-            message("you uncork the flask and a cloud of healing spores wells up around you.", 0);
-            break;
-        case POTION_VENOM:
-            addPoison(&player, magnitude, 1); // ~1 dmg/turn for ~15 turns
-            message("venom courses through your veins!", 0);
-            break;
-        case POTION_DETECT_MAGIC2:
-            quaffDetectMagic(theItem);
-            break;
-        // iOS port (iBrogue): empty-bottle v2 capture-only potions, uncorked in hand -- each releases
-        // its captured hazard around you (the bad-end of a tool meant to be thrown).
-        case POTION_ACID:
-            message("acid sears your throat as you uncork the flask!", 0);
-            weaken(&player, magnitude); // also prints the weakness message
-            spawnDungeonFeature(player.loc.x, player.loc.y, &dungeonFeatureCatalog[DF_ACID_BLOOD], true, false);
-            break;
-        case POTION_WEBBING:
-            message("strands of grasping web erupt from the open flask and seize you!", 0);
-            spawnDungeonFeature(player.loc.x, player.loc.y, &dungeonFeatureCatalog[DF_WEB_LARGE], true, false);
-            break;
-        case POTION_STEAM:
-            message("scalding steam boils out of the open flask!", 0);
-            spawnDungeonFeature(player.loc.x, player.loc.y, &dungeonFeatureCatalog[DF_STEAM_PUFF], true, false);
-            break;
-        case POTION_ICE:
-            // Uncorked in hand: a freezing cloud blooms around you (the frost cloud's T_CAUSES_FREEZE
-            // freezes you as the turn resolves), and any water underfoot ices over.
-            message("frost erupts from the open flask, and biting cold engulfs you!", 0);
-            spawnFrostCloud(player.loc.x, player.loc.y);
-            break;
-        case POTION_WATER:
-            message("water gushes out of the flask, flooding the area around you!", 0);
-            spawnDungeonFeature(player.loc.x, player.loc.y, &dungeonFeatureCatalog[DF_FLOOD], true, false);
             break;
         default:
             message("you feel very strange, as though your body doesn't know how to react!", REQUIRE_ACKNOWLEDGMENT);
@@ -8902,16 +7447,9 @@ short magicCharDiscoverySuffix(short category, short kind) {
                 case POTION_CONFUSION:
                 case POTION_LICHEN:
                 case POTION_DARKNESS:
-                case POTION_VOMIT:  // iOS port (iBrogue)
-                case POTION_VENOM:  // iOS port (iBrogue)
-                case POTION_ACID:     // iOS port (iBrogue): empty-bottle v2 capture-only -- bad to drink (offensive when thrown)
-                case POTION_WEBBING:  // iOS port (iBrogue)
-                case POTION_STEAM:    // iOS port (iBrogue)
-                case POTION_ICE:      // iOS port (iBrogue)
-                case POTION_WATER:    // iOS port (iBrogue)
                     result = -1;
                     break;
-                default: // good potions, incl. honey/wort/detect-magic2 (iOS port)
+                default:
                     result = 1;
                     break;
             }
@@ -9188,25 +7726,6 @@ void recalculateEquipmentBonuses() {
     }
 }
 
-// iOS port (iBrogue): a ring whose effect is obvious the instant it is worn identifies its kind on equip.
-static boolean ringIdentifiesOnEquip(short ringKind) {
-    return ringKind == RING_CLAIRVOYANCE
-        || ringKind == RING_LIGHT
-        || ringKind == RING_STEALTH;
-}
-
-// iOS port (iBrogue): issue #683 — how many ring kinds are still unidentified AND stay hidden when worn.
-// If a freshly-worn ring reveals nothing and this count is 1, the worn ring must be that kind.
-static int unidentifiedRingKindsHiddenOnEquip(void) {
-    int count = 0;
-    for (short k = 0; k < NUMBER_RING_KINDS; k++) {
-        if (!ringTable[k].identified && !ringIdentifiesOnEquip(k)) {
-            count++;
-        }
-    }
-    return count;
-}
-
 // Returns true on success, false otherwise (for example, if failing to remove
 // a cursed item) If something must be first unequipped and it is not clear
 // what, unequipHint will be used if passed.
@@ -9253,13 +7772,9 @@ boolean equipItem(item *theItem, boolean force, item *unequipHint) {
         if (theItem->kind == RING_CLAIRVOYANCE) {
             updateClairvoyance();
             displayLevel();
-        }
-        if (ringIdentifiesOnEquip(theItem->kind)) {
             identifyItemKind(theItem);
-        } else if (!ringTable[theItem->kind].identified
-                   && unidentifiedRingKindsHiddenOnEquip() == 1) {
-            // iOS port (iBrogue): issue #683 — the worn ring revealed no obvious effect, and it is the
-            // only still-unidentified ring kind that stays hidden on equip, so its kind is deducible.
+        } else if (theItem->kind == RING_LIGHT
+                   || theItem->kind == RING_STEALTH) {
             identifyItemKind(theItem);
         }
         updateEncumbrance();
@@ -9355,7 +7870,6 @@ void updateRingBonuses() {
     rogue.clairvoyance = rogue.stealthBonus = rogue.transference
     = rogue.awarenessBonus = rogue.regenerationBonus = rogue.wisdomBonus = rogue.reaping = 0;
     rogue.lightMultiplier = 1;
-    rogue.lightRingBonus = 0; // iOS port (iBrogue): ring of light ally aura / invisible-reveal
 
     for (i=0; i<= 1; i++) {
         if (rings[i]) {
@@ -9374,7 +7888,6 @@ void updateRingBonuses() {
                     break;
                 case RING_LIGHT:
                     rogue.lightMultiplier += effectiveRingEnchant(rings[i]);
-                    rogue.lightRingBonus += effectiveRingEnchant(rings[i]); // iOS port (iBrogue): net light-ring enchant, used by ally aura & reveal
                     break;
                 case RING_AWARENESS:
                     rogue.awarenessBonus += 20 * effectiveRingEnchant(rings[i]);
@@ -9453,37 +7966,6 @@ void shuffleFlavors() {
 
     for (i=0; i<gameConst->numberPotionKinds; i++) {
         resetItemTableEntry(potionTable + i);
-    }
-    // iOS port (iBrogue): the empty bottle (POTION_DETECT_MAGIC slot, which replaces potion of
-    // detect magic) is a plain glass flask, not a mystery potion. Keep its kind permanently
-    // identified so it never joins the potion-ID guessing pool and always reads as "empty bottle".
-    potionTable[POTION_DETECT_MAGIC].identified = true;
-    potionTable[POTION_DETECT_MAGIC].magicPolarityRevealed = true;
-    // iOS port (iBrogue): empty-bottle v2 capture-only potions (acid/webbing/steam/ice/water) are
-    // never generated and only ever exist already-known (the bottle creates them identified), so keep
-    // their kinds permanently identified -- they never join the potion-ID guessing pool.
-    {
-        const short captureOnlyKinds[] = {POTION_ACID, POTION_WEBBING, POTION_STEAM, POTION_ICE, POTION_WATER};
-        for (i = 0; i < (short)(sizeof(captureOnlyKinds) / sizeof(captureOnlyKinds[0])); i++) {
-            potionTable[captureOnlyKinds[i]].identified = true;
-            potionTable[captureOnlyKinds[i]].magicPolarityRevealed = true;
-        }
-    }
-    // iOS port (iBrogue): pick which themed potion set is live this run. Deterministic from the seed
-    // (shuffleFlavors runs after seedRandomGenerator and reruns identically on replay). The inactive
-    // set's two potions are marked absent -- skipped by generation (chooseKind) and the Discoveries
-    // screen -- and pre-identified so they cancel cleanly out of the good/bad polarity deduction (their
-    // counts appear on both the "total" and "revealed" sides of tryIdentifyLastItemKind).
-    for (i = 0; i < (short)(sizeof(potionAbsentThisSeed) / sizeof(potionAbsentThisSeed[0])); i++) {
-        potionAbsentThisSeed[i] = false;
-    }
-    rogue.activePotionSet = rand_range(0, 1);
-    {
-        const short inactiveA = (rogue.activePotionSet == 0) ? POTION_WORT  : POTION_HONEY;
-        const short inactiveB = (rogue.activePotionSet == 0) ? POTION_VENOM : POTION_VOMIT;
-        potionAbsentThisSeed[inactiveA] = potionAbsentThisSeed[inactiveB] = true;
-        potionTable[inactiveA].identified = potionTable[inactiveB].identified = true;
-        potionTable[inactiveA].magicPolarityRevealed = potionTable[inactiveB].magicPolarityRevealed = true;
     }
     for (i=0; i<NUMBER_STAFF_KINDS; i++) {
         resetItemTableEntry(staffTable+ i);

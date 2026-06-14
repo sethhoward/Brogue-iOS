@@ -25,8 +25,6 @@
 #include "GlobalsBase.h"
 #include "Globals.h"
 
-#define FIRE_CONFUSION_DURATION 3   // iOS port (iBrogue): turns of confusion inflicted on catching fire
-
 void exposeCreatureToFire(creature *monst) {
     char buf[COLS], buf2[COLS];
     if ((monst->bookkeepingFlags & MB_IS_DYING)
@@ -35,11 +33,6 @@ void exposeCreatureToFire(creature *monst) {
         || (monst->bookkeepingFlags & MB_SUBMERGED)
         || ((!monst->status[STATUS_LEVITATING]) && cellHasTMFlag(monst->loc, TM_EXTINGUISHES_FIRE))) {
         return;
-    }
-    // iOS port (iBrogue): staff of frost — fire melts ice. Catching fire instantly thaws a frozen creature
-    // (the slow tail layered underneath at freeze time remains). Symmetric with the bolt's "too hot to freeze".
-    if (monst->status[STATUS_FROZEN]) {
-        monst->status[STATUS_FROZEN] = 0;
     }
     if (monst->status[STATUS_BURNING] == 0) {
         if (monst == &player) {
@@ -53,11 +46,6 @@ void exposeCreatureToFire(creature *monst) {
             sprintf(buf2, "%s catches fire", buf);
             combatMessage(buf2, messageColorFromVictim(monst));
         }
-        // iOS port (iBrogue): the shock of catching fire confuses for FIRE_CONFUSION_DURATION turns.
-        // Inside the "initially set on fire" branch, so it applies once on ignition (not every burning
-        // turn), to the player too. Same status path as the confusion weapon runic.
-        monst->status[STATUS_CONFUSED] = monst->maxStatus[STATUS_CONFUSED] =
-            max(monst->status[STATUS_CONFUSED], FIRE_CONFUSION_DURATION);
     }
     monst->status[STATUS_BURNING] = monst->maxStatus[STATUS_BURNING] = max(monst->status[STATUS_BURNING], 7);
 }
@@ -425,18 +413,6 @@ void applyInstantTileEffectsToCreature(creature *monst) {
         }
     }
 
-    // frost cloud (iOS port iBrogue): empty-bottle v2 potion of ice. Anything caught in it freezes for a
-    // few turns, then thaws into a slow tail (freezeCreature handles the fiery-douse case, guards
-    // inanimate/invulnerable, and de-spams its own message/flash). Outside the respiration gate above:
-    // it's external cold, not an inhaled toxin, matching the staff of frost.
-    if (cellHasTerrainFlag((pos){ *x, *y }, T_CAUSES_FREEZE)
-        && !(monst->bookkeepingFlags & MB_SUBMERGED)) {
-        freezeCreature(monst, 3, 5); // 3-turn freeze, then a ~5-turn slow tail
-        if (monst == &player) {
-            rogue.disturbed = true;
-        }
-    }
-
     // poisonous lichen
     if (cellHasTerrainFlag((pos){ *x, *y }, T_CAUSES_POISON)
         && !(monst->info.flags & (MONST_INANIMATE | MONST_INVULNERABLE))
@@ -670,52 +646,22 @@ short scentDistance(short x1, short y1, short x2, short y2) {
     }
 }
 
-// iOS port (iBrogue): wading through water washes away the player's scent, so a
-// pursuer that has lost line of sight can be shaken by crossing water. Deep water
-// (when actually submerged) emits no scent at all, so the trail dead-ends at the
-// water's edge; shallow water emits a faint trail that a tracker may still follow
-// but is liable to lose (the existing per-turn scent-loss roll in awareOfTarget()
-// does the rest). Levitating over the water keeps the player dry, so scent is
-// unaffected. Returns a penalty in scentDistance() units (~2 per tile), or -1 to
-// mean "lay no scent this turn". SCENT_SHALLOW_WATER_PENALTY is tunable: larger
-// makes shallow water a more reliable way to break a trail.
-#define SCENT_SHALLOW_WATER_PENALTY 16
-static short playerScentWaterPenalty() {
-    if (player.status[STATUS_LEVITATING]) {
-        return 0; // hovering above the water, staying dry
-    }
-    if (cellHasTerrainFlag(player.loc, T_IS_DEEP_WATER)) {
-        return -1; // submerged: lay no scent, so the trail goes cold
-    }
-    if (cellHasTMFlag(player.loc, TM_ALLOWS_SUBMERGING)
-        && cellHasTMFlag(player.loc, TM_EXTINGUISHES_FIRE)) {
-        return SCENT_SHALLOW_WATER_PENALTY; // wading through shallow water
-    }
-    return 0;
-}
-
 static void updateScent() {
-    short i, j, scentPenalty;
+    short i, j;
     char grid[DCOLS][DROWS];
 
     zeroOutGrid(grid);
-
-    // iOS port (iBrogue): water washes away the player's scent (see playerScentWaterPenalty).
-    scentPenalty = playerScentWaterPenalty();
-    if (scentPenalty < 0) {
-        return; // submerged in deep water: lay no scent this turn.
-    }
 
     getFOVMask(grid, player.loc.x, player.loc.y, DCOLS * FP_FACTOR, T_OBSTRUCTS_SCENT, 0, false);
 
     for (i=0; i<DCOLS; i++) {
         for (j=0; j<DROWS; j++) {
             if (grid[i][j]) {
-                addScentToCell(i, j, scentDistance(player.loc.x, player.loc.y, i, j) + scentPenalty);
+                addScentToCell(i, j, scentDistance(player.loc.x, player.loc.y, i, j));
             }
         }
     }
-    addScentToCell(player.loc.x, player.loc.y, scentPenalty);
+    addScentToCell(player.loc.x, player.loc.y, 0);
 }
 
 short armorStealthAdjustment(item *theArmor) {
@@ -827,7 +773,6 @@ void updateVision(boolean refreshDisplay) {
 
     updateTelepathy();
     updateLighting();
-    updateAllyEmboldenment(); // iOS port (iBrogue): ring of light -- emboldens allies in your light (idempotent; runs after lighting)
     updateFieldOfViewDisplay(true, refreshDisplay);
 
     //  for (i=0; i<DCOLS; i++) {
@@ -907,19 +852,14 @@ void burnItem(item *theItem) {
             theItem->quantity == 1 ? "s" : "");
     x = theItem->loc.x;
     y = theItem->loc.y;
-    // iOS port (iBrogue): announce the destruction and, if the player witnesses it, glimpse the item's
-    // good/bad polarity (not its kind) -- the scroll-side analogue of the potion fire-erasure tell. Both
-    // must run BEFORE the instance is freed below; revealPolarityOnFieryDestruction reads theItem->kind
-    // and persists the reveal at the kind level. Order: destruction line first, then the insight.
-    if (playerCanSee(x, y)) {
-        messageWithColor(buf2, &itemMessageColor, 0);
-        revealPolarityOnFieryDestruction(theItem);
-    }
     removeItemFromChain(theItem, floorItems);
     deleteItem(theItem);
     pmap[x][y].flags &= ~(HAS_ITEM | ITEM_DETECTED);
     if (pmap[x][y].flags & (ANY_KIND_OF_VISIBLE | DISCOVERED | ITEM_DETECTED)) {
         refreshDungeonCell((pos){ x, y });
+    }
+    if (playerCanSee(x, y)) {
+        messageWithColor(buf2, &itemMessageColor, 0);
     }
     spawnDungeonFeature(x, y, &(dungeonFeatureCatalog[DF_ITEM_FIRE]), true, false);
 }
@@ -1278,33 +1218,6 @@ boolean exposeTileToFire(short x, short y, boolean alwaysIgnite) {
         refreshDungeonCell((pos){ x, y });
     }
     return fireIgnited;
-}
-
-// iOS port (iBrogue): staff of frost. Snuff terrain fire at a cell -- clear every burning (T_IS_FIRE) gas or
-// surface layer back to NOTHING and refresh, leaving the floor beneath untouched. The engine has no built-in
-// tile extinguisher (fire normally just burns out on its own); brimstone/lava-fed fire may simply reignite
-// next turn from its source, and that one calm turn is intended. Returns true if anything was put out.
-boolean extinguishFireOnTile(short x, short y) {
-    boolean changed = false;
-    if (!cellHasTerrainFlag((pos){ x, y }, T_IS_FIRE)) {
-        return false;
-    }
-    for (enum dungeonLayers layer = 0; layer < NUMBER_TERRAIN_LAYERS; layer++) {
-        if ((layer == GAS || layer == SURFACE)
-            && (tileCatalog[pmap[x][y].layers[layer]].flags & T_IS_FIRE)) {
-
-            pmap[x][y].layers[layer] = NOTHING;
-            if (layer == GAS) {
-                pmap[x][y].volume = 0;
-            }
-            changed = true;
-        }
-    }
-    if (changed) {
-        pmap[x][y].flags &= ~CAUGHT_FIRE_THIS_TURN;
-        refreshDungeonCell((pos){ x, y });
-    }
-    return changed;
 }
 
 // Only the gas layer can be volumetric.
@@ -2055,7 +1968,7 @@ static void monstersApproachStairs() {
 
 static void decrementPlayerStatus() {
     // Handle hunger.
-    if (!player.status[STATUS_PARALYZED] && !player.status[STATUS_FROZEN]) { // iOS port (iBrogue): no metabolism while frozen, as with paralysis
+    if (!player.status[STATUS_PARALYZED]) {
         // No nutrition is expended while paralyzed.
         if (player.status[STATUS_NUTRITION] > 0) {
             if (!numberOfMatchingPackItems(AMULET, 0, 0, false) || rand_percent(20)) {
@@ -2097,12 +2010,6 @@ static void decrementPlayerStatus() {
 
     if (player.status[STATUS_PARALYZED] > 0 && !--player.status[STATUS_PARALYZED]) {
         message("you can move again.", 0);
-    }
-
-    // iOS port (iBrogue): staff of frost. Frozen incapacitates exactly like paralysis; the STATUS_SLOWED that
-    // was layered underneath at freeze time keeps ticking, so a slow tail lingers after the ice breaks.
-    if (player.status[STATUS_FROZEN] > 0 && !--player.status[STATUS_FROZEN]) {
-        message("the ice encasing you breaks apart.", 0);
     }
 
     if (player.status[STATUS_HASTED] > 0 && !--player.status[STATUS_HASTED]) {
@@ -2159,23 +2066,6 @@ static void decrementPlayerStatus() {
 
     if (player.status[STATUS_INVISIBLE] > 0 && !--player.status[STATUS_INVISIBLE]) {
         message("you are no longer invisible.", 0);
-    }
-
-    // iOS port (iBrogue): honey potion's heal-over-time. Mete ~20% of max HP evenly across the status's
-    // duration, carrying the rounding remainder via a stateless elapsed-fraction difference (so the total
-    // lands exactly and replays deterministically without a stored accumulator).
-    if (player.status[STATUS_REGENERATING] > 0) {
-        const short dur = max(1, player.maxStatus[STATUS_REGENERATING]);
-        const short total = player.info.maxHP * 20 / 100;
-        const short elapsed = dur - player.status[STATUS_REGENERATING] + 1; // 1..dur this turn
-        const short healNow = total * elapsed / dur - total * (elapsed - 1) / dur;
-        if (healNow > 0 && player.currentHP < player.info.maxHP) {
-            player.currentHP = min(player.currentHP + healNow, player.info.maxHP);
-            player.previousHealthPoints = min(player.currentHP, player.previousHealthPoints + healNow);
-        }
-        if (!--player.status[STATUS_REGENERATING]) {
-            message("the honey's nourishment fades.", 0);
-        }
     }
 
     if (rogue.monsterSpawnFuse <= 0) {
@@ -2352,14 +2242,12 @@ void playerTurnEnded() {
     // over a chasm
     monstersFall();
 
-    showEmptyBottleCaptureHint(); // iOS port (iBrogue): empty-bottle v2 -- once-per-kind hint naming what the tile underfoot would capture into
-
     do {
         if (rogue.gameHasEnded) {
             return;
         }
 
-        if (!player.status[STATUS_PARALYZED] && !player.status[STATUS_FROZEN]) { // iOS port (iBrogue): frozen, like paralysis, costs no player turn
+        if (!player.status[STATUS_PARALYZED]) {
             rogue.playerTurnNumber++; // So recordings don't register more turns than you actually have.
         }
         rogue.absoluteTurnNumber++;
@@ -2557,7 +2445,6 @@ void playerTurnEnded() {
 
                     if ((monst->info.flags & MONST_GETS_TURN_ON_ACTIVATION)
                         || monst->status[STATUS_PARALYZED]
-                        || monst->status[STATUS_FROZEN] // iOS port (iBrogue): staff of frost — frozen monsters skip their turn
                         || monst->status[STATUS_ENTRANCED]
                         || (monst->bookkeepingFlags & MB_CAPTIVE)) {
 
@@ -2660,7 +2547,7 @@ void playerTurnEnded() {
 
         displayCombatText();
 
-        if (player.status[STATUS_PARALYZED] || player.status[STATUS_FROZEN]) { // iOS port (iBrogue): frozen loses turns like paralysis
+        if (player.status[STATUS_PARALYZED]) {
             if (!fastForward) {
                 fastForward = rogue.playbackFastForward || pauseAnimation(25, PAUSE_BEHAVIOR_DEFAULT);
             }
@@ -2690,15 +2577,7 @@ void playerTurnEnded() {
             return;
         }
 
-    } while (player.status[STATUS_PARALYZED] || player.status[STATUS_FROZEN]); // iOS port (iBrogue): staff of frost
-
-    // iOS port (iBrogue): passive rest-polarity insight — counted here (not at command dispatch)
-    // because autoRest re-records each rested turn as REST_KEY, so this is the one chokepoint that
-    // tallies identically live and on replay. See gainPolarityInsightFromRest in Items.c.
-    if (rogue.justRested) {
-        gainPolarityInsightFromRest();
-        levels[rogue.depthLevel].restTurnsOnLevel++; // iOS port (iBrogue): debug-only per-level rest tally
-    }
+    } while (player.status[STATUS_PARALYZED]);
 
     rogue.justRested = false;
     rogue.justSearched = false;

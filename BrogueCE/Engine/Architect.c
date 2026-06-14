@@ -979,10 +979,6 @@ typedef struct machineData {
     short sCols[DCOLS];
 } machineData;
 
-// iOS port (iBrogue): defined below; places a linked altar pair (used by the transference altar, which is
-// raffle-built and so can't be hooked from addMachines the way the force-built insight altars are).
-static void placeAltarPairInRoom(short minMachineNumber, enum tileType westAltar, enum tileType eastAltar, boolean statueAbove);
-
 // Returns true if the machine got built; false if it was aborted.
 // If empty array parentSpawnedItems or parentSpawnedMonsters is given, will pass those back for deletion if necessary.
 boolean buildAMachine(enum machineTypes bp,
@@ -1716,16 +1712,6 @@ boolean buildAMachine(enum machineTypes bp,
     freeGrid(distanceMap);
     if (D_MESSAGE_MACHINE_GENERATION) printf("\nDepth %i: Built a machine from blueprint %i:%s with an origin at (%i, %i).", rogue.depthLevel, bp, blueprintCatalog[bp].name, originX, originY);
 
-    // iOS port (iBrogue): the transference-altar blueprint builds only the room; place its donor/recipient
-    // pair here in a fixed "s . o" layout (donor west, recipient east), the same way the insight altars are
-    // placed in addMachines. We do it here rather than in addMachines because this machine enters the random
-    // reward raffle -- buildAMachine(-1, ..., BP_REWARD, ...) picks the blueprint internally, so addMachines
-    // never learns which blueprint it built. Passing machineNumber - 1 selects this machine's cells (those
-    // with machineNumber == machineNumber). Brogue-only: this blueprint index exists only in Brogue's catalog.
-    if (gameVariant == VARIANT_BROGUE && bp == MT_TRANSFER_ALTAR) {
-        placeAltarPairInRoom(machineNumber - 1, TRANSFER_ALTAR_DONOR, TRANSFER_ALTAR_RECIPIENT, true);
-    }
-
     //Pass created items and monsters to parent where they will be deleted on failure to place parent machine
     if (parentSpawnedItems) {
         for (int i=0; i<itemCount; i++) {
@@ -1740,107 +1726,6 @@ boolean buildAMachine(enum machineTypes bp,
 
     free(p);
     return true;
-}
-
-// iOS port (iBrogue): true if (x, y) is an open carpeted interior cell of a machine built after
-// minMachineNumber (i.e. the paired-altar room we just built) and free to receive an altar.
-static boolean altarPairCellIsOpen(short x, short y, short minMachineNumber) {
-    return coordinatesAreInMap(x, y)
-        && pmap[x][y].machineNumber > minMachineNumber
-        && (pmap[x][y].flags & IS_IN_ROOM_MACHINE)
-        && pmap[x][y].layers[DUNGEON] == CARPET
-        && !(pmap[x][y].flags & (HAS_ITEM | HAS_MONSTER));
-}
-
-static void setAltarTile(short x, short y, enum tileType altar, short minMachineNumber, boolean statueAbove) {
-    pmap[x][y].layers[DUNGEON] = altar;
-    refreshDungeonCell((pos){ x, y });
-    // iOS port (iBrogue): the transference altars each wear a statue directly to the north, so the room
-    // reads differently at a glance from the bare altar/gap/altar arrangement of the other altar rooms.
-    // Skipped if the cell to the north isn't open interior carpet (e.g. the altar abuts the north wall).
-    if (statueAbove && altarPairCellIsOpen(x, y - 1, minMachineNumber)) {
-        pmap[x][y - 1].layers[DUNGEON] = STATUE_INERT;
-        refreshDungeonCell((pos){ x, y - 1 });
-    }
-}
-
-// iOS port (iBrogue): place a linked altar pair in a fixed, readable layout -- the west altar, a one-tile
-// gap, then the east altar (#....w.e....#). Used by the altars of insight (payment west, insight east) and
-// the altars of transference (donor west, recipient east). The generic machine builder picks random
-// interior cells and spreads features apart with personalSpace, so it can't produce an ordered adjacent
-// pair; we place them here instead. Deterministic (no RNG, so replay is unaffected). minMachineNumber is
-// rogue.machineNumber captured before the build, so any cell with a greater machineNumber belongs to the
-// room we just built.
-static void placeAltarPairInRoom(short minMachineNumber, enum tileType westAltar, enum tileType eastAltar, boolean statueAbove) {
-    int cx = 0, cy = 0, count = 0;
-    for (short i = 0; i < DCOLS; i++) {
-        for (short j = 0; j < DROWS; j++) {
-            if (altarPairCellIsOpen(i, j, minMachineNumber)) {
-                cx += i;
-                cy += j;
-                count++;
-            }
-        }
-    }
-    if (count == 0) {
-        return; // no interior found (shouldn't happen); leave the room rather than corrupt it
-    }
-    cx /= count;
-    cy /= count;
-
-    // Preferred: a horizontal run of three open cells (w, gap, e), centered as close to the room
-    // center as possible.
-    short bestX = -1, bestY = -1;
-    int bestDist = -1;
-    for (short j = 0; j < DROWS; j++) {
-        for (short i = 0; i < DCOLS - 2; i++) {
-            if (altarPairCellIsOpen(i, j, minMachineNumber)
-                && altarPairCellIsOpen(i + 1, j, minMachineNumber)
-                && altarPairCellIsOpen(i + 2, j, minMachineNumber)) {
-
-                const int dist = abs((i + 1) - cx) + abs(j - cy);
-                if (bestDist < 0 || dist < bestDist) {
-                    bestDist = dist;
-                    bestX = i;
-                    bestY = j;
-                }
-            }
-        }
-    }
-    if (bestX >= 0) {
-        setAltarTile(bestX, bestY, westAltar, minMachineNumber, statueAbove);             // west
-        setAltarTile(bestX + 2, bestY, eastAltar, minMachineNumber, statueAbove);         // east, one-tile gap
-        return;
-    }
-
-    // Fallback 1: two horizontally adjacent open cells (w e, no gap).
-    for (short j = 0; j < DROWS; j++) {
-        for (short i = 0; i < DCOLS - 1; i++) {
-            if (altarPairCellIsOpen(i, j, minMachineNumber)
-                && altarPairCellIsOpen(i + 1, j, minMachineNumber)) {
-
-                setAltarTile(i, j, westAltar, minMachineNumber, statueAbove);
-                setAltarTile(i + 1, j, eastAltar, minMachineNumber, statueAbove);
-                return;
-            }
-        }
-    }
-
-    // Fallback 2: any two open cells, so the altars always exist.
-    boolean placedWest = false;
-    for (short i = 0; i < DCOLS; i++) {
-        for (short j = 0; j < DROWS; j++) {
-            if (altarPairCellIsOpen(i, j, minMachineNumber)) {
-                if (!placedWest) {
-                    setAltarTile(i, j, westAltar, minMachineNumber, statueAbove);
-                    placedWest = true;
-                } else {
-                    setAltarTile(i, j, eastAltar, minMachineNumber, statueAbove);
-                    return;
-                }
-            }
-        }
-    }
 }
 
 // add machines to the dungeon.
@@ -1864,43 +1749,6 @@ static void addMachines() {
         for (failsafe = 50; failsafe; failsafe--) {
             if (buildAMachine(MT_AMULET_AREA, -1, -1, 0, NULL, NULL, NULL)) {
                 break;
-            }
-        }
-    }
-
-    // iOS port (iBrogue): guaranteed altars-of-insight reward rooms at depths 5 and 15 (Brogue only).
-    // The blueprint is a BP_ROOM machine and needs a gate site whose interior choke-size lands in the
-    // {7,14} range; a level with no qualifying room can't fit it. Rather than silently skip (as the
-    // amulet vault does), we track how many altars are *due* by the current depth and how many have
-    // actually been built, and carry any unmet obligation forward: if depth 5 has no room we retry on
-    // 6, 7, ... until one is placed, and likewise for the depth-15 altar. The carry-forward is bounded: if
-    // an altar still hasn't found a room by INSIGHT_ALTAR_MAX_DEPTH (20), the obligation is abandoned rather
-    // than chased into the late dungeon. Deterministic (depth-driven, buildAMachine uses the substantive
-    // RNG) and save-safe.
-    static const short insightAltarDepths[] = {5, 15};
-    const int insightAltarCount = sizeof(insightAltarDepths) / sizeof(insightAltarDepths[0]);
-    const short INSIGHT_ALTAR_MAX_DEPTH = 20;
-    if (gameVariant == VARIANT_BROGUE
-        && rogue.depthLevel <= INSIGHT_ALTAR_MAX_DEPTH
-        && rogue.insightAltarsBuilt < insightAltarCount) {
-        short insightAltarsDue = 0;
-        for (int i = 0; i < insightAltarCount; i++) {
-            if (rogue.depthLevel >= insightAltarDepths[i]) {
-                insightAltarsDue++;
-            }
-        }
-        if (rogue.insightAltarsBuilt < insightAltarsDue) {
-            // Owe at least one altar; try to place a single one on this level (any shortfall carries
-            // forward to the next level).
-            for (failsafe = 50; failsafe; failsafe--) {
-                const short preInsightMachineNumber = rogue.machineNumber;
-                if (buildAMachine(MT_INSIGHT_ALTAR, -1, -1, 0, NULL, NULL, NULL)) {
-                    // iOS port (iBrogue): the blueprint built only the room; place the altar pair here in a
-                    // fixed s . o layout (the builder won't do ordered/adjacent placement itself).
-                    placeAltarPairInRoom(preInsightMachineNumber, INSIGHT_ALTAR_PAYMENT, INSIGHT_ALTAR_INSIGHT, false);
-                    rogue.insightAltarsBuilt++;
-                    break;
-                }
             }
         }
     }
@@ -3912,56 +3760,6 @@ boolean placeStairs(pos *upStairsLoc) {
     return true;
 }
 
-// iOS port (iBrogue): the "gold goblin" is a passive treasure-hoarder that spawns near the down
-// stairs and (in later phases) flees toward the up stairs when struck, shedding gold and dropping a
-// hoard if killed. Spawned here rather than via the horde/machine tables so we can pin it adjacent to
-// rogue.downLoc and meter it to a single appearance per run. Eligible on depths 5-24 at a low
-// per-level chance. Uses the substantive (seeded) RNG, so it is fully replay-deterministic.
-static void spawnGoldGoblin(void) {
-    if (rogue.goldGoblinSpawned) {
-        return; // at most once per run, even when forced for debugging
-    }
-
-    // iOS port (iBrogue): D_ALWAYS_SPAWN_GOLD_GOBLIN forces a guaranteed spawn on depth 2 (earlier than
-    // the normal 5-24 range, to reach it fast while testing), skipping the depth/chance gate; otherwise
-    // it is the normal random roll.
-    const boolean forceSpawn = D_ALWAYS_SPAWN_GOLD_GOBLIN && rogue.depthLevel == 2;
-
-    if (!forceSpawn
-        && (rogue.depthLevel < 5
-            || rogue.depthLevel > 24
-            || !rand_percent(5))) {
-
-        return;
-    }
-
-    pos loc;
-    if (!getQualifyingLocNear(&loc, rogue.downLoc, false, NULL,
-                              (T_PATHING_BLOCKER | T_HARMFUL_TERRAIN),
-                              (HAS_PLAYER | HAS_MONSTER | HAS_STAIRS | HAS_ITEM | IS_IN_MACHINE),
-                              true, false)) {
-        return;
-    }
-
-    creature *monst = generateMonster(MK_GOLD_GOBLIN, false, false);
-    monst->loc = loc;
-    monst->info.maxHP = 35 + 6 * rogue.depthLevel; // depth-scaled so the chase stays ~6-10 hits across 5-24
-    monst->currentHP = monst->info.maxHP;
-    monst->creatureState = MONSTER_WANDERING; // dormant; its custom turn logic keeps it still until struck
-    // looter.isBearer is set in initializeMonster (true for any creature with a lootProfile); clones clear it.
-    if (forceSpawn) {
-        // iOS port (iBrogue): in debug mode, reveal the goblin telepathically so it can be tracked on the
-        // map (and watched as it flees) even when it slips out of line of sight.
-        monst->bookkeepingFlags |= MB_TELEPATHICALLY_REVEALED;
-    }
-    pmapAt(loc)->flags |= HAS_MONSTER;
-    if (playerCanSeeOrSense(loc.x, loc.y)) {
-        refreshDungeonCell(loc);
-    }
-
-    rogue.goldGoblinSpawned = true;
-}
-
 // Places the player, monsters, items and stairs.
 void initializeLevel(pos upStairsLoc) {
     short i, j, dir;
@@ -3991,7 +3789,6 @@ void initializeLevel(pos upStairsLoc) {
         }
         populateItems(upLoc);
         populateMonsters();
-        spawnGoldGoblin(); // iOS port (iBrogue)
     }
 
     // Restore items that fell from the previous depth.

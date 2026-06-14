@@ -97,13 +97,11 @@ short monsterDefenseAdjusted(const creature *monst) {
     } else {
         retval = monst->info.defense - 25 * monst->weaknessAmount;
     }
-    retval += emboldenmentDefenseBonus(monst); // iOS port (iBrogue): ring of light ally aura
     return max(retval, 0);
 }
 
 short monsterAccuracyAdjusted(const creature *monst) {
     short retval = monst->info.accuracy * accuracyFraction(monst->weaknessAmount * FP_FACTOR * -3/2) / FP_FACTOR;
-    retval += emboldenmentAccuracyBonus(monst); // iOS port (iBrogue): ring of light ally aura
     return max(retval, 0);
 }
 
@@ -144,7 +142,6 @@ boolean attackHit(creature *attacker, creature *defender) {
     // automatically hit if the monster is sleeping or captive or stuck in a web
     if (defender->status[STATUS_STUCK]
         || defender->status[STATUS_PARALYZED]
-        || defender->status[STATUS_FROZEN] // iOS port (iBrogue): staff of frost — a frozen creature can't dodge
         || (defender->bookkeepingFlags & MB_CAPTIVE)) {
 
         return true;
@@ -326,9 +323,8 @@ void moralAttack(creature *attacker, creature *defender) {
     if (defender->currentHP > 0
         && !(defender->bookkeepingFlags & MB_IS_DYING)) {
 
-        if (defender->status[STATUS_PARALYZED] || defender->status[STATUS_FROZEN]) {
+        if (defender->status[STATUS_PARALYZED]) {
             defender->status[STATUS_PARALYZED] = 0;
-            defender->status[STATUS_FROZEN] = 0; // iOS port (iBrogue): a blow shatters the ice (the layered slow tail remains)
              // Paralyzed creature gets a turn to react before the attacker moves again.
             defender->ticksUntilTurn = min(attacker->attackSpeed, 100) - 1;
         }
@@ -388,43 +384,6 @@ static boolean playerImmuneToMonster(creature *monst) {
     }
 }
 
-// iOS port (iBrogue): steal-preference component (see docs/guides/reusable-components.md). Scores how much a
-// thief wants a given item, from its catalog stealProfile -- the data-driven successor to the per-monsterID
-// branches that ported PR #849 ("Deductive Thievery"). Theft becomes an identification hint: monkeys favor food
-// and potions of life/strength (but, ADDITIVE, will take anything); imps favor scrolls of enchanting, positively-
-// enchanted gear (scaled), and runics, and dislike food. Pure scoring (no RNG); the weighted draw happens at the
-// call site in specialHit. Returns 0 for an item this thief will not take (EXCLUSIVE mode, no rule matched).
-// A thief with no profile falls back to the legacy "every item equally desirable" (score 10) behavior.
-static short rateItemStealDesirability(creature *thief, item *theItem) {
-    if (!theItem) {
-        return 0;
-    }
-    const stealProfile *profile = thief->info.steal;
-    if (!profile) {
-        return 10; // legacy default: uniform desirability
-    }
-    short score = profile->baseScore;
-    boolean matched = false;
-    for (const stealRule *r = profile->rules;
-         r->categories || r->requireFlags || r->enchant != ENCHANT_ANY; // a no-criteria row terminates the list
-         r++) {
-
-        if (r->categories && !(theItem->category & r->categories)) continue;
-        if (r->kind >= 0 && theItem->kind != r->kind) continue;
-        if (r->enchant == ENCHANT_POSITIVE && theItem->enchant1 <= 0) continue;
-        if (r->enchant == ENCHANT_NEGATIVE && theItem->enchant1 >= 0) continue;
-        if (r->requireFlags && (theItem->flags & r->requireFlags) != r->requireFlags) continue;
-
-        matched = true;
-        score += r->flatBonus;
-        score += theItem->enchant1 * r->perEnchantBonus;
-    }
-    if (profile->mode == STEAL_EXCLUSIVE && !matched) {
-        return 0; // this thief is only interested in matching items
-    }
-    return max(1, score);
-}
-
 static void specialHit(creature *attacker, creature *defender, short damage) {
     short itemCandidates, randItemIndex, stolenQuantity;
     item *theItem = NULL, *itemFromTopOfStack;
@@ -476,48 +435,15 @@ static void specialHit(creature *attacker, creature *defender, short damage) {
             && !attacker->status[STATUS_CONFUSED] // No stealing from the player if you bump him while confused.
             && attackHit(attacker, defender)) {
 
-            // iOS port (iBrogue): steal-preference component. Eligibility and weighting come from the thief's
-            // stealProfile (catalog `steal` field) via rateItemStealDesirability: an ADDITIVE thief (monkey, imp)
-            // scores every unequipped item >= 1, so it always grabs SOMETHING; an EXCLUSIVE thief scores only the
-            // items it wants (the rest rate 0 and are skipped). A configurable share of thefts (randomPickPercent,
-            // default 5) ignores the weighting and picks uniformly -- but only AMONG THE ELIGIBLE items, so an
-            // EXCLUSIVE thief never breaks its own rule. Monkey/imp stay RNG-identical to the previous hardcoded
-            // path (same rand_percent, then rand_range over the same scores).
-            const stealProfile *stealPrefs = attacker->info.steal;
-            itemCandidates = 0;
-            for (theItem = packItems->nextItem; theItem != NULL; theItem = theItem->nextItem) {
-                if (!(theItem->flags & (ITEM_EQUIPPED)) && rateItemStealDesirability(attacker, theItem) > 0) {
-                    itemCandidates++;
-                }
-            }
-            theItem = NULL;
+            itemCandidates = numberOfMatchingPackItems(ALL_ITEMS, 0, (ITEM_EQUIPPED), false);
             if (itemCandidates) {
-                if (rand_percent(stealPrefs ? stealPrefs->randomPickPercent : 5)) {
-                    randItemIndex = rand_range(1, itemCandidates);
-                    for (theItem = packItems->nextItem; theItem != NULL; theItem = theItem->nextItem) {
-                        if (!(theItem->flags & (ITEM_EQUIPPED)) && rateItemStealDesirability(attacker, theItem) > 0) {
-                            if (randItemIndex == 1) {
-                                break;
-                            } else {
-                                randItemIndex--;
-                            }
-                        }
-                    }
-                } else {
-                    int totalScoreSum = 0;
-                    for (theItem = packItems->nextItem; theItem != NULL; theItem = theItem->nextItem) {
-                        if (!(theItem->flags & (ITEM_EQUIPPED))) {
-                            totalScoreSum += rateItemStealDesirability(attacker, theItem);
-                        }
-                    }
-                    long choiceRoll = rand_range(1, totalScoreSum); // totalScoreSum >= 1 (itemCandidates > 0)
-                    int runningSum = 0;
-                    for (theItem = packItems->nextItem; theItem != NULL; theItem = theItem->nextItem) {
-                        if (!(theItem->flags & (ITEM_EQUIPPED))) {
-                            runningSum += rateItemStealDesirability(attacker, theItem);
-                            if (runningSum >= choiceRoll) {
-                                break;
-                            }
+                randItemIndex = rand_range(1, itemCandidates);
+                for (theItem = packItems->nextItem; theItem != NULL; theItem = theItem->nextItem) {
+                    if (!(theItem->flags & (ITEM_EQUIPPED))) {
+                        if (randItemIndex == 1) {
+                            break;
+                        } else {
+                            randItemIndex--;
                         }
                     }
                 }
@@ -665,98 +591,6 @@ static boolean forceWeaponHit(creature *defender, item *theItem) {
         }
     }
     return autoID;
-}
-
-// iOS port (iBrogue): a shoved frozen block slides a distance set by the shover's effective strength
-// (clamped to this range), and a creature it slams into takes bonus damage for strength above the starting 12.
-#define FROST_PUSH_MIN_DISTANCE 2
-#define FROST_PUSH_MAX_DISTANCE 10
-
-// iOS port (iBrogue): staff of frost. Bumping a frozen creature shoves it like a statue. It slides across open
-// floor -- a distance set by the shover's effective strength (`clamp(str - 8, 2, 10)`) -- then comes to rest
-// the moment it reaches a hazard (lava / a chasm / deep water -- it is deposited ONTO the hazard, to die, fall,
-// or flounder) or runs out of room before a wall, another creature, or the map edge. The frozen block itself
-// takes NO damage; a creature it slams into takes momentum damage (the distance the block travelled) plus a
-// strength shove-bonus (`max(0, str - 12)`, so it bites even on an adjacent slam for a strong shover), and,
-// being struck by ice, is doused if it was on fire. (dx,dy) is the one-tile push direction (away from the
-// shover); the caller guarantees the first cell is open or a hazard (a wedged block is rejected before here).
-void pushFrozenCreature(creature *defender, short dx, short dy) {
-    char buf[DCOLS*3], buf2[COLS], monstName[DCOLS];
-    creature *slamTarget = NULL;
-    short forceDamage, step;
-
-    monsterName(monstName, defender, false); // bare name; we supply "the frozen ..." ourselves
-
-    pos oldLoc = defender->loc;
-    pos cur = oldLoc;
-
-    const short effectiveStrength = rogue.strength - player.weaknessAmount;
-    const short maxPush = clamp(effectiveStrength - 8, FROST_PUSH_MIN_DISTANCE, FROST_PUSH_MAX_DISTANCE);
-    const short strengthBonus = max(0, effectiveStrength - 12);
-
-    if (canDirectlySeeMonster(defender)) {
-        sprintf(buf, "you send the frozen %s skidding away", monstName);
-        buf[DCOLS] = '\0';
-        combatMessage(buf, messageColorFromVictim(defender));
-    }
-
-    // Walk the slide: stop ON the first hazard, or BEFORE a wall / creature / map edge, up to the max distance.
-    for (step = 0; step < maxPush; step++) {
-        pos next = (pos){ cur.x + dx, cur.y + dy };
-        if (!coordinatesAreInMap(next.x, next.y)
-            || cellHasTerrainFlag(next, T_OBSTRUCTS_PASSABILITY)
-            || diagonalBlocked(cur.x, cur.y, next.x, next.y, false)) {
-            break; // wall or map edge: come to rest on the current cell
-        }
-        if (pmapAt(next)->flags & (HAS_MONSTER | HAS_PLAYER)) {
-            slamTarget = monsterAtLoc(next); // stop here and slam into whatever is in the way
-            break;
-        }
-        cur = next; // slide onto the next cell
-        if (cellHasTerrainFlag(cur, (T_LAVA_INSTA_DEATH | T_AUTO_DESCENT | T_IS_DEEP_WATER))) {
-            break; // deposited onto the hazard; it meets its fate via the tile effects below
-        }
-    }
-
-    forceDamage = distanceBetween(oldLoc, cur) + strengthBonus; // momentum + strength shove-force
-
-    // Relocate the block, then let the destination's terrain act on it (lava kills, a chasm drops it a level,
-    // deep water sweeps its carried item away -- and fire there would thaw it).
-    if (distanceBetween(oldLoc, cur) > 0) {
-        pmapAt(oldLoc)->flags &= ~HAS_MONSTER;
-        defender->loc = cur;
-        pmapAt(cur)->flags |= HAS_MONSTER;
-        refreshDungeonCell(oldLoc);
-        refreshDungeonCell(cur);
-        applyInstantTileEffectsToCreature(defender);
-    }
-
-    // Momentum damage to whatever the block slammed into (the block itself is unharmed).
-    if (slamTarget
-        && !(defender->bookkeepingFlags & MB_IS_DYING)
-        && !(slamTarget->info.flags & (MONST_IMMUNE_TO_WEAPONS | MONST_INVULNERABLE))) {
-
-        monsterName(buf2, slamTarget, true);
-        if (slamTarget->status[STATUS_BURNING]) {
-            extinguishFireOnCreature(slamTarget); // the icy block douses what it strikes
-        }
-        if (inflictDamage(NULL, slamTarget, forceDamage, &lightBlue, false)) {
-            if (canDirectlySeeMonster(slamTarget)) {
-                sprintf(buf, "%s %s when the frozen %s slams into $HIMHER",
-                        buf2,
-                        (slamTarget->info.flags & MONST_INANIMATE) ? "is destroyed" : "dies",
-                        monstName);
-                resolvePronounEscapes(buf, slamTarget);
-                buf[DCOLS] = '\0';
-                combatMessage(buf, messageColorFromVictim(slamTarget));
-            }
-            killCreature(slamTarget, false);
-        }
-        if (slamTarget->creatureState != MONSTER_ALLY) {
-            moralAttack(&player, slamTarget);
-            splitMonster(slamTarget, &player);
-        }
-    }
 }
 
 void magicWeaponHit(creature *defender, item *theItem, boolean backstabbed) {
@@ -1236,7 +1070,7 @@ boolean attack(creature *attacker, creature *defender, boolean lungeAttack) {
     } else {
         sneakAttack = (defender != &player && attacker == &player && (defender->creatureState == MONSTER_WANDERING) ? true : false);
         defenderWasAsleep = (defender != &player && (defender->creatureState == MONSTER_SLEEPING) ? true : false);
-        defenderWasParalyzed = defender->status[STATUS_PARALYZED] > 0 || defender->status[STATUS_FROZEN] > 0; // iOS port (iBrogue): frozen counts as helpless for backstab
+        defenderWasParalyzed = defender->status[STATUS_PARALYZED] > 0;
     }
 
     monsterName(attackerName, attacker, true);
@@ -1728,17 +1562,6 @@ boolean inflictDamage(creature *attacker, creature *defender,
         wakeUp(defender);
     }
 
-    // iOS port (iBrogue): two reusable components react to taking damage. A wounded fleer (creature with a
-    // fleeAI profile) commits to fleeing; a looter (creature with a loot profile) sheds loot -- gold per
-    // discrete hit, or a one-time near-death bonus. Both are data-driven (no per-monster branch); the gold
-    // goblin is the reference consumer of both. `damage` here is post-shield and not yet subtracted from HP.
-    if (defender->info.fleeAI && damage > 0) {
-        fleerNoteDamage(defender);
-    }
-    if (defender->info.loot && damage > 0) {
-        monsterShedLootOnHit(defender, attacker, damage);
-    }
-
     if (defender == &player
         && rogue.mode == GAME_MODE_EASY
         && damage > 0) {
@@ -1864,16 +1687,6 @@ void killCreature(creature *decedent, boolean administrativeDeath) {
         } else {
             makeMonsterDropItem(decedent);
         }
-    }
-
-    // iOS port (iBrogue): a slain looter (creature with a loot profile) spills its death hoard (marquee item
-    // + gold piles + thrown weapons). Only on a real death -- escaping via the stairs uses administrativeDeath
-    // and forfeits everything -- and only for the genuine bearer, so clones and debug spawns drop nothing.
-    if (!administrativeDeath
-        && decedent->info.loot
-        && decedent->looter.isBearer) {
-
-        monsterDropDeathLoot(decedent);
     }
 
     if (!administrativeDeath && (decedent->info.abilityFlags & MA_DF_ON_DEATH)

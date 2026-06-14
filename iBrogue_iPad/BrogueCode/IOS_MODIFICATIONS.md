@@ -23,70 +23,27 @@ future maintainers (human or AI) don't mistake an intentional port change for a 
 
 ## Change log
 
-### 2026-06-14 — Selectable keyboard schemes (Classic / Modern) + modifier plumbing (iOS port)
+### 2026-06-14 — Backport: seed persistence + selectable keyboard schemes + modifier plumbing
 
-**What.** Adds the opt-in **Modern** keyboard layout (right-hand 3×3 grid) beside the stock **Classic**
-vi-keys layout, mirroring the BrogueCE engine. Full design + rationale: `docs/design/keyboard-schemes.md`;
-the engine-side details are logged in `BrogueCE/Engine/IOS_MODIFICATIONS.md`. This file covers the
-**shared platform layer** and the Classic engine.
+**What.** Backported from the `se-game-mode` line (without the gameplay WIP), mirroring the BrogueCE
+engine. Full design: `docs/design/keyboard-schemes.md`; engine-side details in
+`BrogueCE/Engine/IOS_MODIFICATIONS.md`.
 
-- **Modifier plumbing (shared, fixes both engines).** The host key queue in `BrogueViewController` was
-  byte-only and both bridges hardcoded `controlKey = shiftKey = 0`, so Shift/Ctrl-run never worked on
-  iOS. The queue now stores a `QueuedKeyEvent { code, shift, control, raw }`; `pressesBegan`/`brogueKey`
-  read `UIKey.modifierFlags` and mark real hardware character keys `raw = true` (on-screen controls,
-  ESC, arrows stay `raw = false`). Arrow keys now send canonical lowercase `hjkl` (scheme-independent),
-  not the old uppercase byte hack. `dequeKeyEvent` became
-  `dequeKeyEvent(shift:control:raw:) -> Int32` (`@objc dequeKeyEventWithShift:control:raw:`); `CEHost`
-  and the `BrogueCEHost` protocol updated to match. `RogueDriver.mm` (Classic) and `CEBridge.mm` (CE)
-  set the event's modifier flags from the dequeued values and call `applyKeyboardScheme()` on `raw`
-  keys only, skipping text entry.
-- **Classic engine scheme support.** `enum keyboardScheme` + `rogueKeyboardScheme` (`Rogue.h` /
-  `Globals.c`, default CLASSIC) and `applyKeyboardScheme()` (`IO.c`) mirror BrogueCE: the Modern grid
-  `uio/jkl/m,.` (center `k` = wait, Shift/Ctrl = run), inventory→`e`, equip→Shift+`E`, messages→`p`,
-  stairs→Shift+`P`/`:`. A `QUIT_KEY` guard makes quit menu-only in both schemes; `actionMenu` drops the
-  `Q:` hotkey label. `printHelpScreen` renders the active scheme and toggles with **Tab** (persisted).
-- **Persistence.** `persistKeyboardScheme()` / `loadPersistedKeyboardScheme()` (`RogueDriver.mm`,
-  NSUserDefaults key `"keyboard scheme"`); restored in `RogueMain.mm` next to the seed restore.
+- **Seed persistence** — `loadPersistedSeed`/`persistLastSeed` (NSUserDefaults, in `RogueDriver.mm`),
+  restored in `rogueMain` (`RogueMain.mm`) and synced from `Recordings.c`; the seed prompt is pre-filled
+  and `requestKeyboardInput` gained a `numeric` arg for a number pad.
+- **Hardware keyboard modifiers** — the shared `BrogueViewController` key queue now carries real
+  Shift/Ctrl + a `raw` flag (was byte-only, modifiers hardcoded to 0), fixing Shift/Ctrl-run; arrows are
+  scheme-independent. `RogueDriver.mm` sets the event flags and runs `raw` keys through the scheme.
+- **Selectable keyboard schemes** — `enum keyboardScheme` + `rogueKeyboardScheme` (default CLASSIC) +
+  `applyKeyboardScheme()` (`IO.c`); the Modern right-hand grid, Shift/Ctrl-run, displaced
+  inventory/equip/messages/stairs, quit-removed-on-tablet, and the scheme-aware `printHelpScreen` with a
+  Tab toggle (persisted via `persistKeyboardScheme`).
 
-**Why.** The numpad/vi assumption is unfriendly on Magic Keyboards and laptops. The modifier plumbing
-was a prerequisite (and a long-standing latent bug — Classic Shift-run never worked on iOS). Recording
-stays canonical because actions self-record canonical keys, so saves/seeds are unaffected.
+Default is Classic, so behavior is unchanged until the player opts in via `?` → Tab.
 
-**Where.** `BrogueViewController.swift` (queue + `addKeyEvent`/`dequeKeyEvent` + `brogueKey` +
-`pressesBegan`), `CEHost.swift`, `RogueDriver.mm` (`nextKeyOrMouseEvent`, persistence), `Rogue.h`,
-`Globals.c`, `IO.c` (`applyKeyboardScheme`, `printHelpScreen`, `actionMenu`), `RogueMain.mm` (restore).
-
-### 2026-06-13 — Seed-entry keyboard: use a number pad (iOS port)
-
-**What.** The pre-filled text dialog (`requestKeyboardInput` → `getInputTextString`) already passed
-the default to the iOS field, so backspace worked in Classic — but it always showed the default
-(alpha) keyboard, even for numeric seed entry. `requestKeyboardInput` now takes a `numeric` flag
-(passed `textEntryType == TEXT_INPUT_NUMBERS`) so the host can show a number pad. (A number pad has
-no Return key; the host adds a "Done" accessory bar that submits like Return.) This is the Classic
-half of the same fix made on the CE side, where the missing pre-fill also broke backspace.
-
-**Where.** `Rogue.h` (`requestKeyboardInput(char *string, boolean numeric)`), `RogueDriver.mm`
-(forwards to `requestTextInputFor:numeric:`), `IO.c` (call site passes the numeric flag).
-
-### 2026-06-13 — Persist the last-played seed across app launches (iOS port)
-
-**What.** The title screen's seeded-game prompt pre-fills `previousGameSeed` — the seed of the most
-recent run. Upstream keeps this only in memory for the process lifetime; on iOS, where backgrounded
-apps are routinely terminated, it reset to 0 on every relaunch, so the prompt never remembered your
-last seed. We now back `previousGameSeed` with `NSUserDefaults`.
-
-**Why.** Players expect the "play a seeded run" field to default to their last seed (as on desktop),
-but app kills wiped it. Persisting it makes the iOS behavior match desktop across launches.
-
-**Where.**
-- `RogueDriver.mm` — `persistLastSeed(unsigned long)` / `loadPersistedSeed(void)` store the seed as
-  an `NSNumber` under `@"last game seed"`, mirroring the high-score persistence. Declared in
-  `Rogue.h` (inside the `extern "C"` platform-function block, next to `saveHighScore`) so the
-  engine `.c`/`.mm` files can call them.
-- `RogueMain.mm` (`rogueMain()`): `previousGameSeed = loadPersistedSeed();` replaces the `= 0` reset.
-- Persist wherever `previousGameSeed` is assigned: after the seed assignment in `initializeRogue`
-  (`RogueMain.mm`, guarded by `!playbackMode`) and after the recording-load assignment
-  (`Recordings.c`), so the persisted value always tracks the in-memory one.
+**Where.** `Rogue.h`, `Globals.c`, `IO.c`, `RogueMain.mm`, `Recordings.c`; platform files
+(`BrogueViewController.swift`/`CEHost.swift`/`RogueDriver.mm`/`RogueScene.swift`) shared with BrogueCE.
 
 ### 2026-06-11 — Port BrogueCE's rethrow command
 

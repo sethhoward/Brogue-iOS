@@ -87,9 +87,6 @@ const bolt boltCatalog_Brogue[] = {
     {"poisoned dart",           "fires a dart",                 "fires strength-sapping darts",             G_WEAPON,&centipedeColor_Brogue,NULL,              BE_ATTACK,      1,              0,          0,          0,                          (BF_TARGET_ENEMIES | BF_NEVER_REFLECTS | BF_NOT_LEARNABLE)},
     {"growing vines",           "releases carnivorous vines into the ground", "conjures carnivorous vines", G_GRASS,&tanColor,      NULL,               BE_NONE,        5,              DF_ANCIENT_SPIRIT_GRASS, DF_ANCIENT_SPIRIT_VINES, (MONST_INANIMATE | MONST_IMMUNE_TO_WEBS),   (BF_TARGET_ENEMIES | BF_NEVER_REFLECTS)},
     {"whip",                    "whips",                        "wields a whip",                            '*',    &tanColor,      NULL,               BE_ATTACK,      1,              0,          0,          MONST_IMMUNE_TO_WEAPONS,    (BF_TARGET_ENEMIES | BF_NEVER_REFLECTS | BF_NOT_LEARNABLE | BF_DISPLAY_CHAR_ALONG_LENGTH)},
-    // iOS port (iBrogue): staff of frost — single-target freeze (stops at the first creature so a frozen one
-    // can be shoved into the rest); pathDF freezes deep water/foliage along the bolt's path
-    {"frost",                   "casts a bolt of frost",        "can freeze $HISHER enemies",               0,      NULL,           &lightBlue,         BE_FREEZE,      5,              DF_DEEP_WATER_FREEZE, 0,    MONST_INANIMATE,            (BF_TARGET_ENEMIES | BF_NOT_LEARNABLE)},
 };
 
     //name              feat description                                        initial value
@@ -621,29 +618,6 @@ const blueprint blueprintCatalog_Brogue[] = {
     {1,DEEPEST_LEVEL}, {40, 40},   0,      2,          0,                  (BP_NO_INTERIOR_FLAG), {
         {0,         STATUE_INERT,DUNGEON,       {3, 3},     3,          0,          -1,         MK_SENTINEL,    2,              0,          0,          (MF_NOT_IN_HALLWAY | MF_TREAT_AS_BLOCKING | MF_IN_VIEW_OF_ORIGIN)},
         {DF_ASH,    0,          0,              {2, 3},     0,          0,          -1,         0,              0,              0,          0,          0}}},
-    // iOS port (iBrogue): altars of insight -- force-built at depths 5 and 15 (see addMachines); occupies
-    // the variant-specific reward slot (index 72 = MT_INSIGHT_ALTAR). Force-only: no BP_REWARD, freq 0, so
-    // it never enters the random reward raffle. The blueprint builds ONLY the carpeted room; the two altars
-    // are then placed in addMachines in a fixed "s . o" arrangement (payment west, one-tile gap, insight
-    // east), because the generic machine builder scatters features at random interior cells and can't
-    // guarantee an ordered, adjacent pair. roomSize {6,25} is deliberately wide (cf. the transfer altar's
-    // {10,30} and the commutation altar's {15,25}): placeAltarPairInRoom needs only two open interior cells,
-    // so a broad acceptance window maximizes the odds a level has a qualifying gate site for the force-build.
-    {"Altars of insight -- sacrifice an offering to reveal the nature of another item",
-    {5, AMULET_LEVEL},{6, 25},     0,      3,          0,                  (BP_ROOM | BP_PURGE_INTERIOR | BP_SURROUND_WITH_WALLS | BP_OPEN_INTERIOR), {
-        {0,         CARPET,     DUNGEON,        {0,0},      0,          0,          -1,         0,              0,              0,          0,          (MF_EVERYWHERE)},
-        {0,         STATUE_INERT,DUNGEON,       {1,3},      0,          0,          -1,         0,              2,              0,          0,          (MF_TREAT_AS_BLOCKING | MF_BUILD_IN_WALLS)},
-        {0,         0,          0,              {1,1},      1,          0,          0,          0,              2,              0,          0,          (MF_BUILD_AT_ORIGIN | MF_PERMIT_BLOCKING | MF_BUILD_VESTIBULE)}}},
-    // iOS port (iBrogue): altars of transference -- a random reward vault (depth 11+, not guaranteed) that
-    // sacrifices a donor item to pour its enchantment into a recipient. Occupies a genuine new machine index
-    // (MT_TRANSFER_ALTAR), appended after the insight altar; this index exists only in Brogue's catalog. Like
-    // the insight altars, the blueprint builds ONLY the carpeted room; the donor/recipient pair is placed in a
-    // fixed "s . o" layout by buildAMachine (the generic builder can't produce an ordered adjacent pair).
-    {"Altars of transference -- sacrifice an item to pour its enchantment into another",
-    {11, AMULET_LEVEL},{10, 30},   30,     3,          0,                  (BP_ROOM | BP_PURGE_INTERIOR | BP_SURROUND_WITH_WALLS | BP_OPEN_INTERIOR | BP_IMPREGNABLE | BP_REWARD), {
-        {0,         CARPET,     DUNGEON,        {0,0},      0,          0,          -1,         0,              0,              0,          0,          (MF_EVERYWHERE)},
-        {0,         STATUE_INERT,DUNGEON,       {1,3},      0,          0,          -1,         0,              2,              0,          0,          (MF_TREAT_AS_BLOCKING | MF_BUILD_IN_WALLS | MF_IMPREGNABLE)},
-        {0,         0,          0,              {1,1},      1,          0,          0,          0,              2,              0,          0,          (MF_BUILD_AT_ORIGIN | MF_PERMIT_BLOCKING | MF_BUILD_VESTIBULE)}}},
 };
 
 // To meter item generation (on level generation):
@@ -679,13 +653,7 @@ const meteredItemGenerationTable meteredItemsGenerationTable_Brogue[] = {
     { .category = POTION, .kind = POTION_INCINERATION },
     { .category = POTION, .kind = POTION_DARKNESS },
     { .category = POTION, .kind = POTION_DESCENT },
-    { .category = POTION, .kind = POTION_LICHEN },
-    // iOS port (iBrogue): keep this potion section index-parallel with potionTable_Brogue.
-    { .category = POTION, .kind = POTION_HONEY },
-    { .category = POTION, .kind = POTION_VOMIT },
-    { .category = POTION, .kind = POTION_WORT },
-    { .category = POTION, .kind = POTION_VENOM },
-    { .category = POTION, .kind = POTION_DETECT_MAGIC2 }
+    { .category = POTION, .kind = POTION_LICHEN }
 };
 
 // levelFeelings[0] -> AMULET_LEVEL, levelFeelings[1] -> DEEPEST_LEVEL
@@ -697,35 +665,20 @@ levelFeeling levelFeelings_Brogue[] = {
 itemTable potionTable_Brogue[] = {
     {"life",                itemColors[1], "",  0,  500,    0, 0, {10,10,0}, false, false, 1,  false, "A swirling elixir that will instantly heal you, cure you of ailments, and permanently increase your maximum health."}, // frequency is dynamically adjusted
     {"strength",            itemColors[2], "",  0,  400,    0, 0, {1,1,0}, false, false, 1,  false, "This powerful medicine will course through your muscles, permanently increasing your strength by one point."}, // frequency is dynamically adjusted
-    {"telepathy",           itemColors[3], "",  20, 350,    0, 0, {300,300,0}, false, false, 1,  false, "This mysterious liquid will attune your mind to the psychic signature of distant creatures. Its effects will not reveal inanimate objects, such as totems, turrets and traps. Hurled at a living creature instead, the flask forges a lasting bond with that single mind -- you will always sense where it lurks, wherever it roams."},
+    {"telepathy",           itemColors[3], "",  20, 350,    0, 0, {300,300,0}, false, false, 1,  false, "This mysterious liquid will attune your mind to the psychic signature of distant creatures. Its effects will not reveal inanimate objects, such as totems, turrets and traps."},
     {"levitation",          itemColors[4], "",  15, 250,    0, 0, {100,100,0}, false, false, 1,  false, "This curious liquid will cause you to hover in the air, able to drift effortlessly over lava, water, chasms and traps. Flames, gases and spiderwebs fill the air, and cannot be bypassed while airborne. Creatures that dwell in water or mud will be unable to attack you while you levitate."},
-    {"empty bottle",        itemColors[5], "",  20, 500,    0, 0, {0,0,0}, false, false, 1,  false, "An ordinary glass flask, stoppered and empty. While you carry it, each gas, liquid, or hazard you can reach fills it with a different potion. Step into the ones you can survive on foot; drift over lava or a chasm while levitating to skim those; or set the bottle down and zap it."}, // iOS port (iBrogue): replaces potion of detect magic; v2 capture system
+    {"detect magic",        itemColors[5], "",  20, 500,    0, 0, {0,0,0}, false, false, 1,  false, "This mysterious brew will sensitize your mind to the radiance of magic. Items imbued with helpful enchantments will be marked with a full sigil; items corrupted by curses or designed to bring misfortune upon the bearer will be marked with a hollow sigil. The Amulet of Yendor will be revealed by its unique aura."},
     {"speed",               itemColors[6], "",  10, 500,    0, 0, {25,25,0}, false, false, 1,  false, "Quaffing the contents of this flask will enable you to move at blinding speed for several minutes."},
     {"fire immunity",       itemColors[7], "",  15, 500,    0, 0, {150,150,0}, false, false, 1,  false, "This potion will render you impervious to heat and permit you to wander through fire and lava and ignore otherwise deadly bolts of flame. It will not guard against the concussive impact of an explosion, however."},
     {"invisibility",        itemColors[8], "",  15, 400,    0, 0, {75,75,0}, false, false, 1,  false, "Drinking this potion will render you temporarily invisible. Enemies more than two spaces away will be unable to track you."},
     {"caustic gas",         itemColors[9], "",  15, 200,    0, 0, {0,0,0}, false, false, -1, false, "Uncorking or shattering this pressurized glass will cause its contents to explode into a deadly cloud of caustic purple gas. You might choose to fling this potion at distant enemies instead of uncorking it by hand."},
     {"paralysis",           itemColors[10], "", 10, 250,    0, 0, {0,0,0}, false, false, -1, false, "Upon exposure to open air, the liquid in this flask will vaporize into a numbing pink haze. Anyone who inhales the cloud will be paralyzed instantly, unable to move for some time after the cloud dissipates. This item can be thrown at distant enemies to catch them within the effect of the gas."},
-    {"hallucination",       itemColors[11], "", 10, 500,    0, 0, {300,300,0}, false, false, -1, false, "This flask contains a vicious and long-lasting hallucinogen. Under its dazzling effect, you will wander through a rainbow wonderland, unable to discern the form of any creatures or items you see. Throwing this potion will create a luminescent fungal forest, which will block line of sight beyond it."},
+    {"hallucination",       itemColors[11], "", 10, 500,    0, 0, {300,300,0}, false, false, -1, false, "This flask contains a vicious and long-lasting hallucinogen. Under its dazzling effect, you will wander through a rainbow wonderland, unable to discern the form of any creatures or items you see."},
     {"confusion",           itemColors[12], "", 15, 450,    0, 0, {0,0,0}, false, false, -1, false, "This unstable chemical will quickly vaporize into a glittering cloud upon contact with open air, causing any creature that inhales it to lose control of the direction of its movements until the effect wears off (although its ability to aim projectile attacks will not be affected). Its vertiginous intoxication can cause creatures and adventurers to careen into one another or into chasms or lava pits, so extreme care should be taken when under its effect. Its contents can be weaponized by throwing the flask at distant enemies."},
     {"incineration",        itemColors[13], "", 15, 500,    0, 0, {0,0,0}, false, false, -1, false, "This flask contains an unstable compound which will burst violently into flame upon exposure to open air. You might throw the flask at distant enemies -- or into a deep lake, to cleanse the cavern with scalding steam."},
     {"darkness",            itemColors[14], "", 7,  150,    0, 0, {400,400,0}, false, false, -1, false, "Drinking this potion will plunge you into darkness. At first, you will be completely blind to anything not illuminated by an independent light source, but over time your vision will regain its former strength. Throwing the potion will create a cloud of supernatural darkness, and enemies will have difficulty seeing or following you if you take refuge under its cover."},
     {"descent",             itemColors[15], "", 15, 500,    0, 0, {0,0,0}, false, false, -1, false, "When this flask is uncorked by hand or shattered by being thrown, the fog that seeps out will temporarily cause the ground in the vicinity to vanish."},
     {"creeping death",      itemColors[16], "", 7,  450,    0, 0, {0,0,0}, false, false, -1, false, "When the cork is popped or the flask is thrown, tiny spores will spill across the ground and begin to grow a deadly lichen. Anything that touches the lichen will be poisoned by its clinging tendrils, and the lichen will slowly grow to fill the area. Fire will purge the infestation."},
-    // iOS port (iBrogue): themed potion sets (one set is live per run) + a returning detect magic. Frequency 10 each.
-    {"honey",               itemColors[17], "", 10, 400,    0, 0, {20,20,0}, false, false, 1,  false, "A heavy jar of thick golden honey. Swallowed, its slow sweetness mends the body over time. Dashed against the ground -- by your hand, or by a bolt of lightning or flame -- it spreads into a sticky golden mire that snares whatever is caught in it."},
-    {"vomit",               itemColors[18], "", 10, 150,    0, 0, {0,0,0}, false, false, -1, false, "A flask of foul, churning bile. Exposed to the open air it erupts into a reeking cloud that sickens any creature who breathes it, just as a zombie's stench does."},
-    {"wort",                itemColors[19], "", 10, 500,    0, 0, {0,0,0}, false, false, 1,  false, "A flask swirling with luminous medicinal spores -- wort. Uncorked or thrown, it bursts into a cloud of healing motes that knit the wounds of any who linger within it."},
-    {"venom",               itemColors[20], "", 10, 250,    0, 0, {15,15,0}, false, false, -1, false, "A vial of viscous green venom. Drinking it floods your veins with poison; hurled, it douses whatever it strikes in the same searing toxin."},
-    {"detect magic",        itemColors[0],  "", 10, 350,    0, 0, {0,0,0}, false, false, 1,  false, "This mysterious brew sensitizes your mind to the radiance of magic, but only fleetingly: it reveals the helpful or harmful nature of one or two items in your pack, chosen at random. Hurled instead, its insight turns outward -- sensing one or two undiscovered magic items elsewhere on this level and marking their auras on your map."},
-    // iOS port (iBrogue): empty-bottle v2 capture-only potions. Frequency 0, and -- unlike life/strength
-    // above (also freq 0 here but spawned by the metered-generation system) -- these are deliberately
-    // absent from meteredItemsGenerationTable, so nothing overrides the 0: they NEVER generate and are
-    // obtainable only by capturing a matching hazard. (See the two-path explanation in Items.c, and docs/design/empty-bottle-v2.md.)
-    {"acid",                itemColors[4],  "", 0,  300,    0, 0, {15,15,0}, false, false, -1, false, "Captured corrosion, sloshing and fuming against the glass. Hurled, it sears whatever it strikes, eating away at its defenses; uncorked in hand, it burns you instead."},
-    {"webbing",             itemColors[15], "", 0,  300,    0, 0, {0,0,0}, false, false, -1, false, "A flask packed with living silk. Shattered against the ground it bursts into a tangle of grasping web; uncork it in your grip and the strands seize you where you stand."},
-    {"steam",               itemColors[13], "", 0,  300,    0, 0, {0,0,0}, false, false, -1, false, "Scalding vapor strains against the stopper. Released, it boils outward into a searing cloud that burns anything caught within it."},
-    {"ice",                 itemColors[12], "", 0,  300,    0, 0, {5,5,0}, false, false, -1, false, "Aching cold radiates through the glass. Hurled at a creature it encases the victim in ice, frozen helpless before thawing into a sluggish chill; uncorked in hand, it freezes you instead."},
-    {"water",               itemColors[5],  "", 0,  300,    0, 0, {0,0,0}, false, false, -1, false, "Plain captured water, heavier than it looks. Dashed against the ground it floods the area into a wide pool -- treacherous footing that conducts a lightning bolt's shock and washes away the scent you leave behind."},
 };
 
 itemTable scrollTable_Brogue[] = {
@@ -1095,7 +1048,7 @@ const gameConstants brogueGameConst = {
     .numberBoltKinds = sizeof(boltCatalog_Brogue) / sizeof(bolt),
     .numberBlueprints = sizeof(blueprintCatalog_Brogue) / sizeof(blueprint),
     .numberPotionKinds = sizeof(potionTable_Brogue) / sizeof(itemTable),
-    .numberGoodPotionKinds = 11, // iOS port (iBrogue): 8 original good + honey, wort, detect-magic2 (count only; good kinds are no longer contiguous)
+    .numberGoodPotionKinds = 8,
     .numberScrollKinds = sizeof(scrollTable_Brogue) / sizeof(itemTable),
     .numberGoodScrollKinds = 12,
     .numberWandKinds = sizeof(wandTable_Brogue) / sizeof(itemTable),

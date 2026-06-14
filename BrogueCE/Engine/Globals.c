@@ -163,15 +163,10 @@ const color altarForeColor =        {5,     7,      9,      0,      0,          
 const color altarBackColor =        {35,    18,     18,     0,      0,          0,          0,      false};
 const color greenAltarBackColor =   {18,    25,     18,     0,      0,          0,          0,      false};
 const color goldAltarBackColor =    {25,    24,     12,     0,      0,          0,          0,      false};
-// iOS port (iBrogue): backdrop for the altars of insight
-const color blueAltarBackColor =    {15,    18,     28,     0,      0,          0,          0,      false};
-// iOS port (iBrogue): backdrop for the altars of transference
-const color violetAltarBackColor =  {24,    14,     28,     0,      0,          0,          0,      false};
 const color pedestalBackColor =     {10,    5,      20,     0,      0,          0,          0,      false};
 
 // monster colors
 const color goblinColor =           {44,    33,     22,     0,      0,          0,          0,      false};
-const color goldGoblinColor =       {90,    73,     20,     0,      12,         0,          8,      true};  // iOS port (iBrogue): shimmering gold
 const color jackalColor =           {60,    42,     27,     0,      0,          0,          0,      false};
 const color ogreColor =             {60,    25,     25,     0,      0,          0,          0,      false};
 const color eelColor =              {30,    12,     12,     0,      0,          0,          0,      false};
@@ -581,29 +576,6 @@ const floorTileType tileCatalog[NUMBER_TILETYPES] = {
  /*MUD_FLOOR*/                  {G_FLOOR,   &mudBackColor,          &refuseBackColor,   85, 0,  DF_STENCH_SMOLDER,0,0,                      0,  NO_LIGHT,       (T_IS_FLAMMABLE), (TM_VANISHES_UPON_PROMOTION),                                                     "the mud floor",        "Rotting animal matter has been ground into the mud floor; the stench is awful."},
  /*MUD_WALL*/                   {G_WALL,    &mudWallForeColor,      &mudWallBackColor,  0,  0,  DF_PLAIN_FIRE,0,0,                          0,  NO_LIGHT,       (T_OBSTRUCTS_EVERYTHING), (TM_STAND_IN_TILE),                                                       "a mud-covered wall",   "A malodorous layer of clay and fecal matter coats the wall."},
  /*MUD_DOORWAY*/                {G_DOORWAY, &mudWallForeColor,      &refuseBackColor,   25, 50, DF_EMBERS,0,0,                              0,  NO_LIGHT,       (T_OBSTRUCTS_VISION | T_OBSTRUCTS_GAS | T_IS_FLAMMABLE), (TM_STAND_IN_TILE | TM_VISUALLY_DISTINCT), "hanging animal skins", "you push through the animal skins that hang across the threshold."},
-
- // iOS port (iBrogue): altars of insight — a linked pair. Drop the item to reveal on the insight altar
- // and a payment item on the offering altar; the payment is consumed, the other item is revealed, and
- // both altars promote to the inert form (see performInsightSacrifice in Items.c).
- /*INSIGHT_ALTAR_INSIGHT*/      {G_ORB_ALTAR,&altarForeColor,       &blueAltarBackColor,17, 0,  0,0,DF_ALTAR_INSIGHT_INERT, 0,  CANDLE_LIGHT,   (T_OBSTRUCTS_SURFACE_EFFECTS), (TM_VANISHES_UPON_PROMOTION | TM_IS_WIRED | TM_INSIGHT_ACTIVATION | TM_LIST_IN_SIDEBAR | TM_VISUALLY_DISTINCT), "an altar of insight",  "place an item here, and an offering on its twin, to divine the item's nature."},
- /*INSIGHT_ALTAR_PAYMENT*/      {G_ALTAR,    &altarForeColor,       &blueAltarBackColor,17, 0,  0,0,DF_ALTAR_INSIGHT_INERT, 0,  CANDLE_LIGHT,   (T_OBSTRUCTS_SURFACE_EFFECTS), (TM_VANISHES_UPON_PROMOTION | TM_IS_WIRED | TM_INSIGHT_ACTIVATION | TM_LIST_IN_SIDEBAR | TM_VISUALLY_DISTINCT), "an altar of offering", "place an offering here, and an item on its twin; the offering will be consumed."},
- /*INSIGHT_ALTAR_INERT*/        {G_ORB_ALTAR,&black,                &blueAltarBackColor,17, 0,  0,0,0,                      0,  NO_LIGHT,       (T_OBSTRUCTS_SURFACE_EFFECTS), (TM_LIST_IN_SIDEBAR | TM_VISUALLY_DISTINCT),                  "a scorched altar",     "scorch marks cover the surface of the altar, but it is cold to the touch."},
-
- // iOS port (iBrogue): altars of transference — a linked pair. Drop the item to empower on the recipient
- // altar and the item to sacrifice on the donor altar; the donor is consumed and its enchantment is added
- // to the recipient (which must have a known enchant level). Sacrificing an unidentified donor is a gamble
- // — it might be cursed — and is revealed as it is consumed (see performEnchantTransfer in Items.c).
- /*TRANSFER_ALTAR_DONOR*/      {G_ALTAR,     &altarForeColor,     &violetAltarBackColor,17, 0,  0,0,DF_ALTAR_TRANSFER_INERT,0,  CANDLE_LIGHT,   (T_OBSTRUCTS_SURFACE_EFFECTS), (TM_VANISHES_UPON_PROMOTION | TM_IS_WIRED | TM_TRANSFER_ENCHANT_ACTIVATION | TM_LIST_IN_SIDEBAR | TM_VISUALLY_DISTINCT), "an altar of sacrifice", "place an item to sacrifice here, and the item to empower on its twin; the sacrifice will be consumed."},
- /*TRANSFER_ALTAR_RECIPIENT*/ {G_ORB_ALTAR,  &altarForeColor,     &violetAltarBackColor,17, 0,  0,0,DF_ALTAR_TRANSFER_INERT,0,  CANDLE_LIGHT,   (T_OBSTRUCTS_SURFACE_EFFECTS), (TM_VANISHES_UPON_PROMOTION | TM_IS_WIRED | TM_TRANSFER_ENCHANT_ACTIVATION | TM_LIST_IN_SIDEBAR | TM_VISUALLY_DISTINCT), "an altar of transference", "place an identified item here to empower, and a sacrifice on its twin; this item absorbs its enchantment."},
- /*TRANSFER_ALTAR_INERT*/     {G_ORB_ALTAR,  &black,              &violetAltarBackColor,17, 0,  0,0,0,                      0,  NO_LIGHT,       (T_OBSTRUCTS_SURFACE_EFFECTS), (TM_LIST_IN_SIDEBAR | TM_VISUALLY_DISTINCT),                  "a scorched altar",     "scorch marks cover the surface of the altar, but it is cold to the touch."},
-    // iOS port (iBrogue): staff of frost — foliage frozen into a brittle, impassable barrier. Like ICE_DEEP it
-    // melts from exposed edges inward (negative promoteChance) and fire thaws it instantly (T_IS_FLAMMABLE -> thaw).
- /*FROZEN_FOLIAGE*/            {G_FOLIAGE, &white,                 &lightBlue,         45, 100,DF_FROZEN_FOLIAGE_THAW,0,DF_FROZEN_FOLIAGE_MELTING,           -100,  NO_LIGHT,   (T_OBSTRUCTS_PASSABILITY | T_OBSTRUCTS_VISION | T_IS_FLAMMABLE), (TM_VANISHES_UPON_PROMOTION),       "frozen foliage",       "the dense foliage has frozen solid into a brittle, glittering thicket."},
- /*FROZEN_FOLIAGE_MELT*/       {G_FOLIAGE, &black,                 &lightBlue,         45, 100,DF_FROZEN_FOLIAGE_THAW,0,DF_FROZEN_FOLIAGE_THAW,              10000,  NO_LIGHT,   (T_OBSTRUCTS_PASSABILITY | T_OBSTRUCTS_VISION | T_IS_FLAMMABLE), (TM_VANISHES_UPON_PROMOTION),       "thawing foliage",      "the ice sheathing the foliage cracks and sloughs away."},
-    // iOS port (iBrogue): empty-bottle v2 potion of ice -- the freezing cloud. Anything caught in it
-    // freezes (T_CAUSES_FREEZE; see applyInstantTileEffectsToCreature), and the cloud douses flame
-    // (TM_EXTINGUISHES_FIRE). Not flammable; dissipates quickly like the other potion gases.
- /*FROST_GAS*/                 {' ',       0,                      &lightBlue,         35, 0,  0,0,0,                                          0,  NO_LIGHT,   (T_CAUSES_FREEZE), (TM_STAND_IN_TILE | TM_GAS_DISSIPATES_QUICKLY | TM_EXTINGUISHES_FIRE),     "a cloud of biting frost", "the air is full of stinging, frost-laden mist."},
 };
 
 unsigned long terrainFlags(pos p) {
@@ -790,17 +762,9 @@ dungeonFeature dungeonFeatureCatalog[NUMBER_DUNGEON_FEATURES] = {
     {ICE_DEEP,                  LIQUID,     150,    50,     DFF_EVACUATE_CREATURES_FIRST,   "", 0,  0,  0,      DEEP_WATER_ALGAE_2, DF_SHALLOW_WATER_FREEZE},
     {ICE_DEEP_MELT,             LIQUID,     0,      0,      0},
     {DEEP_WATER,                LIQUID,     0,      0,      0},
-    // iOS port (iBrogue): staff of frost chains foliage-freezing onto the end of the water-freeze cascade,
-    // so one pathDF (DF_DEEP_WATER_FREEZE) freezes deep water, shallow water, and dense foliage it crosses.
-    {ICE_SHALLOW,               LIQUID,     100,    50,     DFF_EVACUATE_CREATURES_FIRST,   "", 0,  0,  0,      SHALLOW_WATER,      DF_FROZEN_FOLIAGE},
+    {ICE_SHALLOW,               LIQUID,     100,    50,     DFF_EVACUATE_CREATURES_FIRST,   "", 0,  0,  0,      SHALLOW_WATER},
     {ICE_SHALLOW_MELT,          LIQUID,     0,      0,      0},
     {SHALLOW_WATER,             LIQUID,     0,      0,      0},
-
-    // iOS port (iBrogue): staff of frost — dense foliage frozen into a brittle, impassable barrier.
-    // Melts edge-inward (FROZEN_FOLIAGE promoteChance -100) like lake ice; fire thaws it instantly.
-    {FROZEN_FOLIAGE,            SURFACE,    100,    100,    DFF_EVACUATE_CREATURES_FIRST,   "", 0,  0,  0,      FOLIAGE},
-    {FROZEN_FOLIAGE_MELT,       SURFACE,    0,      0,      0},
-    {FOLIAGE,                   SURFACE,    0,      0,      0},
 
     // gas trap effects
     {POISON_GAS,                GAS,        1000,   0,      0,  "a cloud of caustic gas sprays upward from the floor!"},
@@ -965,21 +929,6 @@ dungeonFeature dungeonFeatureCatalog[NUMBER_DUNGEON_FEATURES] = {
     // goblin warren:
     {STENCH_SMOKE_GAS,          GAS,        50,     0,      0, "", 0, 0, 0, 0, DF_PLAIN_FIRE},
     {STENCH_SMOKE_GAS,          GAS,        50,     0,      0, "", 0, 0, 0, 0, DF_EMBERS},
-
-    // iOS port (iBrogue): thrown potion of life bursts into the bloodwort healing gas (HEALING_CLOUD)
-    {HEALING_CLOUD,             GAS,        350,    0,      0},
-
-    // iOS port (iBrogue): an insight altar promotes to its inert form after a sacrifice (visual flash;
-    // the reveal message is emitted by performInsightSacrifice so it appears once, not once per altar)
-    {INSIGHT_ALTAR_INERT,       DUNGEON,    0,      0,      0,  "", SCROLL_ENCHANTMENT_LIGHT},
-
-    // iOS port (iBrogue): a transference altar promotes to its inert form after a transfer (visual flash;
-    // the message is emitted by performEnchantTransfer so it appears once, not once per altar)
-    {TRANSFER_ALTAR_INERT,      DUNGEON,    0,      0,      0,  "", SCROLL_ENCHANTMENT_LIGHT},
-
-    // iOS port (iBrogue): empty-bottle v2 potion of ice -- a freezing cloud (gas-layer volume, like the
-    // other potion gas clouds). effectRadius/flashColor give the cyan burst on shatter.
-    {FROST_GAS,                 GAS,        1000,   0,      0,  "", 0,  &lightBlue, 4},
 };
 
 const dungeonProfile dungeonProfileCatalog[NUMBER_DUNGEON_PROFILES] = {
@@ -1071,86 +1020,6 @@ const lightSource lightCatalog[NUMBER_LIGHT_KINDS] = {
     {&sacrificeTargetColor, {800, 1200, 1},          0,      true},      // demonic statue light
 };
 
-// iOS port (iBrogue): the gold goblin's flee-component config (see docs/guides/reusable-components.md).
-// Attached to its catalog entry's fleeAI field; the shared fleeAITakesTurn() in Monsters.c does the rest.
-// A second flee-creature is just another fleeProfile + catalog row, no new behavior code.
-const fleeProfile goldGoblinFleeProfile = {
-    .trigger = FLEE_ON_SIGHT,
-    .exit = FLEE_EXIT_UP,
-    .breakForExitBelowHpPct = 50,   // keep distance until wounded, then break for the up stairs
-    .playerBerth = 4,
-    .berthCost = 5,
-    .fleeMemoryTurns = 10,
-    .rerouteWhenBlocked = true,     // reroute toward the down stairs (non-escape) when the up route is blocked
-    .tossFeature = DF_FUNGUS_FOREST,
-};
-
-// iOS port (iBrogue): the gold goblin's loot-component config (see docs/guides/reusable-components.md).
-// Net-new bonus loot, distinct from the engine's MONST_CARRY_ITEM_* budget loot. Attached to its catalog
-// entry's loot field; the shared loot helpers in Monsters.c do the rest. A second looting creature is just
-// another lootEntry table + lootProfile + catalog row, no new behavior code.
-// The marquee pool sums to 100: equipment is rolled honestly (random kind, can be cursed -- the usual
-// identification gamble); the consumable slots are forced to guaranteed-useful kinds (detect magic is
-// POTION_DETECT_MAGIC2, the always-present good potion on this branch).
-static const lootEntry goldGoblinMarquee[] = {
-    {STAFF,  -1,                   20},
-    {CHARM,  -1,                   16},
-    {WAND,   -1,                   11},
-    {RING,   -1,                   11},
-    {WEAPON, -1,                   11},
-    {ARMOR,  -1,                   11},
-    {POTION, POTION_DETECT_MAGIC2, 10},
-    {SCROLL, SCROLL_ENCHANTING,     6},
-    {POTION, POTION_LIFE,           2},
-    {POTION, POTION_STRENGTH,       2},
-    {0},  // sentinel: a weight-0 row terminates the table
-};
-
-const lootProfile goldGoblinLoot = {
-    .marquee = goldGoblinMarquee,
-    .deathGoldPilesLo = 2, .deathGoldPilesHi = 4,       // 2-4 fat piles around the corpse
-    .deathGoldLoPerDepth = 5, .deathGoldHiPerDepth = 10, // each rand_range(5*depth, 10*depth)
-    .thrown = {
-        .category = WEAPON,
-        .earlyKind = DART, .lateKind = JAVELIN, .lateDepth = 10,
-        .earlyQtyLo = 5, .earlyQtyHi = 10,             // darts below depth 10
-        .lateQtyLo = 3,   .lateQtyHi = 6,               // javelins from depth 10
-    },
-    .hitGoldLoPerDepth = 2, .hitGoldHiPerDepth = 5,     // chase trail: rand_range(2*depth, 5*depth) per hit
-    .bonusBelowHpPct = 25,                              // one-time near-death drop below 25% HP
-    .bonusCategory = POTION, .bonusKind = POTION_DETECT_MAGIC2,
-};
-
-// iOS port (iBrogue): steal-preference configs for the thieving creatures (see docs/guides/reusable-components.md).
-// Attached to the catalog `steal` field; the shared evaluator in rateItemStealDesirability (Combat.c) reads these
-// instead of per-monsterID branches. Both reproduce the previous hardcoded scoring exactly (RNG-identical). A
-// second thief is just another stealRule table + stealProfile + catalog row.
-
-// Monkey: favors food and potions of life/strength, but (ADDITIVE, base 10) will snatch ANYTHING when nothing
-// favored is carried; 5% of thefts ignore the preference and grab a random item.
-static const stealRule monkeyStealRules[] = {
-    {FOOD,   -1,              ENCHANT_ANY, 0, 290, 0},
-    {POTION, POTION_LIFE,     ENCHANT_ANY, 0, 290, 0},
-    {POTION, POTION_STRENGTH, ENCHANT_ANY, 0, 290, 0},
-    {0}, // sentinel
-};
-const stealProfile monkeyStealProfile = {
-    .mode = STEAL_ADDITIVE, .baseScore = 10, .randomPickPercent = 5, .rules = monkeyStealRules,
-};
-
-// Imp: senses enchantment -- favors scrolls of enchanting, positively-enchanted gear (scaled by enchant), and
-// runics; mildly dislikes food. ADDITIVE, base 10, 5% random.
-static const stealRule impStealRules[] = {
-    {SCROLL,                                SCROLL_ENCHANTING, ENCHANT_ANY,      0,          50, 0},
-    {RING | CHARM | STAFF | WEAPON | ARMOR, -1,                ENCHANT_POSITIVE, 0,           0, 5}, // +enchant1*5
-    {RING | CHARM | STAFF | WEAPON | ARMOR, -1,                ENCHANT_ANY,      ITEM_RUNIC, 25, 0},
-    {FOOD,                                  -1,                ENCHANT_ANY,      0,          -8, 0},
-    {0}, // sentinel
-};
-const stealProfile impStealProfile = {
-    .mode = STEAL_ADDITIVE, .baseScore = 10, .randomPickPercent = 5, .rules = impStealRules,
-};
-
 // Defines all creatures, which include monsters and the player:
 // This cannot be const, since we set monsterIDs
 creatureType monsterCatalog[NUMBER_MONSTER_KINDS] = {
@@ -1164,7 +1033,7 @@ creatureType monsterCatalog[NUMBER_MONSTER_KINDS] = {
     {0, "eel",          G_EEL,    &eelColor,      18,     27,     100,    {3, 7, 2},      5,  50,     100,    0,              0,    false,      0,      0,              {0},
         (MONST_RESTRICTED_TO_LIQUID | MONST_IMMUNE_TO_WATER | MONST_SUBMERGES | MONST_FLITS | MONST_NEVER_SLEEPS)},
     {0, "monkey",       G_MONKEY,    &ogreColor,     12,     17,     100,    {1, 3, 1},      20, 100,    100,    DF_RED_BLOOD,   0,    false,      1,      DF_URINE,       {0},
-        (0), (MA_HIT_STEAL_FLEE), 0, 0, &monkeyStealProfile}, // iOS port (iBrogue): reusable steal component
+        (0), (MA_HIT_STEAL_FLEE)},
     {0, "bloat",        G_BLOAT,    &poisonGasColor,4,      0,      100,    {0, 0, 0},      5,  100,    100,    DF_PURPLE_BLOOD,0,    false,      0,      DF_BLOAT_DEATH, {0},
         (MONST_FLIES | MONST_FLITS), (MA_KAMIKAZE | MA_DF_ON_DEATH)},
     {0, "pit bloat",    G_BLOAT,    &lightBlue,     4,      0,      100,    {0, 0, 0},      5,  100,    100,    DF_PURPLE_BLOOD,0,    false,      0,      DF_HOLE_POTION, {0},
@@ -1243,7 +1112,7 @@ creatureType monsterCatalog[NUMBER_MONSTER_KINDS] = {
     {0, "flame turret", G_TURRET, &lavaForeColor,40, 0,      150,    {1, 2, 1},      0,  100,    250,    0,              LAVA_LIGHT,    false, 0,  0,              {BOLT_FIRE},
         (MONST_TURRET), (0)},
     {0, "imp",          G_IMP,    &pink,          35,     90,     225,    {4, 9, 2},      10, 100,    100,    DF_GREEN_BLOOD, IMP_LIGHT,    false,  0,  0,              {BOLT_BLINKING},
-        (0), (MA_HIT_STEAL_FLEE), 0, 0, &impStealProfile}, // iOS port (iBrogue): reusable steal component
+        (0), (MA_HIT_STEAL_FLEE)},
     {0, "fury",         G_FURY,    &darkRed,       19,     90,     200,    {6, 11, 4},     20, 50,     100,    DF_RED_BLOOD,   0,    false,      0,      0,              {0},
         (MONST_NEVER_SLEEPS | MONST_FLIES)},
     {0, "revenant",     G_REVENANT,    &ectoplasmColor,30,     0,      200,    {15, 20, 5},    0,  100,    100,    DF_ECTOPLASM_BLOOD, 0,    true,   0,      0,              {0},
@@ -1293,13 +1162,6 @@ creatureType monsterCatalog[NUMBER_MONSTER_KINDS] = {
         (MONST_IMMUNE_TO_FIRE| MONST_IMMUNE_TO_WEBS | MONST_NEVER_SLEEPS | MONST_IMMOBILE | MONST_INANIMATE | MONST_WILL_NOT_USE_STAIRS | MONST_NO_POLYMORPH | MONST_ALWAYS_HUNTING | MONST_IMMUNE_TO_WEAPONS), (MA_CAST_SUMMON | MA_ENTER_SUMMONS)},
     {0, "mangrove dryad",G_ANCIENT_SPIRIT,   &tanColor,      70,     60,     175,    {2, 8, 2},      6,  100,    100,    DF_ASH_BLOOD,   0,    true,       0,      0,              {BOLT_ANCIENT_SPIRIT_VINES},
         (MONST_IMMUNE_TO_WEBS | MONST_ALWAYS_USE_ABILITY | MONST_MAINTAINS_DISTANCE | MONST_NO_POLYMORPH | MONST_MALE | MONST_FEMALE), (0)},
-    // iOS port (iBrogue): gold goblin. HP is overridden per-depth at spawn (see spawnGoldGoblin); the 65
-    // here is the fallback for non-hook spawns (e.g. wizard mode). Never attacks (0 damage); moves at the
-    // player's pace like a monkey (move 100 -- it flees continuously, so a faster speed would be flatly
-    // uncatchable), modest dodge (def 25), no regen (0), can't be polymorphed. Custom AI/combat/loot keyed
-    // off MK_GOLD_GOBLIN.
-    {0, "gold goblin",  G_GOBLIN, &goldGoblinColor,    65,     25,     100,    {0, 0, 0},      0,  100,    100,    DF_RED_BLOOD,   0,    false,      0,      0,              {0},
-        (MONST_MALE | MONST_FEMALE | MONST_NO_POLYMORPH), (0), &goldGoblinFleeProfile, &goldGoblinLoot}, // iOS port (iBrogue): reusable flee + loot components
 };
 
 const monsterWords monsterText[NUMBER_MONSTER_KINDS] = {
@@ -1318,7 +1180,7 @@ const monsterWords monsterText[NUMBER_MONSTER_KINDS] = {
     {"The eel slips silently through the subterranean lake, waiting for unsuspecting prey to set foot in $HISHER dark waters.",
         "eating", "Eating",
         {"shocks", "bites", {0}}},
-    {"Mischievous trickster that $HESHE is, the monkey lives to snatch familiar foods, sweet fruits, and drafts of health or strength from passing adventurers.",
+    {"Mischievous trickster that $HESHE is, the monkey lives to steal shiny trinkets from passing adventurers.",
         "examining", "Examining",
         {"tweaks", "bites", "punches", {0}}},
     {"A bladder of deadly gas buoys the bloat through the air, $HISHER thin veinous membrane ready to rupture at the slightest stress.",
@@ -1449,7 +1311,7 @@ const monsterWords monsterText[NUMBER_MONSTER_KINDS] = {
     {"This infernal contraption spits blasts of flame at intruders.",
         "incinerating", "Incinerating",
         {"pricks", {0}}},
-    {"This trickster demon moves with astonishing speed and is drawn magnetically to highly enchanted items, raw magic, and runics, stealing them from $HISHER enemies and blinking away.",
+    {"This trickster demon moves with astonishing speed and delights in stealing from $HISHER enemies and blinking away.",
         "dissecting", "Dissecting",
         {"slices", "cuts", {0}}},
     {"A creature of inchoate rage made flesh, the fury's moist wings beat loudly in the darkness.",
@@ -1529,9 +1391,6 @@ const monsterWords monsterText[NUMBER_MONSTER_KINDS] = {
     {"This mangrove dryad is as old as the earth, and $HISHER gnarled figure houses an ancient power. When angered, $HESHE can call upon the forces of nature to bind $HISHER foes and tear them to shreds.",
         "absorbing", "Absorbing",
         {"whips", "lashes", "thrashes", "lacerates", {0}}},
-    {"Laden with pilfered treasure, this furtive goblin craves nothing but to escape with $HISHER hoard intact. $HESHE will not raise a hand against you -- but wound $HIMHER and $HESHE scatters gold in a panic, hurls a flask of hallucinogen to cloak $HISHER retreat, and bolts for the stairs above. Cut $HIMHER down before $HESHE flees, and the hoard is yours.",
-        "examining", "Fleeing",
-        {"shoves", "scrabbles at", {0}}},
 };
 
 const mutation mutationCatalog[NUMBER_MUTATORS] = {
@@ -1716,8 +1575,8 @@ itemTable keyTable[NUMBER_KEY_TYPES] = {
 };
 
 itemTable foodTable[NUMBER_FOOD_KINDS] = {
-    {"ration of food",      "", "", 3, 25,  0, 1800, {0,0,0}, true, false, 0, false, "A ration of food. Was it left by former adventurers? Is it a curious byproduct of the subterranean ecosystem? A meal taken in peace, with nothing on the hunt for you, settles the mind enough to study an unidentified scroll and sense whether its magic is benevolent or malevolent."},
-    {"mango",               "", "", 1, 15,  0, 1550, {0,0,0}, true, false, 0, false, "An odd fruit to be found so deep beneath the surface of the earth, but only slightly less filling than a ration of food. Like any meal, it feeds the mind as well as the body when eaten undisturbed, affording a quiet moment to divine the nature of an unknown scroll."}
+    {"ration of food",      "", "", 3, 25,  0, 1800, {0,0,0}, true, false, 0, false, "A ration of food. Was it left by former adventurers? Is it a curious byproduct of the subterranean ecosystem?"},
+    {"mango",               "", "", 1, 15,  0, 1550, {0,0,0}, true, false, 0, false, "An odd fruit to be found so deep beneath the surface of the earth, but only slightly less filling than a ration of food."}
 };
 
 itemTable weaponTable[NUMBER_WEAPON_KINDS] = {
@@ -1789,8 +1648,6 @@ itemTable staffTable[NUMBER_STAFF_KINDS] = {
     {"obstruction",     itemWoods[7], "",   10, 1000,   0, BOLT_OBSTRUCTION,   {2,4,1}, false, false, 1,  false, "This staff will conjure a mass of impenetrable green crystal, preventing anything from moving through the affected area and temporarily entombing anything that is already there. The crystal will dissolve into the air as time passes. Higher level staffs will create larger obstructions."},
     {"discord",         itemWoods[8], "",   10, 1000,   0, BOLT_DISCORD,       {2,4,1}, false, false, 1,  false, "This staff will alter the perception of a creature and cause it to lash out indiscriminately. Strangers and allies alike will turn on the victim."},
     {"conjuration",     itemWoods[9], "",   8,  1000,   0, BOLT_CONJURATION,   {2,4,1}, false, false, 1,  false, "A flick of this staff will summon a number of phantom blades to fight on your behalf."},
-    // iOS port (iBrogue): staff of frost
-    {"frost",           itemWoods[13], "",  8,  1200,   0, BOLT_FREEZE,        {2,4,1}, false, false, 1,  false, "A flick of this frozen staff unleashes a lancing bolt of cold. The first creature it strikes is encased in ice, frozen helpless for a short time before thawing into a sluggish chill -- though anything already ablaze is merely doused and slowed, never frozen. The cold sweeps across deep water, freezing a temporary walkable sheet over the depths, and stiffens dense foliage into brittle, impassable thickets. A frozen creature can be shoved aside like a statue, shattering anything it slams into. The cold smothers open flame in its path, and fire melts the staff's ice wherever the two meet."},
     {"healing",         itemWoods[10], "",  5,  1100,   0, BOLT_HEALING,       {2,4,1}, false, false, -1, false, "This staff will heal any creature, friend or foe. Unfortunately, you cannot use this or any staff on yourself except by reflecting the bolt."},
     {"haste",           itemWoods[11], "",  5,  900,    0, BOLT_HASTE,         {2,4,1}, false, false, -1, false, "This staff will temporarily double the speed of any creature, friend or foe. Unfortunately, you cannot use this or any staff on yourself except by reflecting the bolt."},
     {"protection",      itemWoods[12], "",  5,  900,    0, BOLT_SHIELDING,     {2,4,1}, false, false, -1, false, "This staff will bathe a creature in a protective light that will absorb all damage until it is depleted. Unfortunately, you cannot use this or any staff on yourself except by reflecting the bolt."},
@@ -1801,8 +1658,8 @@ itemTable ringTable[NUMBER_RING_KINDS] = {
     {"stealth",         itemGems[1], "",    1,  800,    0, 0, {1,3,1}, false, false, 1, false, "This ring of silent passage will reduce your stealth range, making enemies less likely to notice you and more likely to lose your trail. Staying motionless and lurking in the shadows will make you even harder to spot. Cursed rings of stealth will increase your stealth range, making you easier to spot and to track."},
     {"regeneration",    itemGems[2], "",    1,  750,    0, 0, {1,3,1}, false, false, 1, false, "This ring of sacred life will allow you to recover lost health at an accelerated rate. Cursed rings will decrease or even halt your natural regeneration."},
     {"transference",    itemGems[3], "",    1,  750,    0, 0, {1,3,1}, false, false, 1, false, "This ring of blood magic will heal you in proportion to the damage you inflict on others. Cursed rings will cause you to lose health when inflicting damage."},
-    {"light",           itemGems[4], "",    1,  600,    0, 0, {1,3,1}, false, false, 1, false, "This ring of preternatural vision will allow you to see farther in the dimming light of the deeper dungeon levels, and it will not make you more noticeable to enemies. Allies who stand within your light are emboldened -- better defended, unflinching, slowly mending their wounds -- and no invisible creature can hide within its glow. A cursed ring of light will dim your sight and unsettle your companions, who will lose heart and falter at your side."},
-    {"awareness",       itemGems[5], "",    1,  700,    0, 0, {1,3,1}, false, false, 1, false, "This ring of effortless vigilance will enable you to notice traps, secret doors and hidden levers more often and from a greater distance. On arriving at a new depth, it may also give you the feeling that the level conceals a chamber of significance. Cursed rings of awareness will dull your senses, making it harder to notice secrets without actively searching for them."},
+    {"light",           itemGems[4], "",    1,  600,    0, 0, {1,3,1}, false, false, 1, false, "This ring of preternatural vision will allow you to see farther in the dimming light of the deeper dungeon levels. It will not make you more noticeable to enemies."},
+    {"awareness",       itemGems[5], "",    1,  700,    0, 0, {1,3,1}, false, false, 1, false, "This ring of effortless vigilance will enable you to notice traps, secret doors and hidden levers more often and from a greater distance. Cursed rings of awareness will dull your senses, making it harder to notice secrets without actively searching for them."},
     {"wisdom",          itemGems[6], "",    1,  700,    0, 0, {1,3,1}, false, false, 1, false, "This ring of arcane power will cause your staffs to recharge at an accelerated rate. Cursed rings of wisdom will cause your staffs to recharge more slowly."},
     {"reaping",         itemGems[7], "",    1,  700,    0, 0, {1,3,1}, false, false, 1, false, "This ring of blood magic will recharge your staffs and charms every time you hit an enemy. Cursed rings of reaping will drain your staffs and charms with every hit."},
 };
@@ -1961,8 +1818,4 @@ const statusEffect statusEffectCatalog[NUMBER_OF_STATUS_EFFECTS] = {
     {"Lifespan",        false, 0}, // STATUS_LIFESPAN_REMAINING
     {"Shielded",        true,  0}, // STATUS_SHIELDED
     {"Invisible",       true,  0}, // STATUS_INVISIBLE
-    {"",                false, 0}, // STATUS_AGGRAVATING
-    {"",                false, 0}, // STATUS_REGENERATING (iOS port (iBrogue): honey potion heal-over-time)
-    {"Emboldened",      true,  0}, // STATUS_EMBOLDENED (iOS port (iBrogue): ring of light ally aura)
-    {"Frozen",          false, 0}, // STATUS_FROZEN (iOS port (iBrogue): staff of frost; paralysis-like, not negatable)
 };
