@@ -28,6 +28,43 @@ covers the separate Classic engine that ships in the app target).
 
 ## Change log
 
+### 2026-06-14 — Altars of insight: depths 5 & 15 only, with a carry-forward schedule
+
+**What.** Two changes to the guaranteed altars-of-insight reward room (see the 2026-06-10 entry below):
+1. **Removed the depth-25 altar.** The schedule is now just depths 5 and 15.
+2. **Failed placements carry forward (bounded to depth 20).** The altar is a `BP_ROOM` machine that needs a
+   gate site whose interior choke-size lands in the blueprint's `roomSize` range; a level with no
+   qualifying room can't fit it. Previously such a level silently dropped the altar (best-effort, like the
+   amulet vault), so it didn't reliably appear at 5 or 15. Now `addMachines` tracks how many altars are
+   *due* by the current depth versus how many have actually been built (`rogue.insightAltarsBuilt`), and
+   retries on each subsequent level until the obligation is met — depth 5 with no room retries on 6, 7, …
+   and likewise for the depth-15 altar — but gives up past `INSIGHT_ALTAR_MAX_DEPTH` (20) rather than chase
+   it into the late dungeon.
+3. **Widened the room-size window** from `{7,14}` to `{6,25}`. `{7,14}` was the narrowest/lowest window of
+   any `BP_ROOM` machine (cf. transfer `{10,30}`, commutation `{15,25}`, reward vaults `{30,50}`), which
+   excluded the common larger rooms and was the main cause of placement failures. `placeAltarPairInRoom`
+   needs only two open interior cells, so the broad window is safe — a bigger room is just a roomier
+   carpeted shrine, like the other altars.
+
+**Why.** Players couldn't count on the identification help arriving when expected; tying the schedule to
+"built so far" rather than a depth modulo makes the two altars guaranteed-to-appear rather than
+guaranteed-to-be-*attempted*.
+
+**Where.**
+- `Rogue.h`: new `short insightAltarsBuilt` on the `rogue` struct (zeroed on new game with the rest of the
+  struct; set only in `addMachines`).
+- `Architect.c`: `addMachines` replaces the `(depthLevel - 5) % 10 == 0` modulo gate with a due-vs-built
+  comparison against a static `insightAltarDepths[] = {5, 15}` table, capped at `INSIGHT_ALTAR_MAX_DEPTH`
+  (20); builds at most one altar per level.
+- `GlobalsBrogue.c`: `roomSize` widened `{7,14}` → `{6,25}`; blueprint comment updated ("5/15/25" → "5 and
+  15", plus the room-size rationale).
+
+**Determinism.** Depth-driven and `buildAMachine` uses the substantive RNG, so it's seed-stable. The new
+field is set deterministically during level generation → save-safe (saves are input replays). Note this
+*does* shift seed output relative to the old schedule on any level where placement now happens that didn't
+before (and removes the depth-25 draw); warrants the same release-time `recordingVersionString` treatment
+as the original altar feature. Rapid/Bullet untouched.
+
 ### 2026-06-13 — Seed-entry keyboard: pre-fill the field + use a number pad (iOS port)
 
 **What.** Two bugs in the seeded-game (and any pre-filled) text dialog, fixed together.
@@ -1309,8 +1346,12 @@ recording stream, so seeds and replays are unaffected.
 > guard now refuses only when the insight item is fully identified or already revealed as having no
 > good/bad polarity.
 
+> **Updated 2026-06-14** (see the "carry-forward schedule" entry below): the schedule is now **depths 5 and
+> 15 only** (the depth-25 altar was removed), and an altar that can't fit on its target level is no longer
+> silently dropped — the obligation carries forward to the next level until a room is found.
+
 **What.** A new guaranteed reward room — a pair of linked altars (an "altar of insight" + an "altar of
-offering") that appears once every 10 levels starting at depth 5 (depths 5, 15, 25), Brogue variant only.
+offering") that appears at depths 5 and 15, Brogue variant only.
 Place the item you want to learn about on the insight altar and a payment item on the offering altar; when
 both hold items the offering is consumed and the other item is revealed. The reveal scales with the
 payment: **sacrificing an unidentified item fully identifies** the offered item, while sacrificing an
@@ -1344,7 +1385,7 @@ identification a gamble while easing it.
 **Determinism.** The reveal handler is RNG-free (flag/table flips + a deterministic machine scan); saves are
 recordings (no serialized format change). Because the altar is force-only (not in the BP_REWARD raffle), the
 random reward-room raffle is byte-unchanged at every depth — the only seed divergence is on the forced
-levels (5, 15, 25, Brogue only), where placing the room draws RNG. As new dungeon content it warrants a
+levels (5 and 15, Brogue only), where placing the room draws RNG. As new dungeon content it warrants a
 per-variant `recordingVersionString` bump at release (left to maintainers; not bumped here). Rapid/Bullet
 untouched.
 

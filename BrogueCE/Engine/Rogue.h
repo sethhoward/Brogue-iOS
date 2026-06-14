@@ -2697,6 +2697,7 @@ typedef struct playerCharacter {
     creature *lastTarget;               // to keep track of the last monster the player has thrown at or zapped
     item *lastItemThrown;
     short rewardRoomsGenerated;         // to meter the number of reward machines
+    short insightAltarsBuilt;           // iOS port (iBrogue): guaranteed altars-of-insight built so far this run; obligations carry forward to the next level if a level can't fit the room
     boolean goldGoblinSpawned;          // iOS port (iBrogue): the gold goblin appears at most once per run
     short machineNumber;                // so each machine on a level gets a unique number
     pos sidebarLocationList[ROWS*2];    // to keep track of which location each line of the sidebar references

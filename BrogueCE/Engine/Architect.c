@@ -1868,17 +1868,39 @@ static void addMachines() {
         }
     }
 
-    // iOS port (iBrogue): a guaranteed altars-of-insight reward room every 10 levels from depth 5
-    // (Brogue only). Best-effort like the amulet vault: if no room fits after 50 tries, it's skipped.
+    // iOS port (iBrogue): guaranteed altars-of-insight reward rooms at depths 5 and 15 (Brogue only).
+    // The blueprint is a BP_ROOM machine and needs a gate site whose interior choke-size lands in the
+    // {7,14} range; a level with no qualifying room can't fit it. Rather than silently skip (as the
+    // amulet vault does), we track how many altars are *due* by the current depth and how many have
+    // actually been built, and carry any unmet obligation forward: if depth 5 has no room we retry on
+    // 6, 7, ... until one is placed, and likewise for the depth-15 altar. The carry-forward is bounded: if
+    // an altar still hasn't found a room by INSIGHT_ALTAR_MAX_DEPTH (20), the obligation is abandoned rather
+    // than chased into the late dungeon. Deterministic (depth-driven, buildAMachine uses the substantive
+    // RNG) and save-safe.
+    static const short insightAltarDepths[] = {5, 15};
+    const int insightAltarCount = sizeof(insightAltarDepths) / sizeof(insightAltarDepths[0]);
+    const short INSIGHT_ALTAR_MAX_DEPTH = 20;
     if (gameVariant == VARIANT_BROGUE
-        && rogue.depthLevel >= 5 && (rogue.depthLevel - 5) % 10 == 0) {
-        for (failsafe = 50; failsafe; failsafe--) {
-            const short preInsightMachineNumber = rogue.machineNumber;
-            if (buildAMachine(MT_INSIGHT_ALTAR, -1, -1, 0, NULL, NULL, NULL)) {
-                // iOS port (iBrogue): the blueprint built only the room; place the altar pair here in a
-                // fixed s . o layout (the builder won't do ordered/adjacent placement itself).
-                placeAltarPairInRoom(preInsightMachineNumber, INSIGHT_ALTAR_PAYMENT, INSIGHT_ALTAR_INSIGHT, false);
-                break;
+        && rogue.depthLevel <= INSIGHT_ALTAR_MAX_DEPTH
+        && rogue.insightAltarsBuilt < insightAltarCount) {
+        short insightAltarsDue = 0;
+        for (int i = 0; i < insightAltarCount; i++) {
+            if (rogue.depthLevel >= insightAltarDepths[i]) {
+                insightAltarsDue++;
+            }
+        }
+        if (rogue.insightAltarsBuilt < insightAltarsDue) {
+            // Owe at least one altar; try to place a single one on this level (any shortfall carries
+            // forward to the next level).
+            for (failsafe = 50; failsafe; failsafe--) {
+                const short preInsightMachineNumber = rogue.machineNumber;
+                if (buildAMachine(MT_INSIGHT_ALTAR, -1, -1, 0, NULL, NULL, NULL)) {
+                    // iOS port (iBrogue): the blueprint built only the room; place the altar pair here in a
+                    // fixed s . o layout (the builder won't do ordered/adjacent placement itself).
+                    placeAltarPairInRoom(preInsightMachineNumber, INSIGHT_ALTAR_PAYMENT, INSIGHT_ALTAR_INSIGHT, false);
+                    rogue.insightAltarsBuilt++;
+                    break;
+                }
             }
         }
     }

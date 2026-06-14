@@ -621,14 +621,16 @@ const blueprint blueprintCatalog_Brogue[] = {
     {1,DEEPEST_LEVEL}, {40, 40},   0,      2,          0,                  (BP_NO_INTERIOR_FLAG), {
         {0,         STATUE_INERT,DUNGEON,       {3, 3},     3,          0,          -1,         MK_SENTINEL,    2,              0,          0,          (MF_NOT_IN_HALLWAY | MF_TREAT_AS_BLOCKING | MF_IN_VIEW_OF_ORIGIN)},
         {DF_ASH,    0,          0,              {2, 3},     0,          0,          -1,         0,              0,              0,          0,          0}}},
-    // iOS port (iBrogue): altars of insight -- force-built at depths 5/15/25 (see addMachines); occupies
+    // iOS port (iBrogue): altars of insight -- force-built at depths 5 and 15 (see addMachines); occupies
     // the variant-specific reward slot (index 72 = MT_INSIGHT_ALTAR). Force-only: no BP_REWARD, freq 0, so
-    // it never enters the random reward raffle. The blueprint builds ONLY the carpeted room (kept small so
-    // it fits easily); the two altars are then placed in addMachines in a fixed "s . o" arrangement
-    // (payment west, one-tile gap, insight east), because the generic machine builder scatters features at
-    // random interior cells and can't guarantee an ordered, adjacent pair.
+    // it never enters the random reward raffle. The blueprint builds ONLY the carpeted room; the two altars
+    // are then placed in addMachines in a fixed "s . o" arrangement (payment west, one-tile gap, insight
+    // east), because the generic machine builder scatters features at random interior cells and can't
+    // guarantee an ordered, adjacent pair. roomSize {6,25} is deliberately wide (cf. the transfer altar's
+    // {10,30} and the commutation altar's {15,25}): placeAltarPairInRoom needs only two open interior cells,
+    // so a broad acceptance window maximizes the odds a level has a qualifying gate site for the force-build.
     {"Altars of insight -- sacrifice an offering to reveal the nature of another item",
-    {5, AMULET_LEVEL},{7, 14},     0,      3,          0,                  (BP_ROOM | BP_PURGE_INTERIOR | BP_SURROUND_WITH_WALLS | BP_OPEN_INTERIOR), {
+    {5, AMULET_LEVEL},{6, 25},     0,      3,          0,                  (BP_ROOM | BP_PURGE_INTERIOR | BP_SURROUND_WITH_WALLS | BP_OPEN_INTERIOR), {
         {0,         CARPET,     DUNGEON,        {0,0},      0,          0,          -1,         0,              0,              0,          0,          (MF_EVERYWHERE)},
         {0,         STATUE_INERT,DUNGEON,       {1,3},      0,          0,          -1,         0,              2,              0,          0,          (MF_TREAT_AS_BLOCKING | MF_BUILD_IN_WALLS)},
         {0,         0,          0,              {1,1},      1,          0,          0,          0,              2,              0,          0,          (MF_BUILD_AT_ORIGIN | MF_PERMIT_BLOCKING | MF_BUILD_VESTIBULE)}}},
