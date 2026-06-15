@@ -2636,6 +2636,13 @@ void itemDetails(char *buf, item *theItem) {
                                 staffProtection(enchant) / 10,
                                 staffProtection(enchant + enchantMagnitude() * FP_FACTOR) / 10);
                         break;
+                    case STAFF_FREEZE:
+                        // iOS port (Brogue SE): staff of frost. Was missing from this switch, so its
+                        // detail panel fell through to the "No one knows" default even once identified.
+                        sprintf(buf2, "The bolt from this staff will freeze its target solid for %i turns, after which the creature is left slowed for a while as it thaws. (If the staff is enchanted, the freeze will increase to %i turns.) Anything already on fire is doused and slowed instead of frozen.",
+                                staffFreezeDuration(enchant),
+                                staffFreezeDuration(enchant + enchantMagnitude() * FP_FACTOR));
+                        break;
                     default:
                         strcpy(buf2, "No one knows what this staff does.");
                         break;
@@ -7881,7 +7888,12 @@ boolean readScroll(item *theItem) {
             break;
         case SCROLL_REMOVE_CURSE:
             for (tempItem = packItems->nextItem; tempItem != NULL; tempItem = tempItem->nextItem) {
-                hadEffect |= uncurse(tempItem);
+                if (uncurse(tempItem)) {
+                    // Brogue SE: lifting a curse reveals the (malevolent) polarity of the
+                    // cleansed item, so the player learns what the curse had hidden.
+                    tempItem->flags |= ITEM_MAGIC_DETECTED;
+                    hadEffect = true;
+                }
             }
             if (hadEffect) {
                 message("your pack glows with a cleansing light, and a malevolent energy disperses.", 0);
@@ -8258,14 +8270,21 @@ static item *applyPolarityInsightToRandomItem(unsigned short categoryMask, boole
 // applyPolarityInsightToRandomItem. The random pick is action-triggered, reconstructed identically on
 // replay (Brogue saves are recordings; see the call site in playerTurnEnded).
 //
-// Schedule (step = 100): reveal N needs 100*N consecutive rested turns since the last reveal, i.e.
-// intervals 100, 200, 300, 400, ... (cumulative 100, 300, 600, 1000, ...). Keyed off reveals earned, not
-// kinds known, so the always-identified empty bottle / hidden themed-set potions can't skew the pacing.
+// Schedule (base = 60, step = 25): reveal N needs base + step*(N-1) rested turns since the last reveal,
+// i.e. intervals 60, 85, 110, 135, ... (cumulative 60, 145, 255, 390, ...). The earlier 100*N ramp made
+// the 2nd reveal cost 300 cumulative rested turns, which a typical depth-1..10 run rarely accrues; this
+// low base + gentle additive step is tuned to fire ~2-3 times by depth 10 while later reveals still cost
+// progressively more. The schedule self-limits (resting burns hunger, and the eligible pool is the finite
+// set of unknown polarity-bearing pack items — reveals just hold when nothing qualifies), so a shallow
+// ramp can't runaway-identify the pack. Keyed off reveals earned, not kinds known, so the
+// always-identified empty bottle / hidden themed-set potions can't skew the pacing.
+// (To recalibrate against real play, the debug death-recap reports rested turns + rest reveals per level.)
 //
 // A worn ring of wisdom hastens this: ~10% faster per ring level (rogue.wisdomBonus, the effective
 // enchant of equipped wisdom rings). Cursed (negative) wisdom slows it. Clamped so it speeds up by at
 // most 80% and slows by at most 2x, and the threshold never drops below 1 rested turn.
-#define REST_INSIGHT_STEP_TURNS   100
+#define REST_INSIGHT_BASE_TURNS   70   // rested turns for the first reveal
+#define REST_INSIGHT_STEP_TURNS   40   // added per reveal already earned this game (gentle ramp)
 
 void gainPolarityInsightFromRest(void) {
     rogue.restTurnsSinceInsight++;
@@ -8273,7 +8292,8 @@ void gainPolarityInsightFromRest(void) {
     for (short d = 1; d <= rogue.deepestLevel; d++) {
         revealsSoFar += levels[d].restRevealsOnLevel;
     }
-    unsigned long threshold = (unsigned long)REST_INSIGHT_STEP_TURNS * (revealsSoFar + 1);
+    unsigned long threshold = (unsigned long)REST_INSIGHT_BASE_TURNS
+                            + (unsigned long)REST_INSIGHT_STEP_TURNS * revealsSoFar;
     // iOS port (iBrogue): ring of wisdom reduces the rest-insight threshold by ~10% per ring level.
     long reductionPct = 10L * rogue.wisdomBonus;
     if (reductionPct > 80)   reductionPct = 80;   // never faster than 20% of base

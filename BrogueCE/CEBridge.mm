@@ -611,8 +611,10 @@ void cePersistLastSeed(uint64_t seed) {
 }
 
 // iOS port (iBrogue): the chosen keyboard scheme (Classic / Modern) is persisted in NSUserDefaults so
-// it sticks across launches, defaulting to CLASSIC (stock vi keys) when absent or out of range.
-static NSString * const kCEKeyboardSchemeKey = @"ce keyboard scheme";
+// it sticks across launches, defaulting to CLASSIC (stock vi keys) when absent or out of range. The key
+// is deliberately shared across all three engines (Classic/CE/SE all use @"keyboard scheme") so the
+// scheme is an app-wide input preference -- picking Modern in one engine carries to the others.
+static NSString * const kCEKeyboardSchemeKey = @"keyboard scheme";
 
 static enum keyboardScheme ceLoadPersistedKeyboardScheme(void) {
     NSUserDefaults *d = [NSUserDefaults standardUserDefaults];

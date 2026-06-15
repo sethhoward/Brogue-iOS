@@ -206,6 +206,15 @@ final class BrogueViewController: UIViewController {
     fileprivate var magnifierTimer: Timer?
     fileprivate var inputRequestString: String?
 
+    // iOS port (iBrogue): hardware key-repeat. iOS `pressesBegan` fires once per physical press (unlike
+    // desktop SDL, which repeats natively), so holding a movement/rest/search key would only step once.
+    // We synthesize repeats with a timer: a held, repeat-eligible key re-enqueues itself after an initial
+    // delay, then at a steady interval. See keyRepeatInitialDelay/keyRepeatInterval and isRepeatable(...).
+    fileprivate var keyRepeatTimer: Timer?
+    fileprivate var repeatingKey: QueuedKeyEvent?
+    private let keyRepeatInitialDelay: TimeInterval = 0.4
+    private let keyRepeatInterval: TimeInterval = 0.1
+
     // ── Safe-area action buttons ─────────────────────────────────────────
     // A small column of buttons in the iPhone notch / dynamic-island safe-area
     // strip (the right edge in our landscape-left lock). Tapping a button injects
@@ -3080,15 +3089,97 @@ extension BrogueViewController {
 
     override func pressesBegan(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
         var handledAny = false
+        var repeatCandidate: QueuedKeyEvent?
         for press in presses {
             if let k = brogueKey(for: press) {
-                addKeyEvent(code: k.code, shift: k.shift, control: k.control, raw: k.raw)
+                let ev = QueuedKeyEvent(code: k.code, shift: k.shift, control: k.control, raw: k.raw)
+                addKeyEvent(code: ev.code, shift: ev.shift, control: ev.control, raw: ev.raw)
                 handledAny = true
+                if isRepeatable(ev) { repeatCandidate = ev }
             }
+        }
+        // A new repeat-eligible key starts (and replaces) the repeat; any other handled key cancels it.
+        if let ev = repeatCandidate {
+            startKeyRepeat(ev)
+        } else if handledAny {
+            stopKeyRepeat()
         }
         if !handledAny {
             super.pressesBegan(presses, with: event)
         }
+    }
+
+    override func pressesEnded(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
+        endRepeatIfReleased(presses)
+        super.pressesEnded(presses, with: event)
+    }
+
+    override func pressesCancelled(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
+        endRepeatIfReleased(presses)
+        super.pressesCancelled(presses, with: event)
+    }
+
+    // Stop the repeat once the key driving it is released. (Only one key repeats at a time, so we just
+    // match the released key against the active one.)
+    private func endRepeatIfReleased(_ presses: Set<UIPress>) {
+        guard let active = repeatingKey else { return }
+        for press in presses where brogueKey(for: press)?.code == active.code {
+            stopKeyRepeat()
+            return
+        }
+    }
+
+    // iOS port (iBrogue): only directions, rest (`z`), and search (`s`) auto-repeat -- the "safe to spam"
+    // keys, matching desktop intent. Commands (apply/drop/quaff/stairs/menu/…) never repeat. Running
+    // (Shift/Ctrl) and the long-search / rest-until forms already loop in the engine, so a modified key
+    // is never a repeat candidate. The movement-letter set is scheme-dependent, so we read the active
+    // scheme from the shared "keyboard scheme" default (kept current by applyKeyboardScheme's persistence);
+    // the canonical mapping in applyKeyboardScheme (IO.c) is the source of truth this mirrors.
+    private func isRepeatable(_ ev: QueuedKeyEvent) -> Bool {
+        guard !ev.shift, !ev.control else { return false }
+        if !ev.raw {
+            // Synthesized canonical keys: only the four arrow keys (delivered as vi letters) repeat;
+            // ESC/return/delete/tab/space do not.
+            return [UInt8(ascii: "h"), UInt8(ascii: "j"), UInt8(ascii: "k"), UInt8(ascii: "l")].contains(ev.code)
+        }
+        // Real hardware character keys: rest and search are the same physical key in both schemes.
+        if ev.code == UInt8(ascii: "z") || ev.code == UInt8(ascii: "s") { return true }
+        let isModern = UserDefaults.standard.integer(forKey: "keyboard scheme") == 1 // KEYBOARD_SCHEME_MODERN
+        let movementKeys: Set<UInt8> = isModern ? Set("uiojklm,.".utf8)   // right-hand grid
+                                                 : Set("hjklyubn".utf8)   // classic vi keys
+        return movementKeys.contains(ev.code)
+    }
+
+    private func startKeyRepeat(_ ev: QueuedKeyEvent) {
+        stopKeyRepeat()
+        repeatingKey = ev
+        // Initial delay, then steady repeats. Each tick only enqueues when the queue has drained, so a
+        // slow frame (animations/between-turns) can't build a backlog that floods moves after release.
+        let timer = Timer(timeInterval: keyRepeatInitialDelay, repeats: false) { [weak self] _ in
+            self?.fireKeyRepeat(initial: true)
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        keyRepeatTimer = timer
+    }
+
+    private func fireKeyRepeat(initial: Bool) {
+        guard let ev = repeatingKey else { return }
+        if !hasKeyEvent() {
+            addKeyEvent(code: ev.code, shift: ev.shift, control: ev.control, raw: ev.raw)
+        }
+        if initial {
+            let timer = Timer(timeInterval: keyRepeatInterval, repeats: true) { [weak self] _ in
+                self?.fireKeyRepeat(initial: false)
+            }
+            RunLoop.main.add(timer, forMode: .common)
+            keyRepeatTimer = timer
+        }
+    }
+
+    private func stopKeyRepeat() {
+        keyRepeatTimer?.invalidate()
+        keyRepeatTimer = nil
+        repeatingKey = nil
     }
 
     /// Maps a UIPress to the key code Brogue's input loop expects, plus its modifier state and whether

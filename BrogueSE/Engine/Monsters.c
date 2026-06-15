@@ -1822,9 +1822,11 @@ static void wanderToward(creature *monst, pos destination) {
 }
 
 // iOS port (iBrogue): base % chance to sense a pursuer giving up the chase; the ring of awareness
-// (rogue.awarenessBonus, +20/enchant) is added on top. Kept high so the typical character -- who
-// invests nothing in awareness -- still notices most of the time; the ring pushes it to a near-certainty.
-#define SENSE_LOST_TRAIL_BASE_CHANCE 50
+// (rogue.awarenessBonus, +20/enchant) is added on top. Kept low for the typical character -- who
+// invests nothing in awareness -- so a submerging/resurfacing pursuer (e.g. an eel cycling its
+// tracking->wandering transition while you stand in water) doesn't spam the message; the ring is
+// what makes a high-awareness character notice reliably.
+#define SENSE_LOST_TRAIL_BASE_CHANCE 20
 void updateMonsterState(creature *monst) {
     short x, y, closestFearedEnemy;
     boolean awareOfPlayer;
@@ -1888,9 +1890,9 @@ void updateMonsterState(creature *monst) {
         // iOS port (iBrogue): when a pursuer gives up the chase, you get an awareness-scaled chance to
         // sense it -- no line of sight required. Chance is SENSE_LOST_TRAIL_BASE_CHANCE plus
         // rogue.awarenessBonus (ring of awareness, +20/enchant), clamped to [0,100]. The base is set
-        // high so it triggers readily even for the typical character who invests nothing in awareness;
-        // the ring just pushes it toward certainty. Rolled only here, at the hunting->wandering
-        // transition, so it doesn't spam.
+        // low so a submerging pursuer (an eel cycling this transition while you stand in water) doesn't
+        // spam the message; the ring is what makes a high-awareness character notice reliably. Rolled
+        // only here, at the hunting->wandering transition.
         if (rand_percent(clamp(SENSE_LOST_TRAIL_BASE_CHANCE + rogue.awarenessBonus, 0, 100))) {
             char theMonsterName[COLS], senseBuf[COLS * 2];
             monsterName(theMonsterName, monst, true);

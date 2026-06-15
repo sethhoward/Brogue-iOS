@@ -282,6 +282,26 @@ The iOS **potion of water** (§7, capture-only) exists partly to set this up: it
 footing" (and washes scent — see [MONSTERS_AUDIT.md](MONSTERS_AUDIT.md)). Determinism: damage iterates the
 monster list then the player in a fixed order; the cosmetic shockwave draws no RNG.
 
+### Bolts vs. dropped potions — what a fire / lightning staff does to a flask on the floor
+
+A fire or lightning bolt that crosses a **dropped potion** (or the empty bottle) interacts with it; the
+full rules — including the throw side, thrown-weapon triggers, and the identification consequences — live
+in **§7b** (Potions). The short version:
+
+- **Bad / cloud potions detonate** (spawn their shatter signature and absorb the bolt). A **fire** bolt
+  ignites the cloud as it spawns; a **lightning** bolt blooms it unignited. The bolt is halted at the flask
+  either way (so a line of dropped potions isn't cleared by one zap).
+- **The 8 benevolent potions glow-and-pass** — the bolt passes through harmlessly and **no flag is set**
+  on the flask. You learn the polarity only *by observation* (good glows & passes, bad detonates); the
+  game doesn't record it, so it's no free mass-ID.
+- **The empty bottle is captured**, not shattered: lightning → speed, fire → incineration (see §7a).
+- **Identification:** a detonation normally full-IDs the potion (you saw the cloud), **except** a *fire*
+  trigger reveals only **polarity** for the flammable gas clouds (poison/confusion/paralysis/vomit) and for
+  incineration, whose tells are erased by the flame. See §7b for the exact list.
+
+(Frost is the other terrain-shaping bolt — it quenches fire and freezes water/foliage; see the staff table
+above. It does not detonate potions.)
+
 ---
 
 ## 4. Wands
@@ -493,7 +513,7 @@ A once-per-kind contextual hint names the exact result while you carry a bottle.
 hazard reference, and rationale: [TERRAIN_AUDIT.md §8–9](TERRAIN_AUDIT.md) and the design doc
 [`docs/design/empty-bottle-v2.md`](../design/empty-bottle-v2.md).
 
-### 7b. Throw & zap behavior — which potions are inert
+### 7b. Throw & zap behavior — fire/lightning shattering a dropped potion, & which are inert
 
 Two off-label uses exist: **throwing** a potion (shatters at the target) and **zapping** a *dropped*
 potion with a fire/lightning bolt. Not every potion reacts.
@@ -507,8 +527,10 @@ potion with a fire/lightning bolt. Not every potion reacts.
   (`throwDetectMagicOnFloor`). Same 1–2 base count as the drink (widened by a ring of wisdom).
 - **Glow-and-pass when zapped** (the bolt passes through harmlessly): the **8 benevolent potions** —
   life, strength, telepathy, levitation, speed, fire immunity, invisibility, detect magic
-  (`Items.c`, "the bolt passes through the flask and its fluid glows warmly"). A zap is thus a
-  *costed polarity probe*, not a free mass-ID (see KNOWN_CAVEATS.md). The **empty bottle is the
+  (`Items.c`, "the bolt passes through the flask and its fluid glows warmly"). This sets **no flag** on
+  the flask — no `ITEM_MAGIC_DETECTED`, no auto-ID. So a zap reveals polarity **by observation only**
+  (good = glows & passes, bad = detonates); the game records nothing on a benevolent flask, so it stays
+  unmarked in your pack and is no free mass-ID (see KNOWN_CAVEATS.md). The **empty bottle is the
   exception** — zapping it *captures* the bolt. Bad/cloud potions **detonate** (spawn their shatter
   signature and absorb the bolt), including the new acid/webbing/steam/ice/water.
 - **Thrown weapons can detonate a dropped bad/cloud potion too** (iOS port, `detonateFloorPotionAt`): an

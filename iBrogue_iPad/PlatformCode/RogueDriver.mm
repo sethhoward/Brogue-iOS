@@ -411,7 +411,9 @@ unsigned long loadPersistedSeed(void) {
 }
 
 // iOS port (iBrogue): persist/restore the chosen keyboard scheme (Classic / Modern), defaulting to
-// CLASSIC when absent or out of range. Mirrors the BrogueCE bridge's cePersistKeyboardScheme.
+// CLASSIC when absent or out of range. Mirrors the BrogueCE bridge's cePersistKeyboardScheme. The
+// @"keyboard scheme" key is shared across all three engines (Classic/CE/SE) so the scheme is an
+// app-wide input preference that carries between them.
 static NSString * const kKeyboardSchemeKey = @"keyboard scheme";
 
 void persistKeyboardScheme(int scheme) {

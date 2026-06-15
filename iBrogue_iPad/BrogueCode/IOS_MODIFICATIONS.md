@@ -44,9 +44,12 @@ engine. Full design: `docs/design/keyboard-schemes.md`; engine-side details in
   Shift/Ctrl + a `raw` flag (was byte-only, modifiers hardcoded to 0), fixing Shift/Ctrl-run; arrows are
   scheme-independent. `RogueDriver.mm` sets the event flags and runs `raw` keys through the scheme.
 - **Selectable keyboard schemes** — `enum keyboardScheme` + `rogueKeyboardScheme` (default CLASSIC) +
-  `applyKeyboardScheme()` (`IO.c`); the Modern right-hand grid, Shift/Ctrl-run, displaced
+  `applyKeyboardScheme()` (`IO.c`); the Modern right-hand grid (`u/o`,`m/.` diagonals around the
+  `i/j/k/l` cross — `i`=up,`j`=left,`k`=down,`l`=right — plus `,`=down), Shift/Ctrl-run, displaced
   inventory/equip/messages/stairs, quit-removed-on-tablet, and the scheme-aware `printHelpScreen` with a
-  Tab toggle (persisted via `persistKeyboardScheme`).
+  Tab toggle. The vi keys `h`/`y`/`b`/`n` are inert in Modern (only the grid moves the player; `y`/`n`
+  stay free for yes/no). Persisted via `persistKeyboardScheme` under the shared `"keyboard scheme"`
+  NSUserDefaults key (same key in all three engines, so the scheme carries across Classic/CE/SE).
 
 Default is Classic, so behavior is unchanged until the player opts in via `?` → Tab.
 

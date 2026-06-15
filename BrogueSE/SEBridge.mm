@@ -537,6 +537,45 @@ void notifyEvent(short eventId, int data1, int data2, const char *str1, const ch
     }
 }
 
+// iOS port (Brogue SE): debug rest-insight calibration. The engine (recordRestStatsRow in
+// RogueMain.c) emits one CSV row per finished live run; we append it to Documents/se/rest-stats.csv,
+// writing the header — prefixed with our own wall-clock "time" column — only when the file is first
+// created. Pull the file off-device via Xcode > Window > Devices & Simulators > (app) > Download
+// Container, then look under AppData/Documents/se/rest-stats.csv. Output-only; SE is Debug-only.
+void seRecordRestStats(const char *header, const char *row) {
+    if (!header || !row) {
+        return;
+    }
+    @autoreleasepool {
+        NSString *documents = [NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES) firstObject];
+        NSString *seDir = [documents stringByAppendingPathComponent:@"se"];
+        NSString *csvPath = [seDir stringByAppendingPathComponent:@"rest-stats.csv"];
+        NSFileManager *manager = [NSFileManager defaultManager];
+
+        if (![manager fileExistsAtPath:seDir]) {
+            [manager createDirectoryAtPath:seDir withIntermediateDirectories:YES attributes:nil error:NULL];
+        }
+
+        if (![manager fileExistsAtPath:csvPath]) {
+            NSString *headerLine = [NSString stringWithFormat:@"time,%s\n", header];
+            [headerLine writeToFile:csvPath atomically:YES encoding:NSUTF8StringEncoding error:NULL];
+        }
+
+        NSDateFormatter *fmt = [[NSDateFormatter alloc] init];
+        fmt.dateFormat = @"yyyy-MM-dd'T'HH:mm:ss";
+        fmt.locale = [NSLocale localeWithLocaleIdentifier:@"en_US_POSIX"];
+        NSString *stamp = [fmt stringFromDate:[NSDate date]];
+
+        NSString *dataLine = [NSString stringWithFormat:@"%@,%s\n", stamp, row];
+        NSFileHandle *fh = [NSFileHandle fileHandleForWritingAtPath:csvPath];
+        if (fh) {
+            [fh seekToEndOfFile];
+            [fh writeData:[dataLine dataUsingEncoding:NSUTF8StringEncoding]];
+            [fh closeFile];
+        }
+    }
+}
+
 boolean takeScreenshot(void) {
     return false;
 }
@@ -591,8 +630,11 @@ void cePersistLastSeed(uint64_t seed) {
 }
 
 // iOS port (iBrogue): the chosen keyboard scheme (Classic / Modern) is persisted in NSUserDefaults so
-// it sticks across launches, defaulting to CLASSIC (stock vi keys) when absent or out of range.
-static NSString * const kCEKeyboardSchemeKey = @"se keyboard scheme";
+// it sticks across launches, defaulting to CLASSIC (stock vi keys) when absent or out of range. The key
+// is deliberately shared across all three engines (Classic/CE/SE all use @"keyboard scheme") so the
+// scheme is an app-wide input preference -- picking Modern in one engine carries to the others. (This is
+// an intentional exception to SE's "se ..."-prefixed state: it is an input preference, not game state.)
+static NSString * const kCEKeyboardSchemeKey = @"keyboard scheme";
 
 static enum keyboardScheme ceLoadPersistedKeyboardScheme(void) {
     NSUserDefaults *d = [NSUserDefaults standardUserDefaults];

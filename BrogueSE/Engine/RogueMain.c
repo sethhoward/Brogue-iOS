@@ -1127,6 +1127,64 @@ void freeEverything() {
     free(rogue.featRecord);
 }
 
+// iOS port (Brogue SE): debug rest-insight calibration. At the end of a live run we emit one CSV row
+// of the per-level rest tally (rested turns + polarity reveals) so the rest-insight cadence (see
+// gainPolarityInsightFromRest in Items.c) can be tuned against real play. The host (SEBridge.mm)
+// appends it to Documents/se/rest-stats.csv and owns the leading wall-clock "time" column. The hook
+// is output-only — it draws no RNG and mutates no game state, so recordings/determinism are unaffected.
+extern void seRecordRestStats(const char *header, const char *row);
+
+// Copy src into dst, neutralising characters that would corrupt a CSV cell (commas, quotes, newlines).
+static void sanitizeCsvCell(const char *src, char *dst, size_t dstSize) {
+    size_t i = 0;
+    for (; src && src[i] && i + 1 < dstSize; i++) {
+        const char c = src[i];
+        dst[i] = (c == ',' || c == '"' || c == '\n' || c == '\r') ? ' ' : c;
+    }
+    dst[i] = '\0';
+}
+
+// iOS port (Brogue SE): build and emit the rest-stats CSV row for a finished run. Header and row
+// columns are kept in lock-step here so the host never has to know the schema. Skipped during
+// recording playback.
+static void recordRestStatsRow(const char *outcome, const char *killedBy) {
+    if (rogue.playbackMode) {
+        return; // never log while replaying a recording
+    }
+
+    char header[2048], row[2048], buf[64], cause[128];
+    unsigned long restTurnsTotal = 0, revealsTotal = 0, restTurnsThruD10 = 0, revealsThruD10 = 0;
+    short d;
+
+    for (d = 1; d <= gameConst->deepestLevel; d++) {
+        restTurnsTotal += levels[d].restTurnsOnLevel;
+        revealsTotal   += levels[d].restRevealsOnLevel;
+        if (d <= 10) {
+            restTurnsThruD10 += levels[d].restTurnsOnLevel;
+            revealsThruD10   += levels[d].restRevealsOnLevel;
+        }
+    }
+
+    sanitizeCsvCell(killedBy ? killedBy : "-", cause, sizeof(cause));
+
+    strcpy(header, "seed,mode,outcome,cause,depth,deepest,wisdom,rest_turns_total,reveals_total,rest_turns_d1_10,reveals_d1_10");
+    sprintf(row, "%llu,%i,%s,%s,%i,%i,%i,%lu,%lu,%lu,%lu",
+            (unsigned long long)rogue.seed, (int)rogue.mode, outcome, cause,
+            rogue.depthLevel, rogue.deepestLevel, rogue.wisdomBonus,
+            restTurnsTotal, revealsTotal, restTurnsThruD10, revealsThruD10);
+
+    for (d = 1; d <= gameConst->deepestLevel; d++) {           // per-level rested turns
+        sprintf(buf, ",t%i", d);                            strcat(header, buf);
+        sprintf(buf, ",%lu", levels[d].restTurnsOnLevel);   strcat(row, buf);
+    }
+    for (d = 1; d <= gameConst->deepestLevel; d++) {           // per-level reveals
+        sprintf(buf, ",r%i", d);                            strcat(header, buf);
+        sprintf(buf, ",%lu", levels[d].restRevealsOnLevel); strcat(row, buf);
+    }
+
+    seRecordRestStats(header, row);
+}
+
 void gameOver(char *killedBy, boolean useCustomPhrasing) {
     short i, y;
     char buf[200], highScoreText[200], buf2[200];
@@ -1327,6 +1385,8 @@ void gameOver(char *killedBy, boolean useCustomPhrasing) {
         saveRunHistory(rogue.quit ? "Quit" : "Died", rogue.quit ? "-" : killedBy, (int) theEntry.score, numGems);
     }
 
+    recordRestStatsRow(rogue.quit ? "Quit" : "Died", rogue.quit ? "-" : killedBy); // iOS port (Brogue SE): rest-insight calibration log
+
     rogue.gameHasEnded = true;
     rogue.gameExitStatusCode = EXIT_STATUS_SUCCESS;
 }
@@ -1492,6 +1552,8 @@ void victory(boolean superVictory) {
     if (!rogue.playbackMode && rogue.mode != GAME_MODE_EASY && rogue.mode != GAME_MODE_NORMAL) {
         saveRunHistory(victoryVerb, "-", (int) theEntry.score, gemCount);
     }
+
+    recordRestStatsRow(superVictory ? "Mastered" : "Escaped", "-"); // iOS port (Brogue SE): rest-insight calibration log
 
     rogue.gameHasEnded = true;
     rogue.gameExitStatusCode = EXIT_STATUS_SUCCESS;

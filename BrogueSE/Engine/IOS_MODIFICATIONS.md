@@ -32,6 +32,67 @@ See `BrogueCE/Engine/IOS_MODIFICATIONS.md` (faithful CE) and
 
 ## Change log
 
+### 2026-06-14 — Debug: per-run rest-stats CSV export (for cadence calibration)
+
+**What.** Every finished live SE run now appends one row to `Documents/se/rest-stats.csv`: seed, game
+mode, outcome (Died/Quit/Escaped/Mastered) + sanitized cause, depth reached, deepest level, wisdom
+bonus, total rested turns, total rest reveals, the same two totals restricted to depths 1–10, and a
+per-level breakdown (`t1…tN` rested turns, `r1…rN` reveals). The host owns a leading wall-clock `time`
+column and writes the header once on file creation. This is the empirical readout for tuning the
+rest-insight schedule (the `REST_INSIGHT_BASE_TURNS` / `REST_INSIGHT_STEP_TURNS` constants).
+
+**Pull it off-device:** Xcode → Window → *Devices & Simulators* → select the app → ⚙ → *Download
+Container* → show package contents → `AppData/Documents/se/rest-stats.csv`.
+
+**Why.** "How many rest reveals does a normal depth-1..10 run actually earn?" can't be answered from the
+code — only from real play. The CSV makes the rest budget measurable so the cadence constants can be set
+to the desired ~2-3 reveals by depth 10.
+
+**Where.** `RogueMain.c` — new `extern void seRecordRestStats(const char *, const char *)` hook plus the
+statics `sanitizeCsvCell()` / `recordRestStatsRow()`, called at the end of `gameOver()` and `victory()`
+(after the outcome is finalized, gated on `!rogue.playbackMode` so recordings don't log). `SEBridge.mm`
+— `seRecordRestStats()` inside the `extern "C"` block does the append (reuses the `Documents/se` path,
+adds the timestamp). No `BrogueCEHost` protocol or Swift changes. SE is Debug-only, so this never ships.
+
+**Determinism.** Output-only: the engine hook draws no RNG and mutates no game state, and runs after the
+run has ended — saves/replays are unaffected. The host timestamp is host-side metadata, not engine state.
+
+### 2026-06-14 — Retune the rest-insight schedule (faster repeat reveals)
+
+**What.** Replaced the rest-polarity threshold's steep `100 × N` ramp with a low base plus a gentle
+additive step: reveal N now needs `60 + 25 × (N-1)` rested turns since the last reveal (intervals
+60, 85, 110, 135…; cumulative 60, 145, 255, 390…). The old ramp put the 2nd reveal at 300 cumulative
+rested turns — more than a typical depth-1..10 run accrues — so reveals after the first were rare. The
+new curve is tuned to fire ~2-3 times by depth 10 while later reveals still cost progressively more.
+
+**Why.** The first reveal landed but repeats almost never did; resting is already self-limiting (it
+burns hunger, and the eligible pool is the finite set of unknown polarity-bearing pack items — reveals
+just hold when nothing qualifies), so the steep guard-ramp wasn't earning its cost.
+
+**Where.** `gainPolarityInsightFromRest()` in `Items.c` — new `REST_INSIGHT_BASE_TURNS` (60) constant
+alongside `REST_INSIGHT_STEP_TURNS` (now 25), and the threshold expression `BASE + STEP × revealsSoFar`.
+Ring-of-wisdom acceleration and the deterministic, replay-safe random target are unchanged. The two
+constants are the tuning surface; the debug death-recap's per-level rested-turns/reveal tally is the
+readout for recalibrating against real play. Supersedes the schedule in the 2026-06-11 entry below.
+
+**Determinism.** Threshold is a deterministic function of rested-turn count and reveals earned; no RNG.
+
+### 2026-06-14 — Remove curse reveals the cleansed items' polarity
+
+**What.** Reading a scroll of remove curse now reveals the (malevolent) polarity of every item it
+actually uncurses. Each item whose `ITEM_CURSED` flag is lifted gets `ITEM_MAGIC_DETECTED` set, so
+its good/bad polarity becomes known in the inventory/floor display — the player learns what the curse
+had been hiding. Items that weren't cursed are untouched.
+
+**Why.** Previously the cleansing left no trace of what each item's polarity had been; surfacing the
+malevolent polarity is information the player has clearly earned by spending the scroll.
+
+**Where.** `SCROLL_REMOVE_CURSE` case in `readScroll()` (`Items.c`). The reveal piggybacks on
+`uncurse()`'s return value (true only when a curse was cleared) and reuses the existing
+`ITEM_MAGIC_DETECTED` polarity-knowledge flag.
+
+**Determinism.** Purely state-driven (gated on `ITEM_CURSED`); no RNG, save-replay safe.
+
 ### 2026-06-14 — "Extra hot" blue title-screen flames (iOS port)
 
 **What.** SE's title-screen menu flames burn blue (hottest part of a real flame) instead of the
@@ -72,19 +133,29 @@ selectable from the help screen and persisted. Full design: `docs/design/keyboar
   the on-screen d-pad/buttons enqueue canonical keys (`raw == NO`) that must **not** be remapped, while
   hardware character keys (`raw == YES`) are run through `applyKeyboardScheme`. Recordings, seeds and
   the leaderboard are unaffected by the active scheme.
-- **Modern layout.** Right-hand 3×3 grid `uio / jkl / m,.` (center `k` = wait), Shift/Ctrl + grid =
-  run on all 8 directions. Displaced commands: inventory→`e`, equip→Shift+`E`, messages→`p`,
-  ascend→Shift+`P`, descend→Shift+`:`. The entire left hand (`a`pply/`d`rop/`s`earch/`w`/`z`/`x`/`c`/…
-  and every Shift+command) is untouched (identity).
+- **Modern layout.** Right-hand grid: `u/o` and `m/.` diagonals around the **`i/j/k/l` cross**
+  (`i`=up, `j`=left, `k`=down, `l`=right), with `,` a second down; Shift/Ctrl + grid = run on all 8
+  directions. Displaced commands: inventory→`e`, equip→Shift+`E`, messages→`p`, ascend→Shift+`P`,
+  descend→Shift+`:`. The vi movement keys `h`/`y`/`b`/`n` (and their run forms) are mapped to
+  `UNKNOWN_KEY` (inert) so **only the grid moves the player** — `y`/`n` no longer move you, leaving
+  them free for yes/no. (Those prompts read via `buttonInputLoop` with `textInput == true`, which
+  bypasses `applyKeyboardScheme`, so yes/no and item-letter selection are unaffected.) Other left-hand
+  commands (`a`pply/`d`rop/`s`earch/`w`/`z`/`x`/`c`/… and every Shift+command) are untouched (identity).
+  *(Refined 2026-06-14: was center `k`=wait with `h`/`y`/`b`/`n` passing through as movement; changed
+  to the `i/j/k/l` cross + inert vi keys at the player's request. Wait one turn is still on `z`.)*
 - **Quit removed on tablet.** A guard in `applyKeyboardScheme` maps a hardware `QUIT_KEY` to
   `UNKNOWN_KEY` in **both** schemes — quit is menu-only. The on-screen menu's Quit button synthesizes
   `QUIT_KEY` directly (`raw == NO`) so it still works; `actionMenu` no longer advertises a `Q:` hotkey.
 - **Scheme-aware help screen + toggle.** `printHelpScreen` (`?` / the keyboard-gated menu Help entry)
   now renders the *active* scheme (the Classic command list or the Modern grid) and toggles between
   them with **Tab** (persisted), dismissing on space/esc/click. No new menu item was added.
-- **Persistence.** `cePersistKeyboardScheme()` / `ceLoadPersistedKeyboardScheme()` (`CEBridge.mm`,
-  NSUserDefaults key `"ce keyboard scheme"`); restored in `ce_start`, mirroring the graphics-mode and
-  seed persistence.
+- **Persistence.** `cePersistKeyboardScheme()` / `ceLoadPersistedKeyboardScheme()` (`SEBridge.mm`),
+  restored in `se_start`, mirroring the graphics-mode and seed persistence. The NSUserDefaults key is
+  the **shared** `"keyboard scheme"` (same key in all three engines), so the chosen scheme is an
+  app-wide input preference that carries across Classic/CE/SE — an intentional exception to SE's
+  `"se …"`-prefixed state, because it is an input preference, not game state.
+  *(Refined 2026-06-14: was the per-engine key `"se keyboard scheme"`; unified to the shared key so the
+  setting is remembered across all versions, at the player's request.)*
 
 **Why.** The stock layout assumes a numpad and vi movement, which is unintuitive on Magic
 Keyboards/laptops. The Modern grid gives a spatial directional pad with no numpad; the indirection
@@ -275,6 +346,12 @@ identified staff in `initializeRogue` (`RogueMain.c`), added deterministically (
 were appended to all three variant catalogs (`GlobalsBrogue.c` / `GlobalsRapidBrogue.c` /
 `GlobalsBulletBrogue.c`); the staff/status/tile/DF tables are shared in `Globals.c`. `BOLT_FREEZE` is
 appended (not inserted) since the staff→bolt link is the `power` field, not positional.
+
+**Follow-up (2026-06-14) — itemDetails description.** `STAFF_FREEZE` was never given a `case` in the
+identified-staff `switch` in `itemDetails` (`Items.c`), so an *identified* staff of frost fell through to the
+`default` and reported "No one knows what this staff does." Added a `STAFF_FREEZE` case that prints the
+freeze duration (`staffFreezeDuration`, scaling with enchant like the other staff blurbs) and notes the
+thaw-slow tail and the fire-douses-instead-of-freezes rule.
 
 ### 2026-06-13 — Steal-preference component (extracted from monkey + imp; third reusable component)
 
@@ -606,17 +683,20 @@ deterministic (not recorded inputs), so they're replay-safe. Flip to 0 to ship.
 **What.** When a monster loses the player's trail and reverts from hunting to wandering
 (`MONSTER_TRACKING_SCENT -> MONSTER_WANDERING` in `updateMonsterState()`), the player gets a chance to
 sense it: `"you sense that <the monster> has lost your trail."` **No line of sight is required** — it's
-a pure awareness roll. The chance is `SENSE_LOST_TRAIL_BASE_CHANCE` (50) `+ rogue.awarenessBonus`,
-clamped to `[0,100]`. The base is deliberately high so the typical character — who invests nothing in
-awareness — still notices about half the time; a **ring of awareness** (`+20`/enchant) pushes it toward
-certainty (`+1` → 70%, `+2` → 90%, `+3` → 100%), and a cursed ring suppresses it. Pairs with the
-water/scent change: duck out of sight, cross water, and you'll usually learn the coast is clear.
+a pure awareness roll. The chance is `SENSE_LOST_TRAIL_BASE_CHANCE` (20) `+ rogue.awarenessBonus`,
+clamped to `[0,100]`. The base is deliberately low so the typical character — who invests nothing in
+awareness — only occasionally senses it; a **ring of awareness** (`+20`/enchant) is what makes it
+reliable (`+1` → 40%, `+2` → 60%, `+3` → 80%, `+4` → 100%), and a cursed ring suppresses it. Pairs with
+the water/scent change: duck out of sight, cross water, and an awareness build learns the coast is clear.
 
-**Why.** Requested — tie "did I shake it?" feedback to the player's awareness, with a low enough bar
-that it's useful without an awareness build. Line-of-sight gating was dropped on request (so it also
-confirms in text even when the monster is visible and its sidebar already reads `(Wandering)`). Rolled
-only at the transition (not per turn), so it doesn't spam; it can re-fire only if the monster
-re-acquires and loses the player again.
+**Why.** Requested — tie "did I shake it?" feedback to the player's awareness, gated so it's a real
+payoff for an awareness build rather than near-free. The base was lowered from 50 to 20 (2026-06-14)
+because a submerging pursuer spams it: an **eel** standing next to you in water cycles
+`TRACKING_SCENT -> WANDERING` every time it submerges (it loses awareness underwater, re-acquires on
+surfacing), re-rolling the transition each cycle — at 50% that flooded the log. Line-of-sight gating
+was dropped on request (so it also confirms in text even when the monster is visible and its sidebar
+already reads `(Wandering)`). Rolled only at the transition (not per turn); it can still re-fire when a
+monster re-acquires and loses the player again, which is exactly the eel case — hence the low base.
 
 **Where.** `Monsters.c` — `SENSE_LOST_TRAIL_BASE_CHANCE` define + a block in the
 `TRACKING_SCENT && !awareOfPlayer` branch of `updateMonsterState()`. Draws `rand_percent` **only** when

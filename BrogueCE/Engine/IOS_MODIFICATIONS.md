@@ -50,10 +50,14 @@ input), so recordings/saves are unaffected.
 - **Hardware keyboard modifiers** — the iOS key queue now carries real Shift/Ctrl + a `raw` flag (it was
   byte-only with modifiers hardcoded to 0), so Shift/Ctrl-run works; arrows are scheme-independent.
 - **Selectable keyboard schemes** — `enum keyboardScheme` + `rogueKeyboardScheme` (default CLASSIC) +
-  `applyKeyboardScheme()`; the Modern right-hand grid (`uio/jkl/m,.`), Shift/Ctrl-run, displaced
+  `applyKeyboardScheme()`; the Modern right-hand grid (`u/o`,`m/.` diagonals around the `i/j/k/l`
+  cross — `i`=up,`j`=left,`k`=down,`l`=right — plus `,`=down), Shift/Ctrl-run, displaced
   inventory/equip/messages/stairs, quit-removed-on-tablet, and the scheme-aware `printHelpScreen` with
-  a Tab toggle (persisted via `cePersistKeyboardScheme`). Translation runs in the bridge on `raw`
-  hardware keys only, so on-screen controls aren't remapped; recordings stay canonical.
+  a Tab toggle. The vi keys `h`/`y`/`b`/`n` are inert in Modern (only the grid moves the player; `y`/`n`
+  stay free for yes/no). Translation runs in the bridge on `raw` hardware keys only, so on-screen
+  controls aren't remapped and yes/no / item-letter prompts (read with `textInput`) are unaffected;
+  recordings stay canonical. Persisted via `cePersistKeyboardScheme` under the shared `"keyboard scheme"`
+  NSUserDefaults key (same key in all three engines, so the scheme carries across Classic/CE/SE).
 - **Renderer** — the animation-glitch fix in `RogueScene.swift`.
 
 Full design + rationale: `docs/design/keyboard-schemes.md`. Default is Classic, so behavior is unchanged

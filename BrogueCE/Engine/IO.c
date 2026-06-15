@@ -2437,16 +2437,18 @@ signed long applyKeyboardScheme(signed long keystroke, boolean *controlKey, bool
     }
     switch (rogueKeyboardScheme) {
         case KEYBOARD_SCHEME_MODERN:
-            // Right-hand 3x3 directional grid (uio / jkl / m,.) + displaced commands. Real Shift/Ctrl
-            // state is already in the modifier flags, so run works via executeKeystroke's
-            // controlKey||shiftKey check -- we only translate the character. The whole left hand
-            // (apply/drop/search/swap/rest/explore/call + every Shift+command) passes through unchanged.
+            // Right-hand directional grid: u/o, m/. diagonals around the i/j/k/l (up/left/down/right)
+            // cross, ',' as a second down. Real Shift/Ctrl state is already in the modifier flags, so
+            // run works via executeKeystroke's controlKey||shiftKey check -- we only translate the
+            // character. The vi movement keys h/y/b/n are made inert (see below) so only the grid moves
+            // the player; other left-hand commands (apply/drop/search/swap/rest/explore/call +
+            // Shift+commands) pass through unchanged.
             switch (keystroke) {
                 case 'u': return UPLEFT_KEY;
                 case 'i': return UP_KEY;
                 case 'o': return UPRIGHT_KEY;
                 case 'j': return LEFT_KEY;
-                case 'k': return PERIOD_KEY;       // center = wait in place
+                case 'k': return DOWN_KEY;          // IJKL cross: i/j/k/l = up/left/down/right
                 case 'l': return RIGHT_KEY;
                 case 'm': return DOWNLEFT_KEY;
                 case ',': return DOWN_KEY;
@@ -2455,7 +2457,7 @@ signed long applyKeyboardScheme(signed long keystroke, boolean *controlKey, bool
                 case 'I': return UP_KEY;
                 case 'O': return UPRIGHT_KEY;
                 case 'J': return LEFT_KEY;
-                case 'K': return PERIOD_KEY;
+                case 'K': return DOWN_KEY;          // Shift+k = run down
                 case 'L': return RIGHT_KEY;
                 case 'M': return DOWNLEFT_KEY;      // Shift+m; overrides default M = message archive
                 case '<': return DOWN_KEY;          // Shift+, (run down)
@@ -2465,6 +2467,12 @@ signed long applyKeyboardScheme(signed long keystroke, boolean *controlKey, bool
                 case 'p': return MESSAGE_ARCHIVE_KEY; // messages move off 'M' (now run-down-left)
                 case 'P': return ASCEND_KEY;        // Shift+P = ascend stairs (shift-gated for safety)
                 case ':': return DESCEND_KEY;       // Shift+; = descend stairs
+                // vi-key left-hand movement is removed in modern: h/y/b/n (and their run forms) never
+                // move the player. y/n stay usable for yes/no and as item letters: those prompts read
+                // via buttonInputLoop with textInput == true, which bypasses this remap entirely.
+                case 'h': case 'y': case 'b': case 'n':
+                case 'H': case 'Y': case 'B': case 'N':
+                    return UNKNOWN_KEY;
                 default:  return keystroke;
             }
         case KEYBOARD_SCHEME_CLASSIC:
@@ -4221,8 +4229,8 @@ void printHelpScreen() {
         "       -- Keyboard: Modern (right-hand grid) --",
         "",
         "     u i o      ****move / attack -- press the key in that direction:",
-        "     j k l      ****  u=up-left  i=up  o=up-right   j=left  l=right",
-        "     m , .      ****  m=down-left  ,=down  .=down-right   k=wait",
+        "     j k l      ****  i=up  j=left  k=down  l=right  (the i/j/k/l cross)",
+        "     m , .      ****  u/o=up diagonals   m/.=down diagonals   ,=down",
         "   arrow keys   ****also move or attack (hold shift or control to run)",
         "       <return>  ****enable keyboard cursor control",
         "    <space/esc>  ****disable keyboard cursor control",
@@ -4232,7 +4240,7 @@ void printHelpScreen() {
         "              T  ****re-throw last item at last monster",
         " e, right-click  ****view inventory",
         "              D  ****list discovered items",
-        "              z  ****rest once   (k = wait one turn)",
+        "              z  ****rest once / wait one turn",
         "              Z  ****rest for 100 turns or until something happens",
         "              s  ****search for secrets (control-s: long search)",
         "shift-P / shift-:  ****travel up / down stairs",
