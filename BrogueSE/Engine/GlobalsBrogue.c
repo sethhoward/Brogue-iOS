@@ -725,7 +725,7 @@ itemTable potionTable_Brogue[] = {
     {"webbing",             itemColors[15], "", 0,  300,    0, 0, {0,0,0}, false, false, -1, false, "A flask packed with living silk. Shattered against the ground it bursts into a tangle of grasping web; uncork it in your grip and the strands seize you where you stand."},
     {"steam",               itemColors[13], "", 0,  300,    0, 0, {0,0,0}, false, false, -1, false, "Scalding vapor strains against the stopper. Released, it boils outward into a searing cloud that burns anything caught within it."},
     {"ice",                 itemColors[12], "", 0,  300,    0, 0, {5,5,0}, false, false, -1, false, "Aching cold radiates through the glass. Hurled at a creature it encases the victim in ice, frozen helpless before thawing into a sluggish chill; uncorked in hand, it freezes you instead."},
-    {"water",               itemColors[5],  "", 0,  300,    0, 0, {0,0,0}, false, false, -1, false, "Plain captured water, heavier than it looks. Dashed against the ground it floods the area into a wide pool -- treacherous footing that conducts a lightning bolt's shock and washes away the scent you leave behind."},
+    {"water",               itemColors[5],  "", 0,  300,    0, 0, {0,0,0}, false, false, 1,  false, "Plain captured water, heavier than it looks. Drunk, it douses flames and flushes away the fog of confusion, hallucination, and nausea. Dashed against the ground instead, it floods the area into a wide pool -- treacherous footing that conducts a lightning bolt's shock and washes away the scent you leave behind."},
 };
 
 itemTable scrollTable_Brogue[] = {

@@ -8939,10 +8939,23 @@ boolean drinkPotion(item *theItem) {
             message("frost erupts from the open flask, and biting cold engulfs you!", 0);
             spawnFrostCloud(player.loc.x, player.loc.y);
             break;
-        case POTION_WATER:
-            message("water gushes out of the flask, flooding the area around you!", 0);
-            spawnDungeonFeature(player.loc.x, player.loc.y, &dungeonFeatureCatalog[DF_FLOOD], true, false);
+        case POTION_WATER: {
+            // iOS port (Brogue SE): DRINKING captured water is a "flush" -- it douses fire and dilutes
+            // bodily/sensory afflictions. It does NOT flood your own tile; the flood is the THROWN
+            // effect (see shatterPotionAtLoc). Extinguish burning fully; halve the remaining duration of
+            // confusion / hallucination / nausea. Deterministic (no RNG), so saves/replays are safe.
+            const boolean willFlush = player.status[STATUS_BURNING] || player.status[STATUS_CONFUSED]
+                || player.status[STATUS_HALLUCINATING] || player.status[STATUS_NAUSEOUS];
+            message(willFlush ? "the cool water washes through you, clearing your head."
+                              : "you drink down the stale water.", 0);
+            if (player.status[STATUS_BURNING]) {
+                extinguishFireOnCreature(&player); // also prints "you are no longer on fire."
+            }
+            if (player.status[STATUS_CONFUSED])      player.status[STATUS_CONFUSED]      /= 2;
+            if (player.status[STATUS_HALLUCINATING]) player.status[STATUS_HALLUCINATING] /= 2;
+            if (player.status[STATUS_NAUSEOUS])      player.status[STATUS_NAUSEOUS]      /= 2;
             break;
+        }
         default:
             message("you feel very strange, as though your body doesn't know how to react!", REQUIRE_ACKNOWLEDGMENT);
     }
@@ -8988,10 +9001,9 @@ short magicCharDiscoverySuffix(short category, short kind) {
                 case POTION_WEBBING:  // iOS port (iBrogue)
                 case POTION_STEAM:    // iOS port (iBrogue)
                 case POTION_ICE:      // iOS port (iBrogue)
-                case POTION_WATER:    // iOS port (iBrogue)
                     result = -1;
                     break;
-                default: // good potions, incl. honey/wort/detect-magic2 (iOS port)
+                default: // good potions, incl. honey/wort/detect-magic2 and water (drink = flush; iOS port)
                     result = 1;
                     break;
             }

@@ -32,6 +32,28 @@ See `BrogueCE/Engine/IOS_MODIFICATIONS.md` (faithful CE) and
 
 ## Change log
 
+### 2026-06-15 — Potion of water: drinking it is a "flush" (douse fire + dilute afflictions)
+
+**What.** Drinking captured water used to just flood your own tile (it reused the *thrown* effect).
+Now drinking is a beneficial **flush**: it fully extinguishes `STATUS_BURNING` and halves the
+remaining duration of `STATUS_CONFUSED`, `STATUS_HALLUCINATING`, and `STATUS_NAUSEOUS` (all active
+ones at once). With nothing in scope active it's a flavor sip (still consumed, turn passes). The
+flood is now **throw-only** (`shatterPotionAtLoc`, unchanged). Poison and physical/curse-like effects
+(stuck, weakened, slowed, darkness, aggravating) are deliberately out of scope.
+
+**Polarity.** Water was mis-tagged malevolent; drinking is now benevolent, so `magicPolarity` is
+`+1` (potionTable row) and `magicCharDiscoverySuffix` returns `+1` (water dropped out of the bad
+group). Consequence (accepted): thrown water no longer auto-targets enemies (benevolent potions are
+excluded in `canAutoTargetMonster`); you aim the flood at a tile manually. Water is capture-only +
+always identified, so there's no "cursed potion?" nag and no AI throws it — the reclassification only
+affects Discoveries-screen color and throw-targeting.
+
+**Where.** `POTION_WATER` case in `drinkPotion` and `magicCharDiscoverySuffix` (`Items.c`); water
+row in `GlobalsBrogue.c` (`magicPolarity` + description). SE only. Design doc:
+`docs/design/potion-of-water-drink-flush.md`.
+
+**Determinism.** Extinguish + integer-halve use no RNG; saves/replays unaffected.
+
 ### 2026-06-15 — Fix: polarity channels ignored weapons & armor (detect magic, rest, freed captive)
 
 **What.** Drinking/throwing a potion of detect magic, resting, and freeing a captive could never
