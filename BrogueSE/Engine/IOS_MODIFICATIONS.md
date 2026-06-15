@@ -32,6 +32,36 @@ See `BrogueCE/Engine/IOS_MODIFICATIONS.md` (faithful CE) and
 
 ## Change log
 
+### 2026-06-15 — Fix: monsters woke against a one-turn-stale stealth range (#837)
+
+**What.** A monster could begin hunting even though the player's drawn stealth-range circle
+excluded it — most visibly when the player stepped from lit into dark lighting on the turn the
+monster aggroed.
+
+**Cause.** `playerMoves` updates `player.loc` and then calls `playerTurnEnded` with no vision pass
+in between, so lighting still reflects the *old* tile. `playerTurnEnded` only recomputed
+`rogue.stealthRange` (and refreshed vision) *after* the monster loop. Meanwhile `awarenessDistance`
+already used the new position (scent refreshed at the top of the turn) and the player's current FOV.
+So the monster wake check (`awareOfTarget` → `awareness = rogue.stealthRange * 2`) compared a current
+distance against the *previous* turn's stealth range — the brighter tile's, ~double the dark one —
+while the stealth circle the player saw was the freshly recomputed (dark, smaller) one. Hence a
+monster inside the stale range started hunting despite the displayed range excluding it.
+
+**Fix.** Recompute lighting + stealth range *before* the monster loop, by restoring the
+`updateVision(true)` / `rogue.stealthRange = currentStealthRange()` block that upstream Brogue left
+commented out at the top of the turn. The end-of-turn recompute stays (to reflect what the monsters'
+turns changed). `updateVision(true)` is used rather than a bare `updateLighting()` so the
+light-diff bookkeeping (`recordOldLights`) stays consistent for the end-of-turn display pass —
+otherwise the lighting transition wouldn't redraw.
+
+**Tradeoffs.** One extra `updateVision` (FOV + lighting) per turn — FOV is recomputed redundantly
+since the player doesn't move during the monster loop. It also draws cosmetic RNG via `paintLight`,
+shifting the RNG stream; irrelevant under the current SE policy (determinism/replays/saves not a
+concern) but worth revisiting if seeded determinism is reinstated. This is an upstream Brogue bug
+(present identically in CE); the fix is **SE-only** — CE stays faithful to upstream.
+
+**Where.** `playerTurnEnded` (`Time.c`, before the monster turn loop). Marked `#837`.
+
 ### 2026-06-15 — Fix: confused monsters could stumble onto sacred glyphs (#841)
 
 **What.** A confused monster that "tries to attack" instead lurches in a random valid direction,
