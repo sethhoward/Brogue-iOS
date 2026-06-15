@@ -277,6 +277,12 @@ void initializeRogue(uint64_t seed) {
         levels[i].items = NULL;
         levels[i].scentMap = NULL;
         levels[i].visited = false;
+        // iOS port (Brogue SE): levels[] is malloc'd (not calloc'd) and these custom debug tallies
+        // are never otherwise reset, so without this they carry stale counts from a prior run in the
+        // same session — inflating the rest-stats CSV AND, since gainPolarityInsightFromRest sums
+        // restRevealsOnLevel into its escalating threshold, slowing reveals on the 2nd+ game played.
+        levels[i].restTurnsOnLevel = 0;
+        levels[i].restRevealsOnLevel = 0;
         levels[i].playerExitedVia = (pos){ .x = 0, .y = 0 };
         do {
             levels[i].downStairsLoc.x = rand_range(1, DCOLS - 2);

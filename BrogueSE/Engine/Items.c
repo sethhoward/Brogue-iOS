@@ -5685,9 +5685,16 @@ boolean zap(pos originLoc, pos targetLoc, bolt *theBolt, boolean hideDetails, bo
 /// @param magicPolarity the magic polarity (-1 for bad, 1 for good)
 /// @return true if the player knows the item is of the given magic polarity
 static boolean itemMagicPolarityIsKnown(const item *theItem, int magicPolarity) {
+    // iOS port (Brogue SE): null-guard BEFORE dereferencing. This used to read theItem->category
+    // (via tableForItemCategory) one line above the `theItem &&` test below, so a NULL theItem
+    // faulted at address 0 -- the detect-magic crash (quaffDetectMagic -> revealOrIdentifyPolarityItem
+    // -> here). An unknown/absent item simply has no known polarity, so treat NULL as "not known".
+    if (!theItem) {
+        return false;
+    }
     itemTable *table = tableForItemCategory(theItem->category);
 
-    if ((theItem && (theItem->flags & (ITEM_MAGIC_DETECTED | ITEM_IDENTIFIED)))
+    if ((theItem->flags & (ITEM_MAGIC_DETECTED | ITEM_IDENTIFIED))
         || (table && (table[theItem->kind].identified || table[theItem->kind].magicPolarityRevealed))) {
 
             return itemMagicPolarity(theItem) == magicPolarity;
@@ -8102,6 +8109,9 @@ boolean readScroll(item *theItem) {
 }
 
 static void detectMagicOnItem(item *theItem) {
+    if (!theItem) {
+        return; // iOS port (Brogue SE): null-safe, mirrors itemMagicPolarityIsKnown (detect-magic crash hardening)
+    }
     if (theItem->category & HAS_INTRINSIC_POLARITY) {
         itemTable *theItemTable = tableForItemCategory(theItem->category);
         theItemTable[theItem->kind].magicPolarityRevealed = true;
@@ -8113,6 +8123,22 @@ static void detectMagicOnItem(item *theItem) {
 
         identify(theItem);
     }
+}
+
+// iOS port (Brogue SE): the polarity channels (detect magic drink/throw, rest, freed captive) sense an
+// item over the full CAN_BE_DETECTED set, so a weapon's or armor's good/bad aura (the sign of its enchant)
+// can be revealed -- the category exclusion that used to hide gear from these channels was a bug; the
+// partial 1-2 reveal it replaced the old whole-pack reveal with was the intended design. Gear differs from
+// the kind-flavored consumables in one way: it NEVER escalates to a full enchant ID through a polarity
+// channel (that still comes from wearing/using it -- and matches upstream CE, where detect magic only ever
+// set the aura glyph on weapons/armor, never the exact enchant). So once a weapon/armor's aura is shown
+// (ITEM_MAGIC_DETECTED), a polarity channel has nothing left to tell about it: this predicate drops it from
+// eligibility rather than letting it be re-picked to escalate. (0-enchant non-runic gear is full-ID'd by
+// detectMagicOnItem above as "no magic", and so is caught earlier by itemIdentityFullyKnown.)
+static boolean polarityAuraAlreadyShownForGear(const item *theItem) {
+    return theItem
+        && (theItem->category & (WEAPON | ARMOR))
+        && (theItem->flags & ITEM_MAGIC_DETECTED);
 }
 
 // iOS port (iBrogue): "is there nothing left to learn about this item's identity?" The per-item
@@ -8171,6 +8197,10 @@ boolean revealPolarityOnFieryDestruction(item *theItem) {
 // recoils from the most threatening thing you carry and points out a MALEVOLENT one. The two signs can
 // never collide on the same item, so the monkey's covet and the generic recoil are complementary tells.
 // Polarity reveal only -- no full ID, no escalation -- to keep the "it eyes your satchel" flavor honest.
+// Senses the full CAN_BE_DETECTED set (weapons and armor included, sign-of-enchant polarity), so a freed
+// monkey may covet a good unidentified blade or mail and a freed ally may recoil from a cursed one. Because
+// the pack is sorted by ascending category and WEAPON(1)/ARMOR(2) precede the consumables, gear is the
+// first eligible thing a captive points at when you carry an unsensed good/bad piece.
 // Deterministic: itemMagicPolarity is only ever +1/0/-1 (no finer gradient to sort on), so it reveals the
 // first eligible item in pack order; no RNG. Silent no-op when nothing of that sign has a still-unknown
 // aura (acceptable -- especially the malevolent recoil when you carry no curses). Called from freeCaptive.
@@ -8178,12 +8208,12 @@ void captiveReactToPack(creature *freed) {
     const int sensedPolarity = (freed->info.monsterID == MK_MONKEY)
         ? MAGIC_POLARITY_BENEVOLENT : MAGIC_POLARITY_MALEVOLENT;
     for (item *theItem = packItems->nextItem; theItem != NULL; theItem = theItem->nextItem) {
-        if (!(theItem->category & HAS_INTRINSIC_POLARITY)
+        if (!(theItem->category & CAN_BE_DETECTED)
             || itemIdentityFullyKnown(theItem)
             || itemMagicPolarity(theItem) != sensedPolarity
             || itemMagicPolarityIsKnown(theItem, sensedPolarity)) {
 
-            continue; // no intrinsic polarity, already fully known, wrong sign, or aura already sensed
+            continue; // not detectable, already fully known, wrong sign, or aura already sensed
         }
         detectMagicOnItem(theItem); // reveal (and persist) the kind's polarity; not a full ID
         tryIdentifyLastItemKinds(HAS_INTRINSIC_POLARITY);
@@ -8207,6 +8237,16 @@ void captiveReactToPack(creature *freed) {
 // was a full identification. Shared by resting/eating (applyPolarityInsightToRandomItem) and the potion
 // of detect magic (quaffDetectMagic).
 static boolean revealOrIdentifyPolarityItem(item *theItem) {
+    if (!theItem) {
+        return false; // iOS port (Brogue SE): never identify()/detect a NULL item (detect-magic crash hardening)
+    }
+    if (theItem->category & (WEAPON | ARMOR)) {
+        // iOS port (Brogue SE): gear caps at the polarity glyph -- never escalate to a full enchant ID
+        // through a polarity channel (see polarityAuraAlreadyShownForGear). Eligibility already skips gear
+        // whose aura is shown, so this only ever does the first reveal; the guard keeps the cap honest.
+        detectMagicOnItem(theItem);
+        return false;
+    }
     const boolean polarityKnown = itemMagicPolarityIsKnown(theItem, MAGIC_POLARITY_BENEVOLENT)
                                || itemMagicPolarityIsKnown(theItem, MAGIC_POLARITY_MALEVOLENT);
     if (polarityKnown) {
@@ -8230,7 +8270,6 @@ static item *applyPolarityInsightToRandomItem(unsigned short categoryMask, boole
     boolean anyPotion = false;
     for (item *it = packItems->nextItem; it != NULL; it = it->nextItem) {
         if ((it->category & categoryMask)
-            && (it->category & HAS_INTRINSIC_POLARITY)
             && !itemIdentityFullyKnown(it)
             && itemMagicPolarity(it) != MAGIC_POLARITY_NEUTRAL
             && (it->category & POTION)) {
@@ -8239,13 +8278,18 @@ static item *applyPolarityInsightToRandomItem(unsigned short categoryMask, boole
         }
     }
     const boolean potionsOnly = (favorPotions && anyPotion);
+    // iOS port (Brogue SE): scope is the caller's categoryMask (rest passes CAN_BE_DETECTED so gear is in
+    // play; eating passes SCROLL). The old hardcoded HAS_INTRINSIC_POLARITY AND here would have re-excluded
+    // weapons/armor even when the caller asked for them -- dropped so the mask alone governs scope. Gear
+    // whose aura is already shown drops out (polarityAuraAlreadyShownForGear): nothing left for a polarity
+    // channel to reveal, and it must not be re-picked to escalate.
     for (item *it = packItems->nextItem;
          it != NULL && count < (int)(sizeof(eligible) / sizeof(eligible[0]));
          it = it->nextItem) {
         if (!(it->category & categoryMask)
-            || !(it->category & HAS_INTRINSIC_POLARITY)
             || itemIdentityFullyKnown(it)
             || itemMagicPolarity(it) == MAGIC_POLARITY_NEUTRAL
+            || polarityAuraAlreadyShownForGear(it)
             || (potionsOnly && !(it->category & POTION))) {
             continue;
         }
@@ -8283,8 +8327,8 @@ static item *applyPolarityInsightToRandomItem(unsigned short categoryMask, boole
 // A worn ring of wisdom hastens this: ~10% faster per ring level (rogue.wisdomBonus, the effective
 // enchant of equipped wisdom rings). Cursed (negative) wisdom slows it. Clamped so it speeds up by at
 // most 80% and slows by at most 2x, and the threshold never drops below 1 rested turn.
-#define REST_INSIGHT_BASE_TURNS   70   // rested turns for the first reveal
-#define REST_INSIGHT_STEP_TURNS   40   // added per reveal already earned this game (gentle ramp)
+#define REST_INSIGHT_BASE_TURNS   80   // rested turns for the first reveal
+#define REST_INSIGHT_STEP_TURNS   30   // added per reveal already earned this game (gentle ramp)
 
 void gainPolarityInsightFromRest(void) {
     rogue.restTurnsSinceInsight++;
@@ -8305,7 +8349,9 @@ void gainPolarityInsightFromRest(void) {
 
     // Reveal/identify a random eligible pack item, favoring potions first.
     boolean fullID = false;
-    item *target = applyPolarityInsightToRandomItem(HAS_INTRINSIC_POLARITY, true /* favor potions */, &fullID);
+    // iOS port (Brogue SE): CAN_BE_DETECTED, not HAS_INTRINSIC_POLARITY -- rest now senses weapons/armor
+    // too (gear caps at the aura glyph; no enchant escalation). Potions are still favored first (below).
+    item *target = applyPolarityInsightToRandomItem(CAN_BE_DETECTED, true /* favor potions */, &fullID);
     if (target == NULL) {
         return; // nothing eligible yet; hold the milestone until an unknown item appears
     }
@@ -8371,9 +8417,10 @@ static void quaffDetectMagic(item *exclude) {
     int count = 0;
     for (item *theItem = packItems->nextItem; theItem != NULL; theItem = theItem->nextItem) {
         if (theItem != exclude
-            && (theItem->category & HAS_INTRINSIC_POLARITY)
+            && (theItem->category & CAN_BE_DETECTED) // iOS port (Brogue SE): gear included (was HAS_INTRINSIC_POLARITY)
             && !itemIdentityFullyKnown(theItem)
             && itemMagicPolarity(theItem) != MAGIC_POLARITY_NEUTRAL
+            && !polarityAuraAlreadyShownForGear(theItem) // gear aura already shown -> nothing left, don't escalate
             && count < (int)(sizeof(eligible) / sizeof(eligible[0]))) {
 
             eligible[count++] = theItem;
@@ -8398,6 +8445,9 @@ static void quaffDetectMagic(item *exclude) {
 
     char theName[COLS * 3], buf[COLS * 3];
     for (int i = 0; i < toReveal; i++) {
+        if (!eligible[i]) {
+            continue; // iOS port (Brogue SE): defensive -- never message off a NULL slot (detect-magic crash hardening)
+        }
         if (wasFullID[i]) {
             itemName(eligible[i], theName, true, true, NULL);
             sprintf(buf, "you recognize %s.", theName);
@@ -8422,9 +8472,9 @@ static void throwDetectMagicOnFloor(void) {
     item *eligible[64];
     int count = 0;
     for (item *theItem = floorItems->nextItem; theItem != NULL; theItem = theItem->nextItem) {
-        if ((theItem->category & HAS_INTRINSIC_POLARITY)
+        if ((theItem->category & CAN_BE_DETECTED) // iOS port (Brogue SE): floor gear included (was HAS_INTRINSIC_POLARITY)
             && !itemIdentityFullyKnown(theItem)
-            && !(theItem->flags & ITEM_MAGIC_DETECTED)
+            && !(theItem->flags & ITEM_MAGIC_DETECTED) // already-detected (incl. gear whose aura is shown) skipped
             && itemMagicPolarity(theItem) != MAGIC_POLARITY_NEUTRAL
             && count < (int)(sizeof(eligible) / sizeof(eligible[0]))) {
 
@@ -8810,15 +8860,25 @@ boolean drinkPotion(item *theItem) {
             short captureKind = emptyBottleCaptureKindForTile(player.loc.x, player.loc.y, &captureFlavor);
             if (captureKind >= 0) {
                 recordApplyItemCommand(theItem);
-                fillEmptyBottle(theItem, captureKind, captureFlavor);
-                // The bottle mutates in place, so it never went through the pickup/stack path: re-add it
-                // via addItemToPack so the new potion merges into an existing same-kind stack instead of
-                // taking a bespoke inventory slot. (Unlink first, or addItemToPack would match it to
-                // itself.) addItemToPack either stacks-and-frees theItem or re-adds it under its now-free
-                // letter, so the slot count never grows.
-                removeItemFromChain(theItem, packItems);
-                addItemToPack(theItem);
-                return true; // turn passes; theItem is now the captured potion, merged into the pack
+                // iOS port (Brogue SE): applying ONE empty bottle from a stack must convert only one
+                // bottle -- not the whole stack. Peel a single bottle off (the dropItem pattern) and
+                // fill that; the remaining empty bottles stay in the pack. fillEmptyBottle mutates the
+                // bottle's kind in place, so the filled bottle never went through the pickup/stack path:
+                // re-add it via addItemToPack so the new potion merges into an existing same-kind stack
+                // (or takes a free letter), keeping the slot count honest.
+                item *bottleToFill = theItem;
+                if (theItem->quantity > 1) {
+                    bottleToFill = generateItem(ALL_ITEMS, -1);
+                    *bottleToFill = *theItem;     // clone the empty bottle (quantity overridden below)
+                    bottleToFill->quantity = 1;
+                    theItem->quantity--;          // the rest stay as empty bottles, in place
+                } else {
+                    // Last/only bottle: unlink it before re-adding, or addItemToPack would match it to itself.
+                    removeItemFromChain(theItem, packItems);
+                }
+                fillEmptyBottle(bottleToFill, captureKind, captureFlavor);
+                addItemToPack(bottleToFill);
+                return true; // turn passes; one bottle is now the captured potion, merged into the pack
             }
             message("the bottle is empty, and there is nothing here to capture.", 0);
             return false; // benign — stays in your pack, no turn spent

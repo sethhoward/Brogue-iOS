@@ -973,14 +973,28 @@ final class BrogueViewController: UIViewController {
         }
     }
 
-    /// Invoked from the BrogueCE engine's title menu ("File Management" item).
-    /// Scoped to the CE save directory (Documents/ce) so it doesn't show Classic's files.
+    /// Invoked from the BrogueCE/Brogue SE engine's title menu ("File Management" item).
+    /// CE and SE share the same CEHost bridge, so this one handler serves both — it
+    /// scopes the browser to the *current* engine's save directory (Documents/ce or
+    /// Documents/se) so it doesn't show Classic's (or the other engine's) files.
     @objc func presentFileManagementScreenForCE() {
         DispatchQueue.main.async { [weak self] in
             guard let self = self, self.presentedViewController == nil else { return }
-            let ceDir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-                .appendingPathComponent("ce")
-            let nav = UINavigationController(rootViewController: FileManagementViewController(directory: ceDir))
+            // iOS port (Brogue SE): pick the subfolder from the running engine. SE saves
+            // live in Documents/se; previously this was hardcoded to "ce", so SE's file
+            // management always showed an empty CE directory ("no files found").
+            var subfolder = "ce"
+            var allowsDuplicate = false
+            #if SE_ENABLED
+            if self.currentEngine == .se {
+                subfolder = "se"
+                allowsDuplicate = true   // debug aid: SE-only "Duplicate" swipe action
+            }
+            #endif
+            let saveDir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+                .appendingPathComponent(subfolder)
+            let nav = UINavigationController(rootViewController:
+                FileManagementViewController(directory: saveDir, allowsDuplicate: allowsDuplicate))
             self.present(nav, animated: true)
         }
     }

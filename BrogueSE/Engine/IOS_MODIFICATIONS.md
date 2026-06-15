@@ -32,6 +32,112 @@ See `BrogueCE/Engine/IOS_MODIFICATIONS.md` (faithful CE) and
 
 ## Change log
 
+### 2026-06-15 — Fix: polarity channels ignored weapons & armor (detect magic, rest, freed captive)
+
+**What.** Drinking/throwing a potion of detect magic, resting, and freeing a captive could never
+reveal the good/bad polarity of a weapon or armor — so an unidentified runic/enchanted piece of gear
+was invisible to every polarity check (e.g. a +3 runic chain mail that "nothing worth detecting" ever
+flagged). These channels scanned only `HAS_INTRINSIC_POLARITY = (POTION|SCROLL|RING|WAND|STAFF)`,
+which excludes `WEAPON`/`ARMOR`. Upstream CE detects polarity over the full `CAN_BE_DETECTED` set,
+including gear; the SE rework narrowed the scope unintentionally.
+
+**Fix.** Widened the **scan** mask from `HAS_INTRINSIC_POLARITY` to
+`CAN_BE_DETECTED = (WEAPON|ARMOR|POTION|SCROLL|RING|CHARM|WAND|STAFF|AMULET)` in the four sensing
+channels: `quaffDetectMagic` (drink), `throwDetectMagicOnFloor` (throw), `gainPolarityInsightFromRest`
+(via the `applyPolarityInsightToRandomItem` mask argument), and `captiveReactToPack`. The SE
+partial-reveal mechanic (random 1–2 per quaff, the rest schedule, first-match for captives) is kept
+deliberately — only the *category scope* changed. **Eating insight (`gainScrollInsightFromEating`)
+was left `SCROLL`-only on purpose** — it's the intentional single-category channel.
+
+Two correctness guards accompany the widening:
+- **Gear caps at the polarity glyph — no escalation to a full enchant ID** (matches CE, where detect
+  magic only ever set the aura glyph on weapons/armor; the exact enchant is learned by wearing). New
+  predicate `polarityAuraAlreadyShownForGear()` drops a weapon/armor from eligibility once its aura is
+  shown, and `revealOrIdentifyPolarityItem()` short-circuits gear to a detect-only (never `identify`).
+  The kind-flavored consumables keep the two-step reveal→escalate-to-ID behavior.
+- **The kind-deduction call `tryIdentifyLastItemKinds(HAS_INTRINSIC_POLARITY)` was left untouched.**
+  Only the *scan* filter widened; the elimination engine still runs over `HAS_INTRINSIC_POLARITY`
+  only, since weapons/armor have per-instance (not kind-roster) polarity and can't be deduced.
+  Likewise the internal hardcoded `HAS_INTRINSIC_POLARITY` AND-filter inside
+  `applyPolarityInsightToRandomItem` was removed so the caller's `categoryMask` alone governs scope.
+
+**Where.** `quaffDetectMagic`, `throwDetectMagicOnFloor`, `captiveReactToPack`,
+`applyPolarityInsightToRandomItem`, `gainPolarityInsightFromRest`, `revealOrIdentifyPolarityItem`, and
+the new `polarityAuraAlreadyShownForGear` helper — all in `Items.c`. Doc:
+`docs/game-data/IDENTIFICATION_AUDIT.md` (§2 note, §5a/§5b/§5g, §6a/§6b).
+
+**Determinism.** Still fully `rand_range`-driven; widening the eligible pool changes the RNG draw
+pattern, so pre-change in-flight SE recordings desync — acceptable (SE is unshipped, `SE_ENABLED`
+Debug-only, Game-Center-silent). New seeded runs are reproducible as always.
+
+### 2026-06-15 — Fix: applying one empty bottle from a stack converted the whole stack
+
+**What.** With a stack of empty bottles (e.g. 3), applying one to a capturable tile (water, gas, …)
+transmuted **all** of them into the captured potion in a single action. The capture branch in
+`drinkPotion` called `fillEmptyBottle(theItem, …)`, which sets `bottle->kind` on the *stack* item,
+and then `return`ed early — bypassing the normal `consumePackItem` decrement — so the entire
+quantity changed kind at once.
+
+**Fix.** When the bottle stack has quantity > 1, peel a single bottle off (clone via `generateItem`
++ struct copy, `quantity = 1`, decrement the original) and fill only that one; the rest stay empty
+bottles. Quantity 1 keeps the old unlink-then-`addItemToPack` re-merge path. So one apply = one
+captured potion, leaving the remaining empty bottles intact.
+
+**Where.** `POTION_DETECT_MAGIC` capture branch in `drinkPotion`, `Items.c`.
+
+**Determinism.** Mirrors the existing `dropItem` stack-peel pattern (recorded player action; the
+`generateItem` RNG draw is reproduced identically on replay), so seeds/replays are unaffected.
+
+### 2026-06-15 — Fix: detect magic crashed on a NULL pack item (deref-before-null-guard)
+
+**What.** Quaffing a potion of detect magic could crash with `EXC_BAD_ACCESS` (SIGSEGV at 0x0).
+`itemMagicPolarityIsKnown()` dereferenced `theItem->category` (via `tableForItemCategory`) one line
+*above* its own `theItem &&` null-test, so a NULL item faulted at address 0. The reveal path
+`quaffDetectMagic` → `revealOrIdentifyPolarityItem` → `itemMagicPolarityIsKnown` is the crashing
+chain (confirmed by the device crash log backtrace).
+
+**Fix.** Null-guard `itemMagicPolarityIsKnown()` *before* the deref (a NULL/unknown item has no known
+polarity → return false). Hardened the rest of the detect-magic path against a NULL leaking further:
+`detectMagicOnItem()` and `revealOrIdentifyPolarityItem()` no-op on NULL, and `quaffDetectMagic`'s
+message loop skips empty slots.
+
+**Open question (not yet root-caused).** The crash log shows the symptom (NULL `theItem`), but the
+`quaffDetectMagic` eligibility loop only stores non-NULL pack items, the partial Fisher-Yates only
+swaps existing entries, and nothing in the reveal path (`identify`/`identifyItemKind`/
+`updateRingBonuses`/`detectMagicOnItem`) frees or removes a pack item (`stackItems` runs only on
+pickup via `addItemToPack`). So how a NULL reaches the slot isn't explained by the local logic —
+possible heap corruption from elsewhere. The guards make the path crash-proof regardless; a repro
+from the originating save is still wanted to find the upstream cause.
+
+**Where.** `itemMagicPolarityIsKnown`, `detectMagicOnItem`, `revealOrIdentifyPolarityItem`,
+`quaffDetectMagic` in `Items.c`.
+
+**Determinism.** Pure null-guards; no RNG or state change on the non-NULL path, so seeds/replays are
+unaffected.
+
+### 2026-06-14 — Fix: rest tallies leaked across games in a session (stale `levels[]` memory)
+
+**What.** `levels[]` is `malloc`'d (not `calloc`'d) and the per-level init loop in `initializeRogue()`
+never reset the custom `restTurnsOnLevel` / `restRevealsOnLevel` fields, so a new game inherited the
+previous game's counts from the reused heap block. Since the rest mechanic *increments* these counters,
+stale values both (a) inflated the rest-stats CSV and (b) — because `gainPolarityInsightFromRest` sums
+`restRevealsOnLevel` into its escalating threshold (`revealsSoFar`) — **raised the reveal threshold on
+the 2nd+ game played in a session**, making repeat reveals come slower than designed. Now both fields
+are zeroed per level at game start.
+
+**Evidence.** In a 7-run capture, a depth-1 *Quit* reported per-level rest data for levels 2/3/4
+identical to the prior depth-4 run — impossible for a fresh run, i.e. pure stale memory. The first run
+of the session (fresh, OS-zeroed pages) was clean and matched the schedule exactly (217 rested turns →
+2 reveals).
+
+**Why it mattered for tuning.** This likely contributed to the original "I rarely get a second reveal"
+report: repeated test games in one session accumulated phantom `revealsSoFar`, throttling the cadence.
+
+**Where.** `initializeRogue()` level-init loop in `RogueMain.c`.
+
+**Determinism.** Zeroing leaked debug counters; the fields don't drive dungeon RNG, so seeds/replays are
+unaffected (and the rest-cadence threshold now reflects only the current game, as intended).
+
 ### 2026-06-14 — Debug: per-run rest-stats CSV export (for cadence calibration)
 
 **What.** Every finished live SE run now appends one row to `Documents/se/rest-stats.csv`: seed, game

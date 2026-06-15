@@ -43,6 +43,22 @@ NEVER_IDENTIFIABLE     = (FOOD | CHARM | GOLD | AMULET | GEM | KEY)
 Weapons and armor are not in `HAS_INTRINSIC_POLARITY` — their polarity is read from their
 enchant/curse instead (see §2).
 
+> **[iOS · 2026-06-15] The polarity-sensing channels scan the wider `CAN_BE_DETECTED`, not
+> `HAS_INTRINSIC_POLARITY`.** `HAS_INTRINSIC_POLARITY` is the *kind-deduction* set (the elimination
+> engine §3b only ever runs over it). But which items a channel can *sense* is a separate question, and
+> the four sensing channels — detect magic drink (§5a) & throw (§5b), rest insight (§6a), and the
+> freed-captive tell (§5g) — sense the full
+> `CAN_BE_DETECTED = (WEAPON|ARMOR|POTION|SCROLL|RING|CHARM|WAND|STAFF|AMULET)`, so a weapon's or
+> armor's good/bad aura (the sign of its enchant) is revealed like everything else. **This matches
+> upstream CE's scope.** Earlier the SE rework narrowed these channels to `HAS_INTRINSIC_POLARITY`,
+> which silently hid gear from detect magic — a bug (the *partial 1–2 reveal* that replaced CE's
+> whole-pack reveal was the intended change; *excluding categories* was not). Eating insight (§6b) is
+> the deliberate exception: it stays scroll-only by design. **Gear caps at the aura glyph** — a polarity
+> channel never escalates a weapon/armor to a full enchant ID (that still comes from wearing/using it,
+> exactly as in CE); once its aura is shown the gear drops out of eligibility
+> (`polarityAuraAlreadyShownForGear`). The kind-flavored consumables keep the two-step
+> reveal→escalate-to-ID behavior (§3a).
+
 ---
 
 ## 2. The polarity data model
@@ -123,14 +139,16 @@ auto-IDs by elimination on equip (upstream issue #683; see
 unidentified, polarity-bearing pack items (excluding the potion being drunk), via the escalation
 rule (§3a) — a weaker, fleeting version of the old whole-pack reveal. A worn ring of wisdom widens
 the spread to `1–(2 + wisdomBonus)` ([Items.c:8275](../../BrogueCE/Engine/Items.c)). Then runs the
-elimination pass (§3b).
+elimination pass (§3b). **Scans `CAN_BE_DETECTED`** (incl. weapons/armor — see the §2 note); gear
+reveals its aura glyph but never escalates to a full enchant ID.
 
 ### 5b. Detect magic — throw **[iOS]**
 `throwDetectMagicOnFloor()` ([Items.c:8309–8342](../../BrogueCE/Engine/Items.c)). Turns the insight
 *outward*: senses 1–2 (same wisdom scaling) random undiscovered, polarity-bearing items lying on
 the **floor** of this level, revealing each one's polarity and lighting its map aura
 (`ITEM_DETECTED` cell flag, [Items.c:8333](../../BrogueCE/Engine/Items.c)) — the classic "detect
-magic on the level" feel. The thrown potion self-IDs.
+magic on the level" feel. The thrown potion self-IDs. **Scans `CAN_BE_DETECTED`** (incl.
+weapons/armor); a floor weapon/armor lights its good/bad aura on the map like any other item.
 
 ### 5c. Throwing / shattering a potion **[iOS, on a vanilla base]**
 `shatterPotionAtLoc()` ([Items.c:6611–6724](../../BrogueCE/Engine/Items.c)). A bad/cloud potion
@@ -189,12 +207,16 @@ in your pack — revealing the **polarity** (not the kind) of the first unidenti
 relevant sign whose aura you don't already know:
 - **Monkey** (`MK_MONKEY`) → covets a **benevolent** item: *"the monkey eyes <item> in your pack
   covetously."* Leans on `itemMagicPolarity`, **not** the narrow steal profile (§7a), so any good
-  ring/staff/charm counts.
+  ring/staff/charm — **or weapon/armor** — counts.
 - **Any other captive** → recoils from a **malevolent** item: *"the … shies warily from <item>."* A
-  free curse-warning. **Silent no-op when you carry no malevolent item** (by design).
+  free curse-warning (now including a cursed/negative weapon or armor). **Silent no-op when you carry
+  no malevolent item** (by design).
 
-One tell per rescue; polarity reveal only (no escalation). Picks the first eligible item in pack order
-(`itemMagicPolarity` is only ±1/0 — no finer gradient). No RNG. Also fires for tunnel-freed captives
+One tell per rescue; polarity reveal only (no escalation — gear caps at the aura glyph). **Scans
+`CAN_BE_DETECTED`** (incl. weapons/armor — see the §2 note). Picks the first eligible item in pack
+order (`itemMagicPolarity` is only ±1/0 — no finer gradient); because the pack sorts by ascending
+category and `WEAPON(1)`/`ARMOR(2)` precede the consumables, an unsensed good/bad piece of gear is the
+first thing a captive points at. No RNG. Also fires for tunnel-freed captives
 (`freeCaptivesEmbeddedAt` → `freeCaptive`), but not for clone-made allies.
 
 ---
@@ -219,15 +241,19 @@ per rested turn from `playerTurnEnded` ([Time.c:2693](../../BrogueCE/Engine/Time
 `rogue.justRested`). Each rested turn accrues toward an **escalating threshold**: reveal *N* needs
 `100 × N` consecutive rested turns (intervals 100, 200, 300…; cumulative 100, 300, 600…), keyed off
 reveals earned so far. **Favors potions** when any eligible potion exists. A ring of wisdom
-accelerates it ~10%/level (clamped). See
+accelerates it ~10%/level (clamped). **Scans `CAN_BE_DETECTED`** (incl. weapons/armor — see the §2
+note): when no unidentified potion is left to favor, the secondary pool now includes gear (capped at
+the aura glyph). See
 [pr-notes-rest-polarity-insight phase 8.md](../notes/pr-notes-rest-polarity-insight%20phase%208.md).
 
 ### 6b. Eating insight
 `gainScrollInsightFromEating()` ([Items.c:8224–8250](../../BrogueCE/Engine/Items.c)), called from
 `eat()` ([Items.c:7574](../../BrogueCE/Engine/Items.c)). A safe meal — **nothing in the
 `MONSTER_TRACKING_SCENT` (hunting) state** ([Items.c:8226](../../BrogueCE/Engine/Items.c)) — is a
-calm moment to study one random unknown **scroll** (scrolls only; potions are the rest channel's
-job). See [pr-notes-eat-scroll-insight phase 9.md](../notes/pr-notes-eat-scroll-insight%20phase%209.md).
+calm moment to study one random unknown **scroll**. **This is the deliberate single-category
+exception**: unlike the other channels it stays `SCROLL`-only (potions are the rest channel's job), so
+it was *not* widened to `CAN_BE_DETECTED`. See
+[pr-notes-eat-scroll-insight phase 9.md](../notes/pr-notes-eat-scroll-insight%20phase%209.md).
 
 ---
 
