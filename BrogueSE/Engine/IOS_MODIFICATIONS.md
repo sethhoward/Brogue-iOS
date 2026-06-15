@@ -32,6 +32,31 @@ See `BrogueCE/Engine/IOS_MODIFICATIONS.md` (faithful CE) and
 
 ## Change log
 
+### 2026-06-15 — Fix: worm-tunnel lever could be placed sealed inside walls (#766)
+
+**What.** In the "Worm tunnels" room machine, the hidden lever that opens the tunnels could be placed
+entirely surrounded by granite — inaccessible without shatter/tunneling (reported on seed #411762472,
+depth 11).
+
+**Cause.** The lever is placed with `MF_IN_PASSABLE_VIEW_OF_ORIGIN` (a field-of-view check from the
+machine origin). The blueprint built `WORM_TUNNEL_OUTER_WALL` at the origin (`MF_BUILD_AT_ORIGIN`), so
+the FOV was computed *from inside a wall* and could "see" — and select — a wall tile with no reachable
+passable space beside it.
+
+**Fix.** Build plain `FLOOR` at the origin instead (and drop the `DF_TUNNELIZE` feature DF so the floor
+isn't pre-carved at build time). The FOV now originates from passable space, so the lever lands beside
+a reachable tile. The tunnel reveal still runs off the `WORM_TUNNEL_MARKER` tiles on lever-pull; the
+only behavioral change is cosmetic — the outer wall no longer detonates instantly on pull, the crumble
+trail works outward instead. Matches the upstream-proposed fix for issue #766, scoped to this one
+blueprint (the sibling vestibule "exploding wall / portcullis" machine sits in open space, where the
+wall-origin FOV still finds reachable tiles, so it isn't touched).
+
+**Notes.** Upstream Brogue bug (CE's blueprint is identical); fix is **SE-only**. This is a
+level-generation change, so seeds that place this machine generate differently from here — irrelevant
+under the current SE policy (determinism/replays not a concern), noted for if that changes.
+
+**Where.** "Worm tunnels" blueprint, origin feature row (`GlobalsBrogue.c`). Marked `#766`.
+
 ### 2026-06-15 — Fix: obstruction crystal didn't block explosions (surface effects) (#812)
 
 **What.** An explosion (e.g. from an explosive mutation/bloat) on one side of a region fully sealed by

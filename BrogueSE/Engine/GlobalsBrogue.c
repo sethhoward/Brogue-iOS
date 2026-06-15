@@ -543,7 +543,12 @@ const blueprint blueprintCatalog_Brogue[] = {
         {0,         0,          0,              {3,6},      3,          0,          -1,         MK_UNDERWORM,   1,              0,          0,          0},
         {0,         GRANITE,    DUNGEON,        {150,150},  1,          0,          -1,         0,              1,              0,          0,          (MF_TREAT_AS_BLOCKING | MF_REPEAT_UNTIL_NO_PROGRESS)},
         {DF_WORM_TUNNEL_MARKER_DORMANT,GRANITE,DUNGEON,{0,0},0,         0,          -1,         0,              0,              0,          0,          (MF_EVERYWHERE | MF_PERMIT_BLOCKING)},
-        {DF_TUNNELIZE,WORM_TUNNEL_OUTER_WALL,DUNGEON,{1,1}, 1,          0,          -1,         0,              1,              0,          0,          (MF_BUILD_AT_ORIGIN | MF_PERMIT_BLOCKING)},
+        // iOS port (Brogue SE): #766 — origin is plain FLOOR, not WORM_TUNNEL_OUTER_WALL. The hidden
+        // lever below uses MF_IN_PASSABLE_VIEW_OF_ORIGIN; computing that field-of-view from a wall
+        // tile let the lever land on a granite-sealed, unreachable cell. A floor origin makes the FOV
+        // originate from passable space. DF_TUNNELIZE is dropped so the floor isn't pre-carved at
+        // build (the tunnel reveal is driven by the WORM_TUNNEL_MARKER tiles above on lever-pull).
+        {0,         FLOOR,      DUNGEON,        {1,1},      1,          0,          -1,         0,              1,              0,          0,          (MF_BUILD_AT_ORIGIN | MF_PERMIT_BLOCKING)},
         {0,         WALL_LEVER_HIDDEN,DUNGEON,  {1,1},      1,          0,          -1,         0,              1,              0,          0,          (MF_BUILD_IN_WALLS | MF_IN_PASSABLE_VIEW_OF_ORIGIN | MF_BUILD_ANYWHERE_ON_LEVEL | MF_IMPREGNABLE)}}},
     {"Gauntlet -- key on an altar; take key to cause turrets to emerge",
     {5, 24},           {35, 90},   10,     2,          0,                  (BP_ADOPT_ITEM | BP_NO_INTERIOR_FLAG),  {
