@@ -32,6 +32,33 @@ See `BrogueCE/Engine/IOS_MODIFICATIONS.md` (faithful CE) and
 
 ## Change log
 
+### 2026-06-15 — Fix: a submerged player saw submerged monsters across separate water bodies (#831)
+
+**What.** While submerged in deep water, the player could see (and, with telepathy, identify) *every*
+submerged monster on the level — including ones in disconnected pools (and lava/bog) that have nothing
+to do with the player's water.
+
+**Cause.** `monsterHiddenBySubmersion` revealed a submerged monster whenever the observer was merely
+standing in deep water (`T_IS_DEEP_WATER`, not levitating), with no check that observer and target
+shared the same body of water. Both visibility paths funnel through this: `canSeeMonster` is
+`!monsterIsHidden && (playerCanSee || monsterRevealed)`, so flipping the hidden flag off exposed the
+monster to line of sight *and* let telepathy (`monsterRevealed`) supply the identity.
+
+**Fix.** Reveal a submerged monster only if it shares the **same connected body of deep water** as the
+observer. Added `inSameDeepWaterBody` (Monsters.c) — an iterative, 8-connected flood fill over
+`T_IS_DEEP_WATER` (explicit queue, no recursion, so a large lake can't blow the stack) — and gated the
+reveal on it. Scope is deep water only: the player only ever triggers the reveal from deep water, and
+the monsters that matter (eel, kraken, naga) submerge there; a salamander in connected lava or a naga
+in connected shallow/bog is intentionally not revealed (lava never connects to water anyway, and the
+shallow-water naga is a rare edge). The flood fill is the last `&&` term, so the non-swimming common
+case never reaches it (zero added cost).
+
+**Notes.** Upstream Brogue bug (CE's implementation is identical); fix is **SE-only**. Symmetric for
+monster observers (bolt targeting): a submerged monster observer likewise only perceives submerged
+targets in its own body of water.
+
+**Where.** `monsterHiddenBySubmersion` + new static `inSameDeepWaterBody` (`Monsters.c`). Marked `#831`.
+
 ### 2026-06-15 — Fix: monsters woke against a one-turn-stale stealth range (#837)
 
 **What.** A monster could begin hunting even though the player's drawn stealth-range circle
