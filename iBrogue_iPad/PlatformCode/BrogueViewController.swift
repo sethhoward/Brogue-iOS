@@ -3158,7 +3158,10 @@ extension BrogueViewController {
         }
         // Real hardware character keys: rest and search are the same physical key in both schemes.
         if ev.code == UInt8(ascii: "z") || ev.code == UInt8(ascii: "s") { return true }
-        let isModern = UserDefaults.standard.integer(forKey: "keyboard scheme") == 1 // KEYBOARD_SCHEME_MODERN
+        // Default Modern when no preference is stored, matching the bridge loaders' iOS/macOS default.
+        let schemeDefaults = UserDefaults.standard
+        let isModern = schemeDefaults.object(forKey: "keyboard scheme") == nil
+                       || schemeDefaults.integer(forKey: "keyboard scheme") == 1 // KEYBOARD_SCHEME_MODERN
         let movementKeys: Set<UInt8> = isModern ? Set("uiojklm,.".utf8)   // right-hand grid
                                                  : Set("hjklyubn".utf8)   // classic vi keys
         return movementKeys.contains(ev.code)

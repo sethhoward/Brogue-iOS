@@ -637,13 +637,14 @@ void cePersistLastSeed(uint64_t seed) {
 static NSString * const kCEKeyboardSchemeKey = @"keyboard scheme";
 
 static enum keyboardScheme ceLoadPersistedKeyboardScheme(void) {
+    // iOS port (Brogue SE): default MODERN when absent or out of range (the default layout on iOS/macOS).
     NSUserDefaults *d = [NSUserDefaults standardUserDefaults];
     if ([d objectForKey:kCEKeyboardSchemeKey] == nil) {
-        return KEYBOARD_SCHEME_CLASSIC;
+        return KEYBOARD_SCHEME_MODERN;
     }
     NSInteger stored = [d integerForKey:kCEKeyboardSchemeKey];
     if (stored < KEYBOARD_SCHEME_CLASSIC || stored >= KEYBOARD_SCHEME_COUNT) {
-        return KEYBOARD_SCHEME_CLASSIC;
+        return KEYBOARD_SCHEME_MODERN;
     }
     return (enum keyboardScheme)stored;
 }
