@@ -32,6 +32,28 @@ See `BrogueCE/Engine/IOS_MODIFICATIONS.md` (faithful CE) and
 
 ## Change log
 
+### 2026-06-15 — Fix: obstruction crystal didn't block explosions (surface effects) (#812)
+
+**What.** An explosion (e.g. from an explosive mutation/bloat) on one side of a region fully sealed by
+staff-of-obstruction crystals damaged creatures on the other side — the barrier didn't stop it.
+
+**Cause.** The staff of obstruction lays `FORCEFIELD` tiles (only the boundary becomes `CRYSTAL_WALL`).
+`FORCEFIELD`/`FORCEFIELD_MELT` had `T_OBSTRUCTS_PASSABILITY | T_OBSTRUCTS_GAS |
+T_OBSTRUCTS_DIAGONAL_MOVEMENT` but **not** `T_OBSTRUCTS_SURFACE_EFFECTS`. An explosion is a
+`GAS_EXPLOSION` tile on the SURFACE layer, and its spread (`spawnMapDF`) only refuses to cross cells
+flagged `T_OBSTRUCTS_SURFACE_EFFECTS` — so the flood fill walked straight through the forcefield. Every
+other solid obstruction (`CRYSTAL_WALL`, statues, walls) carries the flag; `FORCEFIELD` was the lone
+exception.
+
+**Fix.** Add `T_OBSTRUCTS_SURFACE_EFFECTS` to `FORCEFIELD` and `FORCEFIELD_MELT` (the melt phase is
+still a solid barrier). Pure data fix, one flag per row; also stops any other surface effect (blood,
+lichen, …) from bleeding through a forcefield. Nothing should occupy the surface of an impassable
+crystal, so no downside.
+
+**Notes.** Upstream Brogue bug (CE's `FORCEFIELD` flags are identical); fix is **SE-only**.
+
+**Where.** `tileCatalog` `FORCEFIELD` / `FORCEFIELD_MELT` rows (`Globals.c`). Marked `#812`.
+
 ### 2026-06-15 — Fix: lumenstones miscounted in the loss score (stacks, not gems) (#805)
 
 **What.** On death/quit, the score counted lumenstone *stacks* rather than individual lumenstones, so
