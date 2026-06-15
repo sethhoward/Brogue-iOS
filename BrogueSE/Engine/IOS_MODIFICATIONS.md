@@ -32,6 +32,24 @@ See `BrogueCE/Engine/IOS_MODIFICATIONS.md` (faithful CE) and
 
 ## Change log
 
+### 2026-06-15 — Fix: confused monsters could stumble onto sacred glyphs (#841)
+
+**What.** A confused monster that "tries to attack" instead lurches in a random valid direction,
+chosen by `randValidDirectionFrom(monst, x, y, false)`. Passing `respectAvoidancePreferences ==
+false` made it ignore *all* avoidance — including `T_SACRED`, the ward laid down by a scroll of
+sanctuary — so a confused monster could wander straight onto a glyph it could never willingly cross,
+bypassing the player's sanctuary.
+
+**Fix.** Sacred ground is a hard ward, not a mere preference, so `randValidDirectionFrom` now
+excludes `T_SACRED` tiles the monster avoids *regardless* of `respectAvoidancePreferences`. The
+existing "attack a player on the avoided tile" exception is preserved (`HAS_PLAYER && state !=
+MONSTER_ALLY`), so a monster can still strike a player standing on the glyph. The player is
+sacred-immune (`monsterAvoids` never trips on sacred for them), so player confused-movement is
+unaffected. Deterministic: the change only alters which directions are eligible before the single
+`rand_range` roll.
+
+**Where.** `randValidDirectionFrom` (`Movement.c`). SE only; marked `#841`.
+
 ### 2026-06-15 — Potion of water: drinking it is a "flush" (douse fire + dilute afflictions)
 
 **What.** Drinking captured water used to just flood your own tile (it reused the *thrown* effect).
