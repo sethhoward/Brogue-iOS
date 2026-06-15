@@ -2138,9 +2138,11 @@ static void decrementPlayerStatus() {
         player.status[STATUS_STUCK] = 0;
     }
 
-    if (player.status[STATUS_EXPLOSION_IMMUNITY]) {
-        player.status[STATUS_EXPLOSION_IMMUNITY]--;
-    }
+    // iOS port (Brogue SE): #816 — STATUS_EXPLOSION_IMMUNITY is intentionally NOT decremented here.
+    // It is decremented before updateEnvironment() in playerTurnEnded instead (see the comment
+    // there). Decrementing it in this function — which runs *after* updateEnvironment, where
+    // explosions are spawned and applied to the player — would knock a freshly granted 5 down to 4
+    // on the same turn, costing one of the five turns of immunity the engine promises.
 
     if (player.status[STATUS_DISCORDANT]) {
         player.status[STATUS_DISCORDANT]--;
@@ -2539,6 +2541,18 @@ void playerTurnEnded() {
                     }
                 }
 
+                // iOS port (Brogue SE): #816 — decrement explosion immunity *before*
+                // updateEnvironment (not in decrementPlayerStatus below, which runs after).
+                // Explosions are spawned inside updateEnvironment (flammable gas igniting ->
+                // GAS_EXPLOSION) and applied to the player immediately via spawnDungeonFeature,
+                // setting STATUS_EXPLOSION_IMMUNITY = 5. If the decrement ran afterward, that fresh
+                // 5 would be reduced to 4 on the same turn and the player could suffer the next
+                // explosion after only 4 turns instead of the intended 5 (Rogue.h: "not again for
+                // five turns"). Monster status already decrements before updateEnvironment
+                // (decrementMonsterStatus, above), so this aligns the player with monsters.
+                if (player.status[STATUS_EXPLOSION_IMMUNITY]) {
+                    player.status[STATUS_EXPLOSION_IMMUNITY]--;
+                }
                 updateEnvironment(); // Update fire and gas, items floating around in water, monsters falling into chasms, etc.
                 decrementPlayerStatus();
                 applyInstantTileEffectsToCreature(&player);

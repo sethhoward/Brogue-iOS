@@ -32,6 +32,32 @@ See `BrogueCE/Engine/IOS_MODIFICATIONS.md` (faithful CE) and
 
 ## Change log
 
+### 2026-06-15 — Fix: explosion immunity lasted 4 turns for the player instead of 5 (#816)
+
+**What.** After an explosion, the player is meant to be immune to further explosive damage "for five
+turns" (Rogue.h, `T_CAUSES_EXPLOSIVE_DAMAGE`). In practice they could suffer the next explosion after
+only 4 turns (reported on the Brogue Discord: explosion on turn 7523, another on 7527).
+
+**Cause.** Explosions are spawned *inside* `updateEnvironment` (flammable gas igniting → `GAS_EXPLOSION`,
+which carries `T_IS_FIRE | T_CAUSES_EXPLOSIVE_DAMAGE`) and applied to the player immediately via
+`spawnDungeonFeature` → `applyInstantTileEffectsToCreature` (Architect.c), setting
+`STATUS_EXPLOSION_IMMUNITY = 5`. In the turn loop the order was `updateEnvironment()` → then
+`decrementPlayerStatus()`, so the freshly granted 5 was decremented to 4 on the *same* tick — costing
+one of the five turns. Monsters were unaffected because `decrementMonsterStatus` already runs before
+`updateEnvironment`; the player's decrement sitting after it was the anomaly.
+
+**Fix.** Decrement `STATUS_EXPLOSION_IMMUNITY` *before* `updateEnvironment` (and removed it from
+`decrementPlayerStatus`), aligning the player with the monster ordering. An explosion granted during
+`updateEnvironment` now survives the full turn, giving a consistent 5-turn gap. Surgical: only this one
+status moved — every other player status keeps its existing timing relative to the environment update.
+Both `updateEnvironment` and `decrementPlayerStatus` have a single call site, so the decrement still
+runs exactly once per environment tick.
+
+**Notes.** Upstream Brogue bug (CE's ordering is identical); fix is **SE-only**.
+
+**Where.** `playerTurnEnded` (decrement relocated before `updateEnvironment`) and `decrementPlayerStatus`
+(decrement removed), both `Time.c`. Marked `#816`.
+
 ### 2026-06-15 — Fix: a submerged player saw submerged monsters across separate water bodies (#831)
 
 **What.** While submerged in deep water, the player could see (and, with telepathy, identify) *every*
