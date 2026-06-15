@@ -1298,8 +1298,16 @@ void gameOver(char *killedBy, boolean useCustomPhrasing) {
                 rogue.depthLevel);
     }
 
-    // Count gems as 500 gold each
-    short numGems = numberOfMatchingPackItems(GEM, 0, 0, false);
+    // Count gems as 500 gold each.
+    // iOS port (Brogue SE): #805 / BrogueCE PR #808 — sum individual lumenstones, not stacks.
+    // numberOfMatchingPackItems returns the number of pack entries, so a stack of N lumenstones
+    // scored as 1 (500 gold) instead of N. The victory path already counts by quantity; match it.
+    short numGems = 0;
+    for (theItem = packItems->nextItem; theItem != NULL; theItem = theItem->nextItem) {
+        if (theItem->category & GEM) {
+            numGems += theItem->quantity;
+        }
+    }
     rogue.gold += 500 * numGems;
     theEntry.score = rogue.gold;
 

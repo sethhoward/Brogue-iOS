@@ -32,6 +32,23 @@ See `BrogueCE/Engine/IOS_MODIFICATIONS.md` (faithful CE) and
 
 ## Change log
 
+### 2026-06-15 — Fix: lumenstones miscounted in the loss score (stacks, not gems) (#805)
+
+**What.** On death/quit, the score counted lumenstone *stacks* rather than individual lumenstones, so
+a stack of N lumenstones added 500 gold instead of N × 500.
+
+**Cause.** `gameOver` used `numberOfMatchingPackItems(GEM, 0, 0, false)`, which returns the number of
+pack entries (one per stack), to value gems at 500 gold each. The victory path already counts by
+`theItem->quantity`.
+
+**Fix.** Sum `theItem->quantity` over `GEM`-category pack items in `gameOver`, matching the victory
+path. Ports BrogueCE PR #808 (issue #805), adapted to SE's existing victory-path idiom.
+
+**Notes.** Upstream Brogue bug present in all engines; applied to **SE** here. CE/Classic inherit the
+upstream fix when PR #808 merges into `origin/master` (per the master-sync model) — not double-patched.
+
+**Where.** `gameOver` (`RogueMain.c`). Marked `#805`.
+
 ### 2026-06-15 — Fix: explosion immunity lasted 4 turns for the player instead of 5 (#816)
 
 **What.** After an explosion, the player is meant to be immune to further explosive damage "for five
