@@ -48,6 +48,9 @@ CBrogueGameEvent uiMode = CBrogueGameEventInMenu;
 // iOS port (iBrogue): runtime-mutable in-game hotkey-label flag (see Rogue.h). Starts false
 // (touch-only); the host sets it via ce_setKeyboardLabelsEnabled() when a hardware keyboard is present.
 boolean KEYBOARD_LABELS = false;
+// iOS port (Brogue SE): whether a hardware keyboard is attached (distinct from KEYBOARD_LABELS, which
+// stays off). Host sets it via se_setHardwareKeyboardConnected(); gates the welcome help-menu hint.
+boolean HARDWARE_KEYBOARD_CONNECTED = false;
 #endif
 // iOS port (iBrogue): active keyboard scheme (see enum keyboardScheme in Rogue.h). Default CLASSIC
 // (stock vi-key layout) so existing behavior and recordings are unchanged until the player opts in.

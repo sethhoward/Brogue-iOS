@@ -51,6 +51,16 @@ void setKeyboardLabelsEnabled(boolean enabled) {
     KEYBOARD_LABELS = enabled;
 }
 
+// iOS port (iBrogue): tracks whether a hardware keyboard is attached, independent of KEYBOARD_LABELS
+// (which stays off — the on-screen hotkey labels are disabled because they reflect the Classic layout
+// and would mismatch the Modern default). Used to surface the "Press <?> for help" welcome hint when a
+// keyboard is present. The host sets it via setHardwareKeyboardConnected() on GCKeyboard connect/disconnect.
+boolean HARDWARE_KEYBOARD_CONNECTED = false;
+
+void setHardwareKeyboardConnected(boolean enabled) {
+    HARDWARE_KEYBOARD_CONNECTED = enabled;
+}
+
 // iOS port (iBrogue): active keyboard scheme (see enum keyboardScheme in Rogue.h). Default CLASSIC so
 // existing behavior and recordings are unchanged until the player opts in. Mirrors the BrogueCE engine.
 enum keyboardScheme rogueKeyboardScheme = KEYBOARD_SCHEME_CLASSIC;

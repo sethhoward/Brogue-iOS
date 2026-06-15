@@ -355,6 +355,13 @@ extern "C" __attribute__((visibility("default"))) void se_setKeyboardLabelsEnabl
     KEYBOARD_LABELS = (enabled != 0);
 }
 
+// iOS port (Brogue SE): report hardware-keyboard presence to the engine (distinct from KEYBOARD_LABELS).
+// The host calls this on GCKeyboard connect/disconnect; the engine uses it to show the "Press <?> for
+// help" welcome hint when a keyboard is attached.
+extern "C" __attribute__((visibility("default"))) void se_setHardwareKeyboardConnected(int connected) {
+    HARDWARE_KEYBOARD_CONNECTED = (connected != 0);
+}
+
 // ---------------------------------------------------------------------------
 // Platform contract.  Signatures must match Rogue.h exactly. Color order for
 // plotChar follows CE's declaration: back* first, fore* second.

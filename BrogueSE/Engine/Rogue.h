@@ -134,6 +134,9 @@
 // Classic engine's setKeyboardLabelsEnabled(). Defaults false (touch-only) until the host reports
 // a keyboard. Defined in GlobalsBase.c.
 extern boolean KEYBOARD_LABELS;
+// iOS port (Brogue SE): whether a hardware keyboard is attached (distinct from KEYBOARD_LABELS). Set by
+// the host via se_setHardwareKeyboardConnected(); gates the welcome help-menu hint. Defined in GlobalsBase.c.
+extern boolean HARDWARE_KEYBOARD_CONNECTED;
 #endif
 
 #define Fl(N)                   ((unsigned long) 1 << (N))

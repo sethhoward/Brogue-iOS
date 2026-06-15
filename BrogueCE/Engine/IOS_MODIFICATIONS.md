@@ -28,6 +28,25 @@ covers the separate Classic engine that ships in the app target).
 
 ## Change log
 
+### 2026-06-15 — Keyboard labels disabled; hardware-keyboard presence drives UI instead
+
+**What.** The in-game hotkey labels are turned off (they reflect the Classic key layout and would
+mismatch the new Modern default — see the "Default to Modern keyboard layout" change). A hardware
+keyboard now instead: hides the on-screen d-pad and ESC button (platform/Swift side — redundant with
+the keyboard's arrows / Escape), and surfaces the "Press <?> for help" welcome hint (the only help
+affordance left with labels — and their help button — gone).
+
+**Engine side.** `KEYBOARD_LABELS` stays at its `false` default — the host no longer enables it. A new
+`HARDWARE_KEYBOARD_CONNECTED` global (GlobalsBase.c / Rogue.h), set by the host via
+`ce_setHardwareKeyboardConnected()` on GCKeyboard connect/disconnect, tracks keyboard presence
+independently. `welcome()` now gates the help-menu hint on `HARDWARE_KEYBOARD_CONNECTED` rather than
+`KEYBOARD_LABELS`. The label infrastructure (`ce_setKeyboardLabelsEnabled`) is left intact but unused,
+so labels can be re-enabled (and remapped for Modern) later.
+
+**Where.** `HARDWARE_KEYBOARD_CONNECTED` (GlobalsBase.c, Rogue.h); `ce_setHardwareKeyboardConnected`
+(CEBridge.mm, BrogueCEHost.h); welcome help-prompt gate (RogueMain.c). Platform behavior (d-pad / ESC
+hide) lives in BrogueViewController.swift. Applies to all three engines.
+
 ### 2026-06-14 — Tag the welcome line with the engine flavor (iOS port)
 
 **What.** With three selectable engines, the opening adventure-log line now ends with `… Dungeons of

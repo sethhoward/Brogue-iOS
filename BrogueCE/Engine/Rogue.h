@@ -108,6 +108,9 @@
 // iOS port (iBrogue): runtime-mutable in-game hotkey-label flag (see above). Default false (touch-only)
 // until the host reports a hardware keyboard via ce_setKeyboardLabelsEnabled(). Defined in GlobalsBase.c.
 extern boolean KEYBOARD_LABELS;
+// iOS port (iBrogue): whether a hardware keyboard is attached (distinct from KEYBOARD_LABELS). Set by the
+// host via ce_setHardwareKeyboardConnected(); gates the welcome help-menu hint. Defined in GlobalsBase.c.
+extern boolean HARDWARE_KEYBOARD_CONNECTED;
 #endif
 
 #define Fl(N)                   ((unsigned long) 1 << (N))

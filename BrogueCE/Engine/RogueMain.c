@@ -168,7 +168,10 @@ static void welcome() {
     sprintf(buf2, " from the %i%s floor and escape with it!", gameConst->amuletLevel, getOrdinalSuffix(gameConst->amuletLevel));
     strcat(buf, buf2);
     message(buf, 0);
-    if (KEYBOARD_LABELS) {
+    // iOS port (iBrogue): show the help-menu hint whenever a hardware keyboard is attached (not
+    // gated on KEYBOARD_LABELS, which is disabled). With labels off there's no on-screen help
+    // button, so this reminds keyboard users that '?' opens help.
+    if (HARDWARE_KEYBOARD_CONNECTED) {
         messageWithColor("Press <?> for help at any time.", &backgroundMessageColor, 0);
     }
     flavorMessage("The doors to the dungeon slam shut behind you.");

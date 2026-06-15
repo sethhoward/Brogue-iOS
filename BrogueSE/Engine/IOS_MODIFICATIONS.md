@@ -32,6 +32,25 @@ See `BrogueCE/Engine/IOS_MODIFICATIONS.md` (faithful CE) and
 
 ## Change log
 
+### 2026-06-15 — Keyboard labels disabled; hardware-keyboard presence drives UI instead
+
+**What.** The in-game hotkey labels are turned off (they reflect the Classic key layout and would
+mismatch the new Modern default — see the "Default to Modern keyboard layout" change). A hardware
+keyboard now instead: hides the on-screen d-pad and ESC button (platform/Swift side — redundant with
+the keyboard's arrows / Escape), and surfaces the "Press <?> for help" welcome hint (the only help
+affordance left with labels — and their help button — gone).
+
+**Engine side.** `KEYBOARD_LABELS` stays at its `false` default — the host no longer enables it. A new
+`HARDWARE_KEYBOARD_CONNECTED` global (GlobalsBase.c / Rogue.h), set by the host via
+`se_setHardwareKeyboardConnected()` on GCKeyboard connect/disconnect, tracks keyboard presence
+independently. `welcome()` now gates the help-menu hint on `HARDWARE_KEYBOARD_CONNECTED` rather than
+`KEYBOARD_LABELS`. The label infrastructure (`se_setKeyboardLabelsEnabled`) is left intact but unused,
+so labels can be re-enabled (and remapped for Modern) later.
+
+**Where.** `HARDWARE_KEYBOARD_CONNECTED` (GlobalsBase.c, Rogue.h); `se_setHardwareKeyboardConnected`
+(SEBridge.mm, BrogueSEHost.h); welcome help-prompt gate (RogueMain.c). Platform behavior (d-pad / ESC
+hide) lives in BrogueViewController.swift. Applies to all three engines.
+
 ### 2026-06-15 — Fix: worm-tunnel lever could be placed sealed inside walls (#766)
 
 **What.** In the "Worm tunnels" room machine, the hidden lever that opens the tunnels could be placed

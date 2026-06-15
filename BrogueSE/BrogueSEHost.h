@@ -38,6 +38,10 @@ void se_requestTermination(void);
 // hints only when a hardware keyboard is attached, mirroring Classic / CE.
 void se_setKeyboardLabelsEnabled(int enabled);
 
+// iOS port (Brogue SE): reports hardware-keyboard presence (distinct from KEYBOARD_LABELS).
+// Gates SE's "Press <?> for help" welcome hint. Called on GCKeyboard connect/disconnect.
+void se_setHardwareKeyboardConnected(int connected);
+
 #ifdef __cplusplus
 }
 #endif

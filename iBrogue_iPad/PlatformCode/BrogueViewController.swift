@@ -455,6 +455,16 @@ final class BrogueViewController: UIViewController {
         didSet { if oldValue != gameplayControlsActive { updateZoomForGameState() } }
     }
 
+    /// Whether a hardware keyboard is currently attached. When true, the on-screen d-pad and the
+    /// ESC button are hidden (redundant with the keyboard's arrows / Escape key); the engines also
+    /// surface a "Press <?> for help" hint. Updated by the GCKeyboard observer.
+    private var hardwareKeyboardConnected = false
+
+    /// Whether the app logic currently wants the on-screen ESC button shown (escapable sub-screen,
+    /// active text entry, etc.). The button is only actually shown when this is true AND no hardware
+    /// keyboard is attached — see refreshEscButtonVisibility().
+    private var escButtonWanted = false
+
     /// True while the player is aiming a throw/zap (CE targeting loop). Reported
     /// by the engine via setCETargeting; moves the esc button aside and re-enables
     /// the magnifier so the player can see what they're aiming at.
@@ -641,7 +651,8 @@ final class BrogueViewController: UIViewController {
                     // Game Center + File Management moved into the Classic title menu.
                     self.leaderBoardButton.isHidden = true
                     self.seedButton.isHidden = false
-                    self.escButton.isHidden = true
+                    self.escButtonWanted = false
+                    self.refreshEscButtonVisibility()
                     self.resetZoom()
                 case .startNewGame, .openGame, .beginOpenGame:
                     self.leaderBoardButton.isHidden = true
@@ -660,14 +671,13 @@ final class BrogueViewController: UIViewController {
                 // Hide/Show the directions.
                 switch self.lastBrogueGameEvent {
                 case .waitingForConfirmation, .actionMenuOpen, .openedInventory, .showTitle, .openGameFinished, .playRecording, .showHighScores, .playBackPanic, .messagePlayerHasDied, .playerHasDiedMessageAcknowledged, .keyBoardInputRequired, .beginOpenGame:
-                    self.dContainerView.isHidden = true
-                    self.dContainerView.isUserInteractionEnabled = false
                     self.gameplayControlsActive = false
                 default:
-                    self.dContainerView.isHidden = false
-                    self.dContainerView.isUserInteractionEnabled = true
                     self.gameplayControlsActive = true
                 }
+                // Actual d-pad visibility also depends on hardware-keyboard presence (hidden when one
+                // is attached); see refreshDirectionPadVisibility().
+                self.refreshDirectionPadVisibility()
                 self.updateActionButtonVisibility()
 
                 // Reserve the home-indicator strip only during gameplay. On the title
@@ -1262,14 +1272,16 @@ final class BrogueViewController: UIViewController {
             self.manageFilesButton?.isHidden = true
             self.showInventoryButton.isHidden = true
 
-            // Directional pad + action bar only during normal play.
-            self.dContainerView.isHidden = !inPlay
-            self.dContainerView.isUserInteractionEnabled = inPlay
+            // Directional pad + action bar only during normal play. The d-pad is additionally
+            // hidden when a hardware keyboard is attached; see refreshDirectionPadVisibility().
             self.gameplayControlsActive = inPlay
+            self.refreshDirectionPadVisibility()
             self.updateActionButtonVisibility()
 
-            // Escape button when CE is showing an escapable sub-screen.
-            self.escButton.isHidden = !showEscape
+            // Escape button when CE is showing an escapable sub-screen (hidden when a hardware
+            // keyboard is attached — the physical Escape key covers it; see refreshEscButtonVisibility).
+            self.escButtonWanted = showEscape
+            self.refreshEscButtonVisibility()
 
             // Keyboard for text entry (naming a save, entering a seed, etc.).
             if keyboard {
@@ -2131,7 +2143,8 @@ extension BrogueViewController {
     @IBAction func escButtonPressed(_ sender: Any) {
         addKeyEvent(event: kESC_Key)
         inputTextField.resignFirstResponder()
-        escButton.isHidden = true
+        escButtonWanted = false
+        refreshEscButtonVisibility()
     }
     
     @IBAction func showInventoryButtonPressed(_ sender: Any) {
@@ -3018,10 +3031,12 @@ extension BrogueViewController: UITextFieldDelegate {
             }
             // When a hardware keyboard is attached, skip the software keyboard
             // entirely — pressesBegan delivers keystrokes to the Brogue queue
-            // via the responder chain. Just expose the Esc button so the user
-            // has a touch-friendly cancel.
+            // via the responder chain, and the physical Escape key cancels, so
+            // no on-screen ESC button is shown (refreshEscButtonVisibility keeps
+            // it hidden while a keyboard is present).
             if GCKeyboard.coalesced != nil {
-                self.escButton.isHidden = false
+                self.escButtonWanted = true
+                self.refreshEscButtonVisibility()
             } else {
                 self.inputTextField.becomeFirstResponder()
             }
@@ -3047,13 +3062,15 @@ extension BrogueViewController: UITextFieldDelegate {
     func textFieldShouldReturn(_ textField: UITextField) -> Bool {
         inputTextField.resignFirstResponder()
         addKeyEvent(event: kReturnKey)
-        escButton.isHidden = true
+        escButtonWanted = false
+        refreshEscButtonVisibility()
         return true
     }
 
     func textFieldDidBeginEditing(_ textField: UITextField) {
         inputTextField.text = inputRequestString ?? ""
-        escButton.isHidden = false
+        escButtonWanted = true
+        refreshEscButtonVisibility()
     }
 
     func textField(_ textField: UITextField, shouldChangeCharactersIn range: NSRange, replacementString string: String) -> Bool {
@@ -3077,28 +3094,52 @@ extension BrogueViewController {
         center.addObserver(self, selector: #selector(keyboardDidDisconnect),
                            name: .GCKeyboardDidDisconnect, object: nil)
         // Set initial state in case a keyboard is already connected at launch.
-        updateKeyboardLabels(GCKeyboard.coalesced != nil)
+        updateHardwareKeyboardState(GCKeyboard.coalesced != nil)
     }
 
     @objc private func keyboardDidConnect(_ note: Notification) {
-        updateKeyboardLabels(true)
+        updateHardwareKeyboardState(true)
     }
 
     @objc private func keyboardDidDisconnect(_ note: Notification) {
-        updateKeyboardLabels(GCKeyboard.coalesced != nil)
+        updateHardwareKeyboardState(GCKeyboard.coalesced != nil)
     }
 
-    // Toggle in-game hotkey labels in ALL engines so the setting is correct whichever one is
-    // active and survives an engine switch. Classic reads a runtime global via
-    // setKeyboardLabelsEnabled(); CE/SE each read their own framework global via
-    // ce_/se_setKeyboardLabelsEnabled(). All are plain global writes into their own image,
-    // safe to call regardless of which engine is currently running.
-    private func updateKeyboardLabels(_ enabled: Bool) {
-        setKeyboardLabelsEnabled(enabled ? 1 : 0)
-        ce_setKeyboardLabelsEnabled(enabled ? 1 : 0)
+    // A hardware keyboard now changes two things (the on-screen hotkey labels themselves stay OFF in
+    // every engine — they reflect the Classic layout and would mismatch the Modern default, so we
+    // deliberately never re-enable KEYBOARD_LABELS): (1) the on-screen d-pad is redundant, so hide it;
+    // (2) the engines surface a "Press <?> for help" hint in the message log — the only help affordance
+    // left with the labels (and their help button) disabled. We report presence to every engine via
+    // its own image's hook (Classic's setHardwareKeyboardConnected(); CE/SE's
+    // ce_/se_setHardwareKeyboardConnected()) so the setting is correct whichever engine is active.
+    private func updateHardwareKeyboardState(_ connected: Bool) {
+        hardwareKeyboardConnected = connected
+        setHardwareKeyboardConnected(connected ? 1 : 0)
+        ce_setHardwareKeyboardConnected(connected ? 1 : 0)
         #if SE_ENABLED
-        se_setKeyboardLabelsEnabled(enabled ? 1 : 0)
+        se_setHardwareKeyboardConnected(connected ? 1 : 0)
         #endif
+        DispatchQueue.main.async { [weak self] in
+            self?.refreshDirectionPadVisibility()
+            self?.refreshEscButtonVisibility()
+        }
+    }
+
+    /// Applies the d-pad's visibility from gameplay state AND hardware-keyboard presence: the d-pad
+    /// shows only during normal play AND when no hardware keyboard is attached. Safe to call from the
+    /// two gameplay-state sites and from the keyboard observer.
+    func refreshDirectionPadVisibility() {
+        let show = gameplayControlsActive && !hardwareKeyboardConnected
+        dContainerView.isHidden = !show
+        dContainerView.isUserInteractionEnabled = show
+    }
+
+    /// Applies the ESC button's visibility from app state (escButtonWanted) AND hardware-keyboard
+    /// presence: shown only when wanted AND no hardware keyboard is attached (the physical Escape key
+    /// covers it otherwise). macOS (Catalyst), not yet a supported target, should likewise be treated
+    /// as always keyboard-present — GCKeyboard reports the Mac's keyboard, so this same path applies.
+    func refreshEscButtonVisibility() {
+        escButton?.isHidden = !(escButtonWanted && !hardwareKeyboardConnected)
     }
 
     override func pressesBegan(_ presses: Set<UIPress>, with event: UIPressesEvent?) {

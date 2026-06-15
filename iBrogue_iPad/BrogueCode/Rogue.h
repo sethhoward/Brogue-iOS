@@ -90,6 +90,11 @@
 extern boolean KEYBOARD_LABELS;
 void setKeyboardLabelsEnabled(boolean enabled);
 
+// iOS port (iBrogue): whether a hardware keyboard is attached (distinct from KEYBOARD_LABELS).
+// Set from the Swift layer via setHardwareKeyboardConnected(); gates the welcome help-menu hint.
+extern boolean HARDWARE_KEYBOARD_CONNECTED;
+void setHardwareKeyboardConnected(boolean enabled);
+
 // Runtime flag: true on iPhone. Set from the Swift layer via setPhoneLayout().
 // Used to opt iPhone-only layout tweaks into the engine without #ifdefs.
 extern boolean PHONE_LAYOUT;
