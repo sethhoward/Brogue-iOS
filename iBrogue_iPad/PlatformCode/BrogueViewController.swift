@@ -2758,7 +2758,18 @@ extension BrogueViewController {
         if let touch = touches.first {
             let location = touch.location(in: view)
 
-            if pointIsInSideBar(point: location) {
+            // The sidebar-examine (hover-only) routing is meaningful ONLY during
+            // active play (the mainInputLoop cursor description box). While a menu
+            // or button box is up (gameplayControlsActive == false — buttonInputLoop
+            // forces uiMode = InMenu), the engine draws its action-menu buttons
+            // (apply/equip/drop/throw…) starting as far left as window column 2, so
+            // for long descriptions the leftmost buttons (throw, due to the
+            // right-to-left layout) land in the sidebar columns (x <= 20). Routing
+            // those through the examine branch sends only a MOUSE_ENTERED_CELL hover
+            // and never the MOUSE_UP that activates a button — so the first tap did
+            // nothing and the player had to tap again. Treat sidebar-column taps as
+            // ordinary clicks whenever we're not in active play.
+            if pointIsInSideBar(point: location) && gameplayControlsActive {
                 // side bar
                 if touch.tapCount >= 2 {
                     // Double-tap acts on the entity (attack / run toward) — not an examine.
@@ -2928,12 +2939,18 @@ extension BrogueViewController {
         }
     }
 
-    /// Hides the directional pad while the magnifier is up, and restores it (to the
-    /// game-state-appropriate visibility) when the magnifier goes away. The codebase
-    /// keeps `dContainerView.isHidden == !gameplayControlsActive`, so that's the
-    /// correct value to restore even if game state changed during the inspect.
+    /// Hides the directional pad while the magnifier is up, and restores it when the
+    /// magnifier goes away. Restoration defers to refreshDirectionPadVisibility() — the
+    /// single source of truth — so it honors BOTH gameplay state AND hardware-keyboard
+    /// presence. (Restoring via `!gameplayControlsActive` alone re-showed the d-pad
+    /// after a magnifier dismissal even with a keyboard attached — e.g. on every mouse
+    /// click, which drives the touch/magnifier path.)
     private func setDpadHiddenForMagnifier(_ hidden: Bool) {
-        dContainerView.isHidden = hidden ? true : !gameplayControlsActive
+        if hidden {
+            dContainerView.isHidden = true
+        } else {
+            refreshDirectionPadVisibility()
+        }
     }
 }
 
