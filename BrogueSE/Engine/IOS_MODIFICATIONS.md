@@ -934,6 +934,47 @@ existing, so a player without the ring (or on a machine-less level) draws **no**
 vanilla behavior. For ring-wearers it perturbs the stream (their game already diverges), deterministically;
 like any gameplay change it diverges replays from pre-change recordings. CE-only; base chance tunable.
 
+### 2026-06-15 — Ring of awareness senses floor item polarity on arrival (new content)
+
+**What.** Augments the ring of awareness (companion to the room-machine sense above): on *first* arriving at
+a level, a worn ring may sense the **good/bad polarity** of magic items lying anywhere on the floor — *secret
+rooms included*, since detection sets the `ITEM_DETECTED` cell flag so the aura glyph (`G_GOOD_MAGIC` /
+`G_BAD_MAGIC`) shows for items the player hasn't found yet. It's the passive, per-floor analogue of a **thrown
+potion of detect magic** (`throwDetectMagicOnFloor`): identical eligibility (any undiscovered, non-neutral,
+polarity-bearing floor item) and identical recording via `detectMagicOnItem` — the instance's aura plus, for
+kind-flavored consumables, the kind's polarity run-wide (so it feeds elimination deduction, exactly like the
+potion). Detected polarity carries into the pack on pickup (`ITEM_MAGIC_DETECTED`). One understated message on
+a successful scan: *"your ring tingles; you sense a hidden magical aura on this level."*
+
+- **Scales with awareness, gated on the ring.** `awarenessEnchant = rogue.awarenessBonus / 20` (net effective
+  enchant of worn awareness rings, summed; the engine stores it ×20). Per-item chance =
+  `min(90, 10 + 10·(enchant+1))` → +1 = 30%, +2 = 40% … **+7 = 90% (cap)**. Rolls = `1 + max(0, enchant − 7)`
+  → +1…+7 do **one** roll; +8 does 2, +9 does 3, … Each *successful* roll reveals one more distinct random
+  hidden item (partial Fisher-Yates; failed rolls waste no items). Gated on `awarenessBonus > 0`, so no ring —
+  or a cursed (senses-dulled) one — senses nothing and draws **no** RNG.
+- **First arrival only.** Called from `startLevel()` inside the freshly-generated branch (the `!visited`
+  proxy), so the bounce-the-stairs-to-re-roll exploit is closed, same as the machine sense.
+- **No visibility filter (deliberate divergence from the thrown potion).** The scan runs *before* the player
+  is positioned (no FOV yet), and detecting a soon-to-be-visible item still usefully records its polarity for
+  the pack — so unlike a design sketch that excluded visible items, eligibility matches
+  `throwDetectMagicOnFloor` exactly. The level is drawn later in `startLevel`, so no `refreshDungeonCell` is
+  needed at detection time.
+
+**Why.** Requested — deepen the awareness build with an item-aura radar that pairs naturally with its
+existing arrival sense; the secret-room reveal is an intended perk. Folded into the existing `RING_AWARENESS`
+rather than a new ring (cohesion, no new enum/table/flavor/frequency tuning).
+
+**Where.** `Items.c` — `senseFloorPolarityFromAwareness()` (mirrors `throwDetectMagicOnFloor`, reuses the
+static `detectMagicOnItem` / `itemIdentityFullyKnown`). `RogueMain.c` — a call after the machine-sense block
+in `startLevel()` (same gameplay-RNG-stream placement). `Rogue.h` — function declaration. `Globals.c` —
+awareness `ringTable` description gains the item-aura sentence.
+
+**Determinism / RNG.** Draws are self-gated (`awarenessBonus > 0` and ≥1 eligible item), on the substantive
+gameplay RNG at a fixed point in `startLevel` after item placement and before the level is shown, so they are
+replay-deterministic and don't perturb dungeon generation. New detection only sets existing item/cell flags —
+no save-format change (saves replay inputs). SE-only; chance/cap/roll formula tunable. Recordings made before
+this change desync for ring-wearers, as with any gameplay change.
+
 ### 2026-06-12 — Allies keep their distance from invulnerable monsters (cherry-pick: upstream PR #803)
 
 **What.** Cherry-picked the two-part change from upstream BrogueCE **PR #803** (open/unmerged as of

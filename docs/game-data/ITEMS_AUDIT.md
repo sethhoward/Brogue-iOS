@@ -373,6 +373,13 @@ keyed off `rogue.awarenessBonus`:
   this level." Existence only — never location or reward/danger; truthful (never false-positives), so
   silence is ambiguous. Gated on wearing the ring AND a machine existing, so non-wearers draw no RNG and
   keep vanilla replay behavior (`AWARENESS_MACHINE_SENSE_BASE = 25`, `RogueMain.c:597`, `RogueMain.c:815`).
+- **Sense floor item polarity (Brogue SE).** On first arriving at a level, a positive ring may sense the
+  benevolent/malevolent aura of magic items lying on the floor — *secret rooms included* — lighting each
+  one's map aura and recording its polarity (the passive, per-floor twin of a thrown potion of detect
+  magic). With `enchant = awarenessBonus / 20`: per-item chance `min(90, 10 + 10·(enchant+1))` (+1 = 30% …
+  +7 = 90% cap), with `1 + max(0, enchant − 7)` rolls (each success reveals one more item). Gated on
+  `awarenessBonus > 0` (cursed senses nothing); action-triggered RNG, replay-stable. See the
+  identification audit §5h and `senseFloorPolarityFromAwareness` (`Items.c`).
 
 ### Ring of wisdom — iOS-port effects
 

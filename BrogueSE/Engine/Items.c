@@ -8528,6 +8528,70 @@ static void throwDetectMagicOnFloor(void) {
     messageWithColor(buf, &itemMessageColor, 0);
 }
 
+// iOS port (Brogue SE): the ring of awareness's outward sense. Called once from startLevel when a level is
+// first entered (gated there on !visited), a worn ring of awareness may sense the good/bad POLARITY of magic
+// items lying anywhere on the floor -- including inside still-undiscovered secret rooms, since it sets the
+// ITEM_DETECTED cell flag so the aura glyph shows for items the player hasn't found yet (the level is drawn
+// later in startLevel, so no refreshDungeonCell is needed here). This is the passive, per-floor analogue of a
+// THROWN potion of detect magic (throwDetectMagicOnFloor): identical eligibility (any undiscovered,
+// non-neutral, polarity-bearing floor item) and identical recording (detectMagicOnItem reveals the instance's
+// aura and, for kind-flavored consumables, the kind's polarity run-wide -- feeding deduction). Unlike the
+// thrown potion it does NOT filter on visibility: it runs before the player is positioned (no FOV yet), and
+// detecting a soon-to-be-visible item still usefully records its polarity for the pack.
+//
+// Chance and reach scale with the ring's net enchant (awarenessEnchant = rogue.awarenessBonus / 20 -- the
+// summed effective enchant of worn awareness rings, which the engine stores pre-multiplied by 20):
+//   per-item chance = min(90, 10 + 10*(enchant+1)) percent   -> +1=30% .. +7=90% (capped)
+//   rolls           = 1 + max(0, enchant - 7)                -> +1..+7 = 1 roll, +8 = 2, +9 = 3, ...
+// Each successful roll reveals one more still-hidden item (a distinct random pick from the eligible pool);
+// failed rolls consume nothing. Gated on rogue.awarenessBonus > 0, so a character without the ring -- or with
+// a cursed (senses-dulled) one -- draws no RNG here and keeps vanilla behavior. The draws are on the gameplay
+// RNG stream at a fixed point in startLevel (after item placement, before the level is shown), so they are
+// deterministic and replay-safe; like any gameplay change they diverge replays from pre-change recordings.
+void senseFloorPolarityFromAwareness(void) {
+    if (rogue.awarenessBonus <= 0) {
+        return; // no awareness ring worn (or it's cursed) -- sense nothing, and draw no RNG
+    }
+    item *eligible[64];
+    int count = 0;
+    for (item *theItem = floorItems->nextItem; theItem != NULL; theItem = theItem->nextItem) {
+        if ((theItem->category & CAN_BE_DETECTED) // matches throwDetectMagicOnFloor: floor gear included
+            && !itemIdentityFullyKnown(theItem)
+            && !(theItem->flags & ITEM_MAGIC_DETECTED) // already-detected (incl. gear whose aura is shown) skipped
+            && itemMagicPolarity(theItem) != MAGIC_POLARITY_NEUTRAL
+            && count < (int)(sizeof(eligible) / sizeof(eligible[0]))) {
+
+            eligible[count++] = theItem;
+        }
+    }
+    if (count == 0) {
+        return; // nothing on this level whose aura could be sensed
+    }
+    const int awarenessEnchant = rogue.awarenessBonus / 20; // awarenessBonus = 20 * net effective enchant
+    const int chance = min(90, 10 + 10 * (awarenessEnchant + 1));
+    const int rolls  = 1 + max(0, awarenessEnchant - 7);
+    // Each successful roll takes one distinct random item from the still-untaken suffix of `eligible`
+    // (partial Fisher-Yates); the `taken` prefix advances only on success, so failed rolls waste no items.
+    int taken = 0;
+    for (int r = 0; r < rolls && taken < count; r++) {
+        if (!rand_percent(chance)) {
+            continue; // this roll sensed nothing
+        }
+        const int j = rand_range(taken, count - 1);
+        item *tmp = eligible[taken]; eligible[taken] = eligible[j]; eligible[j] = tmp;
+        detectMagicOnItem(eligible[taken]);
+        if (itemMagicPolarity(eligible[taken])) {
+            pmapAt(eligible[taken]->loc)->flags |= ITEM_DETECTED; // aura glyph shows even for unfound items
+        }
+        taken++;
+    }
+    if (taken > 0) {
+        tryIdentifyLastItemKinds(HAS_INTRINSIC_POLARITY);
+        messageWithColor("your ring tingles; you sense a hidden magical aura on this level.",
+                         &backgroundMessageColor, 0);
+    }
+}
+
 // iOS port (iBrogue): the altars-of-insight machine. When both linked altars hold items, reveal the item
 // on the insight altar and consume the item on the offering altar. Sacrificing an UNidentified item fully
 // identifies the insight item; paying with an identified item reveals the insight item's polarity, or (if
