@@ -3253,6 +3253,7 @@ extern "C" {
     
     void setBrogueGameEvent(CBrogueGameEvent brogueGameState);
     void requestKeyboardInput(char *string, boolean numeric); // iOS port (iBrogue): numeric -> number pad
+    void setBrogueTargeting(boolean isTargeting); // iOS port (iBrogue): aiming loop -> show on-screen ESC button (mirrors CE's ceSetTargeting)
 
     // iOS port (iBrogue): title-menu entries that open native screens.
     void showFileManagementScreen(void);

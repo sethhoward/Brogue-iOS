@@ -23,6 +23,27 @@ future maintainers (human or AI) don't mistake an intentional port change for a 
 
 ## Change log
 
+### 2026-06-16 — On-screen ESC button during targeting (parity with CE/SE)
+
+**What.** While aiming a throw/zap, Classic now shows the on-screen ESC button so a touch player can
+cancel the aim — CE/SE already did this; Classic was the only engine without it. Tapping it sends
+`ESCAPE_KEY` (27), which `moveCursor` reads as a cancel, exactly as the physical Escape key does.
+
+**Why.** Classic has no `uiMode == ShowEscape` event (CE drives the ESC button's visibility through
+its coarse `uiMode`); Classic's discrete `setBrogueGameEvent` stream had no targeting signal, so
+`escButtonWanted` stayed false and the button never appeared during an aim.
+
+**Engine side.** New `setBrogueTargeting(boolean)` bridge (declared in `Rogue.h`), called from
+`chooseTarget` (`Items.c`): `true` once the aiming loop begins (after the playback early-return, so
+recordings don't trigger UI), `false` at each of the three exit points (cancel, self-target, confirm).
+Display-only and consumes no RNG, so saves/recordings are unaffected. Mirrors CE's `ceSetTargeting`.
+
+**Where.** `setBrogueTargeting` (Rogue.h decl; `RogueDriver.mm` definition — deduped, like
+`setBrogueExamining`, since `chooseTarget` has several exits); enter/exit calls in `chooseTarget`
+(`Items.c`). Platform side: `BrogueViewController.setClassicTargeting(_:)` toggles `escButtonWanted`
+(visibility) in addition to repositioning the button + enabling the magnifier (what `setCETargeting`
+already does for CE). Classic engine only.
+
 ### 2026-06-15 — Keyboard labels disabled; hardware-keyboard presence drives UI instead
 
 **What.** The in-game hotkey labels are turned off (they reflect the Classic key layout and would

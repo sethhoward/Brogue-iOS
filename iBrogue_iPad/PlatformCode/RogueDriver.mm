@@ -252,6 +252,17 @@ extern "C" void setBrogueExamining(boolean examining) {
     [brogueViewController setExamining:(BOOL)examining];
 }
 
+// iOS port (iBrogue): chooseTarget calls this as the aiming loop begins/ends so the
+// host can show the on-screen ESC button (Classic has no uiMode==ShowEscape event;
+// CE drives the button that way). Deduped since chooseTarget has several exit points.
+// Mirrors CE's ceSetTargeting.
+extern "C" void setBrogueTargeting(boolean isTargeting) {
+    static boolean last = false;
+    if (isTargeting == last) return;
+    last = isTargeting;
+    [brogueViewController setClassicTargeting:(BOOL)isTargeting];
+}
+
 void showFileManagementScreen() {
     [brogueViewController presentFileManagementScreen];
 }

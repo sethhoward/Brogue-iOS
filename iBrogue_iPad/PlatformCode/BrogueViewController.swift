@@ -1307,6 +1307,22 @@ final class BrogueViewController: UIViewController {
         }
     }
 
+    /// Called by the Classic bridge (setBrogueTargeting) while the player aims a
+    /// throw/zap. Classic has no uiMode==ShowEscape event — CE drives the ESC button's
+    /// visibility that way — so unlike setCETargeting this ALSO toggles escButtonWanted;
+    /// without it Classic would offer no on-screen way to cancel an aim. The rest mirrors
+    /// setCETargeting: repositions the button clear of the aiming area and enables the
+    /// magnifier so the player can see what they're aiming at.
+    @objc func setClassicTargeting(_ targeting: Bool) {
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self else { return }
+            self.isTargeting = targeting
+            self.escButtonWanted = targeting
+            self.refreshEscButtonVisibility()
+            self.positionEscButtonForTargeting(targeting)
+        }
+    }
+
     /// Reported by both engines (CE: setExamining via the host protocol; Classic:
     /// setBrogueExamining) as the cursor-loop description box appears/disappears. Just
     /// records box state; the actual zoom-suspend is gated on examineArmed and computed
@@ -1632,11 +1648,12 @@ final class BrogueViewController: UIViewController {
 
     /// A line in the info panel. The renderer styles each kind differently.
     private enum InfoBlock {
-        case heading(String)   // top-level group heading
-        case note(String)      // italic descriptor beneath a heading
-        case section(String)   // sub-section heading
-        case body(String)      // plain body paragraph
-        case bullets([String]) // bullet list
+        case heading(String)        // top-level group heading
+        case note(String)           // italic descriptor beneath a heading
+        case section(String)        // sub-section heading
+        case body(String)           // plain body paragraph
+        case bullets([String])      // bullet list
+        case link(String, String)   // tappable label + destination URL
     }
 
     /// Presents a scrollable description of the currently selected engine's key
@@ -1664,9 +1681,14 @@ final class BrogueViewController: UIViewController {
         let textView = UITextView()
         textView.translatesAutoresizingMaskIntoConstraints = false
         textView.isEditable = false
+        textView.isSelectable = true          // required for .link attributes to be tappable
         textView.alwaysBounceVertical = true
         textView.backgroundColor = .clear
         textView.textContainerInset = UIEdgeInsets(top: 8, left: 12, bottom: 24, right: 12)
+        textView.linkTextAttributes = [
+            .foregroundColor: UIColor.link,
+            .underlineStyle: NSUnderlineStyle.single.rawValue,
+        ]
         textView.attributedText = BrogueViewController.infoAttributedText(blocks)
         content.view.addSubview(textView)
         NSLayoutConstraint.activate([
@@ -1741,6 +1763,20 @@ final class BrogueViewController: UIViewController {
                         .paragraphStyle: bulletStyle,
                     ]))
                 }
+            case .link(let text, let urlString):
+                var attributes: [NSAttributedString.Key: Any] = [
+                    .font: UIFont.preferredFont(forTextStyle: .body),
+                    .paragraphStyle: bodyStyle,
+                ]
+                // The .link attribute drives both tap handling and the styling from
+                // the text view's linkTextAttributes; fall back to plain body text
+                // if the URL is somehow unparseable rather than dropping the line.
+                if let url = URL(string: urlString) {
+                    attributes[.link] = url
+                } else {
+                    attributes[.foregroundColor] = UIColor.label
+                }
+                out.append(NSAttributedString(string: text + "\n", attributes: attributes))
             }
         }
         return out
@@ -1759,28 +1795,51 @@ final class BrogueViewController: UIViewController {
                 "be a convenient base for forks and ports to new platforms",
             ]),
             .section("How is CE different from the original Brogue?"),
-            .note("Please refer to the changelog or release history for a complete list. There is also a wiki page: Changes from original."),
+            .note("Please refer to the changelog or release history for a complete list:"),
+            .link("Changes from original", "https://github.com/tmewett/BrogueCE/wiki/Changes-from-original"),
         ]
     }
 
     #if SE_ENABLED
-    /// Short description of Brogue SE — the experimental fork built on BrogueCE.
+    /// Brogue SE release notes — player-facing highlights for the current release.
+    /// Curated for the info panel; the full technical log lives in
+    /// BrogueSE/Engine/IOS_MODIFICATIONS.md. Keep in sync with new content.
     private static func seInfoBlocks() -> [InfoBlock] {
         return [
-            .note("Brogue SE (\"Seth's Edition\") is an experimental fork of BrogueCE — a sandbox for new items, monsters, and mechanics. Switch engines from the title screen to compare."),
-            .heading("What's different"),
-            .note("SE builds on BrogueCE 1.15 and adds original content. Balance is a work in progress and changes often."),
-            .section("New content"),
+            .note("Brogue SE (\"Seth's Edition\") — An experimental fork of BrogueCE with original items, monsters, and mechanics with part 1 titled (\"Alphabet-a Soup\") and an upcoming part 2 titled (\"Alphabeasts\") bringing new monsters and minibosses. Here's what's new:"),
+            .heading("🧪 New Items"),
             .bullets([
-                "A reworked item-identification system: rest to reveal polarity, study scrolls, and altars of insight that trade one item's identity for another's.",
-                "The gold goblin — a treasure-hoarder you chase down before it escapes upstairs.",
-                "The staff of frost, the empty bottle, themed potion sets, and electrified water.",
-                "Tuned ally and ring behavior (light, awareness, wisdom).",
+                "The Empty Bottle — Carry it and the world fills it: step into a gas or pool to bottle it, drift over lava or a chasm while levitating to skim it, or set it down and zap it with a bolt. Each capture becomes a real, identified potion.",
+                "Captured potions — Acid, webbing, steam, ice, and water can only be obtained by capturing hazards with the empty bottle. Each one re-creates its hazard when thrown.",
+                "Staff of Frost — Freeze enemies solid, slow them, freeze water into walkable ice bridges, turn foliage into brittle frozen walls, and shove foes back moving them out of your way and damaging enemies in their path.",
             ]),
-            .section("Saves & scores"),
+            .heading("👹 Monsters & Allies"),
             .bullets([
-                "SE keeps its own saves, recordings, and local high scores, separate from Classic and BrogueCE.",
-                "SE runs are not posted to Game Center while the design is in flux.",
+                "The Gold Goblin — A skittish treasure-hoarder that flees toward the stairs, scattering a trail of gold. Chase it down and corner it before it escapes to the next floor.",
+                "Cleverer thieves — Monkeys and imps now target the items they actually covet, not just whatever's handy. #849 gimballock",
+                "Better allies — Allies keep a safe distance from invulnerable monsters, and the Ring of Light can rally and embolden the companions fighting beside you.",
+            ]),
+            .heading("🔍 A New Way to Identify Items"),
+            .bullets([
+                "Rest to learn — Resting gradually reveals whether your unidentified items are helpful or harmful.",
+                "Clues add up — Gather enough hints about an item — or rule out enough of the alternatives — and the dungeon puts it together for you, identifying it outright.",
+                "Detect magic, reined in — The potion of detect magic now only hints at the good-or-bad nature of one or two items at a time, and turns up less often than before. But pair it with a Ring of Wisdom and the potion becomes stronger.",
+                "Altars of Insight — Sacrifice one item to reveal the nature of another.",
+                "Altars of Transference — Sacrifice and pour one item's enchantment into another.",
+                "Everyday tells — Eating a meal, watching a scroll burn, shattering a potion with a thrown weapon or a bolt, freeing a captive, and the rings of awareness and wisdom all quietly reveal clues about what you're carrying.",
+            ]),
+            .heading("🌊 The Living Dungeon"),
+            .bullets([
+                "Electrified water — A lightning bolt striking a pool now shocks the entire connected body of water. Mind where you stand.",
+                "Water has uses — Wading washes away the scent trail you leave for hunters and douses flames.",
+                "Fire spreads consequences — Catching fire sends you into a brief panic; food rations caught in fire cook into edible \"cooked food.\"",
+                "Read the chase — You can now sense when a pursuing monster has lost your trail.",
+            ]),
+            .heading("🎮 Quality of Life"),
+            .bullets([
+                "Pick your controls — Choose between Classic and Modern keyboard layouts; the game adapts when a hardware keyboard is attached.",
+                "Pick up where you left off — Your last-played seed is remembered across launches.",
+                "Smoother and more stable — Numerous community bug fixes, from dungeon-generation quirks to combat, stealth, and identification edge cases (#766, #805, #812, #816, #831, #837, #841).",
             ]),
         ]
     }

@@ -170,7 +170,7 @@ Runs once per level, in this order:
 
 1. **Bullet-variant L1 weapon vault** (Bullet only).
 2. **Amulet holder** at `AMULET_LEVEL` (26): force-build `MT_AMULET_AREA`, up to 50 tries.
-3. **Altars of insight** (Brogue only, iOS port) — force-built at depths **5 and 15** with a
+3. **Altars of insight** (Brogue only, iOS port) — force-built at depths **6 and 11** with a
    carry-forward schedule and a depth-20 cutoff (§8).
 4. **Metered reward rooms** — the random reward raffle:
 
@@ -334,7 +334,7 @@ These have `freq 0` for the reward raffle — they're pulled in to host the key 
 ### 7f. iOS-port additions
 | Blueprint | depth | roomSize | freq | placement | line |
 |---|---|---|---|---|---|
-| **Altars of insight** | 5–AL | **6–25** | 0 | force-built at 5 & 15 (§8) | :637 |
+| **Altars of insight** | 5–AL | **6–25** | 0 | force-built at 6 & 11 (§8) | :637 |
 | **Altars of transference** | 11–AL | 10–30 | 30 | reward raffle (`BP_REWARD`) | :647 |
 
 ---
@@ -377,9 +377,9 @@ Observations:
 
 Because a single level can fail to offer a qualifying pocket, the insight altars don't rely on a
 one-shot best-effort like the amulet vault. `addMachines` ([Architect.c:1871](../../BrogueSE/Engine/Architect.c)) instead tracks
-how many altars are *due* by the current depth (`insightAltarDepths[] = {5, 15}`) versus how many
+how many altars are *due* by the current depth (`insightAltarDepths[] = {6, 11}`) versus how many
 have actually been built (`rogue.insightAltarsBuilt`), and **carries any shortfall forward**: a
-depth-5 failure retries on 6, 7, … until a room is found, capped at `INSIGHT_ALTAR_MAX_DEPTH = 20`.
+depth-6 failure retries on 7, 8, … until a room is found, capped at `INSIGHT_ALTAR_MAX_DEPTH = 20`.
 This is the reusable recipe for "a fixture that must appear around depth N" given probabilistic
 placement: *schedule by count-built, not by depth-modulo, and bound the carry-forward.*
 

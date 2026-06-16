@@ -32,6 +32,15 @@ See `BrogueCE/Engine/IOS_MODIFICATIONS.md` (faithful CE) and
 
 ## Change log
 
+### 2026-06-16 — Altars of insight: retune guaranteed depths to 6 & 11
+
+**What.** Moved the two guaranteed altars-of-insight reward rooms from depths **5 & 15** to **6 & 11**.
+Mechanism unchanged — same `insightAltarDepths[]` count-built/carry-forward schedule, same
+`INSIGHT_ALTAR_MAX_DEPTH = 20` cutoff (see the 2026-06-14 entry below) — only the table values changed.
+
+**Where.** `insightAltarDepths[] = {6, 11}` in `addMachines` (`Architect.c`). Deterministic
+(depth-driven) and save-safe. Docs synced in [MACHINES_AUDIT.md](../../docs/game-data/MACHINES_AUDIT.md).
+
 ### 2026-06-16 — Remove the "Game Center" button from the SE title menu
 
 **What.** SE is Game Center-silent (no leaderboard/achievements), but its main menu — inherited from CE

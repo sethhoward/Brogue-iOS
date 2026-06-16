@@ -5232,7 +5232,9 @@ boolean chooseTarget(short returnLoc[2],
     oldRNG = rogue.RNG;
     rogue.RNG = RNG_COSMETIC;
     //assureCosmeticRNG;
-    
+
+    setBrogueTargeting(true); // iOS port (iBrogue): entering the aiming loop -> show on-screen ESC button
+
     originLoc[0] = player.xLoc;
     originLoc[1] = player.yLoc;
     
@@ -5283,9 +5285,10 @@ boolean chooseTarget(short returnLoc[2],
             confirmMessages();
             rogue.cursorLoc[0] = rogue.cursorLoc[1] = -1;
             restoreRNG;
+            setBrogueTargeting(false); // iOS port (iBrogue): aiming canceled
             return false;
         }
-        
+
         if (tabKey) {
             if (nextTargetAfter(&newX, &newY, targetLoc[0], targetLoc[1], !targetAllies, targetAllies, false, false, true, event.shiftKey)) {
                 targetLoc[0] = newX;
@@ -5347,18 +5350,20 @@ boolean chooseTarget(short returnLoc[2],
         confirmMessages();
         restoreRNG;
         rogue.cursorLoc[0] = rogue.cursorLoc[1] = -1;
+        setBrogueTargeting(false); // iOS port (iBrogue): aiming canceled (targeted self)
         return false;
     }
-    
+
     monst = monsterAtLoc(targetLoc[0], targetLoc[1]);
     if (monst && monst != &player && canSeeMonster(monst)) {
         rogue.lastTarget = monst;
     }
-    
+
     returnLoc[0] = targetLoc[0];
     returnLoc[1] = targetLoc[1];
     restoreRNG;
     rogue.cursorLoc[0] = rogue.cursorLoc[1] = -1;
+    setBrogueTargeting(false); // iOS port (iBrogue): aiming finished
     return true;
 }
 
