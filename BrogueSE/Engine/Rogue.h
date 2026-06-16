@@ -849,6 +849,7 @@ enum keyKind {
 enum foodKind {
     RATION,
     FRUIT,
+    COOKED_FOOD, // iOS port (Brogue SE): a ration of food charred in fire; smaller meal, heals over time when eaten. Never generated naturally (frequency 0).
     NUMBER_FOOD_KINDS
 };
 
@@ -1210,6 +1211,11 @@ enum tileFlags {
 #define HUNGER_THRESHOLD                    (STOMACH_SIZE - 1800)
 #define WEAK_THRESHOLD                      150
 #define FAINT_THRESHOLD                     50
+
+// iOS port (Brogue SE): eating cooked food (a charred ration) heals 1 HP/turn for 5 turns (5 HP total)
+// via STATUS_REGENERATING. See eat() and the regeneration metering in Time.c.
+#define COOKED_FOOD_REGEN_TURNS             5
+#define COOKED_FOOD_REGEN_TOTAL             5
 #define MAX_EXP_LEVEL                       20
 #define MAX_EXP                             100000000L
 
@@ -2713,6 +2719,8 @@ typedef struct playerCharacter {
     short stealthRange;                 // distance from which monsters will notice you
 
     short previousPoisonPercent;        // and your poison proportion, to display percentage alerts for each.
+
+    short regenerationHeal;             // iOS port (Brogue SE): total HP that STATUS_REGENERATING heals across its duration (set when the status is applied; honey vs cooked food differ).
 
     pos upLoc;                          // upstairs location this level
     pos downLoc;                        // downstairs location this level

@@ -201,6 +201,12 @@ item *makeItemInto(item *theItem, unsigned long itemCategory, short itemKind) {
             }
             theEntry = &foodTable[itemKind];
             theItem->flags |= ITEM_IDENTIFIED;
+            // iOS port (Brogue SE): a ration left in fire cooks into "cooked food" rather than burning to
+            // nothing (see burnItem). Only rations are flammable -- mangoes don't burn, and cooked food
+            // won't re-cook into itself.
+            if (itemKind == RATION) {
+                theItem->flags |= ITEM_FLAMMABLE;
+            }
             break;
 
         case WEAPON:
@@ -1545,6 +1551,14 @@ void itemName(item *theItem, char *root, boolean includeDetails, boolean include
         case FOOD:
             if (theItem -> kind == FRUIT) {
                 sprintf(root, "mango%s", pluralization);
+            } else if (theItem->kind == COOKED_FOOD) {
+                // iOS port (Brogue SE): a cooked ration.
+                if (theItem->quantity == 1) {
+                    sprintf(article, "some ");
+                    sprintf(root, "cooked food");
+                } else {
+                    sprintf(root, "ration%s of cooked food", pluralization);
+                }
             } else {
                 if (theItem->quantity == 1) {
                     sprintf(article, "some ");
@@ -1634,6 +1648,9 @@ void itemName(item *theItem, char *root, boolean includeDetails, boolean include
                 if (theItem->kind == POTION_DETECT_MAGIC) {
                     // iOS port (iBrogue): the empty bottle reads as just "empty bottle(s)", not "potion of empty bottle".
                     sprintf(root, "empty bottle%s", pluralization);
+                } else if (theItem->kind == POTION_WATER) {
+                    // iOS port (Brogue SE): plain captured water reads as "bottle of water", not "potion of water".
+                    sprintf(root, "bottle%s of water", pluralization);
                 } else {
                     sprintf(root, "potion%s of %s", pluralization, potionTable[theItem->kind].name);
                 }
@@ -7580,6 +7597,13 @@ boolean eat(item *theItem, boolean recordCommands) {
     player.status[STATUS_NUTRITION] = min(foodTable[theItem->kind].power + player.status[STATUS_NUTRITION], STOMACH_SIZE);
     if (theItem->kind == RATION) {
         messageWithColor("That food tasted delicious!", &itemMessageColor, 0);
+    } else if (theItem->kind == COOKED_FOOD) {
+        // iOS port (Brogue SE): a hot, cooked meal knits flesh -- heal 1 HP/turn for 5 turns (5 HP total)
+        // via the shared STATUS_REGENERATING heal-over-time primitive (rogue.regenerationHeal carries the
+        // total; Time.c meters it across the duration). See also the honey potion, the other consumer.
+        player.status[STATUS_REGENERATING] = player.maxStatus[STATUS_REGENERATING] = COOKED_FOOD_REGEN_TURNS;
+        rogue.regenerationHeal = COOKED_FOOD_REGEN_TOTAL;
+        messageWithColor("the cooked food is hot and hearty, and your wounds begin to knit closed.", &itemMessageColor, 0);
     } else {
         messageWithColor("My, what a yummy mango!", &itemMessageColor, 0);
     }
@@ -8899,8 +8923,10 @@ boolean drinkPotion(item *theItem) {
             break;
         // iOS port (iBrogue): themed-set potions + returning detect magic.
         case POTION_HONEY:
-            // STATUS_REGENERATING lasts `magnitude` (~20) turns; Time.c meters ~20% of max HP across it.
+            // STATUS_REGENERATING lasts `magnitude` (~20) turns; Time.c meters rogue.regenerationHeal across
+            // it. Honey heals ~20% of max HP (cooked food, the other consumer, heals a flat 5).
             player.status[STATUS_REGENERATING] = player.maxStatus[STATUS_REGENERATING] = magnitude;
+            rogue.regenerationHeal = player.info.maxHP * 20 / 100;
             message("the honey's warmth spreads through you, and your wounds slowly begin to close.", 0);
             break;
         case POTION_VOMIT:

@@ -1725,7 +1725,8 @@ itemTable keyTable[NUMBER_KEY_TYPES] = {
 
 itemTable foodTable[NUMBER_FOOD_KINDS] = {
     {"ration of food",      "", "", 3, 25,  0, 1800, {0,0,0}, true, false, 0, false, "A ration of food. Was it left by former adventurers? Is it a curious byproduct of the subterranean ecosystem? A meal taken in peace, with nothing on the hunt for you, settles the mind enough to study an unidentified scroll and sense whether its magic is benevolent or malevolent."},
-    {"mango",               "", "", 1, 15,  0, 1550, {0,0,0}, true, false, 0, false, "An odd fruit to be found so deep beneath the surface of the earth, but only slightly less filling than a ration of food. Like any meal, it feeds the mind as well as the body when eaten undisturbed, affording a quiet moment to divine the nature of an unknown scroll."}
+    {"mango",               "", "", 1, 15,  0, 1550, {0,0,0}, true, false, 0, false, "An odd fruit to be found so deep beneath the surface of the earth, but only slightly less filling than a ration of food. Like any meal, it feeds the mind as well as the body when eaten undisturbed, affording a quiet moment to divine the nature of an unknown scroll."},
+    {"cooked food",         "", "", 0, 15,  0, 1800, {0,0,0}, true, false, 0, false, "A ration of food caught in a fire and cooked to perfection. It is as filling as a fresh ration, and a hot meal knits flesh besides -- eating it will close your wounds, restoring a little health with each of the next few turns."} // iOS port (Brogue SE): frequency 0 -- only created when a ration burns (see burnItem). Power 1800 = a full ration; eating grants STATUS_REGENERATING (see eat()).
 };
 
 itemTable weaponTable[NUMBER_WEAPON_KINDS] = {

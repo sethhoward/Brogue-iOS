@@ -32,6 +32,47 @@ See `BrogueCE/Engine/IOS_MODIFICATIONS.md` (faithful CE) and
 
 ## Change log
 
+### 2026-06-15 — Display "potion of water" as "bottle of water"
+
+**What.** Captured plain water now reads as **"bottle of water"** instead of "potion of water" — it's
+ordinary water in a bottle, not a magical potion. Display-only; the item, its kind (`POTION_WATER`), and
+all behavior (drink = flush, thrown = flood) are unchanged.
+
+**Where.** `itemName` POTION branch (Items.c) — a special-case alongside the existing empty-bottle one
+(`POTION_DETECT_MAGIC` → "empty bottle"): `POTION_WATER` → "bottle of water". SE-only.
+
+### 2026-06-15 — Rations cook into edible "cooked food" in fire (heal-over-time) (new content)
+
+**What.** A ration of food (but not a mango) caught in actual fire no longer simply burns up — it cooks
+into a new food kind, **cooked food**. Cooked food is as filling as a fresh ration (power 1800, same as
+a ration), and eating it additionally grants a small heal-over-time: **1 HP/turn for 5 turns (5 HP
+total)**. Mangoes stay non-flammable, so only rations convert. Cooked food is never generated naturally
+(frequency 0) — it exists only as the product of burning a ration.
+
+**Reused, not bespoke.** The heal-over-time rides the existing `STATUS_REGENERATING` primitive (built
+for the honey potion). To support a *fixed* total (5) distinct from honey's *proportional* total (~20%
+of max HP), the per-turn metering in `Time.c` was parameterized: a new `rogue.regenerationHeal` field
+carries the total HP to mete across the status duration, set when the status is applied (honey →
+`maxHP*20/100`; cooked food → 5). The stateless elapsed-fraction metering and exact-total/deterministic
+guarantees are unchanged. The fade message is now neutral ("the warmth fades, and your wounds have
+finished closing.") so it reads for both consumers.
+
+**Flammability.** Only `RATION` food is flagged `ITEM_FLAMMABLE` (in `makeItemInto`). `burnItem` now
+branches first: if a flammable item is a ration **and the tile is `T_IS_FIRE`** (not lava — lava also
+routes through `burnItem` via `T_LAVA_INSTA_DEATH`, and a ration dropped in lava is still destroyed), it
+swaps the item's kind to `COOKED_FOOD` in place, clears `ITEM_FLAMMABLE` (so the same fire can't burn
+the freshly-cooked result to nothing next tick), prints a "sizzle … cook to perfection" line, and
+keeps the item on the floor. Everything else burns up as before.
+
+**Determinism / saves.** `rogue.regenerationHeal` is set deterministically wherever the status is
+applied and is recomputed on replay; the kind swap in `burnItem` runs in the normal fire-resolution path
+during replay. No new non-deterministic state. Save-safe per the input-replay model.
+
+**Where.** `COOKED_FOOD` enum + `COOKED_FOOD_REGEN_TURNS`/`_TOTAL` + `rogue.regenerationHeal`
+(Rogue.h); `foodTable` cooked-food row, freq 0, power 1800 (Globals.c); `ITEM_FLAMMABLE` on rations + cooked-food
+naming + regen on eat + honey sets `regenerationHeal` (Items.c); `burnItem` cook-transform + regen
+metering uses `regenerationHeal` + starvation auto-eat message (Time.c). SE-only (gameplay/content).
+
 ### 2026-06-15 — Keyboard labels disabled; hardware-keyboard presence drives UI instead
 
 **What.** The in-game hotkey labels are turned off (they reflect the Classic key layout and would

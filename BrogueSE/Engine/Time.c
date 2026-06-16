@@ -882,7 +882,8 @@ static void checkNutrition() {
         // Force the player to eat something if he has it
         for (theItem = packItems->nextItem; theItem != NULL; theItem = theItem->nextItem) {
             if (theItem->category == FOOD) {
-                sprintf(buf, "unable to control your hunger, you eat a %s.", (theItem->kind == FRUIT ? "mango" : "ration of food"));
+                sprintf(buf, "unable to control your hunger, you eat a %s.",
+                        theItem->kind == FRUIT ? "mango" : (theItem->kind == COOKED_FOOD ? "piece of cooked food" : "ration of food"));
                 messageWithColor(buf, &itemMessageColor, REQUIRE_ACKNOWLEDGMENT);
                 confirmMessages();
                 eat(theItem, false);
@@ -901,12 +902,34 @@ static void checkNutrition() {
 void burnItem(item *theItem) {
     short x, y;
     char buf1[COLS * 3], buf2[COLS * 3];
+    x = theItem->loc.x;
+    y = theItem->loc.y;
+
+    // iOS port (Brogue SE): a ration of food caught in actual fire cooks into "cooked food" rather than
+    // burning to nothing -- a smaller meal, but eating it knits your wounds (see eat()). Only rations are
+    // flammable (mangoes aren't), so this is the only food kind that reaches here. Gate on T_IS_FIRE so a
+    // ration dropped into lava (T_LAVA_INSTA_DEATH, also routed through burnItem) is still destroyed.
+    if ((theItem->category & FOOD) && theItem->kind == RATION
+        && cellHasTerrainFlag((pos){ x, y }, T_IS_FIRE)) {
+
+        itemName(theItem, buf1, false, true, NULL);
+        theItem->kind = COOKED_FOOD;
+        theItem->flags &= ~ITEM_FLAMMABLE; // already cooked -- don't let the same fire burn it to nothing next tick.
+        if (playerCanSee(x, y)) {
+            sprintf(buf2, "%s sizzle%s in the flames and cook%s to perfection.",
+                    buf1,
+                    theItem->quantity == 1 ? "s" : "",
+                    theItem->quantity == 1 ? "s" : "");
+            messageWithColor(buf2, &itemMessageColor, 0);
+            refreshDungeonCell((pos){ x, y });
+        }
+        return;
+    }
+
     itemName(theItem, buf1, false, true, NULL);
     sprintf(buf2, "%s burn%s up!",
             buf1,
             theItem->quantity == 1 ? "s" : "");
-    x = theItem->loc.x;
-    y = theItem->loc.y;
     // iOS port (iBrogue): announce the destruction and, if the player witnesses it, glimpse the item's
     // good/bad polarity (not its kind) -- the scroll-side analogue of the potion fire-erasure tell. Both
     // must run BEFORE the instance is freed below; revealPolarityOnFieryDestruction reads theItem->kind
@@ -2163,12 +2186,14 @@ static void decrementPlayerStatus() {
         message("you are no longer invisible.", 0);
     }
 
-    // iOS port (iBrogue): honey potion's heal-over-time. Mete ~20% of max HP evenly across the status's
-    // duration, carrying the rounding remainder via a stateless elapsed-fraction difference (so the total
-    // lands exactly and replays deterministically without a stored accumulator).
+    // iOS port (iBrogue): heal-over-time primitive shared by the honey potion and cooked food. Mete
+    // rogue.regenerationHeal (set when the status is applied -- ~20% of max HP for honey, a flat 5 for
+    // cooked food) evenly across the status's duration, carrying the rounding remainder via a stateless
+    // elapsed-fraction difference (so the total lands exactly and replays deterministically without a
+    // stored accumulator).
     if (player.status[STATUS_REGENERATING] > 0) {
         const short dur = max(1, player.maxStatus[STATUS_REGENERATING]);
-        const short total = player.info.maxHP * 20 / 100;
+        const short total = rogue.regenerationHeal;
         const short elapsed = dur - player.status[STATUS_REGENERATING] + 1; // 1..dur this turn
         const short healNow = total * elapsed / dur - total * (elapsed - 1) / dur;
         if (healNow > 0 && player.currentHP < player.info.maxHP) {
@@ -2176,7 +2201,7 @@ static void decrementPlayerStatus() {
             player.previousHealthPoints = min(player.currentHP, player.previousHealthPoints + healNow);
         }
         if (!--player.status[STATUS_REGENERATING]) {
-            message("the honey's nourishment fades.", 0);
+            message("the warmth fades, and your wounds have finished closing.", 0);
         }
     }
 
