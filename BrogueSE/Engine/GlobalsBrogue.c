@@ -716,16 +716,19 @@ itemTable potionTable_Brogue[] = {
     {"darkness",            itemColors[14], "", 7,  150,    0, 0, {400,400,0}, false, false, -1, false, "Drinking this potion will plunge you into darkness. At first, you will be completely blind to anything not illuminated by an independent light source, but over time your vision will regain its former strength. Throwing the potion will create a cloud of supernatural darkness, and enemies will have difficulty seeing or following you if you take refuge under its cover."},
     {"descent",             itemColors[15], "", 15, 500,    0, 0, {0,0,0}, false, false, -1, false, "When this flask is uncorked by hand or shattered by being thrown, the fog that seeps out will temporarily cause the ground in the vicinity to vanish."},
     {"creeping death",      itemColors[16], "", 7,  450,    0, 0, {0,0,0}, false, false, -1, false, "When the cork is popped or the flask is thrown, tiny spores will spill across the ground and begin to grow a deadly lichen. Anything that touches the lichen will be poisoned by its clinging tendrils, and the lichen will slowly grow to fill the area. Fire will purge the infestation."},
+    // iOS port (iBrogue): themed potion sets (one set is live per run) + a returning detect magic.
+    // ORDER MUST MATCH enum potionKind in Rogue.h -- potionTable is indexed directly by potion kind
+    // (makeItemInto: &potionTable[itemKind]). HONEY, VOMIT, WORT, VENOM, DETECT_MAGIC2 in that order;
+    // detect magic comes AFTER venom (it is POTION_DETECT_MAGIC2, the last of this block).
+    {"honey",               itemColors[17], "", 0, 400,    0, 0, {20,20,0}, false, false, 1,  false, "A heavy jar of thick golden honey. Swallowed, its slow sweetness mends the body over time. Dashed against the ground -- by your hand, or by a bolt of lightning or flame -- it spreads into a sticky golden mire that snares whatever is caught in it."},
+    {"vomit",               itemColors[18], "", 0, 150,    0, 0, {0,0,0}, false, false, -1, false, "A flask of foul, churning bile. Exposed to the open air it erupts into a reeking cloud that sickens any creature who breathes it, just as a zombie's stench does."},
+    {"wort",                itemColors[19], "", 0, 500,    0, 0, {0,0,0}, false, false, 1,  false, "A flask swirling with luminous medicinal spores -- wort. Uncorked or thrown, it bursts into a cloud of healing motes that knit the wounds of any who linger within it."},
+    {"venom",               itemColors[20], "", 0, 250,    0, 0, {15,15,0}, false, false, -1, false, "A vial of viscous green venom. Drinking it floods your veins with poison; hurled, it douses whatever it strikes in the same searing toxin."},
     {"detect magic",        itemColors[0],  "", 15, 350,    0, 0, {0,0,0}, false, false, 1,  false, "This mysterious brew sensitizes your mind to the radiance of magic, but only fleetingly: it reveals the helpful or harmful nature of one or two items in your pack, chosen at random. Hurled instead, its insight turns outward -- sensing one or two undiscovered magic items elsewhere on this level and marking their auras on your map."},
     // iOS port (iBrogue): empty-bottle v2 capture-only potions. Frequency 0, and -- unlike life/strength
     // above (also freq 0 here but spawned by the metered-generation system) -- these are deliberately
     // absent from meteredItemsGenerationTable, so nothing overrides the 0: they NEVER generate and are
     // obtainable only by capturing a matching hazard. (See the two-path explanation in Items.c, and docs/design/empty-bottle-v2.md.)
-    // iOS port (iBrogue): themed potion sets (one set is live per run) + a returning detect magic. Frequency 10 each.
-    {"honey",               itemColors[17], "", 0, 400,    0, 0, {20,20,0}, false, false, 1,  false, "A heavy jar of thick golden honey. Swallowed, its slow sweetness mends the body over time. Dashed against the ground -- by your hand, or by a bolt of lightning or flame -- it spreads into a sticky golden mire that snares whatever is caught in it."},
-    {"vomit",               itemColors[18], "", 0, 150,    0, 0, {0,0,0}, false, false, -1, false, "A flask of foul, churning bile. Exposed to the open air it erupts into a reeking cloud that sickens any creature who breathes it, just as a zombie's stench does."},
-    {"wort",                itemColors[19], "", 0, 500,    0, 0, {0,0,0}, false, false, 1,  false, "A flask swirling with luminous medicinal spores -- wort. Uncorked or thrown, it bursts into a cloud of healing motes that knit the wounds of any who linger within it."},
-    {"venom",               itemColors[20], "", 0, 250,    0, 0, {15,15,0}, false, false, -1, false, "A vial of viscous green venom. Drinking it floods your veins with poison; hurled, it douses whatever it strikes in the same searing toxin."},
     {"acid",                itemColors[4],  "", 0,  300,    0, 0, {15,15,0}, false, false, -1, false, "Captured corrosion, sloshing and fuming against the glass. Hurled, it sears whatever it strikes, eating away at its defenses; uncorked in hand, it burns you instead."},
     {"webbing",             itemColors[15], "", 0,  300,    0, 0, {0,0,0}, false, false, -1, false, "A flask packed with living silk. Shattered against the ground it bursts into a tangle of grasping web; uncork it in your grip and the strands seize you where you stand."},
     {"steam",               itemColors[13], "", 0,  300,    0, 0, {0,0,0}, false, false, -1, false, "Scalding vapor strains against the stopper. Released, it boils outward into a searing cloud that burns anything caught within it."},
@@ -1028,11 +1031,15 @@ const char *mainMenuTitle_Brogue =
                           ##                                        \
                          ####                                       ";
 
-// Brogue SE version: what the user sees in the menu and title.
-// iOS port (Brogue SE): the "SE " prefix gives SE its own version lineage, fully
-// independent of BrogueCE's "CE " strings, so SE and CE saves/recordings can never
-// alias (they consume RNG differently and would desync if cross-loaded).
-#define BROGUE_VERSION_STRING "SE " STRINGIFY(BROGUE_MAJOR) "." STRINGIFY(BROGUE_MINOR) "." STRINGIFY(BROGUE_PATCH) BROGUE_EXTRA_VERSION
+// Brogue SE release string: the codename + release version the user sees on the title screen
+// (rendered bottom-right of the menu by drawMenuFlames in MainMenu.c via gameConst->versionString),
+// and in --version / seed-catalog output.
+// iOS port (Brogue SE): SE carries its own branded release line, independent of the technical
+// 1.15.1 fork point it inherits from CE. The trailing space is intentional -- it pads the string
+// off the menu's right edge. This is DISPLAY ONLY: save/recording compatibility is governed by
+// BROGUE_RECORDING_VERSION_STRING / BROGUE_PATCH_VERSION_PATTERN below (still "SE <major>.<minor>.<patch>"),
+// so SE and CE saves can never alias regardless of what the title shows.
+#define BROGUE_VERSION_STRING "Alphabet-a Soup 0.9.0 "
 
 // Recording version. Saved into recordings and save files made by this version.
 // Cannot be longer than 16 chars

@@ -507,6 +507,16 @@ void initializeRogue(uint64_t seed) {
         theItem = addItemToPack(theItem);
     }
 
+    if (D_EMPTY_BOTTLE_START) {
+        // iOS port (Brogue SE): playtest grant of 3 empty bottles so the v2 capture system can be tested
+        // without first finding one. Added deterministically here (not as a recorded input), so it
+        // reconstructs identically on replay. The empty bottle reuses the POTION_DETECT_MAGIC slot.
+        theItem = generateItem(POTION, POTION_DETECT_MAGIC);
+        theItem->quantity = 3;
+        identify(theItem);
+        theItem = addItemToPack(theItem);
+    }
+
     DEBUG {
         theItem = generateItem(RING, RING_CLAIRVOYANCE);
         theItem->enchant1 = max(DROWS, DCOLS);

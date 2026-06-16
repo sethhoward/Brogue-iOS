@@ -256,8 +256,12 @@ Both share `applyPolarityInsightToRandomItem()`
 `gainPolarityInsightFromRest()` ([Items.c:8357–8398](../../BrogueSE/Engine/Items.c)), called once
 per rested turn from `playerTurnEnded` ([Time.c:2748](../../BrogueSE/Engine/Time.c), gated on
 `rogue.justRested`). Each rested turn accrues toward an **escalating threshold**: reveal *N* needs
-`100 × N` consecutive rested turns (intervals 100, 200, 300…; cumulative 100, 300, 600…), keyed off
-reveals earned so far. **Favors potions** when any eligible potion exists. A ring of wisdom
+`REST_INSIGHT_BASE_TURNS` (80) + `REST_INSIGHT_STEP_TURNS` (30) × reveals-earned-so-far rested turns
+*since the last reveal* (the counter resets on each reveal) — intervals 80, 110, 140… (cumulative
+80, 190, 330, 500…), keyed off reveals earned so far. *(The earlier `100 × N` ramp — cumulative 100,
+300, 600 — was rejected: its 2nd reveal at 300 cumulative turns rarely fired on a depth-1..10 run.
+This lower base + gentle additive step is tuned to fire ~2–3 times by depth 10.)* **Favors potions**
+when any eligible potion exists. A ring of wisdom
 accelerates it ~10%/level (clamped). **Scans `CAN_BE_DETECTED`** (incl. weapons/armor — see the §2
 note): when no unidentified potion is left to favor, the secondary pool now includes gear (capped at
 the aura glyph). See

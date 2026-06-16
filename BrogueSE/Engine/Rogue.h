@@ -95,6 +95,11 @@
 // it. Flip to 0 to ship.
 #define D_LEATHER_ARMOR_START           0//(WIZARD_MODE && 0)
 
+// iOS port (Brogue SE): start with a few empty bottles for playtesting the v2 capture system, so you can
+// test capturing gases/liquids/hazards without first finding one. Granted deterministically in
+// initializeRogue, so it is recording-safe. Flip to 0 to ship.
+#define D_EMPTY_BOTTLE_START            0//(WIZARD_MODE && 0)
+
 // If enabled, runs a benchmark for the performance of repeatedly updating the screen at the start of the game.
 // #define SCREEN_UPDATE_BENCHMARK
 

@@ -300,9 +300,9 @@ static void initializeMainMenuButton(brogueButton *button, char *textWithHotkey,
 }
 
 #ifdef BROGUE_TABLET
-#define MAIN_MENU_BUTTON_COUNT 5   // iOS port (iBrogue): New Game, Play, View, File Management, Game Center (no Quit)
+#define MAIN_MENU_BUTTON_COUNT 4   // iOS port (Brogue SE): New Game, Play, View, File Management (no Quit; Game Center removed -- SE is GC-silent)
 #else
-#define MAIN_MENU_BUTTON_COUNT 6
+#define MAIN_MENU_BUTTON_COUNT 5
 #endif
 
 /// @brief Initializes the main menu buttons
@@ -319,12 +319,11 @@ static void initializeMainMenuButtons(brogueButton *buttons) {
     initializeMainMenuButton(&(buttons[2]), " <     %sV%siew       ", 'v', 'V', NG_FLYOUT_VIEW);
     // iOS port (iBrogue): native file manager, like the Classic title menu.
     initializeMainMenuButton(&(buttons[3]), "  %sF%sile Management  ", 'f', 'F', NG_FILE_MANAGEMENT);
-    // iOS port (iBrogue): Game Center leaderboard (BrogueCE_High_Score). Hotkey 'C'
-    // avoids the N/P/V/F/Q already used by the other main-menu buttons.
-    initializeMainMenuButton(&(buttons[4]), "    Game %sC%senter    ", 'c', 'C', NG_GAME_CENTER);
+    // iOS port (Brogue SE): SE is Game Center-silent (no leaderboard/achievements), so the
+    // "Game Center" main-menu button is omitted here. CE keeps it in BrogueCE/Engine/MainMenu.c.
 
 #ifndef BROGUE_TABLET
-    initializeMainMenuButton(&(buttons[5]), "       %sQ%suit       ", 'q', 'Q', NG_QUIT);
+    initializeMainMenuButton(&(buttons[4]), "       %sQ%suit       ", 'q', 'Q', NG_QUIT);
 #endif
 
 }

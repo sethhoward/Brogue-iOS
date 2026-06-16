@@ -1635,6 +1635,7 @@ final class BrogueViewController: UIViewController {
         case heading(String)   // top-level group heading
         case note(String)      // italic descriptor beneath a heading
         case section(String)   // sub-section heading
+        case body(String)      // plain body paragraph
         case bullets([String]) // bullet list
     }
 
@@ -1703,6 +1704,10 @@ final class BrogueViewController: UIViewController {
         sectionStyle.paragraphSpacingBefore = 12
         sectionStyle.paragraphSpacing = 4
 
+        let bodyStyle = NSMutableParagraphStyle()
+        bodyStyle.paragraphSpacing = 8
+        bodyStyle.lineBreakMode = .byWordWrapping
+
         for block in blocks {
             switch block {
             case .heading(let text):
@@ -1722,6 +1727,12 @@ final class BrogueViewController: UIViewController {
                     .foregroundColor: UIColor.label,
                     .paragraphStyle: sectionStyle,
                 ]))
+            case .body(let text):
+                out.append(NSAttributedString(string: text + "\n", attributes: [
+                    .font: UIFont.preferredFont(forTextStyle: .body),
+                    .foregroundColor: UIColor.label,
+                    .paragraphStyle: bodyStyle,
+                ]))
             case .bullets(let items):
                 for item in items {
                     out.append(NSAttributedString(string: "•\t" + item + "\n", attributes: [
@@ -1735,65 +1746,20 @@ final class BrogueViewController: UIViewController {
         return out
     }
 
-    /// Key BrogueCE features and differences from the original Brogue. Curated
-    /// for the iOS port — desktop/command-line-only items are omitted.
+    /// BrogueCE's purpose and how it relates to the original Brogue. Curated for
+    /// the iOS port; the full change list lives in the project changelog/wiki.
     private static func ceInfoBlocks() -> [InfoBlock] {
         return [
-            .note("How BrogueCE differs from the original Brogue (\"Classic\"). Switch engines from the title screen to compare."),
-            .heading("Gameplay Differences"),
-            .note("The changes below have some impact on game difficulty and is not a comprehensive list."),
-            .section("Monsters"),
+            .note("Brogue was created by Brian Walker. This version, Brogue: Community Edition, is a continuation of its development. It has several main goals:"),
             .bullets([
-                "Dar priestesses are now included in the 'Mage' monster class. A weapon of mage slaying will instantly kill them, and armor of mage immunity will provide invulnerability to their feeble attacks.",
-                "Goblin conjurers no longer have the spear attack pattern in contradiction with their attack message.",
-                "Liches/phoenixes polymorphed into other creatures no longer spawn phylacteries/eggs on death.",
-                "Allies can no longer learn abilities from the spectral clones created by armor of multiplicity.",
+                "fix bugs and crashes",
+                "add useful quality of life and non-gameplay features",
+                "improve the gameplay and keep it exciting",
+                "ease development and maintenance",
+                "be a convenient base for forks and ports to new platforms",
             ]),
-            .section("Items"),
-            .bullets([
-                "Fixed a bug which caused staffs of firebolt and lightning to deal a fixed amount of damage instead of a variable amount.",
-                "Wands of plenty now reduce the maximum health of the target and its clone by 50%.",
-                "Wands of empowerment no longer increase the target's health regeneration rate.",
-                "Wands of empowerment have been strengthened to a middle-ground between their 1.7.4 and 1.7.5 versions.",
-                "Nerfed charm of teleportation recharge time. At +1 it starts at the same value, but becomes 1 turn at +13 instead of +11.",
-                "Buffed staff of protection duration. At /N max charges, the duration is now 13 × 1.4^(N-2) instead of 5 × 1.53^(N-2).",
-                "Fixed a bug which caused the bolt name from unidentified staffs or wands to be revealed when reflected.",
-                "Fixed a bug which caused some staffs to appear in treasure vaults without their max charges being shown.",
-                "Fixed a bug which caused unidentified rings to be revealed as negative in the ring description after reading a scroll of remove curse.",
-            ]),
-            .section("Combat"),
-            .bullets([
-                "Changed the creatures hit as collateral from a spear attack to be the same as those hit by the sweep of an axe attack. (This reincludes hitting hidden monsters.)",
-                "Fixed a bug which allowed fast-attacking monsters to attack the player before falling down a chasm or hole.",
-                "Fixed a bug which prevented discordant allies from attacking the player diagonally.",
-                "Fixed a bug which caused ranged-melee attackers (e.g. goblins, salamanders) with the grappling mutation to attempt to seize non-adjacent targets. Now they only seize adjacent targets and perform normal, damage-dealing, ranged attacks on non-adjacent targets.",
-            ]),
-            .section("Dungeon Generation"),
-            .bullets([
-                "Captive and shackled allies are more common.",
-                "Fixed a bug which caused some traps to be generated on cells with foliage, leading to odd behavior.",
-            ]),
-            .section("Mechanics"),
-            .bullets([
-                "Fixed a bug which caused hunting monsters to have a 97% chance to lose track of the player for each turn they spend outside of the player's stealth range, instead of the intended 3% chance.",
-                "Revamped the searching system. Instead of performing a strong search only after five consecutive turns of pressing 's', you now perform a weaker, single-turn search every time you press 's', with a stronger one on the fifth."
-            ]),
-            .section("Informational"),
-            .bullets([
-                "The \"blue\" player-to-monster combat information is now displayed in ally tooltips (so you can more easily assess how much health they have).",
-                "The sidebar now displays whether a monster is carrying an item.",
-                "Magic-detected cells are now described with \"you remember seeing here\" when the item has been seen.",
-                "Fixed a bug where inspecting an out-of-sight lumenstone would say \"you remember seeing a lumenstone from depth 0\" instead of the depth it was found.",
-                "Fixed a bug where some item quantities were remembered incorrectly on leaving and revisiting a level.",
-                "Fixed incorrect descriptions of remembered items when hallucinating.",
-            ]),
-            .heading("Non-Gameplay Differences"),
-            .note("The changes below have no impact on game difficulty."),
-            .section("Notable Enhancements"),
-            .bullets([
-                "Improved stability. Game crashes and out-of-sync errors are rare.",
-                "Added support for Oryx's graphical tiles (toggle in-game with the 'G' key). Your text/tiles choice is remembered for future runs.",
-            ]),
+            .section("How is CE different from the original Brogue?"),
+            .note("Please refer to the changelog or release history for a complete list. There is also a wiki page: Changes from original."),
         ]
     }
 
@@ -1823,14 +1789,9 @@ final class BrogueViewController: UIViewController {
     /// Short description of the original Brogue (the "Classic" engine).
     private static func classicInfoBlocks() -> [InfoBlock] {
         return [
-            .heading("Brogue"),
-            .note("The original roguelike by Brian Walker (version 1.7.5)."),
-            .section("About"),
-            .bullets([
-                "A clean, deterministic dungeon crawl that prizes tactical depth over character building — every monster, item, and trap interacts through a small set of consistent rules.",
-                "Descend 26 floors to retrieve the Amulet of Yendor. Light, stealth, and terrain are as important as combat.",
-                "This is the classic engine BrogueCE is built upon. Switch to BrogueCE from the title screen for its bug fixes, balance changes, and graphical tiles — tap the info button there to see what's different.",
-            ]),
+            .note("Countless adventurers before you have descended this torch-lit staircase, seeking the promised riches below. As you reach the bottom and step into the wide cavern, the doors behind you seal with a powerful magic..."),
+            .heading("Welcome to the Dungeons of Doom!"),
+            .body("Brogue is a single-player strategy game set in the halls of a mysterious and randomly-generated dungeon. The objective is simple enough -- retrieve the fabled Amulet of Yendor from the 26th level -- but the dungeon is riddled with danger. Horrifying creatures and devious, trap-ridden terrain await. Yet it is also riddled with weapons, potions, and artifacts of forgotten power. Survival demands strength and cunning in equal measure as you descend, making the most of what the dungeon gives you. You will make sacrifices, narrow escapes, and maybe even some friends along the way -- but will you be one of the lucky few to return alive?"),
         ]
     }
 

@@ -32,6 +32,46 @@ See `BrogueCE/Engine/IOS_MODIFICATIONS.md` (faithful CE) and
 
 ## Change log
 
+### 2026-06-16 — Remove the "Game Center" button from the SE title menu
+
+**What.** SE is Game Center-silent (no leaderboard/achievements), but its main menu — inherited from CE
+— still showed a "Game Center" button. Removed it. The SE title menu is now New Game, Play, View, File
+Management (+ Quit on non-tablet builds).
+
+**Where.** `MainMenu.c` `initializeMainMenuButtons` — dropped the `buttons[4]` `NG_GAME_CENTER` init and
+lowered `MAIN_MENU_BUTTON_COUNT` (tablet 5→4, non-tablet 6→5, with Quit moving to `buttons[4]`). The
+`NG_GAME_CENTER` dispatch case is left in place (now unreachable, harmless). CE keeps its button in
+`BrogueCE/Engine/MainMenu.c`. SE-only.
+
+### 2026-06-16 — SE title-screen release string: "Alphabet-a Soup 0.9.0 "
+
+**What.** The title screen renders `gameConst->versionString` bottom-right (CE shows "CE 1.15"). SE now
+shows its own branded release line, **"Alphabet-a Soup 0.9.0 "** (the trailing space is intentional --
+it pads the string off the menu's right edge). Replaces the previous `"SE 1.15.1-ios"`.
+
+**Where.** `GlobalsBrogue.c` `BROGUE_VERSION_STRING`. This string is **display-only** (title via
+`drawMenuFlames` in `MainMenu.c`, `--version`, seed-catalog header) — it is **not** used for save/
+recording compatibility, which is governed by `BROGUE_RECORDING_VERSION_STRING` /
+`BROGUE_PATCH_VERSION_PATTERN` (left as `"SE <major>.<minor>.<patch>"`). So SE/CE saves still can never
+alias, and the branded version is decoupled from the technical 1.15.1 fork point. No determinism impact.
+
+### 2026-06-16 — Fix: `potionTable_Brogue` row order out of sync with the `potionKind` enum
+
+**What.** In the standard-Brogue potion table only, the **"detect magic"** row sat at index 16 (right
+after "creeping death", *before* the honey/vomit/wort/venom block). The `potionKind` enum puts
+`POTION_DETECT_MAGIC2` at index 20 (*after* `POTION_VENOM`). Because `makeItemInto` indexes the table
+directly by kind (`&potionTable[itemKind]`), every kind 16–20 was off: e.g. capturing a healing cloud
+yields `POTION_WORT` (18), which resolved to `potionTable[18]` = **"vomit"** — the reported bug. Stench
+capture (`POTION_VOMIT`=17) likewise showed as "honey". Reordered the rows to
+HONEY, VOMIT, WORT, VENOM, DETECT_MAGIC2 so the table matches the enum.
+
+**Where.** `GlobalsBrogue.c` `potionTable_Brogue[]` — moved the "detect magic" row to after "venom" and
+left a comment warning that row order MUST track `enum potionKind`. `GlobalsRapidBrogue.c` /
+`GlobalsBulletBrogue.c` were already correct (unchanged). No enum, capture-mapping, or effect-dispatch
+code changed — those all use `POTION_*` constants; this was purely the descriptive table being
+mis-ordered. (Note: honey/vomit/wort/venom carry `frequency 0` in Brogue vs 10 in Rapid/Bullet — left
+as-is; that's a generation-tuning question, separate from this ordering fix.)
+
 ### 2026-06-15 — Display "potion of water" as "bottle of water"
 
 **What.** Captured plain water now reads as **"bottle of water"** instead of "potion of water" — it's
@@ -1069,8 +1109,10 @@ pre-change recordings. CE-only; all magnitudes (`EMBOLDEN_*` defines in `Monster
 in `initializeRogue()`, mirroring `D_FROST_STAFF_START`. Equip it to activate the aura/reveal.
 `D_HEAL_CHARM_START` (default 1) likewise grants a strong +10 charm of health (near-full heal, short
 cooldown) for sustaining an ally run during testing. `D_LEATHER_ARMOR_START` (default 1) grants a +50
-leather armor (near-invulnerable, so you can test without dying); equip it to wear it. All are
-deterministic (not recorded inputs), so they're replay-safe. Flip to 0 to ship.
+leather armor (near-invulnerable, so you can test without dying); equip it to wear it.
+`D_EMPTY_BOTTLE_START` (default 1) grants a stack of 3 empty bottles (the POTION_DETECT_MAGIC slot) so the
+v2 capture system can be tested without first finding one. All are deterministic (not recorded inputs),
+so they're replay-safe. Flip to 0 to ship.
 
 ### 2026-06-11 — Sense when a pursuer gives up the chase (new content)
 
