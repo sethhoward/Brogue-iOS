@@ -464,7 +464,7 @@ always-identified, so their color is never shown). `numberGoodPotionKinds` = 11.
 | 1 | strength | + | **0†** | 400 | 1,1 | +1 strength permanently |
 | 2 | telepathy | + | 20 | 350 | 300 | Drink: sense all creatures (temporary). iOS: thrown at a creature → a *permanent* single-target bond (that one stays revealed). See §7b |
 | 3 | levitation | + | 15 | 250 | 100 | Hover over hazards |
-| 4 | **empty bottle** | + | 20 | 500 | 0 | iOS port: the `POTION_DETECT_MAGIC` slot, repurposed. Captures a gas/liquid/hazard → the matching, already-known potion. See §7a |
+| 4 | **empty bottle** | + | **0✧** | 500 | 0 | iOS port: the `POTION_DETECT_MAGIC` slot, repurposed. `frequency 0` — **not** in the weighted potion draw; placed by its own additive meter (see ✧). Captures a gas/liquid/hazard → the matching, already-known potion. See §7a |
 | 5 | speed (haste self) | + | 10 | 500 | 25 | Move at double speed |
 | 6 | fire immunity | + | 15 | 500 | 150 | Immune to heat/fire/lava |
 | 7 | invisibility | + | 15 | 400 | 75 | Temporarily invisible |
@@ -501,6 +501,16 @@ metered table (§10), so *nothing* overrides the 0 — these never generate. The
 is to capture a matching hazard with the empty bottle (§7a). Always identified (`shuffleFlavors`);
 `magicPolarity −1` so a thrown one is treated as offensive. Adding `POTION_*` enum values shifts the
 generation/ID stream → a `recordingVersionString` bump is owed at release.
+
+✧ **Empty bottle — additive channel (iOS port, Brogue SE).** `frequency = 0` in all three variant
+tables, so `chooseKind` never picks it and it never displaces a real potion (the dilution it caused
+as a ninth in-pool "potion" is gone). It is placed by a dedicated self-correcting meter at the *end*
+of `populateItems`, fully in addition to the per-level item budget: `rogue.emptyBottleSpawnChance`
+accrues `EMPTY_BOTTLE_SPAWN_INCREMENT` (13) points per eligible depth, rolled with `rand_percent`;
+a hit places one bottle (normal item heat-map) and resets the accumulator. Targets **~1 bottle every
+3–4 floors**, gated to depths `[2, amuletLevel]`, no hard cap. Deterministic / save-replay-safe (reset
+in `initializeRogue`; drawn after the item+gold loops so their RNG stream is unchanged). See
+[`docs/design/empty-bottle-v2.md`](../design/empty-bottle-v2.md) §4.
 
 ### 7a. Empty bottle & the capture system (iOS port)
 

@@ -2766,6 +2766,10 @@ typedef struct playerCharacter {
     // metered items
     long long foodSpawned;              // amount of nutrition units spawned so far this game
     meteredItem *meteredItems;
+    // iOS port (Brogue SE): empty-bottle additive generation channel. Self-correcting accumulator,
+    // independent of meteredItems above, advanced once per eligible depth in populateItems and reset
+    // to 0 on a placement. Set deterministically at level-gen, so it is save-replay-safe.
+    short emptyBottleSpawnChance;       // accrued % chance of spawning a free-standing empty bottle this depth
 
     // ring bonuses:
     short clairvoyance;

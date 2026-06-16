@@ -232,6 +232,7 @@ void initializeRogue(uint64_t seed) {
     rogue.highScoreSaved = false;
     rogue.cautiousMode = false;
     rogue.milliseconds = 0;
+    rogue.emptyBottleSpawnChance = 0; // iOS port (Brogue SE): reset the additive empty-bottle meter for the new run
 
     rogue.meteredItems = calloc(gameConst->numberMeteredItems, sizeof(meteredItem));
     rogue.featRecord = calloc(gameConst->numberFeats, sizeof(boolean));

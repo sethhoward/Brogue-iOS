@@ -570,6 +570,11 @@ static boolean getItemSpawnLoc(unsigned short heatMap[DCOLS][DROWS], short *x, s
 }
 
 // Generates and places items for the level. Must pass the location of the up-stairway on the level.
+// iOS port (Brogue SE): per-eligible-depth increment for the additive empty-bottle meter
+// (rogue.emptyBottleSpawnChance). The chance accrues each depth and resets on a placement, so with a
+// reset-on-hit accumulator this targets roughly one bottle every ~3-4 floors. Tunable from playtests.
+#define EMPTY_BOTTLE_SPAWN_INCREMENT    13
+
 void populateItems(pos upstairs) {
     if (!ITEMS_ENABLED) {
         return;
@@ -837,6 +842,29 @@ void populateItems(pos upstairs) {
     if (D_INSPECT_LEVELGEN) {
         dumpLevelToScreen();
         temporaryMessage("Added gold.", REQUIRE_ACKNOWLEDGMENT);
+    }
+
+    // iOS port (Brogue SE): empty-bottle additive generation channel.
+    // The empty bottle (POTION_DETECT_MAGIC) has itemTable frequency 0, so it never appears in the
+    // weighted potion draw (chooseKind) and never consumes a potion slot -- that keeps the real-potion
+    // distribution untouched. Instead it is placed here, on its own self-correcting meter, fully in
+    // ADDITION to the per-level item budget above (it does not consume a generic item slot either).
+    // rogue.emptyBottleSpawnChance accrues each eligible depth and resets to 0 on a placement, targeting
+    // roughly one bottle every 3-4 floors. Gated to depths [2, amuletLevel] (skip the first floor; no
+    // bottles among the lumenstone-only floors past the amulet). Drawn at the END of populateItems so the
+    // item/gold RNG stream above is byte-identical to before this feature; deterministic via rand_percent,
+    // so saves (input replays) reproduce it. See docs/design/empty-bottle-v2.md.
+    if (rogue.depthLevel >= 2 && rogue.depthLevel <= gameConst->amuletLevel) {
+        rogue.emptyBottleSpawnChance += EMPTY_BOTTLE_SPAWN_INCREMENT;
+        if (rand_percent(rogue.emptyBottleSpawnChance)) {
+            item *theItem = generateItem(POTION, POTION_DETECT_MAGIC);
+            theItem->originDepth = rogue.depthLevel;
+            pos itemPlacementLoc = INVALID_POS;
+            getItemSpawnLoc(itemSpawnHeatMap, &itemPlacementLoc.x, &itemPlacementLoc.y, &totalHeat);
+            coolHeatMapAt(itemSpawnHeatMap, itemPlacementLoc, &totalHeat);
+            placeItemAt(theItem, itemPlacementLoc);
+            rogue.emptyBottleSpawnChance = 0;
+        }
     }
 
     // No enchant scrolls or strength/life potions can spawn except via initial

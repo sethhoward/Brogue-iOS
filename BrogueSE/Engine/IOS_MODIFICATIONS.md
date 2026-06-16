@@ -32,6 +32,33 @@ See `BrogueCE/Engine/IOS_MODIFICATIONS.md` (faithful CE) and
 
 ## Change log
 
+### 2026-06-16 — Empty bottle: additive generation channel (out of the potion draw)
+
+**What.** The empty bottle (`POTION_DETECT_MAGIC`) no longer competes in the weighted potion draw.
+Its `itemTable` frequency is set **15 → 0** (Brogue) / **20 → 0** (Rapid/Bullet), and it is now placed
+by a dedicated self-correcting meter at the **end of `populateItems`**, fully *in addition to* the
+per-level item budget (it consumes neither a potion slot nor a generic item slot).
+
+**Why.** As a ninth "potion," the bottle sitting in the draw at freq 15/20 meant every potion roll had
+a real chance of becoming a bottle *instead of* a real potion, visibly skewing the real-potion
+distribution. Pulling it into its own channel restores the pre-bottle potion mix while still seeding
+bottles across the dungeon.
+
+**Mechanic.** New `short rogue.emptyBottleSpawnChance` accrues `EMPTY_BOTTLE_SPAWN_INCREMENT` (13)
+points per eligible depth, rolled with `rand_percent`; on a hit it places one bottle via the normal
+item heat-map (`getItemSpawnLoc` + `placeItemAt`) and resets to 0. Reset-on-hit self-corrects and
+targets **~1 bottle every 3–4 floors**. Gated to depths `[2, gameConst->amuletLevel]`; no hard per-run
+cap. Drawn at the end of `populateItems` so the item/gold RNG stream above is byte-identical to before;
+deterministic via `rand_percent`, reset to 0 in `initializeRogue`, so saves (input replays) reproduce
+placements. Cross-version seed reproducibility intentionally not preserved (SE is leaderboard-silent).
+
+**Where.** `emptyBottleSpawnChance` field + comment in `playerCharacter` (`Rogue.h`); reset in
+`initializeRogue` (`RogueMain.c`); `EMPTY_BOTTLE_SPAWN_INCREMENT` define + the placement pass in
+`populateItems` (`Items.c`); empty-bottle `frequency` set to 0 in all three `potionTable_*`
+(`GlobalsBrogue.c` / `GlobalsBulletBrogue.c` / `GlobalsRapidBrogue.c`). All marked
+`// iOS port (Brogue SE):`. Design rationale in
+[docs/design/empty-bottle-v2.md](../../docs/design/empty-bottle-v2.md) §4.
+
 ### 2026-06-16 — Altars of insight: retune guaranteed depths to 6 & 11
 
 **What.** Moved the two guaranteed altars-of-insight reward rooms from depths **5 & 15** to **6 & 11**.
