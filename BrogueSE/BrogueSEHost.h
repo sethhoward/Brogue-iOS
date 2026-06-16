@@ -9,7 +9,7 @@
 //  drive both engines in the same process.
 //
 //  Included by the framework's SEBridge.mm and by the app's Objective-C bridging
-//  header (under SE_ENABLED).
+//  header.
 //
 
 #import <Foundation/Foundation.h>

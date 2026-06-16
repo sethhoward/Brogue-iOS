@@ -150,14 +150,9 @@ extension BrogueGameEvent {
 
 /// Which engine is currently driving the shared rendering surface.
 ///
-/// `.se` (Brogue SE) is a fork of the CE engine living in its own framework; it is
-/// only available in builds that define `SE_ENABLED`, so the case is compiled out of
-/// shipping builds along with the rest of the SE selector.
+/// `.se` (Brogue SE) is a fork of the CE engine living in its own framework.
 enum EngineKind {
-    case classic, ce
-    #if SE_ENABLED
-    case se
-    #endif
+    case classic, ce, se
 
     /// SE runs through the same CEHost bridge and presents the same in-engine UI as
     /// CE, so most "is this the CE engine?" UI checks should treat SE like CE. Only
@@ -995,12 +990,10 @@ final class BrogueViewController: UIViewController {
             // management always showed an empty CE directory ("no files found").
             var subfolder = "ce"
             var allowsDuplicate = false
-            #if SE_ENABLED
             if self.currentEngine == .se {
                 subfolder = "se"
                 allowsDuplicate = true   // debug aid: SE-only "Duplicate" swipe action
             }
-            #endif
             let saveDir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
                 .appendingPathComponent(subfolder)
             let nav = UINavigationController(rootViewController:
@@ -1195,7 +1188,6 @@ final class BrogueViewController: UIViewController {
             thread.start()
             engineThread = thread
 
-        #if SE_ENABLED
         case .se:
             // Brogue SE engine, in its own embedded framework. Same CEHost bridge as
             // CE; only the entry point differs (se_start vs ce_start).
@@ -1208,20 +1200,11 @@ final class BrogueViewController: UIViewController {
             thread.stackSize = 400 * 8192
             thread.start()
             engineThread = thread
-        #endif
         }
     }
 
     /// Engines in title-screen cycling order (Classic → BrogueCE → Brogue SE).
-    /// SE is only present in `SE_ENABLED` builds, so otherwise this is the original
-    /// two-engine cycle.
-    private static let engineCycle: [EngineKind] = {
-        #if SE_ENABLED
-        return [.classic, .ce, .se]
-        #else
-        return [.classic, .ce]
-        #endif
-    }()
+    private static let engineCycle: [EngineKind] = [.classic, .ce, .se]
 
     /// Cycles to the next/previous engine in lineage order (wrapping). `forward`
     /// advances Classic → CE → SE; `!forward` goes the other way.
@@ -1245,10 +1228,8 @@ final class BrogueViewController: UIViewController {
         switch currentEngine {
         case .ce:
             ce_requestTermination()
-        #if SE_ENABLED
         case .se:
             se_requestTermination()
-        #endif
         case .classic:
             setClassicTerminationRequested(true)
         }
@@ -1398,14 +1379,10 @@ final class BrogueViewController: UIViewController {
     private static let engineDefaultsKey = "selectedEngine"
 
     /// The engine to boot on launch — the last one played, defaulting to Classic.
-    /// A persisted "se" only resolves to SE in SE_ENABLED builds; otherwise it
-    /// falls back to Classic so a shipping build never lands in a hidden engine.
     private static func persistedEngine() -> EngineKind {
         switch UserDefaults.standard.string(forKey: engineDefaultsKey) {
         case "ce": return .ce
-        #if SE_ENABLED
         case "se": return .se
-        #endif
         default: return .classic
         }
     }
@@ -1415,9 +1392,7 @@ final class BrogueViewController: UIViewController {
         switch currentEngine {
         case .classic: value = "classic"
         case .ce: value = "ce"
-        #if SE_ENABLED
         case .se: value = "se"
-        #endif
         }
         UserDefaults.standard.set(value, forKey: Self.engineDefaultsKey)
     }
@@ -1667,9 +1642,7 @@ final class BrogueViewController: UIViewController {
         switch currentEngine {
         case .classic: title = "About Brogue";    blocks = Self.classicInfoBlocks()
         case .ce:      title = "About BrogueCE";   blocks = Self.ceInfoBlocks()
-        #if SE_ENABLED
         case .se:      title = "About Brogue SE";  blocks = Self.seInfoBlocks()
-        #endif
         }
 
         let content = UIViewController()
@@ -1800,13 +1773,12 @@ final class BrogueViewController: UIViewController {
         ]
     }
 
-    #if SE_ENABLED
     /// Brogue SE release notes — player-facing highlights for the current release.
     /// Curated for the info panel; the full technical log lives in
     /// BrogueSE/Engine/IOS_MODIFICATIONS.md. Keep in sync with new content.
     private static func seInfoBlocks() -> [InfoBlock] {
         return [
-            .note("Brogue SE (\"Seth's Edition\") — An experimental fork of BrogueCE with original items, monsters, and mechanics with part 1 titled (\"Alphabet-a Soup\") and an upcoming part 2 titled (\"Alphabeasts\") bringing new monsters and minibosses. Here's what's new:"),
+            .note("Brogue SE — An experimental fork of BrogueCE with original items, monsters, and mechanics with release 1 (\"Alphabet-a Soup\") and an upcoming release (\"Alphabeast\") that will bring new monsters and minibosses. Here's what's new:"),
             .heading("🧪 New Items"),
             .bullets([
                 "The Empty Bottle — Carry it and the world fills it: step into a gas or pool to bottle it, drift over lava or a chasm while levitating to skim it, or set it down and zap it with a bolt. Each capture becomes a real, identified potion.",
@@ -1843,7 +1815,6 @@ final class BrogueViewController: UIViewController {
             ]),
         ]
     }
-    #endif
 
     /// Short description of the original Brogue (the "Classic" engine).
     private static func classicInfoBlocks() -> [InfoBlock] {
@@ -1858,9 +1829,7 @@ final class BrogueViewController: UIViewController {
         switch currentEngine {
         case .classic: versionChooserLabel?.text = "Brogue"
         case .ce:      versionChooserLabel?.text = "BrogueCE"
-        #if SE_ENABLED
         case .se:      versionChooserLabel?.text = "Brogue SE"
-        #endif
         }
     }
 
@@ -3153,9 +3122,7 @@ extension BrogueViewController {
         hardwareKeyboardConnected = connected
         setHardwareKeyboardConnected(connected ? 1 : 0)
         ce_setHardwareKeyboardConnected(connected ? 1 : 0)
-        #if SE_ENABLED
         se_setHardwareKeyboardConnected(connected ? 1 : 0)
-        #endif
         DispatchQueue.main.async { [weak self] in
             self?.refreshDirectionPadVisibility()
             self?.refreshEscButtonVisibility()
