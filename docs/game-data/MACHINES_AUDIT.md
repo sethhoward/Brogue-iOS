@@ -1,6 +1,6 @@
-# Machines & room-placement audit (BrogueCE 1.15)
+# Machines & room-placement audit (Brogue SE)
 
-This documents the **machine** system in the BrogueCE 1.15 engine (`BrogueCE/Engine/`): how
+This documents the **machine** system in the Brogue SE engine (`BrogueSE/Engine/`, a fork of BrogueCE 1.15): how
 reward rooms, vaults, vestibules, flavor areas, and our iOS-port altars get placed into the
 dungeon, **why the `roomSize` window decides whether a machine can appear at all**, and a full
 audit of the Brogue `blueprintCatalog`. Citations are `file:line` against the engine source; if
@@ -18,21 +18,21 @@ the engine changes, regenerate.
 
 | Concern | Location |
 |---|---|
-| Builder + placement | [`buildAMachine`](../../BrogueCE/Engine/Architect.c) — Architect.c:988 |
-| Per-level machine scheduling | [`addMachines`](../../BrogueCE/Engine/Architect.c) — Architect.c:1847 |
-| Choke / gate-site analysis | [`analyzeMap`](../../BrogueCE/Engine/Architect.c) — Architect.c:192 |
-| Interior flood-fill | [`addTileToMachineInteriorAndIterate`](../../BrogueCE/Engine/Architect.c) — Architect.c:400 |
-| Room/corridor carving | [`carveDungeon`](../../BrogueCE/Engine/Architect.c) / [`attachRooms`](../../BrogueCE/Engine/Architect.c) — Architect.c:2608 / 2519 |
-| The catalog (Brogue) | `blueprintCatalog` in [GlobalsBrogue.c:178+](../../BrogueCE/Engine/GlobalsBrogue.c) |
-| `blueprint` / `machineFeature` structs | [Rogue.h:2830 / 2869](../../BrogueCE/Engine/Rogue.h) |
-| `BP_*` / `MF_*` flags | [Rogue.h:2851 / 2796](../../BrogueCE/Engine/Rogue.h) |
-| `machineTypes` enum (blueprint indices) | [Rogue.h:2880](../../BrogueCE/Engine/Rogue.h) |
-| Metering constants | `brogueGameConst` in [GlobalsBrogue.c:1051+](../../BrogueCE/Engine/GlobalsBrogue.c) |
+| Builder + placement | [`buildAMachine`](../../BrogueSE/Engine/Architect.c) — Architect.c:988 |
+| Per-level machine scheduling | [`addMachines`](../../BrogueSE/Engine/Architect.c) — Architect.c:1847 |
+| Choke / gate-site analysis | [`analyzeMap`](../../BrogueSE/Engine/Architect.c) — Architect.c:192 |
+| Interior flood-fill | [`addTileToMachineInteriorAndIterate`](../../BrogueSE/Engine/Architect.c) — Architect.c:400 |
+| Room/corridor carving | [`carveDungeon`](../../BrogueSE/Engine/Architect.c) / [`attachRooms`](../../BrogueSE/Engine/Architect.c) — Architect.c:2608 / 2519 |
+| The catalog (Brogue) | `blueprintCatalog` in [GlobalsBrogue.c:176+](../../BrogueSE/Engine/GlobalsBrogue.c) |
+| `blueprint` / `machineFeature` structs | [Rogue.h:2892 / 2853](../../BrogueSE/Engine/Rogue.h) |
+| `BP_*` / `MF_*` flags | [Rogue.h:2874 / 2819](../../BrogueSE/Engine/Rogue.h) |
+| `machineTypes` enum (blueprint indices) | [Rogue.h:2903](../../BrogueSE/Engine/Rogue.h) |
+| Metering constants | `brogueGameConst` in [GlobalsBrogue.c:1061+](../../BrogueSE/Engine/GlobalsBrogue.c) |
 
 The catalog is **per-variant**: Brogue, Rapid, and Bullet each have their own
 `blueprintCatalog` (`GlobalsBrogue.c`, `GlobalsRapidBrogue.c`, `GlobalsBulletBrogue.c`). This
 audit covers the **Brogue** catalog. Play grid is **79×29** (`DCOLS`×`DROWS`), `AMULET_LEVEL = 26`,
-`DEEPEST_LEVEL = 40` ([GlobalsBrogue.c:43](../../BrogueCE/Engine/GlobalsBrogue.c), [Rogue.h:210](../../BrogueCE/Engine/Rogue.h)).
+`DEEPEST_LEVEL = 40` ([GlobalsBrogue.c:43](../../BrogueSE/Engine/GlobalsBrogue.c), [Rogue.h:213](../../BrogueSE/Engine/Rogue.h)).
 
 ---
 
@@ -40,7 +40,7 @@ audit covers the **Brogue** catalog. Play grid is **79×29** (`DCOLS`×`DROWS`),
 
 Machines are placed *into an already-carved level*. They do not create the rooms they live in
 (except `BP_REDESIGN_INTERIOR` ones); they **find** a pocket of the existing dungeon that matches
-their `roomSize` and claim it. The order, from [`digDungeon`](../../BrogueCE/Engine/Architect.c) (Architect.c:~3040):
+their `roomSize` and claim it. The order, from [`digDungeon`](../../BrogueSE/Engine/Architect.c) (Architect.c:~3048):
 
 1. `clearLevel()` — fill with granite.
 2. **`carveDungeon(grid)`** (Architect.c:2608) — place the first room, then `attachRooms` accretes
@@ -49,7 +49,7 @@ their `roomSize` and claim it. The order, from [`digDungeon`](../../BrogueCE/Eng
    pathing distance currently exceeds 20, converting the tree of rooms into a graph with loops.
 4. Translate the grid to `FLOOR`/`DOOR` tiles (a grid==2 cell becomes a real `DOOR` 60% of the time).
 5. `finishWalls`, then `designLakes`/`fillLakes` (water, lava, chasm, brimstone).
-6. `runAutogenerators(false)` — non-machine terrain & dungeon-features (Architect.c:1910).
+6. `runAutogenerators(false)` — non-machine terrain & dungeon-features (Architect.c:1932).
 7. `removeDiagonalOpenings`.
 8. **`addMachines()`** (Architect.c:1847) — **the subject of this doc.**
 9. `runAutogenerators(true)` — the *machine* autogenerators (traps, flavor machines, etc.).
@@ -83,7 +83,7 @@ in §3.
 
 This is the heart of the system and the answer to "certain sizes are more likely to be placed."
 
-`analyzeMap(calculateChokeMap=true)` ([Architect.c:192](../../BrogueCE/Engine/Architect.c)) runs in two passes:
+`analyzeMap(calculateChokeMap=true)` ([Architect.c:192](../../BrogueSE/Engine/Architect.c)) runs in two passes:
 
 ### 3a. Find chokepoints (Architect.c:246)
 A passable, non-loop cell is an `IS_CHOKEPOINT` if blocking it would pinch the local passable arcs
@@ -111,7 +111,7 @@ Two hard rules fall out of this code:
 
 ### 3c. How `roomSize` gates a `BP_ROOM` machine
 When `buildAMachine` places a `BP_ROOM` blueprint it scans for gate sites whose region size lands
-**inside the blueprint's `roomSize[0..1]` window** ([Architect.c:1087–1099](../../BrogueCE/Engine/Architect.c)):
+**inside the blueprint's `roomSize[0..1]` window** ([Architect.c:1087–1099](../../BrogueSE/Engine/Architect.c)):
 
 ```c
 if ((pmap[i][j].flags & IS_GATE_SITE)
@@ -183,7 +183,7 @@ while (depthLevel <= deepestLevelForMachines
 // then a random bonus pass (40% the first one if none yet, else 15% each)
 ```
 
-Brogue metering constants ([GlobalsBrogue.c:1073+](../../BrogueCE/Engine/GlobalsBrogue.c)):
+Brogue metering constants ([GlobalsBrogue.c:1083+](../../BrogueSE/Engine/GlobalsBrogue.c)):
 
 | Constant | Value | Effect |
 |---|---|---|
@@ -193,7 +193,7 @@ Brogue metering constants ([GlobalsBrogue.c:1073+](../../BrogueCE/Engine/Globals
 | `maxLevelForBonusMachines` | 2 | extra-generous bonus roll only on early levels |
 | `deepestLevelForMachines` | 26 | no reward rooms below the amulet level |
 
-Each metered reward calls `buildAMachine(-1, -1, -1, BP_REWARD, …)` (Architect.c:1900), so it draws
+Each metered reward calls `buildAMachine(-1, -1, -1, BP_REWARD, …)` (Architect.c:1922), so it draws
 a *random* `BP_REWARD` blueprint whose `depthRange` covers the current depth — **the reward you
 get is filtered by depth and weighted by `frequency`.** Up to 50 build attempts back the whole
 loop.
@@ -202,7 +202,7 @@ loop.
 
 ## 6. Flag reference
 
-### Blueprint flags (`BP_*`, Rogue.h:2851)
+### Blueprint flags (`BP_*`, Rogue.h:2874)
 | Flag | Meaning |
 |---|---|
 | `BP_ADOPT_ITEM` | machine must adopt an item (e.g. a door key from a vestibule) |
@@ -221,7 +221,7 @@ loop.
 | `BP_NO_INTERIOR_FLAG` | don't mark the area as a machine (flavor terrain) |
 | `BP_REDESIGN_INTERIOR` | nuke & pave: delete interior, build fresh rooms from a dungeon profile |
 
-### Notable feature flags (`MF_*`, Rogue.h:2796)
+### Notable feature flags (`MF_*`, Rogue.h:2819)
 `MF_GENERATE_ITEM`, `MF_GENERATE_HORDE`, `MF_BUILD_AT_ORIGIN` (at the entry door),
 `MF_BUILD_IN_WALLS` (statues/torches in the perimeter), `MF_BUILD_VESTIBULE` (spawn a door-guard
 machine at the origin), `MF_EVERYWHERE` (carpet the whole interior), `MF_ALTERNATIVE` /
@@ -254,7 +254,7 @@ in raffle; force-built or autogenerated only). `AL` = `AMULET_LEVEL` (26), `DL` 
 | Legendary ally portal | 8–AL | 30–50 | 15 | :263 |
 | Goblin warren² | 5–15 | 100–200 | 15 | :267 |
 | Sentinel sanctuary² | 10–23 | 100–200 | 15 | :278 |
-| **Altars of transference** [iOS] | 11–AL | 10–30 | 30 | :642 |
+| **Altars of transference** [iOS] | 11–AL | 10–30 | 30 | :647 |
 
 ¹ `roomSize {0,0}` + `BP_NO_INTERIOR_FLAG`: not a room machine; its items are adopted by key
 machines elsewhere via `MF_BUILD_ANYWHERE_ON_LEVEL`.
@@ -311,31 +311,31 @@ These have `freq 0` for the reward raffle — they're pulled in to host the key 
 | Zombie crypt | 12–AL | 60–90 | :524 |
 | Haunted house | 16–AL | 45–150 | :534 |
 | Worm tunnels | 8–AL | 80–175 | :540 |
-| Gauntlet (turrets) | 5–24 | 35–90 | :548 |
-| Boss room | 5–AL | 40–100 | :552 |
+| Gauntlet (turrets) | 5–24 | 35–90 | :553 |
+| Boss room | 5–AL | 40–100 | :557 |
 
 ### 7e. Thematic / flavor areas (`freq 0`; placed by machine autogenerators, not the reward raffle)
 | Blueprint | depth | roomSize | line |
 |---|---|---|---|
-| Shrine (safe haven) | 1–DL | 15–25 | :564 |
-| Idyll (ponds/grass) | 1–DL | 80–120 | :569 |
-| Swamp | 1–DL | 50–65 | :573 |
-| Camp | 1–DL | 40–50 | :577 |
-| Remnant (carpet + statues) | 1–DL | 80–120 | :583 |
-| Dismal | 1–DL | 60–70 | :587 |
-| Chasm catwalk | 1–DL-1 | 40–80 | :592 |
-| Lake walk | 1–DL | 40–80 | :598 |
-| Paralysis trap (revealed) | 1–DL | 35–40 | :603 |
-| Paralysis trap (hidden) | 1–DL | 35–40 | :607 |
-| Trick statue | 1–DL | 5–5 | :611 |
-| Worms in the walls (area) | 1–DL | 7–7 | :616 |
-| Sentinels | 1–DL | 40–40 | :620 |
+| Shrine (safe haven) | 1–DL | 15–25 | :569 |
+| Idyll (ponds/grass) | 1–DL | 80–120 | :574 |
+| Swamp | 1–DL | 50–65 | :578 |
+| Camp | 1–DL | 40–50 | :582 |
+| Remnant (carpet + statues) | 1–DL | 80–120 | :588 |
+| Dismal | 1–DL | 60–70 | :592 |
+| Chasm catwalk | 1–DL-1 | 40–80 | :597 |
+| Lake walk | 1–DL | 40–80 | :603 |
+| Paralysis trap (revealed) | 1–DL | 35–40 | :608 |
+| Paralysis trap (hidden) | 1–DL | 35–40 | :612 |
+| Trick statue | 1–DL | 5–5 | :616 |
+| Worms in the walls (area) | 1–DL | 7–7 | :621 |
+| Sentinels | 1–DL | 40–40 | :625 |
 
 ### 7f. iOS-port additions
 | Blueprint | depth | roomSize | freq | placement | line |
 |---|---|---|---|---|---|
-| **Altars of insight** | 5–AL | **6–25** | 0 | force-built at 5 & 15 (§8) | :632 |
-| **Altars of transference** | 11–AL | 10–30 | 30 | reward raffle (`BP_REWARD`) | :642 |
+| **Altars of insight** | 5–AL | **6–25** | 0 | force-built at 5 & 15 (§8) | :637 |
+| **Altars of transference** | 11–AL | 10–30 | 30 | reward raffle (`BP_REWARD`) | :647 |
 
 ---
 
@@ -368,7 +368,7 @@ Observations:
   Its ceiling of 14 excluded the abundant 15–50 pockets, so on many levels nothing qualified and the
   force-build silently failed. Widening it to `{6,25}` brought it in line with the commutation
   (`15–25`) and transference (`10–30`) altars — see the 2026-06-14 entry in
-  [IOS_MODIFICATIONS.md](../../BrogueCE/Engine/IOS_MODIFICATIONS.md).
+  [IOS_MODIFICATIONS.md](../../BrogueSE/Engine/IOS_MODIFICATIONS.md).
 - **Bigger windows ≈ more reliable, with almost no downside** for a small fixture, because the altar
   pair is placed by `placeAltarPairInRoom` which needs only **two open interior cells** (three
   fallback tiers, Architect.c:1774). A larger claimed pocket just yields a roomier carpeted shrine.
@@ -376,7 +376,7 @@ Observations:
 ### The guaranteed-placement pattern (insight altars)
 
 Because a single level can fail to offer a qualifying pocket, the insight altars don't rely on a
-one-shot best-effort like the amulet vault. `addMachines` ([Architect.c:1871](../../BrogueCE/Engine/Architect.c)) instead tracks
+one-shot best-effort like the amulet vault. `addMachines` ([Architect.c:1871](../../BrogueSE/Engine/Architect.c)) instead tracks
 how many altars are *due* by the current depth (`insightAltarDepths[] = {5, 15}`) versus how many
 have actually been built (`rogue.insightAltarsBuilt`), and **carries any shortfall forward**: a
 depth-5 failure retries on 6, 7, … until a room is found, capped at `INSIGHT_ALTAR_MAX_DEPTH = 20`.
@@ -400,7 +400,7 @@ Most reward rooms share a stereotyped layout, expressed as `machineFeature` rows
 
 The generic builder scatters features at random interior cells and can't guarantee an *ordered,
 adjacent* pair, so the iOS altars build **only the carpeted room** via the blueprint, then place the
-two altars in code with `placeAltarPairInRoom` ([Architect.c:1774](../../BrogueCE/Engine/Architect.c)). The target layout is a
+two altars in code with `placeAltarPairInRoom` ([Architect.c:1774](../../BrogueSE/Engine/Architect.c)). The target layout is a
 horizontal run with a one-tile gap:
 
 ```
@@ -412,7 +412,7 @@ horizontal run with a one-tile gap:
 `placeAltarPairInRoom` prefers three open cells in a row centered on the room (the `s . o` form),
 then falls back to two adjacent cells (`s o`), then to any two open cells — so the pair always
 exists even in a cramped pocket. Donor/recipient and payment/insight share the identical placement
-helper (`statueAbove` differs); see [GlobalsBrogue.c:624](../../BrogueCE/Engine/GlobalsBrogue.c).
+helper (`statueAbove` differs); see [GlobalsBrogue.c:637](../../BrogueSE/Engine/GlobalsBrogue.c).
 
 ---
 

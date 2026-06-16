@@ -1,23 +1,23 @@
 # Brogue Monsters — Developer Audit
 
-> **Generated entirely from the BrogueCE 1.15 C source** embedded in this repo. Every
+> **Generated entirely from the Brogue SE C source** (a fork of BrogueCE 1.15) embedded in this repo. Every
 > number, flag, and relationship below was extracted directly from the code, not from
 > memory of the game.
 >
 > **Primary source files:**
-> - `BrogueCE/Engine/Globals.c` — `monsterCatalog`, `monsterText`, `mutationCatalog`, `monsterClassCatalog`
-> - `BrogueCE/Engine/GlobalsBrogue.c` — `hordeCatalog_Brogue`, `brogueGameConst`
-> - `BrogueCE/Engine/Rogue.h` — `creatureType` struct, `enum monsterTypes`, `enum boltType`, `enum monsterBehaviorFlags` (`MONST_*`), `enum monsterAbilityFlags` (`MA_*`), `enum hordeFlags`
-> - `BrogueCE/Engine/Monsters.c` — `pickHordeType`, `spawnHorde`, `generateMonster`, `mutateMonster`, captive/ally handling
-> - `BrogueCE/Engine/PowerTables.c` — power-scaling tables
+> - `BrogueSE/Engine/Globals.c` — `monsterCatalog`, `monsterText`, `mutationCatalog`, `monsterClassCatalog`
+> - `BrogueSE/Engine/GlobalsBrogue.c` — `hordeCatalog_Brogue`, `brogueGameConst`
+> - `BrogueSE/Engine/Rogue.h` — `creatureType` struct, `enum monsterTypes`, `enum boltType`, `enum monsterBehaviorFlags` (`MONST_*`), `enum monsterAbilityFlags` (`MA_*`), `enum hordeFlags`
+> - `BrogueSE/Engine/Monsters.c` — `pickHordeType`, `spawnHorde`, `generateMonster`, `mutateMonster`, captive/ally handling
+> - `BrogueSE/Engine/PowerTables.c` — power-scaling tables
 >
-> **Total monster count:** the `monsterCatalog` has **69 entries** (`NUMBER_MONSTER_KINDS`), of which **68 are monsters** and one (`MK_YOU`, index 0) is the player. Source: `Rogue.h:1004` (`enum monsterTypes`) and `Globals.c:1025` (`monsterCatalog`).
+> **Total monster count:** the `monsterCatalog` has **69 entries** (`NUMBER_MONSTER_KINDS`), of which **68 are monsters** and one (`MK_YOU`, index 0) is the player. Source: `Rogue.h:1071` (`enum monsterTypes`) and `Globals.c:1164` (`monsterCatalog`).
 
 ---
 
 ## 1. The `creatureType` struct
 
-Source: `Rogue.h:2187`. Each `monsterCatalog` row is a `creatureType`:
+Source: `Rogue.h:2389`. Each `monsterCatalog` row is a `creatureType`:
 
 | Field | Type | Meaning |
 |---|---|---|
@@ -47,7 +47,7 @@ Speed note: `movementSpeed`/`attackSpeed` are tick durations. **Lower = faster.*
 
 ## 2. Master monster table
 
-Source: `Globals.c:1025` (`monsterCatalog`). Damage shown as `low–high` (clump factor omitted unless >1). Speed columns are move/attack tick durations. "Regen" is `turnsBetweenRegen` (0 = none).
+Source: `Globals.c:1164` (`monsterCatalog`). Damage shown as `low–high` (clump factor omitted unless >1). Speed columns are move/attack tick durations. "Regen" is `turnsBetweenRegen` (0 = none).
 
 | # | Monster | Char | HP | Def | Acc | Damage | Move | Atk | Regen | Bolts | Special abilities & flags (in play) |
 |---|---|---|---|---|---|---|---|---|---|---|---|
@@ -122,13 +122,13 @@ Source: `Globals.c:1025` (`monsterCatalog`). Damage shown as `low–high` (clump
 | 66 | phoenix egg | egg | 50 | 0 | 0 | 0 | 100 | 150 | 0 | — | Hatches a new phoenix and "becomes" it; immobile, always hunting, immune to fire and weapons (`MA_CAST_SUMMON`, `MA_ENTER_SUMMONS`, `IMMUNE_TO_FIRE`, `IMMUNE_TO_WEAPONS`, `IMMOBILE`, `INANIMATE`, `ALWAYS_HUNTING`, `NEVER_SLEEPS`, `WILL_NOT_USE_STAIRS`, `NO_POLYMORPH`, `IMMUNE_TO_WEBS`) |
 | 67 | mangrove dryad (ancient spirit) | ancient spirit | 70 | 60 | 175 | 2–8(c2) | 100 | 100 | 6 | BOLT_ANCIENT_SPIRIT_VINES | Entangles enemies with grasping vines; keeps its distance, immune to webs, can't be polymorphed (`BOLT_ANCIENT_SPIRIT_VINES`, `ALWAYS_USE_ABILITY`, `MAINTAINS_DISTANCE`, `IMMUNE_TO_WEBS`, `NO_POLYMORPH`; MALE/FEMALE; isLarge) |
 
-`MK_YOU` (the player, index 0) is also a `monsterCatalog` row: HP 30, def 0, acc 100, dmg 1–2, regen 20, flags `MONST_MALE | MONST_FEMALE`. Source `Globals.c:1027`.
+`MK_YOU` (the player, index 0) is also a `monsterCatalog` row: HP 30, def 0, acc 100, dmg 1–2, regen 20, flags `MONST_MALE | MONST_FEMALE`. Source `Globals.c:1166`.
 
 ---
 
 ## 3. `MONST_*` behavior flags (complete reference)
 
-Source: `Rogue.h:2073` (`enum monsterBehaviorFlags`). All bits via `Fl(n)`.
+Source: `Rogue.h:2185` (`enum monsterBehaviorFlags`). All bits via `Fl(n)`.
 
 | Flag | Bit | Meaning |
 |---|---|---|
@@ -178,7 +178,7 @@ Source: `Rogue.h:2073` (`enum monsterBehaviorFlags`). All bits via `Fl(n)`.
 
 ## 4. `MA_*` ability flags (complete reference)
 
-Source: `Rogue.h:2121` (`enum monsterAbilityFlags`).
+Source: `Rogue.h:2233` (`enum monsterAbilityFlags`).
 
 | Flag | Bit | Meaning |
 |---|---|---|
@@ -218,7 +218,7 @@ Source: `Rogue.h:2121` (`enum monsterAbilityFlags`).
 
 ## 5. Mutation catalog
 
-Source: `Globals.c:1396` (`mutationCatalog`, `NUMBER_MUTATORS = 8`). Factors are percentages applied multiplicatively (e.g. healthFactor 300 = ×3 HP). `DFChance = -1` means "leave unchanged." A mutation is skipped if the monster already has any `forbiddenFlags`/`forbiddenAbilityFlags`.
+Source: `Globals.c:1545` (`mutationCatalog`, `NUMBER_MUTATORS = 8`). Factors are percentages applied multiplicatively (e.g. healthFactor 300 = ×3 HP). `DFChance = -1` means "leave unchanged." A mutation is skipped if the monster already has any `forbiddenFlags`/`forbiddenAbilityFlags`.
 
 | Mutation | HP% | Move% | Atk% | Def% | Dmg% | Adds flags | DF / light | Forbidden on | Negatable | Effect |
 |---|---|---|---|---|---|---|---|---|---|---|
@@ -233,7 +233,7 @@ Source: `Globals.c:1396` (`mutationCatalog`, `NUMBER_MUTATORS = 8`). Factors are
 
 ### When monsters get mutated
 
-Source: `Monsters.c:58` (`generateMonster`) and `Monsters.c:28` (`mutateMonster`). Constants from `brogueGameConst` (`GlobalsBrogue.c:1027`): `mutationsOccurAboveLevel = 10`, `depthAccelerator = 1`, `amuletLevel`.
+Source: `Monsters.c:58` (`generateMonster`) and `Monsters.c:28` (`mutateMonster`). Constants from `brogueGameConst` (`GlobalsBrogue.c:1061`): `mutationsOccurAboveLevel = 10`, `depthAccelerator = 1`, `amuletLevel`.
 
 - A monster can be mutated only if `mutationPossible`, it lacks `MONST_NEVER_MUTATED`/`MA_NEVER_MUTATED`, **and** `rogue.depthLevel > 10`.
 - **Depths 11 → amulet level:** `mutationChance = clamp((depth − 10) × depthAccelerator, 1, 10)` percent — so 1% at depth 11 rising to 10% by depth 20+.
@@ -244,7 +244,7 @@ Source: `Monsters.c:58` (`generateMonster`) and `Monsters.c:28` (`mutateMonster`
 
 ## 6. Monster class catalog
 
-Source: `Globals.c:1416` (`monsterClassCatalog`, `MONSTER_CLASS_COUNT = 15`). Classes group monsters for effects such as the staff/wand/charm of **discord-by-class**, certain feats, and "summon monster" weighting. `frequency` weights random selection within the class; `maxDepth = -1` means no depth cap.
+Source: `Globals.c:1565` (`monsterClassCatalog`, `MONSTER_CLASS_COUNT = 15`). Classes group monsters for effects such as the staff/wand/charm of **discord-by-class**, certain feats, and "summon monster" weighting. `frequency` weights random selection within the class; `maxDepth = -1` means no depth cap.
 
 | Class | Freq | maxDepth | Members |
 |---|---|---|---|
@@ -268,9 +268,9 @@ Source: `Globals.c:1416` (`monsterClassCatalog`, `MONSTER_CLASS_COUNT = 15`). Cl
 
 ## 7. Horde catalog
 
-Source: `GlobalsBrogue.c:748` (`hordeCatalog_Brogue`). `brogueGameConst.numberHordes` is computed from the table size (`GlobalsBrogue.c:1062`).
+Source: `GlobalsBrogue.c:796` (`hordeCatalog_Brogue`). `brogueGameConst.numberHordes` is computed from the table size (`GlobalsBrogue.c:1115`).
 
-### 7.1 Structure (`hordeType`, `Rogue.h:2250`)
+### 7.1 Structure (`hordeType`, `Rogue.h:2455`)
 
 | Field | Meaning |
 |---|---|
@@ -284,7 +284,7 @@ Source: `GlobalsBrogue.c:748` (`hordeCatalog_Brogue`). `brogueGameConst.numberHo
 | `machine` | accompanying machine to build (e.g. `MT_CAMP_AREA`) |
 | `flags` | `HORDE_*` (see §8) |
 
-`pickHordeType` (`Monsters.c:502`) sums `frequency` over eligible hordes (matching depth and flag filters) and picks weighted-randomly. `spawnHorde` (`Monsters.c:782`) places the leader, then iterates members, building any associated `machine`.
+`pickHordeType` (`Monsters.c:663`) sums `frequency` over eligible hordes (matching depth and flag filters) and picks weighted-randomly. `spawnHorde` (`Monsters.c:944`) places the leader, then iterates members, building any associated `machine`.
 
 ### 7.2 Naturally-spawning hordes (no machine/summon flags)
 
@@ -375,13 +375,13 @@ Spawned by an `MA_CAST_SUMMON` caster whose type matches the leader (depth field
 
 ### 7.4 Captive hordes (`HORDE_LEADER_CAPTIVE`)
 
-The "leader" is shackled and the followers are its **captors/guards**; freeing the captive makes it an ally. Source `spawnHorde` `Monsters.c:859` (sets `MB_CAPTIVE`, `MONSTER_WANDERING`, HP = ¼ max, draws manacles). All are `HORDE_NEVER_OOD`, freq 10–20.
+The "leader" is shackled and the followers are its **captors/guards**; freeing the captive makes it an ally. Source `spawnHorde` `Monsters.c:1021` (sets `MB_CAPTIVE`, `MONSTER_WANDERING`, HP = ¼ max, draws manacles). All are `HORDE_NEVER_OOD`, freq 10–20.
 
-Examples: kobold-guarded monkey (1–5); goblin-guarded goblin (3–7); goblin-guarded ogre (4–10); kobold-guarded goblin mystic (5–11); ogre-guarded ogre (8–15); troll-guarded troll/centaur/dar blademaster (12–19); salamander↔naga pairs (13–20); fury-guarded imp/dar (18–26); pixie-guarded imp (14–21); dar-trio-guarded tentacle horror (20–26) and golem (18–25). (Full list `GlobalsBrogue.c:829–848`.)
+Examples: kobold-guarded monkey (1–5); goblin-guarded goblin (3–7); goblin-guarded ogre (4–10); kobold-guarded goblin mystic (5–11); ogre-guarded ogre (8–15); troll-guarded troll/centaur/dar blademaster (12–19); salamander↔naga pairs (13–20); fury-guarded imp/dar (18–26); pixie-guarded imp (14–21); dar-trio-guarded tentacle horror (20–26) and golem (18–25). (Full list `GlobalsBrogue.c:877–896`.)
 
 ### 7.5 Machine / area hordes
 
-These spawn only inside generated machines (filtered by `HORDE_MACHINE_ONLY`, `Rogue.h:2064`). Terrain in `spawnsIn`.
+These spawn only inside generated machines (filtered by `HORDE_MACHINE_ONLY`, `Rogue.h:2176`). Terrain in `spawnsIn`.
 
 | Flag | Purpose | Examples (leader / depths) |
 |---|---|---|
@@ -411,19 +411,19 @@ independent systems that can stack**:
 | Extra HP, buffed stats, a random special ability, a distinct color + name prefix | **Mutations** (per-monster, depth-gated, ≤1 per monster) | §5 |
 | An escort of followers led by a leader | **Hordes** (`leaderType` + `memberType[]`) | §7 |
 
-**Leader / follower wiring** (`spawnHorde` → `spawnMinions`, `Monsters.c:782`, `:698`):
+**Leader / follower wiring** (`spawnHorde` → `spawnMinions`, `Monsters.c:944`, `:856`):
 
 - The horde's `leaderType` is generated first; each member is generated next, tagged
-  `MB_FOLLOWER` with its `leader` pointer set to the leader (`Monsters.c:734`).
-- If at least one minion spawns, the leader gets `MB_LEADER` (`Monsters.c:752`). Followers of
-  the same leader treat each other as allies (`monstersAreEnemies`, `Monsters.c:365`) and move
+  `MB_FOLLOWER` with its `leader` pointer set to the leader (`Monsters.c:731`).
+- If at least one minion spawns, the leader gets `MB_LEADER` (`Monsters.c:749`). Followers of
+  the same leader treat each other as allies (`monstersAreEnemies`, `Monsters.c:535`) and move
   and fight as a group.
 - **Permanent packs** (most natural hordes): followers survive the leader's death and disperse.
 - **Bound followers** — `HORDE_DIES_ON_LEADER_DEATH` gives members `MB_BOUND_TO_LEADER`, so
-  they vanish when the leader dies (`Monsters.c:741`); used for summoned/spectral hordes.
+  they vanish when the leader dies (`Monsters.c:904`); used for summoned/spectral hordes.
 - **Dynamic followers** — summoners (`MA_CAST_SUMMON`: goblin conjurer, ogre shaman, lich,
   vampire, goblin warlord) spawn new followers mid-fight, bound to themselves as leader
-  (`Monsters.c:1030`, `:1059`).
+  (`Monsters.c:1156`, `:1221`).
 
 **Stacking:** the leader (or any follower) independently rolls for a mutation in
 `generateMonster`, so a horde leader can also be mutated — e.g. a *juggernaut goblin conjurer*
@@ -435,7 +435,7 @@ elite type.
 
 ## 8. `HORDE_*` flags (complete reference)
 
-Source: `Rogue.h:2042` (`enum hordeFlags`).
+Source: `Rogue.h:2154` (`enum hordeFlags`).
 
 | Flag | Bit | Meaning |
 |---|---|---|
@@ -465,31 +465,31 @@ Source: `Rogue.h:2042` (`enum hordeFlags`).
 ## 9. Depth-based spawning, out-of-depth, captives & scaling
 
 ### Out-of-depth (OOD)
-Source: `spawnHorde`, `Monsters.c:788`. With `brogueGameConst.monsterOutOfDepthChance = 10`, each non-summoned spawn on depth > 1 has a **10%** chance to use an elevated effective depth: `depth = rogue.depthLevel + rand_range(1, min(5, depthLevel/2))`, clamped so it never exceeds the amulet level. When OOD triggers, `HORDE_NEVER_OOD` hordes are excluded. This is how tougher monsters occasionally appear a few floors early.
+Source: `spawnHorde`, `Monsters.c:950`. With `brogueGameConst.monsterOutOfDepthChance = 10`, each non-summoned spawn on depth > 1 has a **10%** chance to use an elevated effective depth: `depth = rogue.depthLevel + rand_range(1, min(5, depthLevel/2))`, clamped so it never exceeds the amulet level. When OOD triggers, `HORDE_NEVER_OOD` hordes are excluded. This is how tougher monsters occasionally appear a few floors early.
 
 ### How spawn eligibility works
-`pickHordeType` (`Monsters.c:502`) considers a horde eligible when `minLevel ≤ depth ≤ maxLevel`, its flags don't intersect `forbiddenFlags`, and it has all `requiredFlags`; selection is weighted by `frequency`. Summon picks instead match `HORDE_IS_SUMMONED` + `leaderType == summonerType`.
+`pickHordeType` (`Monsters.c:663`) considers a horde eligible when `minLevel ≤ depth ≤ maxLevel`, its flags don't intersect `forbiddenFlags`, and it has all `requiredFlags`; selection is weighted by `frequency`. Summon picks instead match `HORDE_IS_SUMMONED` + `leaderType == summonerType`.
 
 ### Captive / ally mechanics
 - Captive hordes (`HORDE_LEADER_CAPTIVE`): leader gets `MB_CAPTIVE`, starts `MONSTER_WANDERING`, HP reduced to `maxHP/4 + 1` (if it regenerates), and manacles are drawn unless it's caged. Freeing it (walking adjacent and choosing to free) turns it into an ally via `becomeAllyWith`.
 - `HORDE_ALLIED_WITH_PLAYER` hordes call `becomeAllyWith(leader)` immediately at spawn (legendary allies).
-- Cloning a captive (e.g. via a wand) makes the clone an ally too (`cloneMonster`, `Monsters.c:590`).
+- Cloning a captive (e.g. via a wand) makes the clone an ally too (`cloneMonster`, `Monsters.c:720`).
 
 ### Difficulty scaling with depth
 BrogueCE 1.15 does **not** scale a monster's base stats by depth via a per-level array (there is no `monsterAccuracyByLevel`/`monsterDefenseByLevel` table in `PowerTables.c` in this version). Instead, monster difficulty rises through:
 1. **Horde depth bands** — each monster only appears within its `minLevel..maxLevel` window, so deeper floors draw from a tougher roster (see §7.2).
 2. **Mutations** — increasingly likely past depth 10, and very common below the amulet level (up to 75%), multiplying HP/damage/speed (see §5).
 3. **Out-of-depth spawns** — 10% chance to pull a horde from up to 5 floors deeper.
-4. **Empowerment** — allies (and some monsters) can be empowered: `empowerMonster` (`Monsters.c:538`) adds +12 HP, +10 defense, +10 accuracy, +~10% damage and full-heals.
+4. **Empowerment** — allies (and some monsters) can be empowered: `empowerMonster` (`Monsters.c:699`) adds +12 HP, +10 defense, +10 accuracy, +~10% damage and full-heals.
 
-`PowerTables.c` monster-relevant scaling is for *player/item* power vs. monsters: `POW_ACCURACY_FRACTION` / `POW_DEFENSE_FRACTION` / `POW_DAMAGE_FRACTION` (`PowerTables.c:139–203`) convert net enchant/armor into hit/defense/damage fractions; `POW_REGEN` (`:126`) governs regeneration timing; `POW_REFLECT` (`:110`) governs reflection. These apply to the combat math, not to a monster's catalog base stats.
+`PowerTables.c` monster-relevant scaling is for *player/item* power vs. monsters: `POW_ACCURACY_FRACTION` / `POW_DEFENSE_FRACTION` / `POW_DAMAGE_FRACTION` (`PowerTables.c:143–207`) convert net enchant/armor into hit/defense/damage fractions; `POW_REGEN` (`:130`) governs regeneration timing; `POW_REFLECT` (`:114`) governs reflection. These apply to the combat math, not to a monster's catalog base stats.
 
-Relevant `brogueGameConst` combat tunables (`GlobalsBrogue.c:1027–1042`):
+Relevant `brogueGameConst` combat tunables (`GlobalsBrogue.c:1076–1095`):
 `playerTransferenceRatio = 20`, `onHitHallucinateDuration = 20`, `onHitWeakenDuration = 300`, `onHitMercyHealPercent = 50`, `mutationsOccurAboveLevel = 10`, `monsterOutOfDepthChance = 10`, `depthAccelerator = 1`.
 
 ---
 
 ## 10. Bolt types monsters can cast
 
-Source: `Rogue.h:919` (`enum boltType`). Bolts referenced by monsters in the catalog:
+Source: `Rogue.h:986` (`enum boltType`). Bolts referenced by monsters in the catalog:
 `BOLT_SHIELDING`, `BOLT_HASTE`, `BOLT_SPARK`, `BOLT_HEALING`, `BOLT_SLOW_2`, `BOLT_SPIDERWEB`, `BOLT_DISTANCE_ATTACK`, `BOLT_NEGATION`, `BOLT_FIRE`, `BOLT_DISCORD`, `BOLT_BLINKING`, `BOLT_POISON_DART`, `BOLT_DRAGONFIRE`, `BOLT_BECKONING`, `BOLT_ANCIENT_SPIRIT_VINES`. (`BOLT_DISTANCE_ATTACK`, `BOLT_POISON_DART`, `BOLT_DRAGONFIRE`, `BOLT_SPIDERWEB`, `BOLT_ANCIENT_SPIRIT_VINES`, `BOLT_WHIP` are monster-only; the rest double as staff/wand effects.)
