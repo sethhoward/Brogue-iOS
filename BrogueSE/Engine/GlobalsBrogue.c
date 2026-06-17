@@ -740,7 +740,7 @@ itemTable potionTable_Brogue[] = {
 
 itemTable scrollTable_Brogue[] = {
     {"enchanting",          itemTitles[0], "",  0,  550,    0, 1, {0,0,0}, false, false, 1,  false, "This ancient enchanting sorcery will imbue a single item with a powerful and permanent magical charge. A staff will increase in power and in number of charges; a weapon will inflict more damage and find its mark more easily; a suit of armor will deflect attacks more often; the magic of a ring will intensify; and a wand will gain expendable charges in the least amount that such a wand can be found with. Weapons and armor will also require less strength to use, and any curses on the item will be lifted."}, // frequency is dynamically adjusted
-    {"identify",            itemTitles[1], "",  30, 300,    0, 0, {0,0,0}, false, false, 1,  false, "This scrying magic will permanently reveal all of the secrets of a single item."},
+    {"identify",            itemTitles[1], "",  35, 300,    0, 0, {0,0,0}, false, false, 1,  false, "This scrying magic will permanently reveal all of the secrets of a single item."},
     {"teleportation",       itemTitles[2], "",  10, 500,    0, 0, {0,0,0}, false, false, 1,  false, "This escape spell will instantly relocate you to a random location on the dungeon level. It can be used to escape a dangerous situation with luck. The unlucky reader might find himself in an even more dangerous place."},
     {"remove curse",        itemTitles[3], "",  15, 150,    0, 0, {0,0,0}, false, false, 1,  false, "This redemption spell will instantly strip from the reader's weapon, armor, rings and carried items any evil enchantments that might prevent the wearer from removing them."},
     {"recharging",          itemTitles[4], "",  12, 375,    0, 0, {0,0,0}, false, false, 1,  false, "The power bound up in this parchment will instantly recharge all of your staffs and charms."},
@@ -751,8 +751,8 @@ itemTable scrollTable_Brogue[] = {
     {"negation",            itemTitles[9], "",  8,  400,    0, 0, {0,0,0}, false, false, 1,  false, "When this powerful anti-magic is released, all creatures (including yourself) and all items lying on the ground within your field of view will be exposed to its blast and stripped of magic. Creatures animated purely by magic will die. Potions, scrolls, items being held by other creatures and items in your inventory will not be affected."},
     {"shattering",          itemTitles[10],"",  8,  500,    0, 0, {0,0,0}, false, false, 1,  false, "This strange incantation will alter the physical structure of nearby stone, causing it to evaporate into the air over the ensuing minutes."},
     {"discord",             itemTitles[11], "", 8,  400,    0, 0, {0,0,0}, false, false, 1,  false, "This scroll will unleash a powerful blast of mind magic. Any creatures within line of sight will turn against their companions and attack indiscriminately for 30 turns."},
-    {"aggravate monsters",  itemTitles[12], "", 15, 50,     0, 0, {0,0,0}, false, false, -1, false, "This scroll will unleash a piercing shriek that will awaken all monsters and alert them to the reader's location."},
-    {"summon monsters",     itemTitles[13], "", 10, 50,     0, 0, {0,0,0}, false, false, -1, false, "This summoning incantation will call out to creatures in other planes of existence, drawing them through the fabric of reality to confront the reader."},
+    {"aggravate monsters",  itemTitles[12], "", 12, 50,     0, 0, {0,0,0}, false, false, -1, false, "This scroll will unleash a piercing shriek that will awaken all monsters and alert them to the reader's location."},
+    {"summon monsters",     itemTitles[13], "", 8, 50,     0, 0, {0,0,0}, false, false, -1, false, "This summoning incantation will call out to creatures in other planes of existence, drawing them through the fabric of reality to confront the reader."},
 };
 
 itemTable wandTable_Brogue[] = {

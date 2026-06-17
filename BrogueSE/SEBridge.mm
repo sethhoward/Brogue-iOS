@@ -20,6 +20,15 @@
 #import <UIKit/UIKit.h>
 #include <stdlib.h>
 
+// iOS port (Brogue SE): capture the build-config DEBUG flag (set in the BrogueSE framework's Debug
+// configuration only) BEFORE Engine/Rogue.h #undefs it and repurposes DEBUG as `if (WIZARD_MODE)`.
+// Gates developer-only, never-ship instrumentation (e.g. the rest-stats CSV) to Debug builds.
+#if defined(DEBUG) && DEBUG
+#define SE_DEBUG_BUILD 1
+#else
+#define SE_DEBUG_BUILD 0
+#endif
+
 #import "Engine/Rogue.h"
 // iOS port (Brogue SE): the host protocol is single-sourced in the master-tracked
 // BrogueCE framework so a host-protocol change propagates to both engines. SE only
@@ -548,8 +557,10 @@ void notifyEvent(short eventId, int data1, int data2, const char *str1, const ch
 // RogueMain.c) emits one CSV row per finished live run; we append it to Documents/se/rest-stats.csv,
 // writing the header — prefixed with our own wall-clock "time" column — only when the file is first
 // created. Pull the file off-device via Xcode > Window > Devices & Simulators > (app) > Download
-// Container, then look under AppData/Documents/se/rest-stats.csv. Output-only; SE is Debug-only.
+// Container, then look under AppData/Documents/se/rest-stats.csv. Output-only. Gated to Debug builds
+// (SE_DEBUG_BUILD): in Release this is a no-op, so the CSV is never written on shipping devices.
 void seRecordRestStats(const char *header, const char *row) {
+#if SE_DEBUG_BUILD
     if (!header || !row) {
         return;
     }
@@ -581,6 +592,10 @@ void seRecordRestStats(const char *header, const char *row) {
             [fh closeFile];
         }
     }
+#else
+    (void)header;
+    (void)row; // Release: the rest-stats CSV is a debug-only calibration tool; never collect on shipping builds
+#endif
 }
 
 boolean takeScreenshot(void) {

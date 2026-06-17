@@ -8459,11 +8459,25 @@ void gainScrollInsightFromEating(void) {
     }
 }
 
-// iOS port (iBrogue): the returning potion of detect magic. Acts on 1-2 (random) unidentified,
-// polarity-bearing items in the pack (excluding the potion being drunk), chosen at random -- revealing
-// each one's good/bad polarity, or fully identifying it if its polarity is already known (same
-// reveal-or-escalate rule as resting/eating). A weaker, fleeting version of the old whole-pack reveal.
-// The random pick is a substantive action-triggered draw, reproduced identically on replay.
+// iOS port (Brogue SE): does this carried item's good/bad polarity already register as known? Mirrors the
+// branch in revealOrIdentifyPolarityItem -- gear caps at the aura glyph (and aura-shown gear is excluded from
+// the detect pool upstream, so it always reads "unknown" here), while flavored items consult the two-axis
+// polarity-known test. Used to PRIORITIZE still-hidden polarities ahead of already-sensed items.
+static boolean detectMagicPolarityAlreadyKnown(const item *theItem) {
+    if (theItem->category & (WEAPON | ARMOR)) {
+        return false;
+    }
+    return itemMagicPolarityIsKnown(theItem, MAGIC_POLARITY_BENEVOLENT)
+        || itemMagicPolarityIsKnown(theItem, MAGIC_POLARITY_MALEVOLENT);
+}
+
+// iOS port (iBrogue): the returning potion of detect magic. Acts on a base of 2 unidentified,
+// polarity-bearing items in the pack (excluding the potion being drunk) -- revealing each one's good/bad
+// polarity, or fully identifying it if its polarity is already known (same reveal-or-escalate rule as
+// resting/eating). It now PRIORITIZES still-hidden polarities: reveals are spent discovering new auras
+// before any already-sensed item is escalated to a full ID. A worn ring of wisdom widens the count to
+// 2 + ring level. A weaker, fleeting version of the old whole-pack reveal. The random pick is a
+// substantive action-triggered draw, reproduced identically on replay.
 static void quaffDetectMagic(item *exclude) {
     item *eligible[32];
     int count = 0;
@@ -8482,14 +8496,26 @@ static void quaffDetectMagic(item *exclude) {
         message("you sense no magic left to discern among your possessions.", 0);
         return;
     }
-    // iOS port (iBrogue): a worn ring of wisdom widens the spread, from 1-2 to 1-(2 + ring level).
-    const int maxReveals = max(1, 2 + (int)rogue.wisdomBonus);
-    const int toReveal = min(rand_range(1, maxReveals), count);
+    // iOS port (Brogue SE): prioritize still-hidden polarities -- stable-partition the eligible pool so
+    // items whose aura we have NOT yet sensed sort ahead of already-sensed ones (unknownCount marks the
+    // boundary). Detect magic then spends its reveals on fresh polarity discoveries first.
+    int unknownCount = 0;
+    for (int i = 0; i < count; i++) {
+        if (!detectMagicPolarityAlreadyKnown(eligible[i])) {
+            item *tmp = eligible[unknownCount]; eligible[unknownCount] = eligible[i]; eligible[i] = tmp;
+            unknownCount++;
+        }
+    }
+    // iOS port (Brogue SE): a base of 2 reveals, widened by a worn ring of wisdom to 2 + ring level (a
+    // cursed wisdom ring can lower it, but never below 1).
+    const int toReveal = min(max(1, 2 + (int)rogue.wisdomBonus), count);
     boolean wasFullID[32] = { false }; // sized to match `eligible`; toReveal <= count <= 32
     // Partial Fisher-Yates: pick `toReveal` distinct eligible items; reveal each one's polarity, or fully
-    // identify it if already sensed.
+    // identify it if already sensed. Selection stays inside the still-hidden band [i, unknownCount) until
+    // it is exhausted, so new polarities are always discovered before any sensed item escalates to a full ID.
     for (int i = 0; i < toReveal; i++) {
-        const int j = rand_range(i, count - 1);
+        const int hi = (i < unknownCount) ? unknownCount - 1 : count - 1;
+        const int j = rand_range(i, hi);
         item *tmp = eligible[i]; eligible[i] = eligible[j]; eligible[j] = tmp;
         wasFullID[i] = revealOrIdentifyPolarityItem(eligible[i]);
     }
@@ -8553,8 +8579,8 @@ void loneWolfRevealPolarity(void) {
 }
 
 // iOS port (iBrogue): a THROWN potion of detect magic turns its insight outward, onto the dungeon
-// floor, rather than the pack (quaffDetectMagic). It senses the same 1-2 base count (widened by a worn
-// ring of wisdom, like the drink) of random undiscovered, polarity-bearing items lying on this level,
+// floor, rather than the pack (quaffDetectMagic). It senses the same base of 2 (widened by a worn
+// ring of wisdom, like the drink) random undiscovered, polarity-bearing items lying on this level,
 // revealing each one's good/bad polarity AND its location on the map (the ITEM_DETECTED cell flag, so
 // the aura glyph shows even for items you haven't found yet) -- the classic "detect magic on the level"
 // feel. Items already identified or already magic-detected are skipped. Action-triggered RNG (the throw),
@@ -8576,8 +8602,9 @@ static void throwDetectMagicOnFloor(void) {
         message("the flask shatters, but no undiscovered magic stirs anywhere on this level.", 0);
         return;
     }
-    const int maxReveals = max(1, 2 + (int)rogue.wisdomBonus); // same 1-2 base as the drink (+ ring of wisdom)
-    const int toReveal = min(rand_range(1, maxReveals), count);
+    // iOS port (Brogue SE): base of 2 (+ ring of wisdom), matching the drink. Floor items are all still
+    // unknown here (already-detected ones are filtered out above), so there is no polarity to prioritize.
+    const int toReveal = min(max(1, 2 + (int)rogue.wisdomBonus), count);
     // Partial Fisher-Yates: pick `toReveal` distinct floor items and detect each.
     for (int i = 0; i < toReveal; i++) {
         const int j = rand_range(i, count - 1);
@@ -9270,6 +9297,33 @@ static boolean canDrop() {
     return true;
 }
 
+// iOS port (Brogue SE): the INSIGHT (item-to-reveal) slot of an altar of insight divines an item's hidden
+// good/bad nature, so it refuses items that have nothing to divine. Two cases:
+//   1. throwing-weapon stacks (darts/javelins/incendiary darts) -- always refused by kind, regardless of
+//      any runic, since the altar is not meant to be spent on a quiver; and
+//   2. items already SETTLED as neutral -- a category that can never carry a good/bad aura (food, gold,
+//      keys, gems), or a detectable item already known to be neutral (fully identified, or magic-detected
+//      and revealed auraless).
+// Crucially this is leak-free: an UNidentified item whose polarity is still hidden is never refused, so the
+// refusal can't become a free "it's neutral" tell (cf. the run's other no-ID-side-channel guards). The
+// payment/offering twin is unrestricted -- you may sacrifice anything. RNG-free, used only as a drop guard.
+static boolean insightSlotRejectsItem(item *theItem) {
+    if ((theItem->category & WEAPON)
+        && (theItem->kind == DART || theItem->kind == JAVELIN || theItem->kind == INCENDIARY_DART)) {
+
+        return true; // a quiver of throwing weapons has no hidden nature to divine
+    }
+    if (itemMagicPolarity(theItem) == MAGIC_POLARITY_NEUTRAL) {
+        if (!(theItem->category & CAN_BE_DETECTED)) {
+            return true; // food / gold / keys / gems: inherently neutral, no identification involved
+        }
+        if (itemIdentityFullyKnown(theItem) || (theItem->flags & ITEM_MAGIC_DETECTED)) {
+            return true; // a detectable item already settled as neutral (refusing leaks nothing new)
+        }
+    }
+    return false;
+}
+
 void drop(item *theItem) {
     char buf[COLS * 3], buf2[COLS * 3];
     unsigned char command[3];
@@ -9285,6 +9339,19 @@ void drop(item *theItem) {
     }
     command[1] = theItem->inventoryLetter;
     command[2] = '\0';
+
+    // iOS port (Brogue SE): refuse, at drop time, to place an ineligible item on the INSIGHT slot of an
+    // altar of insight (see insightSlotRejectsItem). Pure UI rejection -- no keystroke recorded, no turn
+    // spent (like the cursed-equipped guard below), so it stays replay-safe.
+    if (pmapAt(player.loc)->layers[DUNGEON] == INSIGHT_ALTAR_INSIGHT
+        && insightSlotRejectsItem(theItem)) {
+
+        itemName(theItem, buf2, false, false, NULL);
+        sprintf(buf, "the altar of insight finds no hidden nature to divine in your %s.", buf2);
+        confirmMessages();
+        messageWithColor(buf, &itemMessageColor, 0);
+        return;
+    }
 
     if ((theItem->flags & ITEM_EQUIPPED) && (theItem->flags & ITEM_CURSED)) {
         itemName(theItem, buf2, false, false, NULL);

@@ -32,6 +32,79 @@ See `BrogueCE/Engine/IOS_MODIFICATIONS.md` (faithful CE) and
 
 ## Change log
 
+### 2026-06-17 — Altar of insight: refuse ineligible items on the INSIGHT slot at drop time
+
+**What.** The INSIGHT (item-to-reveal) slot of an altar of insight now refuses, *at drop time*, items
+that have no hidden good/bad nature to divine:
+1. **Throwing weapons** — darts, javelins, incendiary darts — are refused by kind, regardless of any
+   runic (the altar isn't meant to be spent on a quiver).
+2. **Items already settled as neutral** — a category that can never carry a good/bad aura (food, gold,
+   keys, gems), or a *detectable* item already known to be neutral (fully identified, or magic-detected
+   and revealed auraless).
+
+The refusal is **leak-free**: an *unidentified* item whose polarity is still hidden is never refused, so
+dropping can't become a free "it's neutral" tell (consistent with the run's other no-ID-side-channel
+guards — potions/scrolls are never neutral, so they're unaffected). The **payment/offering twin slot is
+unrestricted** — you may still sacrifice anything there. Scope decision (per request): the guard applies to
+the **insight slot only**.
+
+**Where.** `Items.c` — new static helper `insightSlotRejectsItem()` (just above `drop()`), and an
+early-return guard in `drop()` that fires when the player stands on an `INSIGHT_ALTAR_INSIGHT` tile and the
+chosen item is ineligible. Pure UI rejection: no keystroke recorded, no turn spent (mirrors the
+cursed-equipped guard), with the message "the altar of insight finds no hidden nature to divine in your …".
+Marked `// iOS port (Brogue SE):`.
+
+**Determinism.** RNG-free; the guard only blocks an action before it happens (no state mutation, no
+recorded keystroke), so saves/replays are unaffected.
+
+**Not covered (by design / scope).** Only the drop command is guarded; an item *thrown* onto the insight
+tile is an unguarded edge case (the vanilla commutation altar is likewise drop-only). The existing
+"fire only if it helps" no-op in `performInsightSacrifice` still covers anything that slips past.
+
+### 2026-06-17 — Remove the death-screen rest readout; gate the rest-stats CSV to Debug builds
+
+**What.** Two cleanups to the rest-insight calibration instrumentation:
+1. **Removed the on-screen rest tally on the death screen.** `gameOver()` (`RogueMain.c`) appended a
+   personal debug readout (`[rest turns/IDs per lvl: …]`) to the recap line. It never touched the saved
+   high-score record, but it was developer-only clutter — deleted.
+2. **Gated the rest-stats CSV to Debug builds.** The `Documents/se/rest-stats.csv` append
+   (`seRecordRestStats` in `SEBridge.mm`) was only guarded against playback, so once SE went to Release
+   (the old `SE_ENABLED` Debug gate is gone) it would have collected on shipping devices. The host write
+   is now wrapped in `#if SE_DEBUG_BUILD` (a no-op in Release). The CSV collection itself is unchanged —
+   it simply only runs in Debug now, as intended.
+
+**Where.** `RogueMain.c` — deleted the death-recap rest-tally block in `gameOver()` (the CSV row builder
+`recordRestStatsRow` and its `gameOver`/`victory` call sites are untouched). `SEBridge.mm` — new
+`SE_DEBUG_BUILD` macro, captured from the build-config `DEBUG` flag *before* `Engine/Rogue.h` `#undef`s
+it (Rogue.h repurposes `DEBUG` as `if (WIZARD_MODE)`); `seRecordRestStats`'s body is now `#if
+SE_DEBUG_BUILD`-gated. `iBrogue_iPad.xcodeproj/project.pbxproj` — added `GCC_PREPROCESSOR_DEFINITIONS =
+("DEBUG=1", "$(inherited)")` to the **BrogueSE framework's Debug configuration only** (it previously set
+`DEBUG` for Swift via `SWIFT_ACTIVE_COMPILATION_CONDITIONS` but not for C/ObjC).
+
+**Determinism.** Output/UI-only; no RNG, no game state, runs at game over — saves/replays unaffected.
+
+### 2026-06-17 — Detect magic: flat base of 2, prioritize still-hidden polarities
+
+**What.** Two tuning changes to the potion of detect magic (`Items.c`):
+1. **Base count `1–2` → `2`.** The reveal count is no longer a random `rand_range(1, …)`; it is now a
+   flat **2 + ring-of-wisdom level** (`min(max(1, 2 + rogue.wisdomBonus), count)`). A cursed wisdom ring
+   can still lower it, but never below 1. Applies to both the drink (`quaffDetectMagic`) and the thrown
+   floor-sense (`throwDetectMagicOnFloor`).
+2. **Prioritize unknown polarities (drink only).** `quaffDetectMagic` now stable-partitions the eligible
+   pack pool so items whose aura is **not yet sensed** sort ahead of already-sensed ones, then keeps the
+   partial Fisher-Yates selection inside that still-hidden band until it's exhausted. So a drink spends its
+   reveals discovering **new** polarities before escalating any already-sensed item to a full ID. (The
+   thrown version needs no partition: its eligibility already excludes `ITEM_MAGIC_DETECTED` items, so every
+   floor candidate is unknown.)
+
+**Where.** `Items.c` — new helper `detectMagicPolarityAlreadyKnown` (mirrors the gear-vs-flavored branch in
+`revealOrIdentifyPolarityItem`); the partition + banded selection in `quaffDetectMagic`; the flat count in
+both `quaffDetectMagic` and `throwDetectMagicOnFloor`. Marked `// iOS port (Brogue SE):`.
+
+**Determinism.** Selection still draws on the substantive `rand_range` stream at the action point, so it
+replays identically within this version; like any gameplay change it diverges replays from pre-change
+recordings.
+
 ### 2026-06-16 — Lone Wolf: a solo-play XPXP progression / fallback (new content)
 
 **What.** A player-owned progression track ("Lone Wolf") that compensates for solo play, since allies
@@ -528,7 +601,8 @@ to the desired ~2-3 reveals by depth 10.
 statics `sanitizeCsvCell()` / `recordRestStatsRow()`, called at the end of `gameOver()` and `victory()`
 (after the outcome is finalized, gated on `!rogue.playbackMode` so recordings don't log). `SEBridge.mm`
 — `seRecordRestStats()` inside the `extern "C"` block does the append (reuses the `Documents/se` path,
-adds the timestamp). No `BrogueCEHost` protocol or Swift changes. SE is Debug-only, so this never ships.
+adds the timestamp). No `BrogueCEHost` protocol or Swift changes. **Update (2026-06-17):** SE now ships
+in Release, so the CSV write is gated to Debug builds (`SE_DEBUG_BUILD`) — see the 2026-06-17 entry.
 
 **Determinism.** Output-only: the engine hook draws no RNG and mutates no game state, and runs after the
 run has ended — saves/replays are unaffected. The host timestamp is host-side metadata, not engine state.
@@ -548,8 +622,9 @@ just hold when nothing qualifies), so the steep guard-ramp wasn't earning its co
 **Where.** `gainPolarityInsightFromRest()` in `Items.c` — new `REST_INSIGHT_BASE_TURNS` (60) constant
 alongside `REST_INSIGHT_STEP_TURNS` (now 25), and the threshold expression `BASE + STEP × revealsSoFar`.
 Ring-of-wisdom acceleration and the deterministic, replay-safe random target are unchanged. The two
-constants are the tuning surface; the debug death-recap's per-level rested-turns/reveal tally is the
-readout for recalibrating against real play. Supersedes the schedule in the 2026-06-11 entry below.
+constants are the tuning surface; the Debug-only rest-stats CSV (`rest-stats.csv`) is the readout for
+recalibrating against real play (the on-screen death-recap tally was removed 2026-06-17). Supersedes the
+schedule in the 2026-06-11 entry below.
 
 **Determinism.** Threshold is a deterministic function of rested-turn count and reveals earned; no RNG.
 
@@ -1420,8 +1495,8 @@ rested turns since the last reveal — intervals 100, 200, 300, 400… (cumulati
 **Ring of wisdom.** A worn ring of wisdom makes the polarity machinery scale with its level
 (`rogue.wisdomBonus`): the rest-insight threshold is reduced ~10% per level (cursed/negative wisdom slows
 it; clamped to at most 80% faster / 2× slower, never below 1 rested turn), and the potion of detect magic
-acts on `1 – (2 + ring level)` items instead of `1–2`. (A separate exploration-driven "XPXP" reveal
-channel was considered and tabled.)
+acts on `2 + ring level` items (see the 2026-06-17 entry; was `1–2`, then `1 – (2 + ring level)`). (A
+separate exploration-driven "XPXP" reveal channel was considered and tabled.)
 
 **Random target + escalation to full ID.** Both the rest check and the eat-a-meal scroll check now pick a
 **random** eligible pack item via a shared helper (`applyPolarityInsightToRandomItem`), and the eligible

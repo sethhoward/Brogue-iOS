@@ -1795,7 +1795,7 @@ final class BrogueViewController: UIViewController {
             .bullets([
                 "Rest to learn — Resting gradually reveals whether your unidentified items are helpful or harmful.",
                 "Clues add up — Gather enough hints about an item — or rule out enough of the alternatives — and the dungeon puts it together for you, identifying it outright.",
-                "Detect magic, reined in — The potion of detect magic now only hints at the good-or-bad nature of one or two items at a time, and turns up less often than before. But pair it with a Ring of Wisdom and the potion becomes stronger.",
+                "Detect magic, reined in — The potion of detect magic now only hints at the good-or-bad nature of couple of items instead of all, and turns up less often than before. But pair it with a Ring of Wisdom and the potion becomes stronger.",
                 "Altars of Insight — Sacrifice one item to reveal the nature of another.",
                 "Everyday tells — Eating a meal, watching a scroll burn, shattering a potion with a thrown weapon or a bolt, freeing a captive, and the rings of awareness and wisdom all quietly reveal clues about what you're carrying.",
             ]),
@@ -1808,6 +1808,7 @@ final class BrogueViewController: UIViewController {
             ]),
             .heading("🎮 Quality of Life"),
             .bullets([
+                "Potions float away when thrown into deep water",
                 "Pick your controls — Choose between Classic and Modern keyboard layouts; the game adapts when a hardware keyboard is attached.",
                 "Pick up where you left off — Your last-played seed is remembered across launches.",
                 "Smoother and more stable — Numerous community bug fixes, from dungeon-generation quirks to combat, stealth, and identification edge cases (#766, #805, #812, #816, #831, #837, #841).",
