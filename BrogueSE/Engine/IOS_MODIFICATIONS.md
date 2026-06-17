@@ -32,6 +32,53 @@ See `BrogueCE/Engine/IOS_MODIFICATIONS.md` (faithful CE) and
 
 ## Change log
 
+### 2026-06-16 — Lone Wolf: a solo-play XPXP progression / fallback (new content)
+
+**What.** A player-owned progression track ("Lone Wolf") that compensates for solo play, since allies
+make a run substantially easier. It is driven by the player's *own* exploration XPXP (the same
+new-pathable-cell count that already feeds allies via `addXPXPToAlly`), which is otherwise never
+accumulated for the player. Two tiers, each granting an **effective-strength aura** and a **polarity
+tell**; gated so it can never coexist with allies.
+
+**Rules.**
+- **Accrual:** `rogue.loneWolfXP += rogue.xpxpThisTurn`, but **only while the player has zero living
+  allies anywhere in the dungeon** (`playerHasLivingAllyAnywhere`, all-depths scan — an ally stranded
+  upstairs still counts) **and** at depth `>= LONE_WOLF_MIN_DEPTH` (6; depths 1–5 rarely offer allies,
+  and grant-then-yank confuses new players).
+- **Tiers (cap 2):** `LONE_WOLF_TIER1_XP` 1500 → +1 effective strength; `LONE_WOLF_TIER2_XP` 3000 →
+  +2 total. The strength is a **removable aura**, applied as a tracked delta on `rogue.strength`
+  (`setLoneWolfStrengthBonus`, via `rogue.loneWolfStrBonus`) so it flows through every combat/equip site
+  and can be removed exactly. (`rogue.strength` therefore moves when the aura applies/removes — an
+  accepted UX tradeoff for this release.)
+- **Polarity tell:** one per tier-up, **only on a run where the player has *never* had an ally**
+  (`!rogue.hasEverHadAlly`) — it compensates the pure-solo player for the per-rescue tells in
+  `captiveReactToPack` they forgo. Reuses the shared polarity path (`loneWolfRevealPolarity` in
+  `Items.c`: collect eligible carried items → `rand_range` pick one → `revealOrIdentifyPolarityItem`).
+  Polarity knowledge is permanent (`ITEM_MAGIC_DETECTED`); never un-revealed.
+- **Gaining any ally** (`becomeAllyWith`, the sole ally chokepoint) calls `loseLoneWolfBonusOnAlly`:
+  latches `hasEverHadAlly` (kills future polarity tells for the run), zeroes the XPXP track, and strips
+  the strength aura. The track is **re-grindable from zero** once the ally dies — the intended late-game
+  fallback when early allies are lost around depth 12 and no replacements appear (Lone Wolf re-pops ~15).
+  Discord does **not** route through `becomeAllyWith`, so a discordant enemy never trips Lone Wolf.
+
+**Determinism / save-safety.** Driven entirely by deterministic exploration counts and ally events; the
+polarity `rand_range` draws happen inside `handleLoneWolf` → `playerTurnEnded`, which asserts
+`RNG_SUBSTANTIVE`. New `rogue` fields are set deterministically, so saves (input replays) stay valid.
+
+**Files.**
+- `Rogue.h`: `playerCharacter` fields `loneWolfXP` / `loneWolfTier` / `loneWolfStrBonus` /
+  `hasEverHadAlly`; tuning defines `LONE_WOLF_MIN_DEPTH` / `LONE_WOLF_TIER1_XP` / `LONE_WOLF_TIER2_XP` /
+  `LONE_WOLF_MAX_TIER`; prototypes for `loneWolfRevealPolarity` and `loseLoneWolfBonusOnAlly`.
+- `RogueMain.c`: zero-init of the four fields in `initializeRogue`.
+- `Time.c`: `playerHasLivingAllyAnywhere`, `setLoneWolfStrengthBonus`, `handleLoneWolf` (called from
+  `handleXPXP` before `xpxpThisTurn` is zeroed), and `loseLoneWolfBonusOnAlly`.
+- `Items.c`: `loneWolfRevealPolarity` (after `quaffDetectMagic`).
+- `Movement.c`: `becomeAllyWith` calls `loseLoneWolfBonusOnAlly` after promoting the ally.
+- `IO.c`: `printMonsterInfo` titles the player **"Lone Wolf"** in the sidebar (replacing "YOU") while a
+  tier is active — no separate line, no tier numeral. The `(lit)`/`(dark)` illumination tag is preserved
+  (both fit the 20-col `STAT_BAR_WIDTH`); only the longer `(invisible)` tag is suppressed on the rare
+  invisible turn so nothing overflows/clips.
+
 ### 2026-06-16 — Empty bottle: additive generation channel (out of the potion draw)
 
 **What.** The empty bottle (`POTION_DETECT_MAGIC`) no longer competes in the weighted potion draw.
@@ -1085,7 +1132,8 @@ buff aura *and* an invisible-creature detector. The vanilla item only scaled `ro
 adds, keyed off a new `rogue.lightRingBonus` (net enchant of worn rings of light; negative if cursed):
 
 - **Emboldened allies.** Any ally standing in the player's light (`IN_FIELD_OF_VIEW` and within
-  `rogue.minersLight.lightRadius.lowerBound` tiles) gets the new `STATUS_EMBOLDENED` status, refreshed
+  `effectiveLightAuraRadius()` tiles — see the 2026-06-16 follow-up; originally the map-wide miner's-light
+  radius) gets the new `STATUS_EMBOLDENED` status, refreshed
   each vision update and lingering `EMBOLDEN_LINGER` (3) turns after leaving the light (so it fades
   rather than blinks at the dim edge). While emboldened:
   - **Defense** bonus, front-loaded and diminishing toward a ceiling (`EMBOLDEN_DEFENSE_CAP` × E/(E+1),
@@ -1093,7 +1141,7 @@ adds, keyed off a new `rogue.lightRingBonus` (net enchant of worn rings of light
   - **Accuracy** small flat `EMBOLDEN_ACCURACY_BONUS` (8) — applied in `monsterAccuracyAdjusted()`.
     **No damage bonus, deliberately** — damage compounds with `empowerMonster` leveling into an
     unbeatable squad; the buff is survivability + presence only.
-  - **Courage / rally** — `moveAlly()` extends the attack leash to the light radius (an emboldened ally
+  - **Courage / rally** — `moveAlly()` extends the attack leash to the aura radius (an emboldened ally
     engages anything in your light). And when it *would* flee at low HP, it doesn't scatter to the generic
     safety map (which would lead it *out* of the light, abandoning the defense/regen keeping it alive);
     instead `allyRallyShieldCell()` sends it to a tile **behind you** -- shielded by your body, in the
@@ -1396,6 +1444,9 @@ Where commutation **swaps** two items you keep, this one **consumes one to power
   handler, not per promoted altar).
 - `GlobalsBrogue.c`: the transference blueprint, appended last (depth 11–`AMULET_LEVEL`, freq 30, `BP_REWARD`).
   Like the insight blueprint it builds **only** the carpeted room; the altar pair is placed afterward.
+  **2026-06-16:** frequency temporarily set to `0` (`0/*was 30*/`) for this release so the altar never enters
+  the blueprint raffle — i.e. it never appears. Restore to `30` to re-enable. All transference code is intact;
+  only the raffle weight changed.
 - `Architect.c`: the insight placement helpers were **generalized** — `insightAltarCellIsOpen` →
   `altarPairCellIsOpen`, `setInsightAltar` → `setAltarTile`, `placeInsightAltarsInRoom(min)` →
   `placeAltarPairInRoom(min, westAltar, eastAltar, statueAbove)` (insight call site updated to pass its two

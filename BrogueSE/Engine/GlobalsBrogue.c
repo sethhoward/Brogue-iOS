@@ -644,8 +644,10 @@ const blueprint blueprintCatalog_Brogue[] = {
     // (MT_TRANSFER_ALTAR), appended after the insight altar; this index exists only in Brogue's catalog. Like
     // the insight altars, the blueprint builds ONLY the carpeted room; the donor/recipient pair is placed in a
     // fixed "s . o" layout by buildAMachine (the generic builder can't produce an ordered adjacent pair).
+    // iOS port (Brogue SE): frequency temporarily set to 0 for this release so the transference altar
+    // never enters the blueprint raffle (i.e. never appears); restore to 30 to re-enable. Revisit later.
     {"Altars of transference -- sacrifice an item to pour its enchantment into another",
-    {11, AMULET_LEVEL},{10, 30},   30,     3,          0,                  (BP_ROOM | BP_PURGE_INTERIOR | BP_SURROUND_WITH_WALLS | BP_OPEN_INTERIOR | BP_IMPREGNABLE | BP_REWARD), {
+    {11, AMULET_LEVEL},{10, 30},   0/*was 30*/,     3,          0,                  (BP_ROOM | BP_PURGE_INTERIOR | BP_SURROUND_WITH_WALLS | BP_OPEN_INTERIOR | BP_IMPREGNABLE | BP_REWARD), {
         {0,         CARPET,     DUNGEON,        {0,0},      0,          0,          -1,         0,              0,              0,          0,          (MF_EVERYWHERE)},
         {0,         STATUE_INERT,DUNGEON,       {1,3},      0,          0,          -1,         0,              2,              0,          0,          (MF_TREAT_AS_BLOCKING | MF_BUILD_IN_WALLS | MF_IMPREGNABLE)},
         {0,         0,          0,              {1,1},      1,          0,          0,          0,              2,              0,          0,          (MF_BUILD_AT_ORIGIN | MF_PERMIT_BLOCKING | MF_BUILD_VESTIBULE)}}},

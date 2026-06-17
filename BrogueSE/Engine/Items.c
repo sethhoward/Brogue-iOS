@@ -8513,6 +8513,45 @@ static void quaffDetectMagic(item *exclude) {
     }
 }
 
+// iOS port (Brogue SE): Lone Wolf's polarity tell. Fired once per Lone Wolf tier-up, but only on a run
+// where the player has NEVER had an ally (rogue.hasEverHadAlly) -- it compensates the pure-solo player
+// for the per-rescue polarity tells in captiveReactToPack that they forgo by never freeing a captive.
+// Reveals ONE random eligible carried item's polarity (mirrors the "one tell per rescue" rule), reusing
+// the shared revealOrIdentifyPolarityItem path; silent no-op if there's nothing left to sense, and the
+// reveal is NOT banked. Selection RNG (rand_range) is the substantive channel, so it replays identically.
+void loneWolfRevealPolarity(void) {
+    item *eligible[32];
+    int count = 0;
+    for (item *theItem = packItems->nextItem; theItem != NULL; theItem = theItem->nextItem) {
+        if ((theItem->category & CAN_BE_DETECTED)
+            && !itemIdentityFullyKnown(theItem)
+            && itemMagicPolarity(theItem) != MAGIC_POLARITY_NEUTRAL
+            && !polarityAuraAlreadyShownForGear(theItem)
+            && count < (int)(sizeof(eligible) / sizeof(eligible[0]))) {
+
+            eligible[count++] = theItem;
+        }
+    }
+    if (count == 0) {
+        return; // nothing left to discern -- silent, like captiveReactToPack
+    }
+    item *chosen = eligible[rand_range(0, count - 1)];
+    const boolean benevolent = (itemMagicPolarity(chosen) == MAGIC_POLARITY_BENEVOLENT);
+    const boolean wasFullID = revealOrIdentifyPolarityItem(chosen);
+    tryIdentifyLastItemKinds(HAS_INTRINSIC_POLARITY);
+
+    char theName[COLS * 3], buf[COLS * 3];
+    if (wasFullID) {
+        itemName(chosen, theName, true, true, NULL);
+        sprintf(buf, "alone in the dark, your instincts lay %s bare.", theName);
+        messageWithColor(buf, &itemMessageColor, 0);
+    } else {
+        itemName(chosen, theName, false, true, NULL);
+        sprintf(buf, "alone in the dark, you feel the %s aura of %s.", (benevolent ? "benevolent" : "malevolent"), theName);
+        messageWithColor(buf, (benevolent ? &goodMessageColor : &badMessageColor), 0);
+    }
+}
+
 // iOS port (iBrogue): a THROWN potion of detect magic turns its insight outward, onto the dungeon
 // floor, rather than the pack (quaffDetectMagic). It senses the same 1-2 base count (widened by a worn
 // ring of wisdom, like the drink) of random undiscovered, polarity-bearing items lying on this level,

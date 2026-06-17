@@ -421,6 +421,11 @@ void initializeRogue(uint64_t seed) {
     rogue.mapToShore = NULL;
     rogue.cursorLoc = INVALID_POS;
     rogue.xpxpThisTurn = 0;
+    // iOS port (Brogue SE): Lone Wolf solo-progression state (see handleLoneWolf / loseLoneWolfBonusOnAlly).
+    rogue.loneWolfXP = 0;
+    rogue.loneWolfTier = 0;
+    rogue.loneWolfStrBonus = 0;
+    rogue.hasEverHadAlly = false;
 
     rogue.yendorWarden = NULL;
 

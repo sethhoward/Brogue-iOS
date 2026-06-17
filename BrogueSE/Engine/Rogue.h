@@ -1226,6 +1226,12 @@ enum tileFlags {
 
 #define XPXP_NEEDED_FOR_TELEPATHIC_BOND     1400 // XPXP required to enable telepathic awareness with the ally
 
+// iOS port (Brogue SE): Lone Wolf solo-progression tuning (see playerCharacter.loneWolfXP).
+#define LONE_WOLF_MIN_DEPTH                 6    // accrue solo XPXP only at this depth or deeper
+#define LONE_WOLF_TIER1_XP                  1500 // solo XPXP for tier 1 (+1 effective strength; ~2 levels of solo exploration)
+#define LONE_WOLF_TIER2_XP                  3000 // solo XPXP for tier 2 (+2 total effective strength)
+#define LONE_WOLF_MAX_TIER                  2    // tier cap
+
 #define ROOM_MIN_WIDTH                      4
 #define ROOM_MAX_WIDTH                      20
 #define ROOM_MIN_HEIGHT                     3
@@ -2721,6 +2727,17 @@ typedef struct playerCharacter {
     unsigned long absoluteTurnNumber;   // number of turns since the beginning of time. Always increments.
     signed long milliseconds;           // milliseconds since launch, to decide whether to engage cautious mode
     short xpxpThisTurn;                 // how many squares the player explored this turn
+    // iOS port (Brogue SE): "Lone Wolf" -- a solo-play fallback progression driven by the player's own
+    // exploration XPXP. Accrues only while the player has zero living allies anywhere and is at depth >= 6.
+    // At tiers (LONE_WOLF_TIER1_XP, LONE_WOLF_TIER2_XP) it grants effective strength (a removable aura) and,
+    // on runs where the player has NEVER had an ally, a one-shot polarity reveal (compensating for the
+    // per-rescue tells in captiveReactToPack that a pure-solo player forgoes). Gaining any ally zeroes the
+    // track and strips the strength aura (re-grindable); hasEverHadAlly latches for the run (kills polarity).
+    // All driven by deterministic exploration -> save-safe (saves replay inputs). See IOS_MODIFICATIONS.md.
+    long loneWolfXP;                    // solo exploration XPXP accumulated toward the next Lone Wolf tier
+    short loneWolfTier;                 // current Lone Wolf tier (0..LONE_WOLF_MAX_TIER)
+    short loneWolfStrBonus;             // effective-strength currently added to rogue.strength by Lone Wolf (so it can be removed exactly)
+    boolean hasEverHadAlly;            // latches true the first time the player gains any ally this run; gates the polarity reveal
     short stealthRange;                 // distance from which monsters will notice you
 
     short previousPoisonPercent;        // and your poison proportion, to display percentage alerts for each.
@@ -3366,6 +3383,7 @@ extern "C" {
     void applyInstantTileEffectsToCreature(creature *monst);
     void vomit(creature *monst);
     void becomeAllyWith(creature *monst);
+    void loseLoneWolfBonusOnAlly(void); // iOS port (Brogue SE): reset solo Lone Wolf track when an ally is gained
     void freeCaptive(creature *monst);
     boolean freeCaptivesEmbeddedAt(short x, short y);
     boolean handleWhipAttacks(creature *attacker, enum directions dir, boolean *aborted);
@@ -3531,6 +3549,7 @@ extern "C" {
     boolean canDirectlySeeMonster(creature *monst);
     short playerLightRevealsMonster(const creature *monst); // iOS port (iBrogue): 0=no, 1=flicker (dim light), 2=full (bright light)
     void updateAllyEmboldenment(void); // iOS port (iBrogue): ring of light ally aura
+    short effectiveLightAuraRadius(void); // iOS port (iBrogue): tight aura reach (3 + |enchant|) for embolden + reveal
     short emboldenmentDefenseBonus(const creature *monst); // iOS port (iBrogue)
     short emboldenmentAccuracyBonus(const creature *monst); // iOS port (iBrogue)
     void monsterName(char *buf, creature *monst, boolean includeArticle);
@@ -3739,6 +3758,7 @@ extern "C" {
     void burnItem(item *theItem);
     boolean revealPolarityOnFieryDestruction(item *theItem); // iOS port (iBrogue): scroll fire-erasure polarity tell
     void captiveReactToPack(creature *freed); // iOS port (iBrogue): freed captive senses a pack item's polarity
+    void loneWolfRevealPolarity(void); // iOS port (Brogue SE): Lone Wolf tier-up polarity tell (pure-solo runs only)
     void activateMachine(short machineNumber);
     boolean circuitBreakersPreventActivation(short machineNumber);
     void promoteTile(short x, short y, enum dungeonLayers layer, boolean useFireDF);

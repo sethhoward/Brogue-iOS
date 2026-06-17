@@ -1035,6 +1035,82 @@ static void addXPXPToAlly(creature *monst) {
     }
 }
 
+// iOS port (Brogue SE): true if the player has any living ally anywhere in the dungeon (any depth, not
+// just the current/adjacent levels). Used to gate Lone Wolf: an ally left behind upstairs still counts,
+// closing the "strand your ally to keep the solo bonus" exploit.
+static boolean playerHasLivingAllyAnywhere(void) {
+    for (int i = 0; i <= gameConst->deepestLevel; i++) {
+        for (creatureIterator it = iterateCreatures(&levels[i].monsters); hasNextCreature(it);) {
+            creature *monst = nextCreature(&it);
+            if (monst->creatureState == MONSTER_ALLY) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+// iOS port (Brogue SE): apply the Lone Wolf effective-strength aura for the given tier, adjusting
+// rogue.strength by the delta from whatever Lone Wolf last applied (so it can be removed exactly on
+// loseLoneWolfBonusOnAlly). Tier 1 -> +1, tier 2 -> +2.
+static void setLoneWolfStrengthBonus(short newBonus) {
+    if (newBonus != rogue.loneWolfStrBonus) {
+        rogue.strength += (newBonus - rogue.loneWolfStrBonus);
+        rogue.loneWolfStrBonus = newBonus;
+        updateEncumbrance();
+    }
+}
+
+// iOS port (Brogue SE): the Lone Wolf solo-progression tick. Drives a player-owned exploration-XPXP track
+// that only advances while the player is genuinely solo (no living ally anywhere) and at depth >= 6.
+// Crossing a tier threshold grants an effective-strength aura (+1 at tier 1, +2 at tier 2) and, on runs
+// where the player has NEVER had an ally, one polarity tell (loneWolfRevealPolarity). Driven entirely by
+// deterministic exploration counts, so it replays identically and is save-safe.
+static void handleLoneWolf() {
+    if (playerHasLivingAllyAnywhere()) {
+        return; // not solo: no accrual, and the aura is stripped on the becomeAllyWith hook
+    }
+    if (rogue.depthLevel < LONE_WOLF_MIN_DEPTH) {
+        return; // too shallow to count (avoids grant-then-yank confusion in the early game)
+    }
+
+    rogue.loneWolfXP += rogue.xpxpThisTurn;
+
+    short newTier = rogue.loneWolfTier;
+    if (rogue.loneWolfXP >= LONE_WOLF_TIER2_XP) {
+        newTier = 2;
+    } else if (rogue.loneWolfXP >= LONE_WOLF_TIER1_XP) {
+        newTier = 1;
+    }
+    if (newTier > LONE_WOLF_MAX_TIER) {
+        newTier = LONE_WOLF_MAX_TIER;
+    }
+
+    while (rogue.loneWolfTier < newTier) {
+        rogue.loneWolfTier++;
+        setLoneWolfStrengthBonus(rogue.loneWolfTier); // +1 at tier 1, +2 at tier 2
+        if (rogue.loneWolfTier == 1) {
+            messageWithColor("alone in the dark, your senses sharpen and your body hardens. (Lone Wolf I)", &advancementMessageColor, 0);
+        } else {
+            messageWithColor("solitude tempers you further. (Lone Wolf II)", &advancementMessageColor, 0);
+        }
+        // Polarity tell only on a pure-solo run -- compensates for the captiveReactToPack tells forgone.
+        if (!rogue.hasEverHadAlly) {
+            loneWolfRevealPolarity();
+        }
+    }
+}
+
+// iOS port (Brogue SE): called from becomeAllyWith -- gaining any ally latches the run as "not pure solo"
+// (kills future polarity tells), zeroes the solo XPXP track, and strips the effective-strength aura. The
+// track is re-grindable from zero if the ally later dies, which is the intended late-game fallback.
+void loseLoneWolfBonusOnAlly() {
+    rogue.hasEverHadAlly = true;
+    rogue.loneWolfXP = 0;
+    rogue.loneWolfTier = 0;
+    setLoneWolfStrengthBonus(0);
+}
+
 /// @brief Allies gain experience if they are within 1 depth level of the player
 static void handleXPXP() {
 
@@ -1054,6 +1130,7 @@ static void handleXPXP() {
             addXPXPToAlly(monst);
         }
     }
+    handleLoneWolf(); // iOS port (Brogue SE): solo-play progression; reads xpxpThisTurn before it is zeroed
     rogue.xpxpThisTurn = 0;
 }
 

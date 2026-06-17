@@ -536,6 +536,9 @@ void becomeAllyWith(creature *monst) {
     monst->leader = &player;
     monst->bookkeepingFlags &= ~(MB_CAPTIVE | MB_SEIZED);
     refreshDungeonCell(monst->loc);
+    // iOS port (Brogue SE): gaining any ally ends pure-solo play -- latch the run, zero the Lone Wolf solo
+    // XPXP track, and strip its effective-strength aura (idempotent; safe under the carriedMonster recursion).
+    loseLoneWolfBonusOnAlly();
 }
 
 void freeCaptive(creature *monst) {

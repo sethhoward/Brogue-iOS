@@ -4760,10 +4760,20 @@ short printMonsterInfo(creature *monst, short y, boolean dim, boolean highlight)
         upperCase(monstName);
 
         if (monst == &player) {
+            // iOS port (Brogue SE): while the Lone Wolf solo aura is active, title the player "Lone Wolf"
+            // in place of "YOU". The (lit)/(dark) illumination tag (with its leading space) is preserved
+            // -- both fit the 20-col sidebar; only the longer "(invisible)" tag is suppressed on the rare
+            // invisible turn so nothing is cut off.
+            const boolean loneWolf = (rogue.loneWolfTier > 0);
+            if (loneWolf) {
+                strcpy(monstName, "Lone Wolf");
+            }
             strcat(monstName, " xxxx");
             encodeMessageColor(monstName, strlen(monstName) - 4, &monstForeColor);
             if (player.status[STATUS_INVISIBLE]) {
-                strcat(monstName, "(invisible)");
+                if (!loneWolf) {
+                    strcat(monstName, "(invisible)");
+                }
             } else if (playerInDarkness()) {
                 //encodeMessageColor(monstName, strlen(monstName) - 4, &playerInDarknessColor);
                 strcat(monstName, "(dark)");
