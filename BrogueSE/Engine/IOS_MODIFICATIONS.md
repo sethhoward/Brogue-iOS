@@ -1198,6 +1198,33 @@ leather armor (near-invulnerable, so you can test without dying); equip it to we
 v2 capture system can be tested without first finding one. All are deterministic (not recorded inputs),
 so they're replay-safe. Flip to 0 to ship.
 
+### 2026-06-16 — Ring of light aura decoupled from the miner's-light radius (tuning)
+
+**What.** The ally-emboldenment aura, the invisible-creature reveal, and the emboldened-ally attack leash
+all keyed off `rogue.minersLight.lightRadius.lowerBound` — the *brightness-fade* radius of the miner's
+light. That radius is geometric in depth (`(DCOLS-1) × 0.85^depth`, see `updateMinersLightRadius` in
+`Light.c`): ~69 tiles on D1, only collapsing to a tight pool deep in the dungeon. So on shallow floors the
+aura covered the **entire level** — allies were emboldened map-wide, invisibles revealed map-wide, and
+emboldened allies would chase anything anywhere. The aura was designed assuming a much tighter reach.
+
+**Fix.** New shared helper `effectiveLightAuraRadius()` (`Monsters.c`) returns a tight, depth-independent
+reach: `EMBOLDEN_AURA_BASE_RADIUS` (3) `+ abs(rogue.lightRingBonus)`, so a found +3 ring → 6 tiles, a +1 →
+4. **Magnitude, not sign, sets the radius** — a cursed −N ring debuffs as wide as an equal +N would buff
+(the original `3 + enchant` would have *shrunk* the cursed debuff to zero at −3, an inversion); the callers
+still apply polarity. Returns 0 when no ring is worn. The three consumers now read the helper:
+`updateAllyEmboldenment()`, `playerLightRevealsMonster()`, and the leash clause in `moveAlly()`. Distance
+stays Chebyshev (`distanceBetween`, the engine idiom) and `IN_FIELD_OF_VIEW` still clips the aura to
+line-of-sight (walls + closed doors). The reveal's bright-core/dim-fade split (inner 60% = full, outer =
+flicker) carries over to the new radius. Everything else (3-turn `EMBOLDEN_LINGER`, the strength curves)
+is unchanged.
+
+**Where.** `Monsters.c` (`effectiveLightAuraRadius` + `EMBOLDEN_AURA_BASE_RADIUS`; the three call sites);
+`Rogue.h` (prototype).
+
+**Determinism / saves.** Helper is pure state-derived from `rogue.lightRingBonus` (set deterministically
+in `updateRingBonuses`), so it replays identically and is safe to call from the display pipeline. No
+save-format impact; diverges replays from pre-change recordings like any gameplay tweak.
+
 ### 2026-06-11 — Sense when a pursuer gives up the chase (new content)
 
 **What.** When a monster loses the player's trail and reverts from hunting to wandering

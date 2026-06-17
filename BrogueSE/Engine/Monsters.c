@@ -321,6 +321,20 @@ boolean canDirectlySeeMonster(creature *monst) {
 #define EMBOLDEN_DEFENSE_CAP        20  // defense bonus asymptote (~2 ally empowerments; empowerMonster grants +10)
 #define EMBOLDEN_ACCURACY_BONUS     8   // small flat accuracy nudge (consistency, never damage)
 #define EMBOLDEN_REGEN_PERCENT_CAP  300 // extra regeneration % asymptote while emboldened (recovery-paced, not combat sustain)
+#define EMBOLDEN_AURA_BASE_RADIUS   3   // tile reach of the aura before adding the ring's net enchant magnitude
+
+// Tile radius of the worn ring's aura, used by BOTH the ally-emboldenment buff/debuff and the
+// invisible-creature reveal. Deliberately decoupled from the miner's *light* radius (which is a
+// brightness-fade parameter that spans the whole map on shallow floors); this is a tight, tactical
+// reach instead. Magnitude (not sign) sets the radius, so a deeper curse debuffs as wide as an equal
+// buff would embolden; the sign/polarity is handled by the callers. Returns 0 when no ring is worn
+// (callers also guard this). Pure state-derived -> deterministic and display-pipeline safe.
+short effectiveLightAuraRadius(void) {
+    if (rogue.lightRingBonus == 0) {
+        return 0;
+    }
+    return EMBOLDEN_AURA_BASE_RADIUS + abs(rogue.lightRingBonus);
+}
 
 // Front-loaded, diminishing-toward-a-ceiling curve: cap * E/(E+1). ~half at +1, ~80% at +3, never exceeds cap.
 static short emboldenmentCurve(short cap, short enchant) {
@@ -373,7 +387,7 @@ short playerLightRevealsMonster(const creature *monst) {
     if (!(pmapAt(monst->loc)->flags & IN_FIELD_OF_VIEW)) {
         return 0;
     }
-    radius = rogue.minersLight.lightRadius.lowerBound;
+    radius = effectiveLightAuraRadius(); // tight aura, not the map-wide miner's-light radius
     if (radius < 1) {
         return 0;
     }
@@ -393,7 +407,7 @@ void updateAllyEmboldenment() {
     if (rogue.lightRingBonus == 0) {
         return; // no ring of light worn (or net-neutral pair)
     }
-    radius = rogue.minersLight.lightRadius.lowerBound;
+    radius = effectiveLightAuraRadius(); // tight aura, not the map-wide miner's-light radius
     if (radius < 1) {
         return;
     }
@@ -3394,9 +3408,10 @@ static void moveAlly(creature *monst) {
     } else {
         leashLength = 4;
     }
-    // iOS port (iBrogue): ring of light. Emboldened allies will engage anything within your light.
+    // iOS port (iBrogue): ring of light. Emboldened allies will engage anything within your light --
+    // the tight aura reach, not the map-wide miner's-light radius (which spans the level on shallow floors).
     if (monst->status[STATUS_EMBOLDENED] && rogue.lightRingBonus > 0) {
-        leashLength = max(leashLength, (short) rogue.minersLight.lightRadius.lowerBound);
+        leashLength = max(leashLength, effectiveLightAuraRadius());
     }
     if (shortestDistance == 1) {
         if (closestMonster->movementSpeed < monst->movementSpeed
