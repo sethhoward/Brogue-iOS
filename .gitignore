@@ -21,3 +21,10 @@ Pods/
 *.ipa
 *.dSYM.zip
 *.mobileprovision
+
+# Private project files (kept locally, never committed)
+CLAUDE.md
+KNOWN_CAVEATS.md
+docs/adr/
+docs/design/
+docs/notes/
