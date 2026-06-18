@@ -13,6 +13,6 @@ Brogue (Classic) - Countless adventurers before you have descended this torch-li
 
 [BrogueCE](https://github.com/tmewett/BrogueCE) - Community edition continuing developing, refining, and bug fixing of classic Brogu
 
-Brogue SE — An experimental fork of BrogueCE with original items, monsters, and mechanics.
+[Brogue SE](BROGUE_SE.md) — An experimental fork of BrogueCE with original items, monsters, and mechanics.
 
 ```"This variant is a collaboration between human expression and an AI language model. The design, code, in-game text, and creative direction are mine; audits, bug squashing, comments, commits, documentation, and subsequent code was written by an LLM through my prompting."```
