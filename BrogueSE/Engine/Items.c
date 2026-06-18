@@ -2928,7 +2928,7 @@ static boolean displayMagicCharForItem(item *theItem) {
 //   - Wands and everything else: no bar.
 static void setInventoryProgressBar(item *theItem, brogueButton *button, short track) {
     short pct = -1; // -1 == no bar; otherwise 0..100 fill of the full-width track
-    short segCells = 0; // >= 2 divides the bar into segments (known staff charges)
+    short segCount = 0; // >= 2 divides the full-width bar into that many segments (known staff charges)
     const color *barColor = &gray;
 
     if (track <= 0) {
@@ -2962,8 +2962,11 @@ static void setInventoryProgressBar(item *theItem, brogueButton *button, short t
             pct = (theItem->enchant1 > 0)
                   ? (theItem->charges * 100 + partialPct) / theItem->enchant1
                   : 0;
-            if (theItem->enchant1 >= 2) {
-                segCells = track / theItem->enchant1;
+            // Segment per charge, but only if each segment is at least 2 cells wide (else the gaps
+            // would eat the whole bar). The bar is split proportionally across the full width in
+            // drawButton, so it always renders exactly enchant1 segments with no remainder stub.
+            if (theItem->enchant1 >= 2 && track / theItem->enchant1 >= 2) {
+                segCount = theItem->enchant1;
             }
         } else if (theItem->charges >= 1) {
             // Max hidden: track a single charge — a charge is ready -> full bar (never reveals how
@@ -2991,7 +2994,7 @@ static void setInventoryProgressBar(item *theItem, brogueButton *button, short t
             button->flags |= B_DRAW_PROGRESS_BAR;
             button->barColor = *barColor;
             button->barFillCells = fillCells;
-            button->barSegmentCells = segCells;
+            button->barSegments = segCount;
         }
     }
 }
@@ -6953,6 +6956,18 @@ static boolean detonateFloorPotionAt(short x, short y, boolean fiery) {
     return false;
 }
 
+// iOS port (Brogue SE): dart-as-identification is DISABLED. We trialled a costed version (a thrown
+// dart/javelin detonating a dropped bad potion and being consumed against the flask), on the theory that the
+// per-probe cost would self-balance against dart scarcity. Playtest killed it: scarcity is a property of the
+// run's RNG, not of darts -- a single early drop (e.g. a staff for combat + a stack of 8 javelins as pure
+// surplus) reduces the cost to zero and lets the player map the entire potion pool's polarity for free. That
+// is exactly the free-mass-ID the costed-bolt probe exists to prevent; the bolt avoids it because staff
+// charges are a genuinely limited, slow-recharging resource, whereas a quiver has no such ceiling. So darts
+// are removed from the identification channels: a dart/javelin thrown at a dropped potion simply drops and is
+// recoverable like any thrown weapon. Bolts and incendiary darts still detonate floor potions (their costs --
+// a staff charge, a one-shot incendiary -- are bounded). Flip back to true to restore the consumed-dart probe.
+static const boolean dartsProbeAndConsumeOnPotions = false;
+
 static void throwItem(item *theItem, creature *thrower, pos targetLoc, short maxDistance) {
     short i, numCells;
     creature *monst = NULL;
@@ -7189,11 +7204,25 @@ static void throwItem(item *theItem, creature *thrower, pos targetLoc, short max
         deleteItem(theItem);
         return;
     }
-    // iOS port (iBrogue): a thrown dart or javelin detonates a dropped bad/cloud potion like a LIGHTNING
-    // bolt -- the cloud blooms but nothing ignites it (no fire is applied here). The weapon then drops as
-    // usual below.
-    if ((theItem->category & WEAPON) && (theItem->kind == DART || theItem->kind == JAVELIN)) {
-        detonateFloorPotionAt(x, y, false); // non-fiery: cloud blooms unignited (lightning-bolt style)
+    // iOS port (iBrogue/Brogue SE): a thrown dart or javelin landing on a dropped potion detonates a bad/cloud
+    // one like a LIGHTNING bolt (the cloud blooms but nothing ignites it) and is CONSUMED against the flask --
+    // a real per-probe cost, so dart-ID is never free (see dartsProbeAndConsumeOnPotions). A benevolent potion
+    // is inert: the dart just cracks off it, revealing nothing but its good/inert nature. With no potion on the
+    // tile (or the probe disabled) the dart falls through and drops, recoverable, like any thrown weapon.
+    if (dartsProbeAndConsumeOnPotions
+        && (theItem->category & WEAPON) && (theItem->kind == DART || theItem->kind == JAVELIN)) {
+
+        item *floorPotion = itemAtLoc((pos){ x, y });
+        if (floorPotion && (floorPotion->category & POTION)) {
+            if (!detonateFloorPotionAt(x, y, false) && playerCanSee(x, y)) {
+                // benevolent potion: no shatter signature, so the flask simply takes the hit (observational
+                // tell only -- no polarity is recorded, mirroring the bolt's glow-and-pass)
+                message("the dart cracks against the flask, but the fluid within only glistens, unspent.", 0);
+            }
+            deleteItem(theItem); // spent against the flask -- not recovered
+            refreshDungeonCell((pos){ x, y });
+            return;
+        }
     }
     pos dropLoc;
     getQualifyingLocNear(&dropLoc, (pos){ x, y }, true, 0, (T_OBSTRUCTS_ITEMS | T_OBSTRUCTS_PASSABILITY), (HAS_ITEM), false, false);
@@ -8309,13 +8338,28 @@ static boolean revealOrIdentifyPolarityItem(item *theItem) {
     return polarityKnown;
 }
 
+// iOS port (Brogue SE): does this carried item's good/bad polarity already register as known? Mirrors the
+// branch in revealOrIdentifyPolarityItem -- gear caps at the aura glyph (and aura-shown gear is excluded from
+// the insight pools upstream, so it always reads "unknown" here), while flavored items consult the two-axis
+// polarity-known test. Shared by every reveal-or-escalate channel (detect magic, resting, eating) to
+// PRIORITIZE still-hidden polarities ahead of already-sensed items.
+static boolean polarityAlreadySensed(const item *theItem) {
+    if (theItem->category & (WEAPON | ARMOR)) {
+        return false;
+    }
+    return itemMagicPolarityIsKnown(theItem, MAGIC_POLARITY_BENEVOLENT)
+        || itemMagicPolarityIsKnown(theItem, MAGIC_POLARITY_MALEVOLENT);
+}
+
 // iOS port (iBrogue): shared selection for the passive insight events (resting, eating). Picks a RANDOM
 // eligible pack item -- unidentified, non-neutral, polarity-bearing, matching categoryMask -- and either
 // reveals its good/bad polarity (if still hidden) or, if its polarity is already known, fully identifies
-// it. The pool deliberately INCLUDES polarity-known items, so insight escalates "sensed" items into full
-// IDs. favorPotions restricts the pool to potions whenever any eligible potion exists (resting favors
-// potions first). Sets *outFullID; returns the affected item, or NULL if nothing was eligible. The random
-// pick is a substantive, action-triggered draw, reproduced identically on replay.
+// it. The pool INCLUDES polarity-known items so insight can still escalate "sensed" items into full IDs,
+// but -- like the potion of detect magic -- it PRIORITIZES still-hidden polarities: a new aura is always
+// revealed before any already-sensed item is escalated. favorPotions restricts the pool to potions whenever
+// any eligible potion exists (resting favors potions first). Sets *outFullID; returns the affected item, or
+// NULL if nothing was eligible. The random pick is a substantive, action-triggered draw, reproduced
+// identically on replay.
 static item *applyPolarityInsightToRandomItem(unsigned short categoryMask, boolean favorPotions, boolean *outFullID) {
     item *eligible[32];
     int count = 0;
@@ -8350,7 +8394,18 @@ static item *applyPolarityInsightToRandomItem(unsigned short categoryMask, boole
     if (count == 0) {
         return NULL;
     }
-    item *target = eligible[rand_range(0, count - 1)];
+    // iOS port (Brogue SE): prioritize still-hidden polarities (mirrors the potion of detect magic).
+    // Stable-partition so unknown-polarity items sort first; draw from that band when it is non-empty, and
+    // only fall through to the already-sensed items (escalating one to a full ID) once nothing new remains.
+    int unknownCount = 0;
+    for (int i = 0; i < count; i++) {
+        if (!polarityAlreadySensed(eligible[i])) {
+            item *tmp = eligible[unknownCount]; eligible[unknownCount] = eligible[i]; eligible[i] = tmp;
+            unknownCount++;
+        }
+    }
+    const int pickHi = (unknownCount > 0) ? unknownCount - 1 : count - 1;
+    item *target = eligible[rand_range(0, pickHi)];
     const boolean polarityKnown = revealOrIdentifyPolarityItem(target);
     tryIdentifyLastItemKinds(HAS_INTRINSIC_POLARITY);
     if (outFullID) {
@@ -8459,18 +8514,6 @@ void gainScrollInsightFromEating(void) {
     }
 }
 
-// iOS port (Brogue SE): does this carried item's good/bad polarity already register as known? Mirrors the
-// branch in revealOrIdentifyPolarityItem -- gear caps at the aura glyph (and aura-shown gear is excluded from
-// the detect pool upstream, so it always reads "unknown" here), while flavored items consult the two-axis
-// polarity-known test. Used to PRIORITIZE still-hidden polarities ahead of already-sensed items.
-static boolean detectMagicPolarityAlreadyKnown(const item *theItem) {
-    if (theItem->category & (WEAPON | ARMOR)) {
-        return false;
-    }
-    return itemMagicPolarityIsKnown(theItem, MAGIC_POLARITY_BENEVOLENT)
-        || itemMagicPolarityIsKnown(theItem, MAGIC_POLARITY_MALEVOLENT);
-}
-
 // iOS port (iBrogue): the returning potion of detect magic. Acts on a base of 2 unidentified,
 // polarity-bearing items in the pack (excluding the potion being drunk) -- revealing each one's good/bad
 // polarity, or fully identifying it if its polarity is already known (same reveal-or-escalate rule as
@@ -8501,7 +8544,7 @@ static void quaffDetectMagic(item *exclude) {
     // boundary). Detect magic then spends its reveals on fresh polarity discoveries first.
     int unknownCount = 0;
     for (int i = 0; i < count; i++) {
-        if (!detectMagicPolarityAlreadyKnown(eligible[i])) {
+        if (!polarityAlreadySensed(eligible[i])) {
             item *tmp = eligible[unknownCount]; eligible[unknownCount] = eligible[i]; eligible[i] = tmp;
             unknownCount++;
         }

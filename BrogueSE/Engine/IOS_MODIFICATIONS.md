@@ -32,6 +32,49 @@ See `BrogueCE/Engine/IOS_MODIFICATIONS.md` (faithful CE) and
 
 ## Change log
 
+### 2026-06-18 — Darts removed as a potion-identification channel
+
+**What.** A thrown dart or javelin landing on a dropped potion **no longer detonates it** — it simply drops
+and is recoverable, like any thrown weapon. Only **bolts** (fire/lightning staffs & wands) and **incendiary
+darts** still detonate floor potions. This removes plain darts/javelins from the identification channels.
+
+**Why (the trial and the kill).** We first trialled a *costed* dart probe — the dart detonates a bad potion
+(auto-ID, lightning style), is inert against a benevolent one, and is **consumed against the flask** rather
+than recovered — on the theory that the per-probe cost would self-balance against dart scarcity. Playtest
+refuted it: scarcity is a property of the *run's RNG*, not of darts. A single early drop (the motivating
+case: a staff for combat **plus a stack of 8 javelins** as pure surplus on depth 1) drops the cost to zero
+and lets the player map the **entire potion pool's polarity for free** — exactly the free-mass-ID the costed
+bolt probe exists to prevent. The bolt avoids this because staff charges are a genuinely limited,
+slow-recharging resource; a quiver has no such ceiling, and consuming the dart doesn't help because the
+*pile* is the problem, not the recovery. No fiddly per-game/charge cap was judged worth the complexity.
+
+**Where.** `Items.c` — the dart-as-ID channel is gated behind a single file-scope flag
+`dartsProbeAndConsumeOnPotions` (just above `throwItem`), now `false`. When false, the `DART | JAVELIN`
+branch in `throwItem` short-circuits and the weapon falls through to the normal drop. Flip back to `true` to
+restore the consumed-dart probe (the implementation is retained behind the flag). Marked
+`// iOS port (Brogue SE):`. Caveat updated in `KNOWN_CAVEATS.md`.
+
+**Determinism.** No RNG involved; saves/replays unaffected beyond the usual gameplay-change divergence from
+pre-change recordings.
+
+### 2026-06-18 — Rest & eat-a-meal insight: prioritize still-hidden polarities
+
+**What.** Extended the detect-magic "prioritize still-hidden polarities" behavior (see the 2026-06-17
+entry) to the two passive insight channels — **resting** and **eating a meal**. Both pick a random
+eligible pack item through the shared `applyPolarityInsightToRandomItem`, whose pool deliberately includes
+already-sensed items (so insight can escalate them to full IDs). That pool is now stable-partitioned so an
+item whose good/bad aura is **still hidden** is always chosen first; an already-sensed item is only escalated
+to a full ID once nothing new remains to reveal. Matches the drink/throw of detect magic.
+
+**Where.** `Items.c` — the polarity-known predicate (formerly `detectMagicPolarityAlreadyKnown`) is renamed
+`polarityAlreadySensed` and hoisted next to `revealOrIdentifyPolarityItem`, since it is now shared by all
+three reveal-or-escalate channels (detect magic, rest, eat). `applyPolarityInsightToRandomItem` gained the
+same partition-then-pick used by `quaffDetectMagic`. Marked `// iOS port (Brogue SE):`.
+
+**Determinism.** Still a single substantive `rand_range` draw at the action point (the partition is a pure
+reordering, no extra RNG), so saves/replays stay valid; like any gameplay change it diverges replays from
+pre-change recordings.
+
 ### 2026-06-17 — Altar of insight: refuse ineligible items on the INSIGHT slot at drop time
 
 **What.** The INSIGHT (item-to-reveal) slot of an altar of insight now refuses, *at drop time*, items
@@ -1386,9 +1429,17 @@ relabels `STATUS_CONFUSED` to "Panic" while the creature is also burning (`IO.c`
 exactly the fire-induced confusion (confusion lasts 3 turns, burning up to 7). Confusion from other
 sources keeps its normal "Confused" label.
 
-**Where.** `Time.c` — `FIRE_CONFUSION_DURATION` define + one assignment in `exposeCreatureToFire`.
-`IO.c` — a `STATUS_CONFUSED` special case in the sidebar status loop renders "Panic" when burning. No
-RNG drawn; deterministic, no save/replay impact. CE-only.
+**Panic-aware messages (2026-06-18).** The ignition combat message reads "you catch fire and panic"
+(was "you catch fire") so the "Panic" status bar has an on-screen cause. The player's `STATUS_CONFUSED`
+expiry message in `playerTurnEnded` mirrors the sidebar's condition: "you regain your composure." when
+`STATUS_BURNING > 0` (i.e. it was fire-panic), else the normal "you no longer feel confused." Because
+panic (3 turns) always ends while burning (7) is still active, this reliably distinguishes fire-panic
+from real confusion.
+
+**Where.** `Time.c` — `FIRE_CONFUSION_DURATION` define + one assignment in `exposeCreatureToFire`; the
+ignition message and the `STATUS_CONFUSED`-expiry message (in `playerTurnEnded`). `IO.c` — a
+`STATUS_CONFUSED` special case in the sidebar status loop renders "Panic" when burning. No RNG drawn;
+deterministic, no save/replay impact. CE-only.
 
 ### 2026-06-11 — Subtle progress bars behind inventory rows (new content)
 
@@ -1402,10 +1453,13 @@ row text. Per category:
   the next charge (zap → wait → the bar visibly refills). Pre-ID it tracks **a single charge** as one
   continuous bar — full whenever at least one charge is ready (never revealing how many are stockpiled),
   otherwise the recharge progress toward the next charge. Once identified the bar is **split into
-  `enchant1` equal segments** (one per charge, separated by 1-cell gaps via `barSegmentCells`): whole
+  `enchant1` equal segments** (one per charge, separated by 1-cell gaps via `barSegments`): whole
   charges fill whole segments and partial recharge tops off the next, so a 2-charge staff reads 50/50,
-  3-charge in thirds, etc. Partial recharge is derived from `enchant2` (counts down to 0 = next charge)
-  over `staffChargeDuration()`. Gradient dark→light.
+  3-charge in thirds, etc. Segment boundaries are placed **proportionally across the full row width**, so
+  they tile it exactly — exactly `enchant1` segments with no remainder stub even when the width isn't a
+  multiple of the charge count (the segmentation is suppressed if a segment would be narrower than 2
+  cells). Partial recharge is derived from `enchant2` (counts down to 0 = next charge) over
+  `staffChargeDuration()`. Gradient dark→light.
 - **Charm** — **recharge progress** `(rechargeDelay − charges) ÷ rechargeDelay`, shown **only while on
   cooldown** (`charges > 0`); hidden when ready. Gradient dark→light.
 - **Wands and everything else** — no bar.
@@ -1425,7 +1479,8 @@ kept low (`INVENTORY_BAR_TINT_MIN`/`MAX`, 12/28) so the row text stays readable 
 charge state, without revealing information the player shouldn't have yet (staff max capacity).
 
 **Where.** `Rogue.h` — two new `brogueButton` flags (`B_DRAW_PROGRESS_BAR`, `B_PROGRESS_BAR_FLIP`),
-three new `brogueButton` fields (`barColor`, `barFillCells`, `barSegmentCells`), and the `INVENTORY_BAR_*`
+three new `brogueButton` fields (`barColor`, `barFillCells`, `barSegments` — a segment *count*, placed
+proportionally over the full width), and the `INVENTORY_BAR_*`
 tunables (chunk width, tint min/max). `Buttons.c` — `drawButton()` blends the chunky bar color into the
 per-cell background for the leading `barFillCells` cells (skipping segment-boundary gaps), guarded to
 `BUTTON_NORMAL`. `Items.c` — new static `setInventoryProgressBar()` computes the bar from item state and

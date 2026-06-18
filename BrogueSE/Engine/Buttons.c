@@ -100,9 +100,12 @@ void drawButton(brogueButton *button, enum buttonDrawStates highlight, screenDis
             && i < button->barFillCells) {
 
             // Leave a 1-cell gap at each segment boundary so a segmented bar (known staff charges)
-            // reads as discrete chunks; continuous bars have barSegmentCells == 0.
-            const boolean isSegmentGap = (button->barSegmentCells >= 2)
-                                         && (i > 0) && (i % button->barSegmentCells == 0);
+            // reads as discrete chunks; continuous bars have barSegments == 0. Boundaries are placed
+            // proportionally across the full row width, so the segments always tile it exactly (no
+            // remainder stub even when width isn't a multiple of the charge count): a gap falls on the
+            // first cell of each new segment, giving exactly barSegments - 1 gaps.
+            const boolean isSegmentGap = (button->barSegments >= 2) && (i > 0)
+                && ((i * button->barSegments / width) != ((i - 1) * button->barSegments / width));
             if (!isSegmentGap) {
                 const short numChunks = max(1, (button->barFillCells + INVENTORY_BAR_CHUNK_WIDTH - 1)
                                                / INVENTORY_BAR_CHUNK_WIDTH);

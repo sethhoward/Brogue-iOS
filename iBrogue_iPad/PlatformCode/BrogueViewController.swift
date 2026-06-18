@@ -1759,6 +1759,8 @@ final class BrogueViewController: UIViewController {
     /// the iOS port; the full change list lives in the project changelog/wiki.
     private static func ceInfoBlocks() -> [InfoBlock] {
         return [
+            .link("BrogueCE support", "https://github.com/tmewett/BrogueCE"),
+            .link("iOS support", "https://github.com/sethhoward/Brogue-iPad"),
             .note("Brogue was created by Brian Walker. This version, Brogue: Community Edition, is a continuation of its development. It has several main goals:"),
             .bullets([
                 "fix bugs and crashes",
@@ -1778,6 +1780,7 @@ final class BrogueViewController: UIViewController {
     /// BrogueSE/Engine/IOS_MODIFICATIONS.md. Keep in sync with new content.
     private static func seInfoBlocks() -> [InfoBlock] {
         return [
+            .link("Support", "https://github.com/sethhoward/Brogue-iPad"),
             .note("Brogue SE — An experimental fork of BrogueCE with original items, monsters, and mechanics with release 1 (\"Alphabet-a Soup\") and an upcoming release (\"Alphabeast\") that will bring new monsters and minibosses. Here's what's new:"),
             .heading("🧪 New Items"),
             .bullets([
@@ -1820,6 +1823,7 @@ final class BrogueViewController: UIViewController {
     /// Short description of the original Brogue (the "Classic" engine).
     private static func classicInfoBlocks() -> [InfoBlock] {
         return [
+            .link("Support", "https://github.com/sethhoward/Brogue-iPad"),
             .note("Countless adventurers before you have descended this torch-lit staircase, seeking the promised riches below. As you reach the bottom and step into the wide cavern, the doors behind you seal with a powerful magic..."),
             .heading("Welcome to the Dungeons of Doom!"),
             .body("Brogue is a single-player strategy game set in the halls of a mysterious and randomly-generated dungeon. The objective is simple enough -- retrieve the fabled Amulet of Yendor from the 26th level -- but the dungeon is riddled with danger. Horrifying creatures and devious, trap-ridden terrain await. Yet it is also riddled with weapons, potions, and artifacts of forgotten power. Survival demands strength and cunning in equal measure as you descend, making the most of what the dungeon gives you. You will make sacrifices, narrow escapes, and maybe even some friends along the way -- but will you be one of the lucky few to return alive?"),
