@@ -32,6 +32,49 @@ See `BrogueCE/Engine/IOS_MODIFICATIONS.md` (faithful CE) and
 
 ## Change log
 
+### 2026-06-18 — Darts removed as a potion-identification channel
+
+**What.** A thrown dart or javelin landing on a dropped potion **no longer detonates it** — it simply drops
+and is recoverable, like any thrown weapon. Only **bolts** (fire/lightning staffs & wands) and **incendiary
+darts** still detonate floor potions. This removes plain darts/javelins from the identification channels.
+
+**Why (the trial and the kill).** We first trialled a *costed* dart probe — the dart detonates a bad potion
+(auto-ID, lightning style), is inert against a benevolent one, and is **consumed against the flask** rather
+than recovered — on the theory that the per-probe cost would self-balance against dart scarcity. Playtest
+refuted it: scarcity is a property of the *run's RNG*, not of darts. A single early drop (the motivating
+case: a staff for combat **plus a stack of 8 javelins** as pure surplus on depth 1) drops the cost to zero
+and lets the player map the **entire potion pool's polarity for free** — exactly the free-mass-ID the costed
+bolt probe exists to prevent. The bolt avoids this because staff charges are a genuinely limited,
+slow-recharging resource; a quiver has no such ceiling, and consuming the dart doesn't help because the
+*pile* is the problem, not the recovery. No fiddly per-game/charge cap was judged worth the complexity.
+
+**Where.** `Items.c` — the dart-as-ID channel is gated behind a single file-scope flag
+`dartsProbeAndConsumeOnPotions` (just above `throwItem`), now `false`. When false, the `DART | JAVELIN`
+branch in `throwItem` short-circuits and the weapon falls through to the normal drop. Flip back to `true` to
+restore the consumed-dart probe (the implementation is retained behind the flag). Marked
+`// iOS port (Brogue SE):`. Caveat updated in `KNOWN_CAVEATS.md`.
+
+**Determinism.** No RNG involved; saves/replays unaffected beyond the usual gameplay-change divergence from
+pre-change recordings.
+
+### 2026-06-18 — Rest & eat-a-meal insight: prioritize still-hidden polarities
+
+**What.** Extended the detect-magic "prioritize still-hidden polarities" behavior (see the 2026-06-17
+entry) to the two passive insight channels — **resting** and **eating a meal**. Both pick a random
+eligible pack item through the shared `applyPolarityInsightToRandomItem`, whose pool deliberately includes
+already-sensed items (so insight can escalate them to full IDs). That pool is now stable-partitioned so an
+item whose good/bad aura is **still hidden** is always chosen first; an already-sensed item is only escalated
+to a full ID once nothing new remains to reveal. Matches the drink/throw of detect magic.
+
+**Where.** `Items.c` — the polarity-known predicate (formerly `detectMagicPolarityAlreadyKnown`) is renamed
+`polarityAlreadySensed` and hoisted next to `revealOrIdentifyPolarityItem`, since it is now shared by all
+three reveal-or-escalate channels (detect magic, rest, eat). `applyPolarityInsightToRandomItem` gained the
+same partition-then-pick used by `quaffDetectMagic`. Marked `// iOS port (Brogue SE):`.
+
+**Determinism.** Still a single substantive `rand_range` draw at the action point (the partition is a pure
+reordering, no extra RNG), so saves/replays stay valid; like any gameplay change it diverges replays from
+pre-change recordings.
+
 ### 2026-06-17 — Altar of insight: refuse ineligible items on the INSIGHT slot at drop time
 
 **What.** The INSIGHT (item-to-reveal) slot of an altar of insight now refuses, *at drop time*, items
