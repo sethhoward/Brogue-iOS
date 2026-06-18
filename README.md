@@ -1,8 +1,18 @@
-Brogue-iPad
+Brogue-iOS
 ===========
 
-This is the iPad port of Brian Walker's amazing roguelike Brogue which can be found @https://sites.google.com/site/broguegame/
+Welcome to the Dungeons of Doom!
 
-Brogue for iPad can be downloaded for free on the iTunes store via your iPad @https://itunes.apple.com/us/app/brogue/id613921309?mt=8
+This is an iOS port of Brian Walker's amazing roguelike Brogue which can be found @https://sites.google.com/site/broguegame/
 
-This project can be run on iPhone. Change the proj settings to universal and build away. Too small for the app store.
+Brogue for iPad can be downloaded for free on the [App Store](https://apps.apple.com/us/app/brogue/id613921309)
+
+This application is a graphical wrapper, I/O handler, and app launcher for:
+
+Brogue (Classic) - Countless adventurers before you have descended this torch-lit staircase, seeking the promised riches below. As you reach the bottom and step into the wide cavern, the doors behind you seal with a powerful magic...
+
+[BrogueCE](https://github.com/tmewett/BrogueCE) - Community edition continuing developing, refining, and bug fixing of classic Brogu
+
+Brogue SE — An experimental fork of BrogueCE with original items, monsters, and mechanics.
+
+```"This variant is a collaboration between human expression and an AI language model. The design, code, in-game text, and creative direction are mine; audits, bug squashing, comments, commits, documentation, and subsequent code was written by an LLM through my prompting."```
