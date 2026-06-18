@@ -3072,12 +3072,13 @@ typedef struct brogueButton {
     enum NGCommands command;
     // iOS port (iBrogue): inventory progress bar. When B_DRAW_PROGRESS_BAR is set, the leading
     // `barFillCells` cells of the row are tinted with `barColor` (behind the text), in the button's
-    // normal draw state only. `barSegmentCells` >= 2 divides the bar into segments of that width with
-    // a 1-cell gap at each boundary (used to show a known staff's discrete charges). See
+    // normal draw state only. `barSegments` >= 2 divides the *full row width* into that many equal
+    // segments (proportionally rounded, so they always tile the width exactly with no remainder
+    // stub) with a 1-cell gap at each boundary (used to show a known staff's discrete charges). See
     // setInventoryProgressBar() and drawButton().
     color barColor;
     short barFillCells;
-    short barSegmentCells;
+    short barSegments;
 } brogueButton;
 
 enum buttonDrawStates {

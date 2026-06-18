@@ -47,7 +47,9 @@ void exposeCreatureToFire(creature *monst) {
             player.info.foreColor = &torchLightColor;
             refreshDungeonCell(player.loc);
             //updateVision(); // this screws up the firebolt visual effect by erasing it while a message is displayed
-            combatMessage("you catch fire", &badMessageColor);
+            // iOS port (iBrogue): the message names the panic so the "Panic" status bar (and its
+            // expiry message below) has an on-screen cause; the shock confuses for FIRE_CONFUSION_DURATION.
+            combatMessage("you catch fire and panic", &badMessageColor);
         } else if (canDirectlySeeMonster(monst)) {
             monsterName(buf, monst, true);
             sprintf(buf2, "%s catches fire", buf);
@@ -2188,7 +2190,11 @@ static void decrementPlayerStatus() {
     }
 
     if (player.status[STATUS_CONFUSED] > 0 && !--player.status[STATUS_CONFUSED]) {
-        message("you no longer feel confused.", 0);
+        // iOS port (iBrogue): catching fire inflicts STATUS_CONFUSED but reads as "Panic" while still
+        // burning (see exposeCreatureToFire and the sidebar in IO.c). Mirror that label on expiry so the
+        // recovery message matches the status the player was watching. Panic (3 turns) always ends while
+        // burning (7 turns) is still active, so this reliably distinguishes fire-panic from real confusion.
+        message(player.status[STATUS_BURNING] > 0 ? "you regain your composure." : "you no longer feel confused.", 0);
     }
 
     if (player.status[STATUS_NAUSEOUS] > 0 && !--player.status[STATUS_NAUSEOUS]) {

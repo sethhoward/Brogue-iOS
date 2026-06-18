@@ -2928,7 +2928,7 @@ static boolean displayMagicCharForItem(item *theItem) {
 //   - Wands and everything else: no bar.
 static void setInventoryProgressBar(item *theItem, brogueButton *button, short track) {
     short pct = -1; // -1 == no bar; otherwise 0..100 fill of the full-width track
-    short segCells = 0; // >= 2 divides the bar into segments (known staff charges)
+    short segCount = 0; // >= 2 divides the full-width bar into that many segments (known staff charges)
     const color *barColor = &gray;
 
     if (track <= 0) {
@@ -2962,8 +2962,11 @@ static void setInventoryProgressBar(item *theItem, brogueButton *button, short t
             pct = (theItem->enchant1 > 0)
                   ? (theItem->charges * 100 + partialPct) / theItem->enchant1
                   : 0;
-            if (theItem->enchant1 >= 2) {
-                segCells = track / theItem->enchant1;
+            // Segment per charge, but only if each segment is at least 2 cells wide (else the gaps
+            // would eat the whole bar). The bar is split proportionally across the full width in
+            // drawButton, so it always renders exactly enchant1 segments with no remainder stub.
+            if (theItem->enchant1 >= 2 && track / theItem->enchant1 >= 2) {
+                segCount = theItem->enchant1;
             }
         } else if (theItem->charges >= 1) {
             // Max hidden: track a single charge — a charge is ready -> full bar (never reveals how
@@ -2991,7 +2994,7 @@ static void setInventoryProgressBar(item *theItem, brogueButton *button, short t
             button->flags |= B_DRAW_PROGRESS_BAR;
             button->barColor = *barColor;
             button->barFillCells = fillCells;
-            button->barSegmentCells = segCells;
+            button->barSegments = segCount;
         }
     }
 }
