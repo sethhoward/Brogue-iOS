@@ -305,3 +305,13 @@ Toggled from the help screen. The scheme is applied in the platform bridge, not 
 | Wisdom ring rest acceleration | ~10%/level, capped at 80% faster |
 | Empty bottle spawn rate | ~1 every 3-4 floors (separate meter) |
 | Ring of light aura | 3 + |enchant| tiles |
+
+---
+
+## License
+
+Brogue SE is a fork of BrogueCE and is licensed, like its base, under the **GNU Affero
+General Public License v3 or later** ([`LICENSE`](LICENSE)). The SE-original content
+listed above is © 2026 Seth Howard; the forked base is © Brian Walker and the Brogue CE
+contributors. See [`NOTICE.md`](legal/NOTICE.md) for the full attribution and
+[`LICENSE-EXCEPTIONS.md`](legal/LICENSE-EXCEPTIONS.md) for documented additional permissions.

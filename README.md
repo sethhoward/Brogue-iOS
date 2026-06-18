@@ -16,3 +16,11 @@ Brogue (Classic) - Countless adventurers before you have descended this torch-li
 [Brogue SE](BROGUE_SE.md) — An experimental fork of BrogueCE with original items, monsters, and mechanics.
 
 ```"This variant is a collaboration between human expression and an AI language model. The design, code, in-game text, and creative direction are mine; audits, bug squashing, comments, commits, documentation, and subsequent code was written by an LLM through my prompting."```
+
+## License
+
+Licensed under the **GNU Affero General Public License v3 or later** — full text in
+[`LICENSE`](LICENSE). Copyright and per-engine attribution are in [`NOTICE.md`](legal/NOTICE.md);
+documented additional permissions and their current status (including app-store
+distribution) are in [`LICENSE-EXCEPTIONS.md`](legal/LICENSE-EXCEPTIONS.md). To contribute,
+see [`CONTRIBUTING.md`](legal/CONTRIBUTING.md) and the [`CLA.md`](legal/CLA.md).
