@@ -90,6 +90,11 @@
 extern boolean KEYBOARD_LABELS;
 void setKeyboardLabelsEnabled(boolean enabled);
 
+// iOS port (iBrogue): whether a hardware keyboard is attached (distinct from KEYBOARD_LABELS).
+// Set from the Swift layer via setHardwareKeyboardConnected(); gates the welcome help-menu hint.
+extern boolean HARDWARE_KEYBOARD_CONNECTED;
+void setHardwareKeyboardConnected(boolean enabled);
+
 // Runtime flag: true on iPhone. Set from the Swift layer via setPhoneLayout().
 // Used to opt iPhone-only layout tweaks into the engine without #ifdefs.
 extern boolean PHONE_LAYOUT;
@@ -3248,6 +3253,7 @@ extern "C" {
     
     void setBrogueGameEvent(CBrogueGameEvent brogueGameState);
     void requestKeyboardInput(char *string, boolean numeric); // iOS port (iBrogue): numeric -> number pad
+    void setBrogueTargeting(boolean isTargeting); // iOS port (iBrogue): aiming loop -> show on-screen ESC button (mirrors CE's ceSetTargeting)
 
     // iOS port (iBrogue): title-menu entries that open native screens.
     void showFileManagementScreen(void);

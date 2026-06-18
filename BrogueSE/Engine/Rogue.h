@@ -71,6 +71,35 @@
 #define D_MESSAGE_ITEM_GENERATION       (WIZARD_MODE && 0)
 #define D_MESSAGE_MACHINE_GENERATION    (WIZARD_MODE && 0)
 
+// iOS port (iBrogue): standalone debug toggle (NOT gated on wizard mode -- works in a normal game).
+// When 1, guarantees a single gold goblin on depth 2 (early, to reach it fast while testing), bypassing
+// the random spawn roll, and telepathically reveals it so it can be tracked on the map while it flees.
+// Set to 0 for normal random behavior.
+#define D_ALWAYS_SPAWN_GOLD_GOBLIN      0
+
+// iOS port (iBrogue): start with a high-enchant staff of frost for playtesting (freeze/slow/ice bridges/
+// frozen foliage/push). Granted deterministically in initializeRogue, so it is recording-safe. Flip to 0 to ship.
+#define D_FROST_STAFF_START             0//(WIZARD_MODE && 0)
+
+// iOS port (iBrogue): start with a +3 ring of light for playtesting (ally emboldenment aura + invisible
+// reveal). Granted deterministically in initializeRogue, so it is recording-safe. Equip it to see the
+// effect. Flip to 0 to ship.
+#define D_LIGHT_RING_START              0//(WIZARD_MODE && 0)
+
+// iOS port (iBrogue): start with a strong (+10) charm of health for playtesting -- a near-full heal on a
+// short cooldown. Granted deterministically in initializeRogue, so it is recording-safe. Flip to 0 to ship.
+#define D_HEAL_CHARM_START              0//(WIZARD_MODE && 0)
+
+// iOS port (iBrogue): start with a +50 leather armor for playtesting -- effectively invulnerable, to test
+// without dying. Granted deterministically in initializeRogue, so it is recording-safe. Equip it to wear
+// it. Flip to 0 to ship.
+#define D_LEATHER_ARMOR_START           0//(WIZARD_MODE && 0)
+
+// iOS port (Brogue SE): start with a few empty bottles for playtesting the v2 capture system, so you can
+// test capturing gases/liquids/hazards without first finding one. Granted deterministically in
+// initializeRogue, so it is recording-safe. Flip to 0 to ship.
+#define D_EMPTY_BOTTLE_START            0//(WIZARD_MODE && 0)
+
 // If enabled, runs a benchmark for the performance of repeatedly updating the screen at the start of the game.
 // #define SCREEN_UPDATE_BENCHMARK
 
@@ -81,9 +110,8 @@
 #define DELETE_SAVE_FILE_AFTER_LOADING  true
 
 // set to false to disable references to keystrokes (e.g. for a tablet port)
-// iOS port (iBrogue): on tablet, KEYBOARD_LABELS is a runtime variable (declared after the `boolean`
-// typedef below) so an attached hardware keyboard can turn in-game hotkey labels on/off. Non-tablet
-// keeps the compile-time true.
+// iOS port (iBrogue): on tablet, KEYBOARD_LABELS is now a runtime variable rather than a hardcoded
+// false (see below, after the `boolean` typedef). The non-tablet default stays a compile-time true.
 #ifndef BROGUE_TABLET
 #define KEYBOARD_LABELS true
 #endif
@@ -105,11 +133,14 @@
 #define true                    1
 
 #ifdef BROGUE_TABLET
-// iOS port (iBrogue): runtime-mutable in-game hotkey-label flag (see above). Default false (touch-only)
-// until the host reports a hardware keyboard via ce_setKeyboardLabelsEnabled(). Defined in GlobalsBase.c.
+// iOS port (iBrogue): runtime-mutable on tablet (instead of a hardcoded false) so an attached
+// hardware keyboard can turn in-game hotkey labels on, and detaching turns them back off. The host
+// drives it via ce_setKeyboardLabelsEnabled() on GCKeyboard connect/disconnect, mirroring the
+// Classic engine's setKeyboardLabelsEnabled(). Defaults false (touch-only) until the host reports
+// a keyboard. Defined in GlobalsBase.c.
 extern boolean KEYBOARD_LABELS;
-// iOS port (iBrogue): whether a hardware keyboard is attached (distinct from KEYBOARD_LABELS). Set by the
-// host via ce_setHardwareKeyboardConnected(); gates the welcome help-menu hint. Defined in GlobalsBase.c.
+// iOS port (Brogue SE): whether a hardware keyboard is attached (distinct from KEYBOARD_LABELS). Set by
+// the host via se_setHardwareKeyboardConnected(); gates the welcome help-menu hint. Defined in GlobalsBase.c.
 extern boolean HARDWARE_KEYBOARD_CONNECTED;
 #endif
 
@@ -692,6 +723,25 @@ enum tileType {
     MUD_WALL,
     MUD_DOORWAY,
 
+    // iOS port (iBrogue): altars of insight (sacrifice one item to reveal another)
+    INSIGHT_ALTAR_INSIGHT,
+    INSIGHT_ALTAR_PAYMENT,
+    INSIGHT_ALTAR_INERT,
+
+    // iOS port (iBrogue): altars of transference (sacrifice one item to pour its enchantment into another)
+    TRANSFER_ALTAR_DONOR,
+    TRANSFER_ALTAR_RECIPIENT,
+    TRANSFER_ALTAR_INERT,
+
+    // iOS port (iBrogue): staff of frost — foliage frozen into a brittle, impassable barrier that thaws back
+    FROZEN_FOLIAGE,
+    FROZEN_FOLIAGE_MELT,
+
+    // iOS port (iBrogue): empty-bottle v2 potion of ice -- the freezing cloud's gas tile. Appended at
+    // the end of the enum (not grouped with the other gases) so it doesn't shift any existing tileType
+    // index; its gas-layer behavior comes from the DF that spawns it, not from enum adjacency.
+    FROST_GAS,
+
     NUMBER_TILETYPES,
 };
 
@@ -804,6 +854,7 @@ enum keyKind {
 enum foodKind {
     RATION,
     FRUIT,
+    COOKED_FOOD, // iOS port (Brogue SE): a ration of food charred in fire; smaller meal, heals over time when eaten. Never generated naturally (frequency 0).
     NUMBER_FOOD_KINDS
 };
 
@@ -824,6 +875,21 @@ enum potionKind {
     POTION_DARKNESS,
     POTION_DESCENT,
     POTION_LICHEN,
+    // iOS port (iBrogue): new potions in two mutually-exclusive themed sets plus a returning
+    // detect magic (the old POTION_DETECT_MAGIC slot is now the empty bottle). See IOS_MODIFICATIONS.md.
+    POTION_HONEY,           // Set 1 (good): regen over time; thrown leaves a sticky net patch
+    POTION_VOMIT,           // Set 1 (bad): rot-gas nausea cloud
+    POTION_WORT,            // Set 2 (good): healing/wort cloud; the empty bottle's wort capture
+    POTION_VENOM,           // Set 2 (bad): inflicts poison (DoT)
+    POTION_DETECT_MAGIC2,   // always present (good): reveals polarity of 1-2 random pack items
+    // iOS port (iBrogue): empty-bottle v2 capture-only potions. Frequency 0 -- never generated; the
+    // ONLY way to obtain one is to capture a matching gas/liquid/hazard with an empty bottle. Each
+    // re-creates its captured hazard when thrown/uncorked. See docs/design/empty-bottle-v2.md.
+    POTION_ACID,            // capture: acid splatter. Thrown: weaken() the struck creature (defense down)
+    POTION_WEBBING,         // capture: spiderweb/netting. Thrown: lays an entangling web patch
+    POTION_STEAM,           // capture: steam. Thrown/uncorked: scalding steam cloud
+    POTION_ICE,             // capture: ice. Thrown: freezes the struck creature (mirrors the frost staff)
+    POTION_WATER,           // capture: deep/shallow water. Thrown/uncorked: a large flood puddle
 };
 
 enum weaponKind {
@@ -913,6 +979,7 @@ enum staffKind {
     STAFF_OBSTRUCTION,
     STAFF_DISCORD,
     STAFF_CONJURATION,
+    STAFF_FREEZE, // iOS port (iBrogue): staff of frost (good staff, positive polarity)
     STAFF_HEALING,
     NUMBER_GOOD_STAFF_KINDS = STAFF_HEALING,
     STAFF_HASTE,
@@ -951,7 +1018,8 @@ enum boltType {
     BOLT_DISTANCE_ATTACK,
     BOLT_POISON_DART,
     BOLT_ANCIENT_SPIRIT_VINES,
-    BOLT_WHIP
+    BOLT_WHIP,
+    BOLT_FREEZE // iOS port (iBrogue): staff of frost
 };
 
 enum ringKind {
@@ -1078,6 +1146,10 @@ enum monsterTypes {
     MK_PHOENIX_EGG,
     MK_ANCIENT_SPIRIT,
 
+    // iOS port (iBrogue): passive treasure-hoarder that flees to the up stairs when struck;
+    // spawned by spawnGoldGoblin() in Architect.c. Appended last so existing kind indices don't shift.
+    MK_GOLD_GOBLIN,
+
     NUMBER_MONSTER_KINDS
 };
 
@@ -1144,10 +1216,21 @@ enum tileFlags {
 #define HUNGER_THRESHOLD                    (STOMACH_SIZE - 1800)
 #define WEAK_THRESHOLD                      150
 #define FAINT_THRESHOLD                     50
+
+// iOS port (Brogue SE): eating cooked food (a charred ration) heals 1 HP/turn for 5 turns (5 HP total)
+// via STATUS_REGENERATING. See eat() and the regeneration metering in Time.c.
+#define COOKED_FOOD_REGEN_TURNS             5
+#define COOKED_FOOD_REGEN_TOTAL             5
 #define MAX_EXP_LEVEL                       20
 #define MAX_EXP                             100000000L
 
 #define XPXP_NEEDED_FOR_TELEPATHIC_BOND     1400 // XPXP required to enable telepathic awareness with the ally
+
+// iOS port (Brogue SE): Lone Wolf solo-progression tuning (see playerCharacter.loneWolfXP).
+#define LONE_WOLF_MIN_DEPTH                 6    // accrue solo XPXP only at this depth or deeper
+#define LONE_WOLF_TIER1_XP                  1500 // solo XPXP for tier 1 (+1 effective strength; ~2 levels of solo exploration)
+#define LONE_WOLF_TIER2_XP                  3000 // solo XPXP for tier 2 (+2 total effective strength)
+#define LONE_WOLF_MAX_TIER                  2    // tier cap
 
 #define ROOM_MIN_WIDTH                      4
 #define ROOM_MAX_WIDTH                      20
@@ -1245,10 +1328,11 @@ enum tileFlags {
 
 #define UNKNOWN_KEY         (128+19)
 
-// iOS port (iBrogue): selectable keyboard schemes — see docs/design/keyboard-schemes.md. A scheme
-// remaps physical keys to canonical engine keys at the input layer (before recording), so recordings
-// stay scheme-independent. CLASSIC is identity (vi keys); MODERN is a right-hand 3x3 grid (uio/jkl/m,.)
-// for keyboards without a numpad. Default CLASSIC.
+// iOS port (iBrogue): selectable keyboard schemes. A "scheme" remaps the physical keys the player
+// presses to the engine's canonical key constants (above) at the input layer, before recording, so
+// recordings stay scheme-independent (saves/seeds/leaderboard are unaffected). CLASSIC is the stock
+// vi-key layout (identity mapping); MODERN is a right-hand 3x3 directional grid (uio/jkl/m,.) for
+// laptops/Magic Keyboards without a numpad. See docs/design/keyboard-schemes.md. Default CLASSIC.
 enum keyboardScheme {
     KEYBOARD_SCHEME_CLASSIC = 0,
     KEYBOARD_SCHEME_MODERN,
@@ -1647,6 +1731,11 @@ enum dungeonFeatureTypes {
     DF_SHALLOW_WATER_MELTING,
     DF_SHALLOW_WATER_THAW,
 
+    // iOS port (iBrogue): staff of frost — freeze dense foliage into a brittle barrier, then thaw it back
+    DF_FROZEN_FOLIAGE,
+    DF_FROZEN_FOLIAGE_MELTING,
+    DF_FROZEN_FOLIAGE_THAW,
+
     DF_POISON_GAS_CLOUD,
     DF_CONFUSION_GAS_TRAP_CLOUD,
     DF_NET,
@@ -1808,6 +1897,18 @@ enum dungeonFeatureTypes {
     DF_STENCH_BURN,
     DF_STENCH_SMOLDER,
 
+    // iOS port (iBrogue): healing-spore cloud burst from a thrown potion of life
+    DF_LIFE_POTION_CLOUD,
+
+    // iOS port (iBrogue): an insight altar promotes to its inert form after a sacrifice
+    DF_ALTAR_INSIGHT_INERT,
+
+    // iOS port (iBrogue): a transference altar promotes to its inert form after a transfer
+    DF_ALTAR_TRANSFER_INERT,
+
+    // iOS port (iBrogue): empty-bottle v2 potion of ice -- the freezing cloud (spawns FROST_GAS)
+    DF_FREEZING_CLOUD_POTION,
+
     NUMBER_DUNGEON_FEATURES,
 };
 
@@ -1874,6 +1975,7 @@ enum boltEffects {
     BE_HEALING,
     BE_HASTE,
     BE_SHIELDING,
+    BE_FREEZE, // iOS port (iBrogue): staff of frost — freeze (or, if burning/fiery, just extinguish + slow)
 };
 
 enum boltFlags {
@@ -1973,6 +2075,7 @@ enum terrainFlagCatalog {
     T_IS_DF_TRAP                    = Fl(19),       // spews gas of type specified in fireType when stepped on
     T_CAUSES_EXPLOSIVE_DAMAGE       = Fl(20),       // is an explosion; deals higher of 15-20 or 50% damage instantly, but not again for five turns
     T_SACRED                        = Fl(21),       // monsters that aren't allies of the player will avoid stepping here
+    T_CAUSES_FREEZE                 = Fl(22),       // iOS port (iBrogue): freezes anything caught on this tile (the frost cloud)
 
     T_OBSTRUCTS_SCENT               = (T_OBSTRUCTS_PASSABILITY | T_OBSTRUCTS_VISION | T_AUTO_DESCENT | T_LAVA_INSTA_DEATH | T_IS_DEEP_WATER | T_SPONTANEOUSLY_IGNITES),
     T_PATHING_BLOCKER               = (T_OBSTRUCTS_PASSABILITY | T_AUTO_DESCENT | T_IS_DF_TRAP | T_LAVA_INSTA_DEATH | T_IS_DEEP_WATER | T_IS_FIRE | T_SPONTANEOUSLY_IGNITES),
@@ -1982,7 +2085,7 @@ enum terrainFlagCatalog {
     T_MOVES_ITEMS                   = (T_IS_DEEP_WATER | T_LAVA_INSTA_DEATH),
     T_CAN_BE_BRIDGED                = (T_AUTO_DESCENT),
     T_OBSTRUCTS_EVERYTHING          = (T_OBSTRUCTS_PASSABILITY | T_OBSTRUCTS_VISION | T_OBSTRUCTS_ITEMS | T_OBSTRUCTS_GAS | T_OBSTRUCTS_SURFACE_EFFECTS | T_OBSTRUCTS_DIAGONAL_MOVEMENT),
-    T_HARMFUL_TERRAIN               = (T_CAUSES_POISON | T_IS_FIRE | T_CAUSES_DAMAGE | T_CAUSES_PARALYSIS | T_CAUSES_CONFUSION | T_CAUSES_EXPLOSIVE_DAMAGE),
+    T_HARMFUL_TERRAIN               = (T_CAUSES_POISON | T_IS_FIRE | T_CAUSES_DAMAGE | T_CAUSES_PARALYSIS | T_CAUSES_CONFUSION | T_CAUSES_EXPLOSIVE_DAMAGE | T_CAUSES_FREEZE),
     T_RESPIRATION_IMMUNITIES        = (T_CAUSES_DAMAGE | T_CAUSES_CONFUSION | T_CAUSES_PARALYSIS | T_CAUSES_NAUSEA),
 };
 
@@ -2013,6 +2116,8 @@ enum terrainMechanicalFlagCatalog {
     TM_INTERRUPT_EXPLORATION_WHEN_SEEN = Fl(23),    // will generate a message when discovered during exploration to interrupt exploration
     TM_INVERT_WHEN_HIGHLIGHTED      = Fl(24),       // will flip fore and back colors when highlighted with pathing
     TM_SWAP_ENCHANTS_ACTIVATION     = Fl(25),       // in machine, swap item enchantments when two suitable items are on this terrain, and activate the machine when that happens
+    TM_INSIGHT_ACTIVATION           = Fl(26),       // iOS port (iBrogue): in machine, when the insight + payment altars both hold items, reveal the insight item and consume the payment, then activate
+    TM_TRANSFER_ENCHANT_ACTIVATION  = Fl(27),       // iOS port (iBrogue): in machine, when the donor + recipient altars both hold items, pour the donor's enchantment into the recipient, consume the donor, then activate
 
     TM_PROMOTES_ON_STEP             = (TM_PROMOTES_ON_CREATURE | TM_PROMOTES_ON_ITEM),
 };
@@ -2045,6 +2150,9 @@ enum statusEffects {
     STATUS_SHIELDED,
     STATUS_INVISIBLE,
     STATUS_AGGRAVATING,
+    STATUS_REGENERATING, // iOS port (iBrogue): honey potion's heal-over-time
+    STATUS_EMBOLDENED, // iOS port (iBrogue): ally standing in the light of a worn ring of light
+    STATUS_FROZEN, // iOS port (iBrogue): staff of frost — encased in ice (acts like paralysis); thaws into STATUS_SLOWED
     NUMBER_OF_STATUS_EFFECTS,
 };
 
@@ -2199,6 +2307,96 @@ enum monsterBookkeepingFlags {
 };
 
 // Defines all creatures, which include monsters and the player:
+// iOS port (iBrogue): reusable "fleeing creature" component (see docs/guides/reusable-components.md).
+// A creatureType carries an optional fleeProfile (config); creatures with one run fleeAITakesTurn()
+// in place of the normal monster AI. The gold goblin is the first/reference consumer.
+enum fleeTrigger { FLEE_ON_SIGHT, FLEE_ON_DAMAGE };
+enum fleeExit { FLEE_EXIT_UP, FLEE_EXIT_DOWN, FLEE_EXIT_NEAREST };
+
+typedef struct fleeProfile {
+    enum fleeTrigger trigger;             // what starts it fleeing (taking damage always commits, regardless)
+    enum fleeExit exit;                   // which stair counts as escape
+    short breakForExitBelowHpPct;         // >= this %HP it only keeps distance; below it, it breaks for the exit. 0 = never break (pure kite); 100 = break once damaged
+    short playerBerth;                    // routing: tiles within which it pays a cost to stay clear of the player
+    short berthCost;                      // routing: extra cost per tile inside the berth (steeper = wider detours)
+    short fleeMemoryTurns;                // turns it keeps running after last seeing the player
+    boolean rerouteWhenBlocked;           // when the exit route is blocked, reposition toward the other stair (non-escape)
+    enum dungeonFeatureTypes tossFeature; // DF flung onto the just-vacated tile on the first break step (0 = none)
+} fleeProfile;
+
+typedef struct fleerState {               // iOS port (iBrogue): per-instance runtime state for the flee component
+    boolean triggered;                    // has committed to fleeing
+    short fleeTurns;                       // turns left running (refreshed while it can see the player)
+    short fleeCommit;                      // turns left committed to the reroute (anti-dither)
+    boolean threwToss;                     // has flung its one tossFeature
+} fleerState;
+
+// iOS port (iBrogue): reusable "looting creature" component (see docs/guides/reusable-components.md).
+// A creatureType carries an optional lootProfile (config); creatures with one shed gold/items as they are
+// struck and scatter a hoard on death, all data-driven via the shared helpers in Monsters.c. This is
+// NET-NEW loot, distinct from the engine's carried-item system (MONST_CARRY_ITEM_*, which assigns one item
+// from the dungeon's item budget at level-gen) -- use that flag for an ordinary single carried drop, and a
+// lootProfile for a curated, multi-item, event-triggered bonus hoard. The gold goblin is the reference consumer.
+typedef struct lootEntry {                // one weighted row of a loot table
+    enum itemCategory category;
+    short kind;                           // -1 = honest random kind (natural enchant/runic/curse); else forces that kind
+    short weight;                         // relative weight within the table; a row with weight 0 TERMINATES the table
+} lootEntry;
+
+typedef struct lootThrownStack {          // a guaranteed depth-gated stack of thrown weapons dropped on death
+    enum itemCategory category;           // 0 = no thrown stack
+    short earlyKind, lateKind;            // item kind below / at-or-above lateDepth (e.g. DART / JAVELIN)
+    short lateDepth;                      // depth at which it switches from the early kind to the late kind
+    short earlyQtyLo, earlyQtyHi;         // stack size (rand_range bounds) below lateDepth
+    short lateQtyLo, lateQtyHi;           // stack size (rand_range bounds) at or above lateDepth
+} lootThrownStack;
+
+typedef struct lootProfile {
+    // death hoard (scattered around the corpse on a real, non-administrative death)
+    const lootEntry *marquee;             // weighted pool ({0}-weight-terminated); one item rolled & scattered on death (NULL = none)
+    short deathGoldPilesLo, deathGoldPilesHi; // number of gold piles on death (rand_range; 0/0 = none)
+    short deathGoldLoPerDepth, deathGoldHiPerDepth; // each pile = rand_range(lo*depth, hi*depth)
+    lootThrownStack thrown;               // optional depth-gated thrown-weapon stack (category 0 = none)
+    // live shedding (per discrete attack the creature survives)
+    short hitGoldLoPerDepth, hitGoldHiPerDepth; // gold trail per hit = rand_range(lo*depth, hi*depth); 0/0 = none
+    short bonusBelowHpPct;                // one-time near-death drop the first hit that leaves it below this %HP (0 = none)
+    enum itemCategory bonusCategory;      // category of that one-time bonus item
+    short bonusKind;                      // kind of that one-time bonus item (-1 = honest random)
+} lootProfile;
+
+typedef struct lootState {                // iOS port (iBrogue): per-instance runtime state for the loot component
+    boolean isBearer;                     // sheds loot & drops the death hoard (false for clones & debug spawns)
+    boolean bonusDropped;                 // has shed its one-time near-death bonus
+} lootState;
+
+// iOS port (iBrogue): reusable "thieving creature" component (see docs/guides/reusable-components.md).
+// A creature with the MA_HIT_STEAL_FLEE ability chooses WHICH unequipped pack item to snatch via this
+// weighted, rule-based desirability profile (catalog `steal` field), evaluated in rateItemStealDesirability
+// (Combat.c) -- replacing the old per-monsterID branches. The steal/flee/drop machinery itself is unchanged;
+// only the preference is data-driven. A thief with no profile falls back to "every item equally desirable".
+enum stealMode {
+    STEAL_ADDITIVE,                       // every unequipped item is eligible; rules adjust its score (monkey, imp)
+    STEAL_EXCLUSIVE,                      // ONLY items matching a rule are eligible; everything else is never taken
+};
+
+enum enchantPolarity { ENCHANT_ANY, ENCHANT_POSITIVE, ENCHANT_NEGATIVE }; // gate on the sign of enchant1
+
+typedef struct stealRule {                // contributes to an item's score when category + kind + all gates match
+    unsigned long categories;             // itemCategory bitmask the rule matches (0 = any category)
+    short kind;                           // -1 = any kind; else a specific kind (POTION_LIFE, SCROLL_ENCHANTING, ...)
+    enum enchantPolarity enchant;         // require enchant1 ANY / > 0 / < 0
+    unsigned long requireFlags;           // require ALL these item flags (ITEM_RUNIC, ITEM_CURSED, ...); 0 = none
+    short flatBonus;                      // added to the score when the rule applies
+    short perEnchantBonus;                // added (enchant1 * this) when the rule applies (e.g. the imp's enchant-scaling)
+} stealRule;                              // a row with NO match criteria (categories 0, requireFlags 0, enchant ANY) TERMINATES the list
+
+typedef struct stealProfile {
+    enum stealMode mode;
+    short baseScore;                      // starting desirability of an eligible item (monkey/imp = 10)
+    short randomPickPercent;              // % of thefts that ignore the weighting and pick uniformly AMONG ELIGIBLE items (monkey/imp = 5)
+    const stealRule *rules;               // rule list, terminated by a no-criteria sentinel row
+} stealProfile;
+
 typedef struct creatureType {
     enum monsterTypes monsterID; // index number for the monsterCatalog
     char monsterName[COLS];
@@ -2219,6 +2417,9 @@ typedef struct creatureType {
     enum boltType bolts[20];
     unsigned long flags;
     unsigned long abilityFlags;
+    const struct fleeProfile *fleeAI;   // iOS port (iBrogue): NULL = normal AI; non-NULL = reusable flee component
+    const struct lootProfile *loot;     // iOS port (iBrogue): NULL = no special loot; non-NULL = reusable loot component
+    const struct stealProfile *steal;   // iOS port (iBrogue): NULL = legacy uniform theft; non-NULL = reusable steal-preference component
 } creatureType;
 
 typedef struct monsterWords {
@@ -2334,6 +2535,8 @@ typedef struct creature {
     short xpxp;                         // exploration experience (used to time telepathic bonding for allies)
     short newPowerCount;                // how many more times this monster can absorb a fallen monster
     short totalPowerCount;              // how many times has the monster been empowered? Used to recover abilities when negated.
+    fleerState fleer;                   // iOS port (iBrogue): reusable flee-component runtime state (gold goblin etc.)
+    lootState looter;                   // iOS port (iBrogue): reusable loot-component runtime state (gold goblin etc.)
 
     struct creature *leader;                 // only if monster is a follower
     struct creature *carriedMonster; // when vampires turn into bats, one of the bats restores the vampire when it dies
@@ -2497,6 +2700,7 @@ typedef struct playerCharacter {
     boolean quit;                       // to skip the typical end-game theatrics when the player quits
     uint64_t seed;                      // the master seed for generating the entire dungeon
     short RNG;                          // which RNG are we currently using?
+    short activePotionSet;              // iOS port (iBrogue): which themed potion set is live this run (0 or 1); chosen deterministically in shuffleFlavors, not serialized
     unsigned long gold;                 // how much gold we have
     unsigned long goldGenerated;        // how much gold has been generated on the levels, not counting gold held by monsters
     short strength;
@@ -2523,9 +2727,22 @@ typedef struct playerCharacter {
     unsigned long absoluteTurnNumber;   // number of turns since the beginning of time. Always increments.
     signed long milliseconds;           // milliseconds since launch, to decide whether to engage cautious mode
     short xpxpThisTurn;                 // how many squares the player explored this turn
+    // iOS port (Brogue SE): "Lone Wolf" -- a solo-play fallback progression driven by the player's own
+    // exploration XPXP. Accrues only while the player has zero living allies anywhere and is at depth >= 6.
+    // At tiers (LONE_WOLF_TIER1_XP, LONE_WOLF_TIER2_XP) it grants effective strength (a removable aura) and,
+    // on runs where the player has NEVER had an ally, a one-shot polarity reveal (compensating for the
+    // per-rescue tells in captiveReactToPack that a pure-solo player forgoes). Gaining any ally zeroes the
+    // track and strips the strength aura (re-grindable); hasEverHadAlly latches for the run (kills polarity).
+    // All driven by deterministic exploration -> save-safe (saves replay inputs). See IOS_MODIFICATIONS.md.
+    long loneWolfXP;                    // solo exploration XPXP accumulated toward the next Lone Wolf tier
+    short loneWolfTier;                 // current Lone Wolf tier (0..LONE_WOLF_MAX_TIER)
+    short loneWolfStrBonus;             // effective-strength currently added to rogue.strength by Lone Wolf (so it can be removed exactly)
+    boolean hasEverHadAlly;            // latches true the first time the player gains any ally this run; gates the polarity reveal
     short stealthRange;                 // distance from which monsters will notice you
 
     short previousPoisonPercent;        // and your poison proportion, to display percentage alerts for each.
+
+    short regenerationHeal;             // iOS port (Brogue SE): total HP that STATUS_REGENERATING heals across its duration (set when the status is applied; honey vs cooked food differ).
 
     pos upLoc;                          // upstairs location this level
     pos downLoc;                        // downstairs location this level
@@ -2534,6 +2751,8 @@ typedef struct playerCharacter {
     creature *lastTarget;               // to keep track of the last monster the player has thrown at or zapped
     item *lastItemThrown;
     short rewardRoomsGenerated;         // to meter the number of reward machines
+    short insightAltarsBuilt;           // iOS port (iBrogue): guaranteed altars-of-insight built so far this run; obligations carry forward to the next level if a level can't fit the room
+    boolean goldGoblinSpawned;          // iOS port (iBrogue): the gold goblin appears at most once per run
     short machineNumber;                // so each machine on a level gets a unique number
     pos sidebarLocationList[ROWS*2];    // to keep track of which location each line of the sidebar references
 
@@ -2564,16 +2783,22 @@ typedef struct playerCharacter {
     // metered items
     long long foodSpawned;              // amount of nutrition units spawned so far this game
     meteredItem *meteredItems;
+    // iOS port (Brogue SE): empty-bottle additive generation channel. Self-correcting accumulator,
+    // independent of meteredItems above, advanced once per eligible depth in populateItems and reset
+    // to 0 on a placement. Set deterministically at level-gen, so it is save-replay-safe.
+    short emptyBottleSpawnChance;       // accrued % chance of spawning a free-standing empty bottle this depth
 
     // ring bonuses:
     short clairvoyance;
     short stealthBonus;
     short regenerationBonus;
     short lightMultiplier;
+    short lightRingBonus; // iOS port (iBrogue): net enchant of worn rings of light (negative if cursed); drives ally emboldenment & invisible-reveal
     short awarenessBonus;
     short transference;
     short wisdomBonus;
     short reaping;
+    unsigned long emptyBottleHintedKinds; // iOS port (iBrogue): bitmask of capture-result potion kinds already hinted this game (empty-bottle v2 contextual hint, once per kind)
 
     // feats:
     boolean *featRecord;
@@ -2596,6 +2821,8 @@ typedef struct playerCharacter {
 
     // Path of the current save game or recording, NULL for a new game
     char currentGamePath[BROGUE_FILENAME_MAX];
+
+    unsigned long restTurnsSinceInsight; // rested turns accrued toward the next polarity reveal
 } playerCharacter;
 
 // Stores the necessary info about a level so it can be regenerated:
@@ -2611,6 +2838,8 @@ typedef struct levelData {
     pos downStairsLoc;
     pos playerExitedVia;
     unsigned long awaySince;
+    unsigned long restTurnsOnLevel; // iOS port (iBrogue): debug per-level rest tally (death-recap readout)
+    unsigned long restRevealsOnLevel; // iOS port (iBrogue): debug per-level count of polarity reveals earned by resting
 } levelData;
 
 enum machineFeatureFlags {
@@ -2780,7 +3009,18 @@ enum machineTypes {
     MT_SENTINEL_AREA,
 
     // Variant-specific machines
-    MT_REWARD_HEAVY_OR_RUNIC_WEAPON
+    MT_REWARD_HEAVY_OR_RUNIC_WEAPON,
+
+    // iOS port (iBrogue): the altars of transference (Brogue only). A genuine new machine index that
+    // exists only in Brogue's blueprintCatalog (appended after the insight altar); the Bullet/Rapid
+    // catalogs stop at MT_REWARD_HEAVY_OR_RUNIC_WEAPON, so their reward raffle never reaches this index
+    // and it is never force-built outside Brogue. Enters Brogue's random reward raffle via BP_REWARD.
+    MT_TRANSFER_ALTAR,
+
+    // iOS port (iBrogue): Brogue fills this variant-specific reward slot with the altars of insight
+    // (force-built at fixed depths in addMachines; never collides with the Bullet weapon vault, which
+    // occupies the same index only in BulletBrogue's catalog).
+    MT_INSIGHT_ALTAR = MT_REWARD_HEAVY_OR_RUNIC_WEAPON
 };
 
 typedef struct autoGenerator {
@@ -2830,6 +3070,14 @@ typedef struct brogueButton {
                                 // (Primarily to display magic character and item symbols in the inventory display.)
     unsigned long flags;
     enum NGCommands command;
+    // iOS port (iBrogue): inventory progress bar. When B_DRAW_PROGRESS_BAR is set, the leading
+    // `barFillCells` cells of the row are tinted with `barColor` (behind the text), in the button's
+    // normal draw state only. `barSegmentCells` >= 2 divides the bar into segments of that width with
+    // a 1-cell gap at each boundary (used to show a known staff's discrete charges). See
+    // setInventoryProgressBar() and drawButton().
+    color barColor;
+    short barFillCells;
+    short barSegmentCells;
 } brogueButton;
 
 enum buttonDrawStates {
@@ -2845,7 +3093,16 @@ enum BUTTON_FLAGS {
     B_HOVER_ENABLED         = Fl(3),
     B_WIDE_CLICK_AREA       = Fl(4),
     B_KEYPRESS_HIGHLIGHT    = Fl(5),
+    // iOS port (iBrogue): inventory progress bars (see drawButton / setInventoryProgressBar).
+    B_DRAW_PROGRESS_BAR     = Fl(6),    // tint the leading `barFillCells` cells with `barColor`
+    B_PROGRESS_BAR_FLIP     = Fl(7),    // gradient runs light->dark (count-down) instead of dark->light
 };
+
+// iOS port (iBrogue): tunables for the subtle inventory progress bars. The bar spans the full inventory
+// row width (maxLength), so "full" is the same length on every row and progress is comparable.
+#define INVENTORY_BAR_CHUNK_WIDTH       4   // cells per gradient chunk (bigger = chunkier, blockier steps)
+#define INVENTORY_BAR_TINT_MIN          12  // bar-color strength at the dim end (0-100; >0 so it never vanishes)
+#define INVENTORY_BAR_TINT_MAX          28  // bar-color strength at the bright end (0-100; low so text stays readable)
 
 typedef struct buttonState {
     // Indices of the buttons that are doing stuff:
@@ -2986,6 +3243,15 @@ extern "C" {
     void notifyEvent(short eventId, int data1, int data2, const char *str1, const char *str2);
     boolean takeScreenshot(void);
     enum graphicsModes setGraphicsMode(enum graphicsModes mode);
+    // iOS port (iBrogue): persist/restore the most recent run's seed so the
+    // "New Seeded Game" prompt can pre-fill it across app launches.
+    uint64_t ceLoadPersistedSeed(void);
+    void cePersistLastSeed(uint64_t seed);
+    // iOS port (iBrogue): persist the chosen keyboard scheme (enum keyboardScheme) across launches.
+    void cePersistKeyboardScheme(int scheme);
+    // iOS port (iBrogue): pre-fill + show the on-screen keyboard for text entry;
+    // numeric selects a number pad for seed entry.
+    void ceRequestTextInput(const char *defaultText, boolean numeric);
     boolean controlKeyIsDown(void);
     boolean shiftKeyIsDown(void);
     short getHighScoresList(rogueHighScoresEntry returnList[HIGH_SCORES_COUNT]);
@@ -3088,15 +3354,9 @@ extern "C" {
     void executeMouseClick(rogueEvent *theEvent);
     void executeKeystroke(signed long keystroke, boolean controlKey, boolean shiftKey);
     // iOS port (iBrogue): translate a raw physical keystroke to the canonical engine keystroke for the
-    // active keyboard scheme. Identity for CLASSIC. Applied in the platform bridge before recording.
+    // active keyboard scheme (see enum keyboardScheme). Identity for CLASSIC. May adjust the modifier
+    // flags (e.g. to flag a run). Applied in nextBrogueEvent before recording, so recordings stay canonical.
     signed long applyKeyboardScheme(signed long keystroke, boolean *controlKey, boolean *shiftKey);
-    // iOS port (iBrogue): platform-bridge persistence hooks (implemented in CEBridge.mm). Seed persists
-    // the last run's seed across launches; keyboard-scheme persists the Classic/Modern choice; the
-    // text-input hook pre-fills + shows the on-screen keyboard for seed/save entry.
-    uint64_t ceLoadPersistedSeed(void);
-    void cePersistLastSeed(uint64_t seed);
-    void cePersistKeyboardScheme(int scheme);
-    void ceRequestTextInput(const char *defaultText, boolean numeric);
     boolean placeStairs(pos *upStairsLoc);
     void initializeLevel(pos upStairsLoc);
     void startLevel (short oldLevelNumber, short stairDirection);
@@ -3123,6 +3383,7 @@ extern "C" {
     void applyInstantTileEffectsToCreature(creature *monst);
     void vomit(creature *monst);
     void becomeAllyWith(creature *monst);
+    void loseLoneWolfBonusOnAlly(void); // iOS port (Brogue SE): reset solo Lone Wolf track when an ally is gained
     void freeCaptive(creature *monst);
     boolean freeCaptivesEmbeddedAt(short x, short y);
     boolean handleWhipAttacks(creature *attacker, enum directions dir, boolean *aborted);
@@ -3168,6 +3429,7 @@ extern "C" {
     short staffChargeDuration(const item *theItem);
     void rechargeItemsIncrementally(short multiplier);
     void extinguishFireOnCreature(creature *monst);
+    boolean extinguishFireOnTile(short x, short y); // iOS port (iBrogue): staff of frost — snuff terrain fire
     void autoRest(void);
     void manualSearch(void);
     boolean startFighting(enum directions dir, boolean tillDeath);
@@ -3255,6 +3517,9 @@ extern "C" {
     void unAlly(creature *monst);
     boolean monsterFleesFrom(creature *monst, creature *defender);
     void monstersTurn(creature *monst);
+    void fleerNoteDamage(creature *monst); // iOS port (iBrogue): generic flee-component damage trigger
+    void monsterShedLootOnHit(creature *monst, creature *attacker, short damage); // iOS port (iBrogue): loot-component per-hit shedding
+    void monsterDropDeathLoot(creature *monst); // iOS port (iBrogue): loot-component death hoard
     boolean getRandomMonsterSpawnLocation(short *x, short *y);
     void spawnPeriodicHorde(void);
     void initializeStatus(creature *monst);
@@ -3282,6 +3547,11 @@ extern "C" {
     boolean monsterIsHidden(const creature *monst, const creature *observer);
     boolean canSeeMonster(creature *monst);
     boolean canDirectlySeeMonster(creature *monst);
+    short playerLightRevealsMonster(const creature *monst); // iOS port (iBrogue): 0=no, 1=flicker (dim light), 2=full (bright light)
+    void updateAllyEmboldenment(void); // iOS port (iBrogue): ring of light ally aura
+    short effectiveLightAuraRadius(void); // iOS port (iBrogue): tight aura reach (3 + |enchant|) for embolden + reveal
+    short emboldenmentDefenseBonus(const creature *monst); // iOS port (iBrogue)
+    short emboldenmentAccuracyBonus(const creature *monst); // iOS port (iBrogue)
     void monsterName(char *buf, creature *monst, boolean includeArticle);
     boolean monsterIsInClass(const creature *monst, const short monsterClass);
     boolean chooseTarget(pos *returnLoc, short maxDistance, enum autoTargetMode targetingMode, const item *theItem);
@@ -3289,6 +3559,7 @@ extern "C" {
     fixpt netEnchant(item *theItem);
     short hitProbability(creature *attacker, creature *defender);
     boolean attackHit(creature *attacker, creature *defender);
+    void pushFrozenCreature(creature *defender, short dx, short dy); // iOS port (iBrogue): staff of frost — bump-to-push
     void applyArmorRunicEffect(char returnString[DCOLS], creature *attacker, short *damage, boolean melee);
     void processStaggerHit(creature *attacker, creature *defender);
     boolean attack(creature *attacker, creature *defender, boolean lungeAttack);
@@ -3338,6 +3609,10 @@ extern "C" {
                        boolean targetCanLeaveMap);
     void identifyItemKind(item *theItem);
     void autoIdentify(item *theItem);
+    boolean fillEmptyBottle(item *bottle, short newPotionKind, const char *flavorText); // iOS port (iBrogue): empty-bottle capture
+    void showEmptyBottleCaptureHint(void); // iOS port (iBrogue): empty-bottle v2 contextual capture hint
+    boolean freezeCreature(creature *monst, short freezeTurns, short slowTurns); // iOS port (iBrogue): shared freeze (staff of frost bolt + frost cloud)
+    boolean potionKindAbsentThisSeed(short kind); // iOS port (iBrogue): inactive themed-set potions are hidden this run
     short numberOfItemsInPack(void);
     char nextAvailableInventoryCharacter(void);
     void checkForDisenchantment(item *theItem);
@@ -3448,6 +3723,9 @@ extern "C" {
     boolean unequipItem(item *theItem, boolean force);
     short magicCharDiscoverySuffix(short category, short kind);
     int itemMagicPolarity(item *theItem);
+    void gainPolarityInsightFromRest(void);
+    void gainScrollInsightFromEating(void);
+    void senseFloorPolarityFromAwareness(void); // iOS port (Brogue SE): ring of awareness senses floor item polarity on first arrival
     item *itemAtLoc(pos loc);
     item *dropItem(item *theItem);
     itemTable *tableForItemCategory(enum itemCategory theCat);
@@ -3478,6 +3756,9 @@ extern "C" {
     void discoverCell(const short x, const short y);
     void updateVision(boolean refreshDisplay);
     void burnItem(item *theItem);
+    boolean revealPolarityOnFieryDestruction(item *theItem); // iOS port (iBrogue): scroll fire-erasure polarity tell
+    void captiveReactToPack(creature *freed); // iOS port (iBrogue): freed captive senses a pack item's polarity
+    void loneWolfRevealPolarity(void); // iOS port (Brogue SE): Lone Wolf tier-up polarity tell (pure-solo runs only)
     void activateMachine(short machineNumber);
     boolean circuitBreakersPreventActivation(short machineNumber);
     void promoteTile(short x, short y, enum dungeonLayers layer, boolean useFireDF);
@@ -3523,6 +3804,8 @@ extern "C" {
     short staffDiscordDuration(fixpt enchant);
     int staffProtection(fixpt enchant);
     short staffEntrancementDuration(fixpt enchant);
+    short staffFreezeDuration(fixpt enchant); // iOS port (iBrogue): staff of frost — hard-freeze turns
+    short staffFreezeSlowDuration(fixpt enchant); // iOS port (iBrogue): staff of frost — slow tail on thaw
     fixpt ringWisdomMultiplier(fixpt enchant);
     short charmHealing(fixpt enchant);
     int charmProtection(fixpt enchant);

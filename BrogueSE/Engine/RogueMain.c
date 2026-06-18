@@ -31,8 +31,8 @@
 #include <time.h>
 
 int rogueMain() {
-    // iOS port (iBrogue): restore the last-played seed (persisted across app launches) so the
-    // seeded-game prompt pre-fills it; upstream resets to 0.
+    // iOS port (iBrogue): restore the last-played seed (persisted across app
+    // launches) so the seeded-game prompt pre-fills it; upstream resets to 0.
     previousGameSeed = ceLoadPersistedSeed();
     mainBrogueJunction();
     return rogue.gameExitStatusCode;
@@ -158,9 +158,9 @@ static const char *getOrdinalSuffix(int number) {
 
 static void welcome() {
     char buf[DCOLS*3], buf2[DCOLS*3];
-    // iOS port (iBrogue): tag the welcome line with the engine flavor so it's clear
+    // iOS port (Brogue SE): tag the welcome line with the engine flavor so it's clear
     // which of the three selectable engines (Classic / BrogueCE / Brogue SE) is running.
-    message("Hello and welcome, adventurer, to the Dungeons of Doom! (BrogueCE)", 0);
+    message("Hello and welcome, adventurer, to the Dungeons of Doom! (Brogue SE)", 0);
     strcpy(buf, "Retrieve the ");
     encodeMessageColor(buf, strlen(buf), &itemMessageColor);
     strcat(buf, "Amulet of Yendor");
@@ -168,7 +168,7 @@ static void welcome() {
     sprintf(buf2, " from the %i%s floor and escape with it!", gameConst->amuletLevel, getOrdinalSuffix(gameConst->amuletLevel));
     strcat(buf, buf2);
     message(buf, 0);
-    // iOS port (iBrogue): show the help-menu hint whenever a hardware keyboard is attached (not
+    // iOS port (Brogue SE): show the help-menu hint whenever a hardware keyboard is attached (not
     // gated on KEYBOARD_LABELS, which is disabled). With labels off there's no on-screen help
     // button, so this reminds keyboard users that '?' opens help.
     if (HARDWARE_KEYBOARD_CONNECTED) {
@@ -232,6 +232,7 @@ void initializeRogue(uint64_t seed) {
     rogue.highScoreSaved = false;
     rogue.cautiousMode = false;
     rogue.milliseconds = 0;
+    rogue.emptyBottleSpawnChance = 0; // iOS port (Brogue SE): reset the additive empty-bottle meter for the new run
 
     rogue.meteredItems = calloc(gameConst->numberMeteredItems, sizeof(meteredItem));
     rogue.featRecord = calloc(gameConst->numberFeats, sizeof(boolean));
@@ -241,6 +242,7 @@ void initializeRogue(uint64_t seed) {
     if (!rogue.playbackMode) {
         rogue.seed = seedRandomGenerator(seed);
         previousGameSeed = rogue.seed;
+        cePersistLastSeed(previousGameSeed); // iOS port (iBrogue): remember across launches
     }
 
 #ifdef SCREEN_UPDATE_BENCHMARK
@@ -279,6 +281,12 @@ void initializeRogue(uint64_t seed) {
         levels[i].items = NULL;
         levels[i].scentMap = NULL;
         levels[i].visited = false;
+        // iOS port (Brogue SE): levels[] is malloc'd (not calloc'd) and these custom debug tallies
+        // are never otherwise reset, so without this they carry stale counts from a prior run in the
+        // same session — inflating the rest-stats CSV AND, since gainPolarityInsightFromRest sums
+        // restRevealsOnLevel into its escalating threshold, slowing reveals on the 2nd+ game played.
+        levels[i].restTurnsOnLevel = 0;
+        levels[i].restRevealsOnLevel = 0;
         levels[i].playerExitedVia = (pos){ .x = 0, .y = 0 };
         do {
             levels[i].downStairsLoc.x = rand_range(1, DCOLS - 2);
@@ -297,6 +305,7 @@ void initializeRogue(uint64_t seed) {
     }
 
     rogue.rewardRoomsGenerated = 0;
+    rogue.goldGoblinSpawned = false; // iOS port (iBrogue): meter the gold goblin to once per run
 
     // pre-shuffle the random terrain colors
     oldRNG = rogue.RNG;
@@ -412,6 +421,11 @@ void initializeRogue(uint64_t seed) {
     rogue.mapToShore = NULL;
     rogue.cursorLoc = INVALID_POS;
     rogue.xpxpThisTurn = 0;
+    // iOS port (Brogue SE): Lone Wolf solo-progression state (see handleLoneWolf / loseLoneWolfBonusOnAlly).
+    rogue.loneWolfXP = 0;
+    rogue.loneWolfTier = 0;
+    rogue.loneWolfStrBonus = 0;
+    rogue.hasEverHadAlly = false;
 
     rogue.yendorWarden = NULL;
 
@@ -453,6 +467,60 @@ void initializeRogue(uint64_t seed) {
 
     if (D_OMNISCENCE) {
         rogue.playbackOmniscience = 1;
+    }
+
+    if (D_FROST_STAFF_START) {
+        // iOS port (iBrogue): playtest grant for the staff of frost. Added deterministically here (not as a
+        // recorded input), so it reconstructs identically on replay. The staff table is shared across variants,
+        // so STAFF_FREEZE is always valid. Combine with its normal frequency for ordinary drops too.
+        theItem = generateItem(STAFF, STAFF_FREEZE);
+        theItem->enchant1 = theItem->charges = 10;
+        theItem->flags |= (ITEM_IDENTIFIED | ITEM_MAX_CHARGES_KNOWN);
+        identify(theItem);
+        theItem = addItemToPack(theItem);
+    }
+
+    if (D_LIGHT_RING_START) {
+        // iOS port (iBrogue): playtest grant for the reworked ring of light. Added deterministically here
+        // (not as a recorded input), so it reconstructs identically on replay. Equip it to activate the
+        // ally aura and invisible-reveal.
+        theItem = generateItem(RING, RING_LIGHT);
+        theItem->enchant1 = 3;
+        theItem->flags &= ~ITEM_CURSED;
+        identify(theItem);
+        theItem = addItemToPack(theItem);
+    }
+
+    if (D_HEAL_CHARM_START) {
+        // iOS port (iBrogue): playtest grant for a strong charm of health. Added deterministically here
+        // (not as a recorded input), so it reconstructs identically on replay.
+        theItem = generateItem(CHARM, CHARM_HEALTH);
+        theItem->enchant1 = 10;
+        theItem->charges = 0; // ready to use immediately
+        theItem->flags |= ITEM_IDENTIFIED;
+        identify(theItem);
+        theItem = addItemToPack(theItem);
+    }
+
+    if (D_LEATHER_ARMOR_START) {
+        // iOS port (iBrogue): playtest grant for a +50 leather armor (near-invulnerable, so you can test
+        // without dying). Added deterministically here (not as a recorded input), so it reconstructs
+        // identically on replay. Equip it to wear it.
+        theItem = generateItem(ARMOR, LEATHER_ARMOR);
+        theItem->enchant1 = 50;
+        theItem->flags &= ~(ITEM_CURSED | ITEM_RUNIC);
+        identify(theItem);
+        theItem = addItemToPack(theItem);
+    }
+
+    if (D_EMPTY_BOTTLE_START) {
+        // iOS port (Brogue SE): playtest grant of 3 empty bottles so the v2 capture system can be tested
+        // without first finding one. Added deterministically here (not as a recorded input), so it
+        // reconstructs identically on replay. The empty bottle reuses the POTION_DETECT_MAGIC slot.
+        theItem = generateItem(POTION, POTION_DETECT_MAGIC);
+        theItem->quantity = 3;
+        identify(theItem);
+        theItem = addItemToPack(theItem);
     }
 
     DEBUG {
@@ -551,6 +619,25 @@ static void updateColors() {
     }
 }
 
+// iOS port (iBrogue): ring of awareness. The base chance (before the +20/enchant awareness bonus) that a
+// ring-wearer senses a level's room machine on first arrival. Tunable; see IOS_MODIFICATIONS.md.
+#define AWARENESS_MACHINE_SENSE_BASE 25
+
+// iOS port (iBrogue): ring of awareness. Whether the current level holds a room machine -- a hand-built
+// set-piece (reward vault, altar, captive room, guardian puzzle, etc.), detected via the
+// IS_IN_ROOM_MACHINE cell flag, which persists for the life of the level.
+static boolean levelContainsRoomMachine(void) {
+    short i, j;
+    for (i = 0; i < DCOLS; i++) {
+        for (j = 0; j < DROWS; j++) {
+            if (pmap[i][j].flags & IS_IN_ROOM_MACHINE) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
 void startLevel(short oldLevelNumber, short stairDirection) {
     uint64_t oldSeed;
     item *theItem;
@@ -612,6 +699,7 @@ void startLevel(short oldLevelNumber, short stairDirection) {
                     && !(cellHasTerrainFlag((pos){ x, y }, T_OBSTRUCTS_PASSABILITY))
                     && !monst->status[STATUS_ENTRANCED]
                     && !monst->status[STATUS_PARALYZED]
+                    && !monst->status[STATUS_FROZEN] // iOS port (iBrogue): staff of frost — a frozen monster can't follow you up/down stairs
                     && (mapToStairs[monst->loc.x][monst->loc.y] < 30000 || monst->creatureState == MONSTER_ALLY || monst == rogue.yendorWarden)) {
 
                     monst->status[STATUS_ENTERS_LEVEL_IN] = clamp(mapToStairs[monst->loc.x][monst->loc.y] * monst->movementSpeed / 100 + 1, 1, 150);
@@ -743,6 +831,25 @@ void startLevel(short oldLevelNumber, short stairDirection) {
 
         // re-seed the RNG
         seedRandomGenerator(oldSeed);
+
+        // iOS port (iBrogue): ring of awareness -- on first arriving at a level, a perceptive character may
+        // sense that it holds a room machine (a vault/altar/captive/guardian set-piece). Existence only:
+        // never reveals location, nor whether it's reward or danger. Positive-only and truthful (it never
+        // fires falsely, so silence is ambiguous). The rand_percent draw is gated on wearing the ring AND a
+        // machine existing, so players without the ring draw no RNG here and keep vanilla behavior. A cursed
+        // ring of awareness (negative bonus) senses nothing. Rolled here on the gameplay RNG stream so it's
+        // deterministic; like any gameplay change it diverges replays from pre-change recordings.
+        if (rogue.awarenessBonus > 0
+            && levelContainsRoomMachine()
+            && rand_percent(min(100, AWARENESS_MACHINE_SENSE_BASE + rogue.awarenessBonus))) {
+
+            messageWithColor("you sense that something of significance lies hidden on this level.", &backgroundMessageColor, 0);
+        }
+
+        // iOS port (Brogue SE): ring of awareness -- on first arriving at a level, also sense the good/bad
+        // polarity of magic items lying on the floor (secret rooms included). Self-gated on wearing the ring,
+        // and rolled here on the gameplay RNG stream so it stays deterministic. See senseFloorPolarityFromAwareness.
+        senseFloorPolarityFromAwareness();
 
         //logLevel();
 
@@ -1050,6 +1157,64 @@ void freeEverything() {
     free(rogue.featRecord);
 }
 
+// iOS port (Brogue SE): debug rest-insight calibration. At the end of a live run we emit one CSV row
+// of the per-level rest tally (rested turns + polarity reveals) so the rest-insight cadence (see
+// gainPolarityInsightFromRest in Items.c) can be tuned against real play. The host (SEBridge.mm)
+// appends it to Documents/se/rest-stats.csv and owns the leading wall-clock "time" column. The hook
+// is output-only — it draws no RNG and mutates no game state, so recordings/determinism are unaffected.
+extern void seRecordRestStats(const char *header, const char *row);
+
+// Copy src into dst, neutralising characters that would corrupt a CSV cell (commas, quotes, newlines).
+static void sanitizeCsvCell(const char *src, char *dst, size_t dstSize) {
+    size_t i = 0;
+    for (; src && src[i] && i + 1 < dstSize; i++) {
+        const char c = src[i];
+        dst[i] = (c == ',' || c == '"' || c == '\n' || c == '\r') ? ' ' : c;
+    }
+    dst[i] = '\0';
+}
+
+// iOS port (Brogue SE): build and emit the rest-stats CSV row for a finished run. Header and row
+// columns are kept in lock-step here so the host never has to know the schema. Skipped during
+// recording playback.
+static void recordRestStatsRow(const char *outcome, const char *killedBy) {
+    if (rogue.playbackMode) {
+        return; // never log while replaying a recording
+    }
+
+    char header[2048], row[2048], buf[64], cause[128];
+    unsigned long restTurnsTotal = 0, revealsTotal = 0, restTurnsThruD10 = 0, revealsThruD10 = 0;
+    short d;
+
+    for (d = 1; d <= gameConst->deepestLevel; d++) {
+        restTurnsTotal += levels[d].restTurnsOnLevel;
+        revealsTotal   += levels[d].restRevealsOnLevel;
+        if (d <= 10) {
+            restTurnsThruD10 += levels[d].restTurnsOnLevel;
+            revealsThruD10   += levels[d].restRevealsOnLevel;
+        }
+    }
+
+    sanitizeCsvCell(killedBy ? killedBy : "-", cause, sizeof(cause));
+
+    strcpy(header, "seed,mode,outcome,cause,depth,deepest,wisdom,rest_turns_total,reveals_total,rest_turns_d1_10,reveals_d1_10");
+    sprintf(row, "%llu,%i,%s,%s,%i,%i,%i,%lu,%lu,%lu,%lu",
+            (unsigned long long)rogue.seed, (int)rogue.mode, outcome, cause,
+            rogue.depthLevel, rogue.deepestLevel, rogue.wisdomBonus,
+            restTurnsTotal, revealsTotal, restTurnsThruD10, revealsThruD10);
+
+    for (d = 1; d <= gameConst->deepestLevel; d++) {           // per-level rested turns
+        sprintf(buf, ",t%i", d);                            strcat(header, buf);
+        sprintf(buf, ",%lu", levels[d].restTurnsOnLevel);   strcat(row, buf);
+    }
+    for (d = 1; d <= gameConst->deepestLevel; d++) {           // per-level reveals
+        sprintf(buf, ",r%i", d);                            strcat(header, buf);
+        sprintf(buf, ",%lu", levels[d].restRevealsOnLevel); strcat(row, buf);
+    }
+
+    seRecordRestStats(header, row);
+}
+
 void gameOver(char *killedBy, boolean useCustomPhrasing) {
     short i, y;
     char buf[200], highScoreText[200], buf2[200];
@@ -1157,8 +1322,16 @@ void gameOver(char *killedBy, boolean useCustomPhrasing) {
                 rogue.depthLevel);
     }
 
-    // Count gems as 500 gold each
-    short numGems = numberOfMatchingPackItems(GEM, 0, 0, false);
+    // Count gems as 500 gold each.
+    // iOS port (Brogue SE): #805 / BrogueCE PR #808 — sum individual lumenstones, not stacks.
+    // numberOfMatchingPackItems returns the number of pack entries, so a stack of N lumenstones
+    // scored as 1 (500 gold) instead of N. The victory path already counts by quantity; match it.
+    short numGems = 0;
+    for (theItem = packItems->nextItem; theItem != NULL; theItem = theItem->nextItem) {
+        if (theItem->category & GEM) {
+            numGems += theItem->quantity;
+        }
+    }
     rogue.gold += 500 * numGems;
     theEntry.score = rogue.gold;
 
@@ -1223,6 +1396,8 @@ void gameOver(char *killedBy, boolean useCustomPhrasing) {
     if (!rogue.playbackMode && rogue.mode != GAME_MODE_EASY &&  rogue.mode != GAME_MODE_WIZARD) {
         saveRunHistory(rogue.quit ? "Quit" : "Died", rogue.quit ? "-" : killedBy, (int) theEntry.score, numGems);
     }
+
+    recordRestStatsRow(rogue.quit ? "Quit" : "Died", rogue.quit ? "-" : killedBy); // iOS port (Brogue SE): rest-insight calibration log
 
     rogue.gameHasEnded = true;
     rogue.gameExitStatusCode = EXIT_STATUS_SUCCESS;
@@ -1389,6 +1564,8 @@ void victory(boolean superVictory) {
     if (!rogue.playbackMode && rogue.mode != GAME_MODE_EASY && rogue.mode != GAME_MODE_NORMAL) {
         saveRunHistory(victoryVerb, "-", (int) theEntry.score, gemCount);
     }
+
+    recordRestStatsRow(superVictory ? "Mastered" : "Escaped", "-"); // iOS port (Brogue SE): rest-insight calibration log
 
     rogue.gameHasEnded = true;
     rogue.gameExitStatusCode = EXIT_STATUS_SUCCESS;

@@ -1,23 +1,40 @@
 //
-//  CEBridge.mm
-//  BrogueCE
+//  SEBridge.mm
+//  BrogueSE
 //
-//  Objective-C++ bridge between the BrogueCE 1.15 C engine (vendored in
-//  Engine/) and the host iOS app. The engine declares its platform contract as
-//  free C functions in Rogue.h (no brogueConsole struct in this fork), so this
-//  file provides definitions for every platform symbol the engine references,
-//  plus the single exported entry point ce_start().
+//  Objective-C++ bridge between the Brogue SE C engine (vendored in Engine/, a
+//  fork of BrogueCE 1.15) and the host iOS app. The engine declares its platform
+//  contract as free C functions in Rogue.h (no brogueConsole struct in this fork),
+//  so this file provides definitions for every platform symbol the engine
+//  references, plus the single exported entry point se_start().
+//
+//  This is SE's own copy of the bridge, compiled into BrogueSE.framework. It is a
+//  sibling of BrogueCE's CEBridge.mm; the engine symbols are isolated per-framework
+//  (two-level namespace) and only the exported entry points differ (se_* vs ce_*).
 //
 //  Rendering / input / signaling are routed to an app-supplied object that
-//  conforms to BrogueCEHost (see BrogueCEHost.h).
+//  conforms to BrogueCEHost (single-sourced in the BrogueCE framework).
 //
 
 #import <Foundation/Foundation.h>
 #import <UIKit/UIKit.h>
 #include <stdlib.h>
 
+// iOS port (Brogue SE): capture the build-config DEBUG flag (set in the BrogueSE framework's Debug
+// configuration only) BEFORE Engine/Rogue.h #undefs it and repurposes DEBUG as `if (WIZARD_MODE)`.
+// Gates developer-only, never-ship instrumentation (e.g. the rest-stats CSV) to Debug builds.
+#if defined(DEBUG) && DEBUG
+#define SE_DEBUG_BUILD 1
+#else
+#define SE_DEBUG_BUILD 0
+#endif
+
 #import "Engine/Rogue.h"
-#import "BrogueCEHost.h"
+// iOS port (Brogue SE): the host protocol is single-sourced in the master-tracked
+// BrogueCE framework so a host-protocol change propagates to both engines. SE only
+// adds its own entry-point declarations (BrogueSEHost.h).
+#import "../BrogueCE/BrogueCEHost.h"
+#import "BrogueSEHost.h"
 
 // ---------------------------------------------------------------------------
 // Unicode code points for the non-ASCII glyphs. Upstream CE defines these in
@@ -60,11 +77,11 @@
 // ---------------------------------------------------------------------------
 static id<BrogueCEHost> gHost = nil;
 
-// Set by ce_requestTermination() (UI thread), read by the engine thread. When
+// Set by se_requestTermination() (UI thread), read by the engine thread. When
 // true, the bridge unblocks the title-screen input wait and the engine's
 // titleMenu hook returns with rogue.nextGame = NG_QUIT, so rogueMain() exits.
 // Defined with C linkage so the vendored engine (MainMenu.c) can extern it.
-extern "C" { volatile boolean brogueCETerminationRequested = false; }
+extern "C" { volatile boolean brogueSETerminationRequested = false; }
 
 // CE's commitDraws() only re-plots cells that changed vs its previouslyPlottedCells
 // cache. That cache survives a teardown/reboot, but the shared RogueScene was
@@ -305,13 +322,13 @@ static boolean ce_isEnvironmentGlyph(enum displayGlyph glyph) {
 // Exported entry point.
 // ---------------------------------------------------------------------------
 // Establishes a writable working directory for the engine's relative file I/O
-// (recordings, saves). BrogueCE files are partitioned into Documents/ce so they
-// never collide with the Classic engine's files in Documents/. Mirrors Classic's
-// initializeBrogueSaveLocation(), but scoped to the CE subdirectory.
+// (recordings, saves). Brogue SE files are partitioned into Documents/se so they
+// never collide with the Classic engine's files in Documents/ or BrogueCE's in
+// Documents/ce. Mirrors Classic's initializeBrogueSaveLocation(), scoped to se/.
 static void initializeBrogueCESaveLocation(void) {
     NSFileManager *manager = [NSFileManager defaultManager];
     NSString *documents = [NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES) firstObject];
-    NSString *ceDir = [documents stringByAppendingPathComponent:@"ce"];
+    NSString *ceDir = [documents stringByAppendingPathComponent:@"se"];
 
     if (![manager fileExistsAtPath:ceDir]) {
         [manager createDirectoryAtPath:ceDir withIntermediateDirectories:YES attributes:nil error:NULL];
@@ -320,14 +337,14 @@ static void initializeBrogueCESaveLocation(void) {
     [manager changeCurrentDirectoryPath:ceDir];
 }
 
-extern "C" __attribute__((visibility("default"))) void ce_start(id<BrogueCEHost> host) {
+extern "C" __attribute__((visibility("default"))) void se_start(id<BrogueCEHost> host) {
     gHost = host;
     // iOS port (iBrogue): restore the player's last-chosen graphics mode so the
     // text/tiles/hybrid selection persists across launches and future runs.
     graphicsMode = ceLoadPersistedGraphicsMode();
     // iOS port (iBrogue): restore the player's chosen keyboard scheme (Classic / Modern).
     rogueKeyboardScheme = ceLoadPersistedKeyboardScheme();
-    brogueCETerminationRequested = false;
+    brogueSETerminationRequested = false;
     brogueCEAtTitle = false;
     gNeedsFullRedraw = true; // resync the shared scene on (re)entry
     gLastReportedUIMode = -1; // force a UI-mode report on (re)entry
@@ -336,21 +353,21 @@ extern "C" __attribute__((visibility("default"))) void ce_start(id<BrogueCEHost>
     rogueMain();
 }
 
-extern "C" __attribute__((visibility("default"))) void ce_requestTermination(void) {
-    brogueCETerminationRequested = true;
+extern "C" __attribute__((visibility("default"))) void se_requestTermination(void) {
+    brogueSETerminationRequested = true;
 }
 
 // iOS port (iBrogue): drive the engine's runtime KEYBOARD_LABELS flag (see Rogue.h /
 // GlobalsBase.c). The host calls this on GCKeyboard connect/disconnect so in-game hotkey
 // labels appear only with a hardware keyboard, matching the Classic engine.
-extern "C" __attribute__((visibility("default"))) void ce_setKeyboardLabelsEnabled(int enabled) {
+extern "C" __attribute__((visibility("default"))) void se_setKeyboardLabelsEnabled(int enabled) {
     KEYBOARD_LABELS = (enabled != 0);
 }
 
-// iOS port (iBrogue): report hardware-keyboard presence to the engine (distinct from KEYBOARD_LABELS).
+// iOS port (Brogue SE): report hardware-keyboard presence to the engine (distinct from KEYBOARD_LABELS).
 // The host calls this on GCKeyboard connect/disconnect; the engine uses it to show the "Press <?> for
 // help" welcome hint when a keyboard is attached.
-extern "C" __attribute__((visibility("default"))) void ce_setHardwareKeyboardConnected(int connected) {
+extern "C" __attribute__((visibility("default"))) void se_setHardwareKeyboardConnected(int connected) {
     HARDWARE_KEYBOARD_CONNECTED = (connected != 0);
 }
 
@@ -401,7 +418,7 @@ boolean pauseForMilliseconds(short milliseconds, PauseBehavior behavior) {
     reportAtTitleIfChanged();
 
     [NSThread sleepForTimeInterval:milliseconds / 1000.];
-    if (brogueCETerminationRequested) {
+    if (brogueSETerminationRequested) {
         return true; // wake the title loop so it can observe the request
     }
     if (gHost && ([gHost hasTouchEvent] || [gHost hasKeyEvent])) {
@@ -424,7 +441,7 @@ void nextKeyOrMouseEvent(rogueEvent *returnEvent, boolean textInput, boolean col
 
         // Engine-switch requested: unblock with a benign keystroke so the title
         // loop iterates and its termination hook returns NG_QUIT.
-        if (brogueCETerminationRequested) {
+        if (brogueSETerminationRequested) {
             returnEvent->eventType = KEYSTROKE;
             returnEvent->param1 = 0;
             returnEvent->param2 = 0;
@@ -511,47 +528,19 @@ void nextKeyOrMouseEvent(rogueEvent *returnEvent, boolean textInput, boolean col
     }
 }
 
-// iOS port (iBrogue): the engine's game-over notification hook drives Game Center.
-// Classic reports scores/feats by calling [[GameCenter shared] ...] directly from
-// RogueMain.mm (compiled into the app target); the CE engine lives in a framework that
-// can't see the app's classes, so it routes through the BrogueCEHost protocol instead.
-// These engine globals are consulted here to gate reporting and read the feat record.
-extern playerCharacter rogue;
-extern const feat *featTable;
-extern const gameConstants *gameConst;
-extern int gameVariant;
-
-// Maps the featTypes enum order (Engine/Rogue.h) to App Store Connect achievement IDs.
-// Game Center achievements are app-global, so these reuse the Classic engine's IDs; only
-// brogue_untempted (FEAT_TONE / "Untempted") is CE-only and must be created in ASC.
-static NSString * const kCEAchievementIDForFeat[] = {
-    @"brogue_pure_mage",    // FEAT_PURE_MAGE
-    @"pure_warrior",        // FEAT_PURE_WARRIOR
-    @"brogue_companion",    // FEAT_COMPANION
-    @"brogue_specialist",   // FEAT_SPECIALIST
-    @"brogue_jellymancer",  // FEAT_JELLYMANCER
-    @"brogue_dragonslayer", // FEAT_DRAGONSLAYER
-    @"brogue_paladin",      // FEAT_PALADIN
-    @"brogue_untempted",    // FEAT_TONE (Untempted)
-};
-
-// Posts the final score and any earned feats to Game Center. Only completed runs reach
-// here — quit/abandon (GAMEOVER_QUIT) and playback (GAMEOVER_RECORDING) are not forwarded,
-// so a player can't pad the leaderboard by giving up. On death only non-initialValue feats
-// count (the "ascend without..." feats require a win); on victory/supervictory all set
-// feats count. Restricted to standard Brogue, non-wizard runs.
+// iOS port (Brogue SE): Brogue SE is Game Center-silent.
+//
+// Unlike Classic (which reports from RogueMain.mm) and BrogueCE (which routes scores/
+// feats through the BrogueCEHost protocol), SE deliberately posts NOTHING to Game
+// Center: no leaderboard score, no achievements. SE's gameplay balance is under active
+// change, so an online leaderboard mixing incomparable rulesets would be meaningless,
+// and SE must never land on (or corrupt) BrogueCE's "BrogueCE_High_Score" board or its
+// shared achievement IDs. Local high scores / run history ARE still recorded — see the
+// "se high scores …" / "se run history" NSUserDefaults keys above.
+//
+// A dedicated SE leaderboard can be introduced later if/when SE stabilizes.
 static void ceReportGameOver(long score, boolean isVictory) {
-    if (gameVariant != VARIANT_BROGUE) return;     // Rapid/Bullet score differently
-    if (rogue.mode == GAME_MODE_WIZARD) return;    // never report cheat runs
-
-    if (score > 0 && gHost) [gHost reportCEScore:score];
-
-    const short n = (short)(sizeof(kCEAchievementIDForFeat) / sizeof(kCEAchievementIDForFeat[0]));
-    for (short i = 0; i < gameConst->numberFeats && i < n; i++) {
-        if (!rogue.featRecord[i]) continue;
-        if (!isVictory && featTable[i].initialValue) continue; // ascend-only feats need a win
-        if (gHost) [gHost submitCEAchievementWithID:kCEAchievementIDForFeat[i]];
-    }
+    (void)score; (void)isVictory;   // intentionally no Game Center reporting for SE
 }
 
 void notifyEvent(short eventId, int data1, int data2, const char *str1, const char *str2) {
@@ -564,6 +553,51 @@ void notifyEvent(short eventId, int data1, int data2, const char *str1, const ch
     }
 }
 
+// iOS port (Brogue SE): debug rest-insight calibration. The engine (recordRestStatsRow in
+// RogueMain.c) emits one CSV row per finished live run; we append it to Documents/se/rest-stats.csv,
+// writing the header — prefixed with our own wall-clock "time" column — only when the file is first
+// created. Pull the file off-device via Xcode > Window > Devices & Simulators > (app) > Download
+// Container, then look under AppData/Documents/se/rest-stats.csv. Output-only. Gated to Debug builds
+// (SE_DEBUG_BUILD): in Release this is a no-op, so the CSV is never written on shipping devices.
+void seRecordRestStats(const char *header, const char *row) {
+#if SE_DEBUG_BUILD
+    if (!header || !row) {
+        return;
+    }
+    @autoreleasepool {
+        NSString *documents = [NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES) firstObject];
+        NSString *seDir = [documents stringByAppendingPathComponent:@"se"];
+        NSString *csvPath = [seDir stringByAppendingPathComponent:@"rest-stats.csv"];
+        NSFileManager *manager = [NSFileManager defaultManager];
+
+        if (![manager fileExistsAtPath:seDir]) {
+            [manager createDirectoryAtPath:seDir withIntermediateDirectories:YES attributes:nil error:NULL];
+        }
+
+        if (![manager fileExistsAtPath:csvPath]) {
+            NSString *headerLine = [NSString stringWithFormat:@"time,%s\n", header];
+            [headerLine writeToFile:csvPath atomically:YES encoding:NSUTF8StringEncoding error:NULL];
+        }
+
+        NSDateFormatter *fmt = [[NSDateFormatter alloc] init];
+        fmt.dateFormat = @"yyyy-MM-dd'T'HH:mm:ss";
+        fmt.locale = [NSLocale localeWithLocaleIdentifier:@"en_US_POSIX"];
+        NSString *stamp = [fmt stringFromDate:[NSDate date]];
+
+        NSString *dataLine = [NSString stringWithFormat:@"%@,%s\n", stamp, row];
+        NSFileHandle *fh = [NSFileHandle fileHandleForWritingAtPath:csvPath];
+        if (fh) {
+            [fh seekToEndOfFile];
+            [fh writeData:[dataLine dataUsingEncoding:NSUTF8StringEncoding]];
+            [fh closeFile];
+        }
+    }
+#else
+    (void)header;
+    (void)row; // Release: the rest-stats CSV is a debug-only calibration tool; never collect on shipping builds
+#endif
+}
+
 boolean takeScreenshot(void) {
     return false;
 }
@@ -572,7 +606,7 @@ boolean takeScreenshot(void) {
 // persisted in NSUserDefaults so it carries across app launches and future runs,
 // rather than resetting to TEXT_GRAPHICS each launch. Stored as the raw enum
 // integer under a CE-specific key.
-static NSString * const kCEGraphicsModeKey = @"ce graphics mode";
+static NSString * const kCEGraphicsModeKey = @"se graphics mode";
 
 // Read the persisted graphics mode, clamped to the valid enum range. Defaults to
 // TEXT_GRAPHICS when absent or out of range (matching the engine's own default).
@@ -606,7 +640,7 @@ enum graphicsModes setGraphicsMode(enum graphicsModes mode) {
 // only in memory for the lifetime of the process; on iOS backgrounded apps are
 // frequently terminated, which would otherwise reset it to 0 each launch. Stored
 // as an NSNumber so the full uint64_t seed range round-trips losslessly.
-static NSString * const kCELastSeedKey = @"ce last game seed";
+static NSString * const kCELastSeedKey = @"se last game seed";
 
 uint64_t ceLoadPersistedSeed(void) {
     NSNumber *n = [[NSUserDefaults standardUserDefaults] objectForKey:kCELastSeedKey];
@@ -620,11 +654,12 @@ void cePersistLastSeed(uint64_t seed) {
 // iOS port (iBrogue): the chosen keyboard scheme (Classic / Modern) is persisted in NSUserDefaults so
 // it sticks across launches, defaulting to CLASSIC (stock vi keys) when absent or out of range. The key
 // is deliberately shared across all three engines (Classic/CE/SE all use @"keyboard scheme") so the
-// scheme is an app-wide input preference -- picking Modern in one engine carries to the others.
+// scheme is an app-wide input preference -- picking Modern in one engine carries to the others. (This is
+// an intentional exception to SE's "se ..."-prefixed state: it is an input preference, not game state.)
 static NSString * const kCEKeyboardSchemeKey = @"keyboard scheme";
 
 static enum keyboardScheme ceLoadPersistedKeyboardScheme(void) {
-    // iOS port (iBrogue): default MODERN when absent or out of range (the default layout on iOS/macOS).
+    // iOS port (Brogue SE): default MODERN when absent or out of range (the default layout on iOS/macOS).
     NSUserDefaults *d = [NSUserDefaults standardUserDefaults];
     if ([d objectForKey:kCEKeyboardSchemeKey] == nil) {
         return KEYBOARD_SCHEME_MODERN;
@@ -704,9 +739,9 @@ void ceSetPlayerWindowLocation(short windowX, short windowY) {
 // parallel arrays. Kept under CE-specific keys, separate from the Classic
 // engine's list, since the two engines score independently. CE's
 // rogueHighScoresEntry has no seed field, so (unlike Classic) we store none.
-static NSString * const kCEHighScoresScoresKey = @"ce high scores scores";
-static NSString * const kCEHighScoresTextKey   = @"ce high scores text";
-static NSString * const kCEHighScoresDatesKey  = @"ce high scores dates";
+static NSString * const kCEHighScoresScoresKey = @"se high scores scores";
+static NSString * const kCEHighScoresTextKey   = @"se high scores text";
+static NSString * const kCEHighScoresDatesKey  = @"se high scores dates";
 
 // Ensure all three arrays exist and hold exactly HIGH_SCORES_COUNT entries,
 // padding empty slots (score 0). Safe to call before every read/write.
@@ -811,7 +846,7 @@ boolean saveHighScore(rogueHighScoresEntry theEntry) {
 // as a "player reset their recent stats here" sentinel. Persisted as an array of
 // dictionaries in NSUserDefaults under a CE-specific key. `rogue` (the engine's
 // global game state) supplies the fields saveRunHistory isn't handed directly.
-static NSString * const kCERunHistoryKey = @"ce run history";
+static NSString * const kCERunHistoryKey = @"se run history";
 extern playerCharacter rogue;
 
 static void ceAppendRun(NSDictionary *run) {

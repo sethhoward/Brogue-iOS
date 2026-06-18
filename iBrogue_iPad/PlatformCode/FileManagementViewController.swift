@@ -68,13 +68,20 @@ final class FileManagementViewController: UITableViewController {
     /// the flat Documents folder (Classic's saves); CE passes Documents/ce.
     private let directoryURL: URL
 
-    init(directory: URL? = nil) {
+    /// When true, each row offers a "Duplicate" swipe action. This is a debug aid
+    /// (handy for copying off a crashing save before experimenting on it) and is
+    /// only wired up for the Brogue SE engine.
+    private let allowsDuplicate: Bool
+
+    init(directory: URL? = nil, allowsDuplicate: Bool = false) {
         self.directoryURL = directory ?? FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        self.allowsDuplicate = allowsDuplicate
         super.init(style: .insetGrouped)
     }
 
     required init?(coder: NSCoder) {
         self.directoryURL = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        self.allowsDuplicate = false
         super.init(coder: coder)
     }
 
@@ -187,6 +194,60 @@ final class FileManagementViewController: UITableViewController {
         share.backgroundColor = .systemBlue
 
         return UISwipeActionsConfiguration(actions: [delete, share])
+    }
+
+    override func tableView(_ tableView: UITableView,
+                            leadingSwipeActionsConfigurationForRowAt indexPath: IndexPath)
+    -> UISwipeActionsConfiguration? {
+        guard allowsDuplicate, let url = file(at: indexPath) else { return nil }
+
+        let duplicate = UIContextualAction(style: .normal, title: "Duplicate") { [weak self] _, _, completion in
+            self?.duplicate(url: url)
+            completion(true)
+        }
+        duplicate.backgroundColor = .systemGreen
+        return UISwipeActionsConfiguration(actions: [duplicate])
+    }
+
+    /// Copies a file (plus any companion `.txt` annotation) to a uniquely-named
+    /// sibling in the same directory, then refreshes the list.
+    private func duplicate(url: URL) {
+        let copy = uniqueDuplicateURL(for: url)
+        do {
+            try FileManager.default.copyItem(at: url, to: copy)
+        } catch {
+            let alert = UIAlertController(
+                title: "Couldn’t Duplicate",
+                message: error.localizedDescription,
+                preferredStyle: .alert)
+            alert.addAction(UIAlertAction(title: "OK", style: .default))
+            present(alert, animated: true)
+            return
+        }
+
+        // Carry along the companion annotation recordings may have.
+        let annotation = url.deletingPathExtension().appendingPathExtension("txt")
+        if FileManager.default.fileExists(atPath: annotation.path) {
+            let annotationCopy = copy.deletingPathExtension().appendingPathExtension("txt")
+            try? FileManager.default.copyItem(at: annotation, to: annotationCopy)
+        }
+
+        reloadFiles()
+    }
+
+    /// Builds a non-colliding URL like `Name copy.broguesave`, `Name copy 2.broguesave`, …
+    private func uniqueDuplicateURL(for url: URL) -> URL {
+        let ext = url.pathExtension
+        let base = url.deletingPathExtension().lastPathComponent
+        for suffix in 0... {
+            let name = suffix == 0 ? "\(base) copy" : "\(base) copy \(suffix + 1)"
+            let candidate = directoryURL.appendingPathComponent(name).appendingPathExtension(ext)
+            if !FileManager.default.fileExists(atPath: candidate.path) {
+                return candidate
+            }
+        }
+        // Unreachable: the loop always returns once a free name is found.
+        return directoryURL.appendingPathComponent("\(base) copy").appendingPathExtension(ext)
     }
 
     private func confirmDelete(url: URL, at indexPath: IndexPath, completion: @escaping (Bool) -> Void) {

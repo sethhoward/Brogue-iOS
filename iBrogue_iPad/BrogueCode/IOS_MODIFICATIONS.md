@@ -23,6 +23,54 @@ future maintainers (human or AI) don't mistake an intentional port change for a 
 
 ## Change log
 
+### 2026-06-16 — On-screen ESC button during targeting (parity with CE/SE)
+
+**What.** While aiming a throw/zap, Classic now shows the on-screen ESC button so a touch player can
+cancel the aim — CE/SE already did this; Classic was the only engine without it. Tapping it sends
+`ESCAPE_KEY` (27), which `moveCursor` reads as a cancel, exactly as the physical Escape key does.
+
+**Why.** Classic has no `uiMode == ShowEscape` event (CE drives the ESC button's visibility through
+its coarse `uiMode`); Classic's discrete `setBrogueGameEvent` stream had no targeting signal, so
+`escButtonWanted` stayed false and the button never appeared during an aim.
+
+**Engine side.** New `setBrogueTargeting(boolean)` bridge (declared in `Rogue.h`), called from
+`chooseTarget` (`Items.c`): `true` once the aiming loop begins (after the playback early-return, so
+recordings don't trigger UI), `false` at each of the three exit points (cancel, self-target, confirm).
+Display-only and consumes no RNG, so saves/recordings are unaffected. Mirrors CE's `ceSetTargeting`.
+
+**Where.** `setBrogueTargeting` (Rogue.h decl; `RogueDriver.mm` definition — deduped, like
+`setBrogueExamining`, since `chooseTarget` has several exits); enter/exit calls in `chooseTarget`
+(`Items.c`). Platform side: `BrogueViewController.setClassicTargeting(_:)` toggles `escButtonWanted`
+(visibility) in addition to repositioning the button + enabling the magnifier (what `setCETargeting`
+already does for CE). Classic engine only.
+
+### 2026-06-15 — Keyboard labels disabled; hardware-keyboard presence drives UI instead
+
+**What.** The in-game hotkey labels are turned off (they reflect the Classic key layout and would
+mismatch the new Modern default — see the "Default to Modern keyboard layout" change). A hardware
+keyboard now instead: hides the on-screen d-pad and ESC button (platform/Swift side — redundant with
+the keyboard's arrows / Escape), and surfaces the "Press <?> for help" welcome hint (the only help
+affordance left with labels — and their help button — gone).
+
+**Engine side.** `KEYBOARD_LABELS` stays at its `false` default — the host no longer enables it. A new
+`HARDWARE_KEYBOARD_CONNECTED` global (Globals.c / Rogue.h), set by the host via
+`setHardwareKeyboardConnected()` on GCKeyboard connect/disconnect, tracks keyboard presence
+independently. `welcome()` now gates the help-menu hint on `HARDWARE_KEYBOARD_CONNECTED` rather than
+`KEYBOARD_LABELS`. The label infrastructure (`setKeyboardLabelsEnabled`) is left intact but unused,
+so labels can be re-enabled (and remapped for Modern) later.
+
+**Where.** `HARDWARE_KEYBOARD_CONNECTED` (Globals.c, Rogue.h); `setHardwareKeyboardConnected`
+(Globals.c, Rogue.h); welcome help-prompt gate (RogueMain.mm). Platform behavior (d-pad / ESC hide)
+lives in BrogueViewController.swift. Applies to all three engines.
+
+### 2026-06-14 — Tag the welcome line with the engine flavor (iOS port)
+
+**What.** With three selectable engines, the opening adventure-log line now ends with the engine
+flavor in parens — `… Dungeons of Doom! (Brogue)` for this (Classic) engine — so it's obvious which
+one is running. Display-only (a `message()` string, not an input), so recordings/saves are unaffected.
+
+**Where.** `welcome()` in `RogueMain.mm`.
+
 ### 2026-06-14 — Backport: seed persistence + selectable keyboard schemes + modifier plumbing
 
 **What.** Backported from the `se-game-mode` line (without the gameplay WIP), mirroring the BrogueCE
@@ -36,9 +84,12 @@ engine. Full design: `docs/design/keyboard-schemes.md`; engine-side details in
   Shift/Ctrl + a `raw` flag (was byte-only, modifiers hardcoded to 0), fixing Shift/Ctrl-run; arrows are
   scheme-independent. `RogueDriver.mm` sets the event flags and runs `raw` keys through the scheme.
 - **Selectable keyboard schemes** — `enum keyboardScheme` + `rogueKeyboardScheme` (default CLASSIC) +
-  `applyKeyboardScheme()` (`IO.c`); the Modern right-hand grid, Shift/Ctrl-run, displaced
+  `applyKeyboardScheme()` (`IO.c`); the Modern right-hand grid (`u/o`,`m/.` diagonals around the
+  `i/j/k/l` cross — `i`=up,`j`=left,`k`=down,`l`=right — plus `,`=down), Shift/Ctrl-run, displaced
   inventory/equip/messages/stairs, quit-removed-on-tablet, and the scheme-aware `printHelpScreen` with a
-  Tab toggle (persisted via `persistKeyboardScheme`).
+  Tab toggle. The vi keys `h`/`y`/`b`/`n` are inert in Modern (only the grid moves the player; `y`/`n`
+  stay free for yes/no). Persisted via `persistKeyboardScheme` under the shared `"keyboard scheme"`
+  NSUserDefaults key (same key in all three engines, so the scheme carries across Classic/CE/SE).
 
 Default is Classic, so behavior is unchanged until the player opts in via `?` → Tab.
 

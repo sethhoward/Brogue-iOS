@@ -149,7 +149,17 @@ extension BrogueGameEvent {
 // MARK: - BrogueViewController
 
 /// Which engine is currently driving the shared rendering surface.
-enum EngineKind { case classic, ce }
+///
+/// `.se` (Brogue SE) is a fork of the CE engine living in its own framework.
+enum EngineKind {
+    case classic, ce, se
+
+    /// SE runs through the same CEHost bridge and presents the same in-engine UI as
+    /// CE, so most "is this the CE engine?" UI checks should treat SE like CE. Only
+    /// truly engine-specific things (Game Center, the ce_*/se_* entry points) branch
+    /// on the exact case.
+    var isCEFamily: Bool { self != .classic }
+}
 
 final class BrogueViewController: UIViewController {
     /// Retains the BrogueCE host adapter for the lifetime of the CE engine thread.
@@ -160,6 +170,9 @@ final class BrogueViewController: UIViewController {
     private var engineThread: Thread?
     /// Set while a title-screen engine swap is in flight (awaiting clean exit).
     private var switchPending = false
+    /// The engine to boot once the outgoing one exits during a swap. Captured at
+    /// request time so the 3-way cycle can move to a specific target (not just flip).
+    private var pendingTargetEngine: EngineKind?
     /// The title-screen version-chooser chip and its label.
     private var versionChooser: UIView?
     private var versionChooserLabel: UILabel?
@@ -187,6 +200,15 @@ final class BrogueViewController: UIViewController {
     fileprivate var keyEvents = [QueuedKeyEvent]()
     fileprivate var magnifierTimer: Timer?
     fileprivate var inputRequestString: String?
+
+    // iOS port (iBrogue): hardware key-repeat. iOS `pressesBegan` fires once per physical press (unlike
+    // desktop SDL, which repeats natively), so holding a movement/rest/search key would only step once.
+    // We synthesize repeats with a timer: a held, repeat-eligible key re-enqueues itself after an initial
+    // delay, then at a steady interval. See keyRepeatInitialDelay/keyRepeatInterval and isRepeatable(...).
+    fileprivate var keyRepeatTimer: Timer?
+    fileprivate var repeatingKey: QueuedKeyEvent?
+    private let keyRepeatInitialDelay: TimeInterval = 0.4
+    private let keyRepeatInterval: TimeInterval = 0.1
 
     // ── Safe-area action buttons ─────────────────────────────────────────
     // A small column of buttons in the iPhone notch / dynamic-island safe-area
@@ -428,6 +450,16 @@ final class BrogueViewController: UIViewController {
         didSet { if oldValue != gameplayControlsActive { updateZoomForGameState() } }
     }
 
+    /// Whether a hardware keyboard is currently attached. When true, the on-screen d-pad and the
+    /// ESC button are hidden (redundant with the keyboard's arrows / Escape key); the engines also
+    /// surface a "Press <?> for help" hint. Updated by the GCKeyboard observer.
+    private var hardwareKeyboardConnected = false
+
+    /// Whether the app logic currently wants the on-screen ESC button shown (escapable sub-screen,
+    /// active text entry, etc.). The button is only actually shown when this is true AND no hardware
+    /// keyboard is attached — see refreshEscButtonVisibility().
+    private var escButtonWanted = false
+
     /// True while the player is aiming a throw/zap (CE targeting loop). Reported
     /// by the engine via setCETargeting; moves the esc button aside and re-enables
     /// the magnifier so the player can see what they're aiming at.
@@ -614,7 +646,8 @@ final class BrogueViewController: UIViewController {
                     // Game Center + File Management moved into the Classic title menu.
                     self.leaderBoardButton.isHidden = true
                     self.seedButton.isHidden = false
-                    self.escButton.isHidden = true
+                    self.escButtonWanted = false
+                    self.refreshEscButtonVisibility()
                     self.resetZoom()
                 case .startNewGame, .openGame, .beginOpenGame:
                     self.leaderBoardButton.isHidden = true
@@ -633,14 +666,13 @@ final class BrogueViewController: UIViewController {
                 // Hide/Show the directions.
                 switch self.lastBrogueGameEvent {
                 case .waitingForConfirmation, .actionMenuOpen, .openedInventory, .showTitle, .openGameFinished, .playRecording, .showHighScores, .playBackPanic, .messagePlayerHasDied, .playerHasDiedMessageAcknowledged, .keyBoardInputRequired, .beginOpenGame:
-                    self.dContainerView.isHidden = true
-                    self.dContainerView.isUserInteractionEnabled = false
                     self.gameplayControlsActive = false
                 default:
-                    self.dContainerView.isHidden = false
-                    self.dContainerView.isUserInteractionEnabled = true
                     self.gameplayControlsActive = true
                 }
+                // Actual d-pad visibility also depends on hardware-keyboard presence (hidden when one
+                // is attached); see refreshDirectionPadVisibility().
+                self.refreshDirectionPadVisibility()
                 self.updateActionButtonVisibility()
 
                 // Reserve the home-indicator strip only during gameplay. On the title
@@ -946,14 +978,26 @@ final class BrogueViewController: UIViewController {
         }
     }
 
-    /// Invoked from the BrogueCE engine's title menu ("File Management" item).
-    /// Scoped to the CE save directory (Documents/ce) so it doesn't show Classic's files.
+    /// Invoked from the BrogueCE/Brogue SE engine's title menu ("File Management" item).
+    /// CE and SE share the same CEHost bridge, so this one handler serves both — it
+    /// scopes the browser to the *current* engine's save directory (Documents/ce or
+    /// Documents/se) so it doesn't show Classic's (or the other engine's) files.
     @objc func presentFileManagementScreenForCE() {
         DispatchQueue.main.async { [weak self] in
             guard let self = self, self.presentedViewController == nil else { return }
-            let ceDir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-                .appendingPathComponent("ce")
-            let nav = UINavigationController(rootViewController: FileManagementViewController(directory: ceDir))
+            // iOS port (Brogue SE): pick the subfolder from the running engine. SE saves
+            // live in Documents/se; previously this was hardcoded to "ce", so SE's file
+            // management always showed an empty CE directory ("no files found").
+            var subfolder = "ce"
+            var allowsDuplicate = false
+            if self.currentEngine == .se {
+                subfolder = "se"
+                allowsDuplicate = true   // debug aid: SE-only "Duplicate" swipe action
+            }
+            let saveDir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+                .appendingPathComponent(subfolder)
+            let nav = UINavigationController(rootViewController:
+                FileManagementViewController(directory: saveDir, allowsDuplicate: allowsDuplicate))
             self.present(nav, animated: true)
         }
     }
@@ -1143,20 +1187,49 @@ final class BrogueViewController: UIViewController {
             thread.stackSize = 400 * 8192
             thread.start()
             engineThread = thread
+
+        case .se:
+            // Brogue SE engine, in its own embedded framework. Same CEHost bridge as
+            // CE; only the entry point differs (se_start vs ce_start).
+            let host = CEHost(viewPort: skViewPort, viewController: self)
+            ceHost = host
+            let thread = Thread { [weak self] in
+                se_start(host)
+                self?.engineDidExit()
+            }
+            thread.stackSize = 400 * 8192
+            thread.start()
+            engineThread = thread
         }
     }
 
-    /// Requests an in-place swap to the other engine. Only meaningful at the
-    /// title screen: injects the Quit keystroke so the active engine unwinds out
-    /// of its main-menu loop and `rogueMain` returns cleanly.
-    @objc func requestEngineSwitch() {
+    /// Engines in title-screen cycling order (Classic → BrogueCE → Brogue SE).
+    private static let engineCycle: [EngineKind] = [.classic, .ce, .se]
+
+    /// Cycles to the next/previous engine in lineage order (wrapping). `forward`
+    /// advances Classic → CE → SE; `!forward` goes the other way.
+    private func cycleEngine(forward: Bool) {
+        let cycle = Self.engineCycle
+        guard let idx = cycle.firstIndex(of: currentEngine) else { return }
+        let n = cycle.count
+        let target = cycle[forward ? (idx + 1) % n : (idx - 1 + n) % n]
+        requestEngineSwitch(to: target)
+    }
+
+    /// Requests an in-place swap to `target`. Only meaningful at the title screen:
+    /// injects the Quit keystroke so the active engine unwinds out of its main-menu
+    /// loop and `rogueMain` returns cleanly; `engineDidExit` then boots `target`.
+    func requestEngineSwitch(to target: EngineKind) {
         // Only switch from a title screen — the engine's terminate hook lives in
         // its title loop, so requesting it mid-game would hang the engine.
-        guard atTitle, !switchPending else { return }
+        guard atTitle, !switchPending, target != currentEngine else { return }
         switchPending = true
+        pendingTargetEngine = target
         switch currentEngine {
         case .ce:
             ce_requestTermination()
+        case .se:
+            se_requestTermination()
         case .classic:
             setClassicTerminationRequested(true)
         }
@@ -1180,14 +1253,16 @@ final class BrogueViewController: UIViewController {
             self.manageFilesButton?.isHidden = true
             self.showInventoryButton.isHidden = true
 
-            // Directional pad + action bar only during normal play.
-            self.dContainerView.isHidden = !inPlay
-            self.dContainerView.isUserInteractionEnabled = inPlay
+            // Directional pad + action bar only during normal play. The d-pad is additionally
+            // hidden when a hardware keyboard is attached; see refreshDirectionPadVisibility().
             self.gameplayControlsActive = inPlay
+            self.refreshDirectionPadVisibility()
             self.updateActionButtonVisibility()
 
-            // Escape button when CE is showing an escapable sub-screen.
-            self.escButton.isHidden = !showEscape
+            // Escape button when CE is showing an escapable sub-screen (hidden when a hardware
+            // keyboard is attached — the physical Escape key covers it; see refreshEscButtonVisibility).
+            self.escButtonWanted = showEscape
+            self.refreshEscButtonVisibility()
 
             // Keyboard for text entry (naming a save, entering a seed, etc.).
             if keyboard {
@@ -1209,6 +1284,22 @@ final class BrogueViewController: UIViewController {
         DispatchQueue.main.async { [weak self] in
             guard let self = self else { return }
             self.isTargeting = targeting
+            self.positionEscButtonForTargeting(targeting)
+        }
+    }
+
+    /// Called by the Classic bridge (setBrogueTargeting) while the player aims a
+    /// throw/zap. Classic has no uiMode==ShowEscape event — CE drives the ESC button's
+    /// visibility that way — so unlike setCETargeting this ALSO toggles escButtonWanted;
+    /// without it Classic would offer no on-screen way to cancel an aim. The rest mirrors
+    /// setCETargeting: repositions the button clear of the aiming area and enables the
+    /// magnifier so the player can see what they're aiming at.
+    @objc func setClassicTargeting(_ targeting: Bool) {
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self else { return }
+            self.isTargeting = targeting
+            self.escButtonWanted = targeting
+            self.refreshEscButtonVisibility()
             self.positionEscButtonForTargeting(targeting)
         }
     }
@@ -1273,8 +1364,10 @@ final class BrogueViewController: UIViewController {
             self.switchPending = false
             self.engineThread = nil
             self.ceHost = nil
-            // Swap to the other engine in place, and remember the choice.
-            self.currentEngine = (self.currentEngine == .ce) ? .classic : .ce
+            // Boot the engine captured at request time (the 3-way cycle's target),
+            // and remember the choice.
+            self.currentEngine = self.pendingTargetEngine ?? self.currentEngine
+            self.pendingTargetEngine = nil
             self.persistEngine()
             self.updateVersionChooserLabel()
             self.startEngine()
@@ -1287,11 +1380,21 @@ final class BrogueViewController: UIViewController {
 
     /// The engine to boot on launch — the last one played, defaulting to Classic.
     private static func persistedEngine() -> EngineKind {
-        return UserDefaults.standard.string(forKey: engineDefaultsKey) == "ce" ? .ce : .classic
+        switch UserDefaults.standard.string(forKey: engineDefaultsKey) {
+        case "ce": return .ce
+        case "se": return .se
+        default: return .classic
+        }
     }
 
     private func persistEngine() {
-        UserDefaults.standard.set(currentEngine == .ce ? "ce" : "classic", forKey: Self.engineDefaultsKey)
+        let value: String
+        switch currentEngine {
+        case .classic: value = "classic"
+        case .ce: value = "ce"
+        case .se: value = "se"
+        }
+        UserDefaults.standard.set(value, forKey: Self.engineDefaultsKey)
     }
 
     /// Builds the title-only "‹ engine ›" chip. Swipe or tap it to switch engines.
@@ -1333,11 +1436,14 @@ final class BrogueViewController: UIViewController {
             stack.trailingAnchor.constraint(equalTo: chip.trailingAnchor, constant: -16),
         ])
 
-        for direction in [UISwipeGestureRecognizer.Direction.left, .right] {
-            let swipe = UISwipeGestureRecognizer(target: self, action: #selector(versionChooserActivated))
-            swipe.direction = direction
-            chip.addGestureRecognizer(swipe)
-        }
+        // Swipe direction maps to the lineage cycle: left → next (Classic→CE→SE),
+        // right → previous. A tap advances forward, same as a left swipe.
+        let swipeLeft = UISwipeGestureRecognizer(target: self, action: #selector(versionChooserSwipedNext))
+        swipeLeft.direction = .left
+        chip.addGestureRecognizer(swipeLeft)
+        let swipeRight = UISwipeGestureRecognizer(target: self, action: #selector(versionChooserSwipedPrev))
+        swipeRight.direction = .right
+        chip.addGestureRecognizer(swipeRight)
         chip.addGestureRecognizer(UITapGestureRecognizer(target: self, action: #selector(versionChooserActivated)))
 
         versionChooser = chip
@@ -1346,7 +1452,15 @@ final class BrogueViewController: UIViewController {
     }
 
     @objc private func versionChooserActivated() {
-        requestEngineSwitch()
+        cycleEngine(forward: true)
+    }
+
+    @objc private func versionChooserSwipedNext() {
+        cycleEngine(forward: true)
+    }
+
+    @objc private func versionChooserSwipedPrev() {
+        cycleEngine(forward: false)
     }
 
     // MARK: - Title-screen options (universal, Classic + CE)
@@ -1509,10 +1623,12 @@ final class BrogueViewController: UIViewController {
 
     /// A line in the info panel. The renderer styles each kind differently.
     private enum InfoBlock {
-        case heading(String)   // top-level group heading
-        case note(String)      // italic descriptor beneath a heading
-        case section(String)   // sub-section heading
-        case bullets([String]) // bullet list
+        case heading(String)        // top-level group heading
+        case note(String)           // italic descriptor beneath a heading
+        case section(String)        // sub-section heading
+        case body(String)           // plain body paragraph
+        case bullets([String])      // bullet list
+        case link(String, String)   // tappable label + destination URL
     }
 
     /// Presents a scrollable description of the currently selected engine's key
@@ -1521,21 +1637,32 @@ final class BrogueViewController: UIViewController {
     private func presentEngineInfo() {
         guard presentedViewController == nil else { return }
 
-        let isCE = (currentEngine == .ce)
+        let title: String
+        let blocks: [InfoBlock]
+        switch currentEngine {
+        case .classic: title = "About Brogue";    blocks = Self.classicInfoBlocks()
+        case .ce:      title = "About BrogueCE";   blocks = Self.ceInfoBlocks()
+        case .se:      title = "About Brogue SE";  blocks = Self.seInfoBlocks()
+        }
 
         let content = UIViewController()
         content.view.backgroundColor = .systemBackground
-        content.title = isCE ? "About BrogueCE" : "About Brogue"
+        content.title = title
         content.navigationItem.rightBarButtonItem =
             UIBarButtonItem(barButtonSystemItem: .done, target: self, action: #selector(dismissEngineInfo))
 
         let textView = UITextView()
         textView.translatesAutoresizingMaskIntoConstraints = false
         textView.isEditable = false
+        textView.isSelectable = true          // required for .link attributes to be tappable
         textView.alwaysBounceVertical = true
         textView.backgroundColor = .clear
         textView.textContainerInset = UIEdgeInsets(top: 8, left: 12, bottom: 24, right: 12)
-        textView.attributedText = BrogueViewController.infoAttributedText(isCE ? Self.ceInfoBlocks() : Self.classicInfoBlocks())
+        textView.linkTextAttributes = [
+            .foregroundColor: UIColor.link,
+            .underlineStyle: NSUnderlineStyle.single.rawValue,
+        ]
+        textView.attributedText = BrogueViewController.infoAttributedText(blocks)
         content.view.addSubview(textView)
         NSLayoutConstraint.activate([
             textView.topAnchor.constraint(equalTo: content.view.safeAreaLayoutGuide.topAnchor),
@@ -1572,6 +1699,10 @@ final class BrogueViewController: UIViewController {
         sectionStyle.paragraphSpacingBefore = 12
         sectionStyle.paragraphSpacing = 4
 
+        let bodyStyle = NSMutableParagraphStyle()
+        bodyStyle.paragraphSpacing = 8
+        bodyStyle.lineBreakMode = .byWordWrapping
+
         for block in blocks {
             switch block {
             case .heading(let text):
@@ -1591,6 +1722,12 @@ final class BrogueViewController: UIViewController {
                     .foregroundColor: UIColor.label,
                     .paragraphStyle: sectionStyle,
                 ]))
+            case .body(let text):
+                out.append(NSAttributedString(string: text + "\n", attributes: [
+                    .font: UIFont.preferredFont(forTextStyle: .body),
+                    .foregroundColor: UIColor.label,
+                    .paragraphStyle: bodyStyle,
+                ]))
             case .bullets(let items):
                 for item in items {
                     out.append(NSAttributedString(string: "•\t" + item + "\n", attributes: [
@@ -1599,69 +1736,83 @@ final class BrogueViewController: UIViewController {
                         .paragraphStyle: bulletStyle,
                     ]))
                 }
+            case .link(let text, let urlString):
+                var attributes: [NSAttributedString.Key: Any] = [
+                    .font: UIFont.preferredFont(forTextStyle: .body),
+                    .paragraphStyle: bodyStyle,
+                ]
+                // The .link attribute drives both tap handling and the styling from
+                // the text view's linkTextAttributes; fall back to plain body text
+                // if the URL is somehow unparseable rather than dropping the line.
+                if let url = URL(string: urlString) {
+                    attributes[.link] = url
+                } else {
+                    attributes[.foregroundColor] = UIColor.label
+                }
+                out.append(NSAttributedString(string: text + "\n", attributes: attributes))
             }
         }
         return out
     }
 
-    /// Key BrogueCE features and differences from the original Brogue. Curated
-    /// for the iOS port — desktop/command-line-only items are omitted.
+    /// BrogueCE's purpose and how it relates to the original Brogue. Curated for
+    /// the iOS port; the full change list lives in the project changelog/wiki.
     private static func ceInfoBlocks() -> [InfoBlock] {
         return [
-            .note("How BrogueCE differs from the original Brogue (\"Classic\"). Switch engines from the title screen to compare."),
-            .heading("Gameplay Differences"),
-            .note("The changes below have some impact on game difficulty and is not a comprehensive list."),
-            .section("Monsters"),
+            .note("Brogue was created by Brian Walker. This version, Brogue: Community Edition, is a continuation of its development. It has several main goals:"),
             .bullets([
-                "Dar priestesses are now included in the 'Mage' monster class. A weapon of mage slaying will instantly kill them, and armor of mage immunity will provide invulnerability to their feeble attacks.",
-                "Goblin conjurers no longer have the spear attack pattern in contradiction with their attack message.",
-                "Liches/phoenixes polymorphed into other creatures no longer spawn phylacteries/eggs on death.",
-                "Allies can no longer learn abilities from the spectral clones created by armor of multiplicity.",
+                "fix bugs and crashes",
+                "add useful quality of life and non-gameplay features",
+                "improve the gameplay and keep it exciting",
+                "ease development and maintenance",
+                "be a convenient base for forks and ports to new platforms",
             ]),
-            .section("Items"),
+            .section("How is CE different from the original Brogue?"),
+            .note("Please refer to the changelog or release history for a complete list:"),
+            .link("Changes from original", "https://github.com/tmewett/BrogueCE/wiki/Changes-from-original"),
+        ]
+    }
+
+    /// Brogue SE release notes — player-facing highlights for the current release.
+    /// Curated for the info panel; the full technical log lives in
+    /// BrogueSE/Engine/IOS_MODIFICATIONS.md. Keep in sync with new content.
+    private static func seInfoBlocks() -> [InfoBlock] {
+        return [
+            .note("Brogue SE — An experimental fork of BrogueCE with original items, monsters, and mechanics with release 1 (\"Alphabet-a Soup\") and an upcoming release (\"Alphabeast\") that will bring new monsters and minibosses. Here's what's new:"),
+            .heading("🧪 New Items"),
             .bullets([
-                "Fixed a bug which caused staffs of firebolt and lightning to deal a fixed amount of damage instead of a variable amount.",
-                "Wands of plenty now reduce the maximum health of the target and its clone by 50%.",
-                "Wands of empowerment no longer increase the target's health regeneration rate.",
-                "Wands of empowerment have been strengthened to a middle-ground between their 1.7.4 and 1.7.5 versions.",
-                "Nerfed charm of teleportation recharge time. At +1 it starts at the same value, but becomes 1 turn at +13 instead of +11.",
-                "Buffed staff of protection duration. At /N max charges, the duration is now 13 × 1.4^(N-2) instead of 5 × 1.53^(N-2).",
-                "Fixed a bug which caused the bolt name from unidentified staffs or wands to be revealed when reflected.",
-                "Fixed a bug which caused some staffs to appear in treasure vaults without their max charges being shown.",
-                "Fixed a bug which caused unidentified rings to be revealed as negative in the ring description after reading a scroll of remove curse.",
+                "The Empty Bottle — Carry it and the world fills it: step into a gas or pool to bottle it, drift over lava or a chasm while levitating to skim it, or set it down and zap it with a bolt. Each capture becomes a real, identified potion.",
+                "Captured potions — Acid, webbing, steam, ice, and water can only be obtained by capturing hazards with the empty bottle. Each one re-creates its hazard when thrown.",
+                "Staff of Frost — Freeze enemies solid, slow them, freeze water into walkable ice bridges, turn foliage into brittle frozen walls, and shove foes back moving them out of your way and damaging enemies in their path.",
             ]),
-            .section("Combat"),
+            .heading("👹 Monsters & Allies"),
             .bullets([
-                "Changed the creatures hit as collateral from a spear attack to be the same as those hit by the sweep of an axe attack. (This reincludes hitting hidden monsters.)",
-                "Fixed a bug which allowed fast-attacking monsters to attack the player before falling down a chasm or hole.",
-                "Fixed a bug which prevented discordant allies from attacking the player diagonally.",
-                "Fixed a bug which caused ranged-melee attackers (e.g. goblins, salamanders) with the grappling mutation to attempt to seize non-adjacent targets. Now they only seize adjacent targets and perform normal, damage-dealing, ranged attacks on non-adjacent targets.",
+                "The Gold Goblin — A skittish treasure-hoarder that flees toward the stairs, scattering a trail of gold. Chase it down and corner it before it escapes to the next floor.",
+                "Cleverer thieves — Monkeys and imps now target the items they actually covet, not just whatever's handy. #849 gimballock",
+                "Better allies — Allies keep a safe distance from invulnerable monsters, and the Ring of Light can rally and embolden the companions fighting beside you.",
             ]),
-            .section("Dungeon Generation"),
+            .heading("🔍 A New Way to Identify Items"),
             .bullets([
-                "Captive and shackled allies are more common.",
-                "Fixed a bug which caused some traps to be generated on cells with foliage, leading to odd behavior.",
+                "Rest to learn — Resting gradually reveals whether your unidentified items are helpful or harmful.",
+                "Clues add up — Gather enough hints about an item — or rule out enough of the alternatives — and the dungeon puts it together for you, identifying it outright.",
+                "Detect magic, reined in — The potion of detect magic now only hints at the good-or-bad nature of couple of items instead of all, and turns up less often than before. But pair it with a Ring of Wisdom and the potion becomes stronger.",
+                "Altars of Insight — Sacrifice one item to reveal the nature of another.",
+                "Everyday tells — Eating a meal, watching a scroll burn, shattering a potion with a thrown weapon or a bolt, freeing a captive, and the rings of awareness and wisdom all quietly reveal clues about what you're carrying.",
             ]),
-            .section("Mechanics"),
+            .heading("🌊 The Living Dungeon"),
             .bullets([
-                "Fixed a bug which caused hunting monsters to have a 97% chance to lose track of the player for each turn they spend outside of the player's stealth range, instead of the intended 3% chance.",
-                "Revamped the searching system. Instead of performing a strong search only after five consecutive turns of pressing 's', you now perform a weaker, single-turn search every time you press 's', with a stronger one on the fifth."
+                "Electrified water — A lightning bolt striking a pool now shocks the entire connected body of water. Mind where you stand.",
+                "Water has uses — Wading washes away the scent trail you leave for hunters and douses flames.",
+                "Fire spreads consequences — Catching fire sends you into a brief panic; food rations caught in fire cook into edible \"cooked food.\"",
+                "Read the chase — You can now sense when a pursuing monster has lost your trail.",
             ]),
-            .section("Informational"),
+            .heading("🎮 Quality of Life"),
             .bullets([
-                "The \"blue\" player-to-monster combat information is now displayed in ally tooltips (so you can more easily assess how much health they have).",
-                "The sidebar now displays whether a monster is carrying an item.",
-                "Magic-detected cells are now described with \"you remember seeing here\" when the item has been seen.",
-                "Fixed a bug where inspecting an out-of-sight lumenstone would say \"you remember seeing a lumenstone from depth 0\" instead of the depth it was found.",
-                "Fixed a bug where some item quantities were remembered incorrectly on leaving and revisiting a level.",
-                "Fixed incorrect descriptions of remembered items when hallucinating.",
-            ]),
-            .heading("Non-Gameplay Differences"),
-            .note("The changes below have no impact on game difficulty."),
-            .section("Notable Enhancements"),
-            .bullets([
-                "Improved stability. Game crashes and out-of-sync errors are rare.",
-                "Added support for Oryx's graphical tiles (toggle in-game with the 'G' key). Your text/tiles choice is remembered for future runs.",
+                "Potions float away when thrown into deep water",
+                "Pick your controls — Choose between Classic and Modern keyboard layouts; the game adapts when a hardware keyboard is attached.",
+                "Pick up where you left off — Your last-played seed is remembered across launches.",
+                "Smoother and more stable — Numerous community bug fixes, from dungeon-generation quirks to combat, stealth, and identification edge cases (#766, #805, #812, #816, #831, #837, #841).",
+                "..and so much more",
             ]),
         ]
     }
@@ -1669,19 +1820,18 @@ final class BrogueViewController: UIViewController {
     /// Short description of the original Brogue (the "Classic" engine).
     private static func classicInfoBlocks() -> [InfoBlock] {
         return [
-            .heading("Brogue"),
-            .note("The original roguelike by Brian Walker (version 1.7.5)."),
-            .section("About"),
-            .bullets([
-                "A clean, deterministic dungeon crawl that prizes tactical depth over character building — every monster, item, and trap interacts through a small set of consistent rules.",
-                "Descend 26 floors to retrieve the Amulet of Yendor. Light, stealth, and terrain are as important as combat.",
-                "This is the classic engine BrogueCE is built upon. Switch to BrogueCE from the title screen for its bug fixes, balance changes, and graphical tiles — tap the info button there to see what's different.",
-            ]),
+            .note("Countless adventurers before you have descended this torch-lit staircase, seeking the promised riches below. As you reach the bottom and step into the wide cavern, the doors behind you seal with a powerful magic..."),
+            .heading("Welcome to the Dungeons of Doom!"),
+            .body("Brogue is a single-player strategy game set in the halls of a mysterious and randomly-generated dungeon. The objective is simple enough -- retrieve the fabled Amulet of Yendor from the 26th level -- but the dungeon is riddled with danger. Horrifying creatures and devious, trap-ridden terrain await. Yet it is also riddled with weapons, potions, and artifacts of forgotten power. Survival demands strength and cunning in equal measure as you descend, making the most of what the dungeon gives you. You will make sacrifices, narrow escapes, and maybe even some friends along the way -- but will you be one of the lucky few to return alive?"),
         ]
     }
 
     private func updateVersionChooserLabel() {
-        versionChooserLabel?.text = (currentEngine == .ce) ? "BrogueCE" : "Brogue"
+        switch currentEngine {
+        case .classic: versionChooserLabel?.text = "Brogue"
+        case .ce:      versionChooserLabel?.text = "BrogueCE"
+        case .se:      versionChooserLabel?.text = "Brogue SE"
+        }
     }
 
     private func updateVersionChooserVisibility() {
@@ -1730,7 +1880,7 @@ extension BrogueViewController: UIContextMenuInteractionDelegate {
     /// Commands offered in the rebind menus for the active engine. CE-only
     /// commands (e.g. re-throw) are dropped while Classic is running.
     private func availableCommands() -> [Command] {
-        BrogueViewController.commandCatalog.filter { currentEngine == .ce || !$0.ceOnly }
+        BrogueViewController.commandCatalog.filter { currentEngine.isCEFamily || !$0.ceOnly }
     }
 
     private func rebindMenu(forSlot slot: Int) -> UIMenu {
@@ -1983,7 +2133,8 @@ extension BrogueViewController {
     @IBAction func escButtonPressed(_ sender: Any) {
         addKeyEvent(event: kESC_Key)
         inputTextField.resignFirstResponder()
-        escButton.isHidden = true
+        escButtonWanted = false
+        refreshEscButtonVisibility()
     }
     
     @IBAction func showInventoryButtonPressed(_ sender: Any) {
@@ -2597,7 +2748,18 @@ extension BrogueViewController {
         if let touch = touches.first {
             let location = touch.location(in: view)
 
-            if pointIsInSideBar(point: location) {
+            // The sidebar-examine (hover-only) routing is meaningful ONLY during
+            // active play (the mainInputLoop cursor description box). While a menu
+            // or button box is up (gameplayControlsActive == false — buttonInputLoop
+            // forces uiMode = InMenu), the engine draws its action-menu buttons
+            // (apply/equip/drop/throw…) starting as far left as window column 2, so
+            // for long descriptions the leftmost buttons (throw, due to the
+            // right-to-left layout) land in the sidebar columns (x <= 20). Routing
+            // those through the examine branch sends only a MOUSE_ENTERED_CELL hover
+            // and never the MOUSE_UP that activates a button — so the first tap did
+            // nothing and the player had to tap again. Treat sidebar-column taps as
+            // ordinary clicks whenever we're not in active play.
+            if pointIsInSideBar(point: location) && gameplayControlsActive {
                 // side bar
                 if touch.tapCount >= 2 {
                     // Double-tap acts on the entity (attack / run toward) — not an examine.
@@ -2719,7 +2881,7 @@ extension BrogueViewController {
         // Never while pinching / two-finger panning the map — the magnifier would
         // fight the gesture and lag behind the moving cells.
         guard !zoomGestureInProgress else { return false }
-        let engineAllowsMagnifier = (currentEngine == .ce)
+        let engineAllowsMagnifier = currentEngine.isCEFamily
             ? (gameplayControlsActive || isTargeting)
             : lastBrogueGameEvent.canShowMagnifyingGlass
         guard engineAllowsMagnifier, pointIsInPlayArea(point: point) else {
@@ -2767,12 +2929,18 @@ extension BrogueViewController {
         }
     }
 
-    /// Hides the directional pad while the magnifier is up, and restores it (to the
-    /// game-state-appropriate visibility) when the magnifier goes away. The codebase
-    /// keeps `dContainerView.isHidden == !gameplayControlsActive`, so that's the
-    /// correct value to restore even if game state changed during the inspect.
+    /// Hides the directional pad while the magnifier is up, and restores it when the
+    /// magnifier goes away. Restoration defers to refreshDirectionPadVisibility() — the
+    /// single source of truth — so it honors BOTH gameplay state AND hardware-keyboard
+    /// presence. (Restoring via `!gameplayControlsActive` alone re-showed the d-pad
+    /// after a magnifier dismissal even with a keyboard attached — e.g. on every mouse
+    /// click, which drives the touch/magnifier path.)
     private func setDpadHiddenForMagnifier(_ hidden: Bool) {
-        dContainerView.isHidden = hidden ? true : !gameplayControlsActive
+        if hidden {
+            dContainerView.isHidden = true
+        } else {
+            refreshDirectionPadVisibility()
+        }
     }
 }
 
@@ -2870,10 +3038,12 @@ extension BrogueViewController: UITextFieldDelegate {
             }
             // When a hardware keyboard is attached, skip the software keyboard
             // entirely — pressesBegan delivers keystrokes to the Brogue queue
-            // via the responder chain. Just expose the Esc button so the user
-            // has a touch-friendly cancel.
+            // via the responder chain, and the physical Escape key cancels, so
+            // no on-screen ESC button is shown (refreshEscButtonVisibility keeps
+            // it hidden while a keyboard is present).
             if GCKeyboard.coalesced != nil {
-                self.escButton.isHidden = false
+                self.escButtonWanted = true
+                self.refreshEscButtonVisibility()
             } else {
                 self.inputTextField.becomeFirstResponder()
             }
@@ -2899,13 +3069,15 @@ extension BrogueViewController: UITextFieldDelegate {
     func textFieldShouldReturn(_ textField: UITextField) -> Bool {
         inputTextField.resignFirstResponder()
         addKeyEvent(event: kReturnKey)
-        escButton.isHidden = true
+        escButtonWanted = false
+        refreshEscButtonVisibility()
         return true
     }
 
     func textFieldDidBeginEditing(_ textField: UITextField) {
         inputTextField.text = inputRequestString ?? ""
-        escButton.isHidden = false
+        escButtonWanted = true
+        refreshEscButtonVisibility()
     }
 
     func textField(_ textField: UITextField, shouldChangeCharactersIn range: NSRange, replacementString string: String) -> Bool {
@@ -2929,37 +3101,148 @@ extension BrogueViewController {
         center.addObserver(self, selector: #selector(keyboardDidDisconnect),
                            name: .GCKeyboardDidDisconnect, object: nil)
         // Set initial state in case a keyboard is already connected at launch.
-        updateKeyboardLabels(GCKeyboard.coalesced != nil)
+        updateHardwareKeyboardState(GCKeyboard.coalesced != nil)
     }
 
     @objc private func keyboardDidConnect(_ note: Notification) {
-        updateKeyboardLabels(true)
+        updateHardwareKeyboardState(true)
     }
 
     @objc private func keyboardDidDisconnect(_ note: Notification) {
-        updateKeyboardLabels(GCKeyboard.coalesced != nil)
+        updateHardwareKeyboardState(GCKeyboard.coalesced != nil)
     }
 
-    // Toggle in-game hotkey labels in BOTH engines so the setting is correct whichever one is
-    // active and survives an engine switch. Classic reads a runtime global via
-    // setKeyboardLabelsEnabled(); CE reads its own framework global via ce_setKeyboardLabelsEnabled().
-    // Both are plain global writes, safe to call regardless of which engine is currently running.
-    private func updateKeyboardLabels(_ enabled: Bool) {
-        setKeyboardLabelsEnabled(enabled ? 1 : 0)
-        ce_setKeyboardLabelsEnabled(enabled ? 1 : 0)
+    // A hardware keyboard now changes two things (the on-screen hotkey labels themselves stay OFF in
+    // every engine — they reflect the Classic layout and would mismatch the Modern default, so we
+    // deliberately never re-enable KEYBOARD_LABELS): (1) the on-screen d-pad is redundant, so hide it;
+    // (2) the engines surface a "Press <?> for help" hint in the message log — the only help affordance
+    // left with the labels (and their help button) disabled. We report presence to every engine via
+    // its own image's hook (Classic's setHardwareKeyboardConnected(); CE/SE's
+    // ce_/se_setHardwareKeyboardConnected()) so the setting is correct whichever engine is active.
+    private func updateHardwareKeyboardState(_ connected: Bool) {
+        hardwareKeyboardConnected = connected
+        setHardwareKeyboardConnected(connected ? 1 : 0)
+        ce_setHardwareKeyboardConnected(connected ? 1 : 0)
+        se_setHardwareKeyboardConnected(connected ? 1 : 0)
+        DispatchQueue.main.async { [weak self] in
+            self?.refreshDirectionPadVisibility()
+            self?.refreshEscButtonVisibility()
+        }
+    }
+
+    /// Applies the d-pad's visibility from gameplay state AND hardware-keyboard presence: the d-pad
+    /// shows only during normal play AND when no hardware keyboard is attached. Safe to call from the
+    /// two gameplay-state sites and from the keyboard observer.
+    func refreshDirectionPadVisibility() {
+        let show = gameplayControlsActive && !hardwareKeyboardConnected
+        dContainerView.isHidden = !show
+        dContainerView.isUserInteractionEnabled = show
+    }
+
+    /// Applies the ESC button's visibility from app state (escButtonWanted) AND hardware-keyboard
+    /// presence: shown only when wanted AND no hardware keyboard is attached (the physical Escape key
+    /// covers it otherwise). macOS (Catalyst), not yet a supported target, should likewise be treated
+    /// as always keyboard-present — GCKeyboard reports the Mac's keyboard, so this same path applies.
+    func refreshEscButtonVisibility() {
+        escButton?.isHidden = !(escButtonWanted && !hardwareKeyboardConnected)
     }
 
     override func pressesBegan(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
         var handledAny = false
+        var repeatCandidate: QueuedKeyEvent?
         for press in presses {
             if let k = brogueKey(for: press) {
-                addKeyEvent(code: k.code, shift: k.shift, control: k.control, raw: k.raw)
+                let ev = QueuedKeyEvent(code: k.code, shift: k.shift, control: k.control, raw: k.raw)
+                addKeyEvent(code: ev.code, shift: ev.shift, control: ev.control, raw: ev.raw)
                 handledAny = true
+                if isRepeatable(ev) { repeatCandidate = ev }
             }
+        }
+        // A new repeat-eligible key starts (and replaces) the repeat; any other handled key cancels it.
+        if let ev = repeatCandidate {
+            startKeyRepeat(ev)
+        } else if handledAny {
+            stopKeyRepeat()
         }
         if !handledAny {
             super.pressesBegan(presses, with: event)
         }
+    }
+
+    override func pressesEnded(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
+        endRepeatIfReleased(presses)
+        super.pressesEnded(presses, with: event)
+    }
+
+    override func pressesCancelled(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
+        endRepeatIfReleased(presses)
+        super.pressesCancelled(presses, with: event)
+    }
+
+    // Stop the repeat once the key driving it is released. (Only one key repeats at a time, so we just
+    // match the released key against the active one.)
+    private func endRepeatIfReleased(_ presses: Set<UIPress>) {
+        guard let active = repeatingKey else { return }
+        for press in presses where brogueKey(for: press)?.code == active.code {
+            stopKeyRepeat()
+            return
+        }
+    }
+
+    // iOS port (iBrogue): only directions, rest (`z`), and search (`s`) auto-repeat -- the "safe to spam"
+    // keys, matching desktop intent. Commands (apply/drop/quaff/stairs/menu/…) never repeat. Running
+    // (Shift/Ctrl) and the long-search / rest-until forms already loop in the engine, so a modified key
+    // is never a repeat candidate. The movement-letter set is scheme-dependent, so we read the active
+    // scheme from the shared "keyboard scheme" default (kept current by applyKeyboardScheme's persistence);
+    // the canonical mapping in applyKeyboardScheme (IO.c) is the source of truth this mirrors.
+    private func isRepeatable(_ ev: QueuedKeyEvent) -> Bool {
+        guard !ev.shift, !ev.control else { return false }
+        if !ev.raw {
+            // Synthesized canonical keys: only the four arrow keys (delivered as vi letters) repeat;
+            // ESC/return/delete/tab/space do not.
+            return [UInt8(ascii: "h"), UInt8(ascii: "j"), UInt8(ascii: "k"), UInt8(ascii: "l")].contains(ev.code)
+        }
+        // Real hardware character keys: rest and search are the same physical key in both schemes.
+        if ev.code == UInt8(ascii: "z") || ev.code == UInt8(ascii: "s") { return true }
+        // Default Modern when no preference is stored, matching the bridge loaders' iOS/macOS default.
+        let schemeDefaults = UserDefaults.standard
+        let isModern = schemeDefaults.object(forKey: "keyboard scheme") == nil
+                       || schemeDefaults.integer(forKey: "keyboard scheme") == 1 // KEYBOARD_SCHEME_MODERN
+        let movementKeys: Set<UInt8> = isModern ? Set("uiojklm,.".utf8)   // right-hand grid
+                                                 : Set("hjklyubn".utf8)   // classic vi keys
+        return movementKeys.contains(ev.code)
+    }
+
+    private func startKeyRepeat(_ ev: QueuedKeyEvent) {
+        stopKeyRepeat()
+        repeatingKey = ev
+        // Initial delay, then steady repeats. Each tick only enqueues when the queue has drained, so a
+        // slow frame (animations/between-turns) can't build a backlog that floods moves after release.
+        let timer = Timer(timeInterval: keyRepeatInitialDelay, repeats: false) { [weak self] _ in
+            self?.fireKeyRepeat(initial: true)
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        keyRepeatTimer = timer
+    }
+
+    private func fireKeyRepeat(initial: Bool) {
+        guard let ev = repeatingKey else { return }
+        if !hasKeyEvent() {
+            addKeyEvent(code: ev.code, shift: ev.shift, control: ev.control, raw: ev.raw)
+        }
+        if initial {
+            let timer = Timer(timeInterval: keyRepeatInterval, repeats: true) { [weak self] _ in
+                self?.fireKeyRepeat(initial: false)
+            }
+            RunLoop.main.add(timer, forMode: .common)
+            keyRepeatTimer = timer
+        }
+    }
+
+    private func stopKeyRepeat() {
+        keyRepeatTimer?.invalidate()
+        keyRepeatTimer = nil
+        repeatingKey = nil
     }
 
     /// Maps a UIPress to the key code Brogue's input loop expects, plus its modifier state and whether

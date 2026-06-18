@@ -1291,6 +1291,16 @@ void getCellAppearance(pos loc, enum displayGlyph *returnChar, color *returnFore
                             applyColorAverage(&cellForeColor, &pink, 50);
                         }
                     }
+                    // iOS port (iBrogue): staff of frost. Persistent state tint -- a strong icy cast while
+                    // frozen solid, a fainter chill while merely slowed (slowed tint is game-wide, any source).
+                    // Frozen takes precedence, since a creature is also slowed underneath while encased in ice.
+                    if (monst->status[STATUS_FROZEN]) {
+                        applyColorAverage(&cellForeColor, &white, 25);
+                        applyColorAverage(&cellForeColor, &lightBlue, 60);
+                        applyColorAverage(&cellBackColor, &lightBlue, 40);
+                    } else if (monst->status[STATUS_SLOWED]) {
+                        applyColorAverage(&cellForeColor, &lightBlue, 30);
+                    }
                 }
                 //DEBUG if (monst->bookkeepingFlags & MB_LEADER) applyColorAverage(&cellBackColor, &purple, 50);
             }
@@ -2423,27 +2433,32 @@ boolean pauseAnimation(short milliseconds, PauseBehavior behavior) {
     return pauseBrogue(milliseconds, behavior);
 }
 
-// iOS port (iBrogue): keyboard-scheme translation — maps the raw physical keystroke to the canonical
-// engine key for the active scheme, before recording, so recordings stay scheme-independent (actions
-// self-record canonical keys). Called from the platform bridge (CEBridge.mm) on raw hardware keys only,
-// so synthesized on-screen input is never remapped. See docs/design/keyboard-schemes.md.
+// iOS port (iBrogue): keyboard-scheme translation. Maps the raw physical keystroke the platform
+// delivered to the engine's canonical key for the active scheme, before recording/dispatch, so
+// recordings stay scheme-independent (see enum keyboardScheme / docs/design/keyboard-schemes.md).
+// CLASSIC is identity. MODERN is filled in a later step; for now it is also identity so this lands
+// as a pure no-op. Never called for text entry (see nextBrogueEvent's textInput gate).
 signed long applyKeyboardScheme(signed long keystroke, boolean *controlKey, boolean *shiftKey) {
     (void)controlKey;
     (void)shiftKey;
-    // Quit is menu-only on tablet -- a stray hardware 'Q' must never abandon the run. The on-screen
-    // menu's Quit button synthesizes QUIT_KEY directly (raw == false) and bypasses this. Both schemes.
+    // iOS port (iBrogue): quit is menu-only on tablet -- a stray hardware 'Q' must never abandon the
+    // run. The on-screen menu's Quit button synthesizes QUIT_KEY directly (raw == false) and bypasses
+    // this translation, so it still works. Applies in both schemes.
     if (keystroke == QUIT_KEY) {
         return UNKNOWN_KEY; // inert; executeKeystroke has no case for it
     }
     switch (rogueKeyboardScheme) {
         case KEYBOARD_SCHEME_MODERN:
             // Right-hand directional grid: u/o, m/. diagonals around the i/j/k/l (up/left/down/right)
-            // cross, ',' as a second down. Real Shift/Ctrl state is already in the modifier flags, so
-            // run works via executeKeystroke's controlKey||shiftKey check -- we only translate the
-            // character. The vi movement keys h/y/b/n are made inert (see below) so only the grid moves
-            // the player; other left-hand commands (apply/drop/search/swap/rest/explore/call +
-            // Shift+commands) pass through unchanged.
+            // cross, ',' as a second down. The incoming keystroke is the delivered character (the
+            // shifted form for shifted keys); the real Shift/Ctrl state is already in
+            // *shiftKey/*controlKey, so movement "run" rides on the existing controlKey||shiftKey check
+            // in executeKeystroke -- we only translate the character to the canonical key. The vi
+            // movement keys h/y/b/n are made inert (see below) so only the grid moves the player;
+            // other left-hand commands (apply/drop/search/swap/rest/explore/call + Shift+commands)
+            // pass through unchanged.
             switch (keystroke) {
+                // movement grid (unshifted)
                 case 'u': return UPLEFT_KEY;
                 case 'i': return UP_KEY;
                 case 'o': return UPRIGHT_KEY;
@@ -2453,27 +2468,31 @@ signed long applyKeyboardScheme(signed long keystroke, boolean *controlKey, bool
                 case 'm': return DOWNLEFT_KEY;
                 case ',': return DOWN_KEY;
                 case '.': return DOWNRIGHT_KEY;
-                case 'U': return UPLEFT_KEY;        // shifted/Ctrl forms = run (flag already set)
+                // movement grid (shifted/Ctrl => run; the modifier flag is already set, so just map
+                // the direction). The uppercase letters are the shifted forms of the grid keys.
+                case 'U': return UPLEFT_KEY;
                 case 'I': return UP_KEY;
                 case 'O': return UPRIGHT_KEY;
                 case 'J': return LEFT_KEY;
                 case 'K': return DOWN_KEY;          // Shift+k = run down
                 case 'L': return RIGHT_KEY;
-                case 'M': return DOWNLEFT_KEY;      // Shift+m; overrides default M = message archive
-                case '<': return DOWN_KEY;          // Shift+, (run down)
-                case '>': return DOWNRIGHT_KEY;     // Shift+. (run down-right)
-                case 'e': return INVENTORY_KEY;     // inventory moves off 'i' (now UP)
-                case 'E': return EQUIP_KEY;         // Shift+E = equip
+                case 'M': return DOWNLEFT_KEY;     // Shift+m (run); overrides default M = message archive
+                case '<': return DOWN_KEY;         // Shift+, (run down)
+                case '>': return DOWNRIGHT_KEY;    // Shift+. (run down-right)
+                // displaced commands
+                case 'e': return INVENTORY_KEY;    // inventory moves off 'i' (now UP)
+                case 'E': return EQUIP_KEY;        // Shift+E = equip
                 case 'p': return MESSAGE_ARCHIVE_KEY; // messages move off 'M' (now run-down-left)
-                case 'P': return ASCEND_KEY;        // Shift+P = ascend stairs (shift-gated for safety)
-                case ':': return DESCEND_KEY;       // Shift+; = descend stairs
+                case 'P': return ASCEND_KEY;       // Shift+P = ascend stairs (shift-gated for safety)
+                case ':': return DESCEND_KEY;      // Shift+; = descend stairs
                 // vi-key left-hand movement is removed in modern: h/y/b/n (and their run forms) never
-                // move the player. y/n stay usable for yes/no and as item letters: those prompts read
-                // via buttonInputLoop with textInput == true, which bypasses this remap entirely.
+                // move the player -- the right-hand grid is the only mover. y/n stay usable for yes/no
+                // and as item letters: those prompts read via buttonInputLoop with textInput == true,
+                // which bypasses this remap entirely, so this inert mapping never reaches them.
                 case 'h': case 'y': case 'b': case 'n':
                 case 'H': case 'Y': case 'B': case 'N':
                     return UNKNOWN_KEY;
-                default:  return keystroke;
+                default:  return keystroke;        // left hand + everything else unchanged
             }
         case KEYBOARD_SCHEME_CLASSIC:
         default:
@@ -2513,6 +2532,11 @@ void nextBrogueEvent(rogueEvent *returnEvent, boolean textInput, boolean colorsD
         do {
             nextKeyOrMouseEvent(returnEvent, textInput, colorsDance); // No mouse clicks outside of the window will register.
         } while (returnEvent->eventType == MOUSE_UP && !locIsInWindow((windowpos){ returnEvent->param1, returnEvent->param2 }));
+        // iOS port (iBrogue): keyboard-scheme translation is applied in the platform bridge
+        // (nextKeyOrMouseEvent), not here, because only the bridge can tell a raw hardware keystroke
+        // from a synthesized one (on-screen d-pad/buttons enqueue canonical keys that must NOT be
+        // remapped). The bridge calls applyKeyboardScheme() for raw keys before they reach this point,
+        // so the event is already canonical here. See docs/design/keyboard-schemes.md.
         // recording done elsewhere
     }
 
@@ -2881,6 +2905,11 @@ boolean getInputTextString(char *inputText,
     } else {
         strcpy(suffix, promptSuffix);
     }
+
+    // iOS port (iBrogue): hand the default to the host so the on-screen keyboard
+    // is pre-filled (otherwise backspace can't clear the pre-filled seed) and uses
+    // a number pad for numeric entry.
+    ceRequestTextInput(defaultEntry, textEntryType == TEXT_INPUT_NUMBERS);
 
     CBrogueGameEvent oldUiMode = uiMode;
     do {
@@ -4183,10 +4212,10 @@ char nextKeyPress(boolean textInput) {
 
 #define BROGUE_HELP_LINE_COUNT  33
 
-// iOS port (iBrogue): the help screen is the scheme-aware keyboard reference. It renders the active
-// keyboard scheme (Classic vi keys or the Modern right-hand grid), and Tab toggles between the two in
-// place (persisted). Quit is omitted from both (menu-only on tablet; see applyKeyboardScheme). See
-// docs/design/keyboard-schemes.md.
+// iOS port (iBrogue): the help screen is now the scheme-aware keyboard reference. It renders the
+// active keyboard scheme (Classic vi keys or the Modern right-hand grid), and Tab toggles between the
+// two in place (persisted). Quit is omitted from both (it is menu-only on tablet; see
+// applyKeyboardScheme). See docs/design/keyboard-schemes.md.
 void printHelpScreen() {
     short i, j;
     const char classicHelp[BROGUE_HELP_LINE_COUNT][DCOLS*3] = {
@@ -4254,6 +4283,7 @@ void printHelpScreen() {
         "    <space/esc>  ****clear message or cancel command",
         "          (quit from the menu button)",
         "",
+        "",
         "  -- Tab: switch to the Classic (vi keys) layout --",
         "",
         "      -- press space or click to continue --"
@@ -4268,6 +4298,7 @@ void printHelpScreen() {
     do {
         restoreDisplayBuffer(&rbuf); // clean slate before (re)drawing the active layout
 
+        // Copy the active scheme's text into a mutable buffer and replace the "****"s with color escapes.
         for (i=0; i<BROGUE_HELP_LINE_COUNT; i++) {
             strcpy(helpText[i], (rogueKeyboardScheme == KEYBOARD_SCHEME_MODERN) ? modernHelp[i] : classicHelp[i]);
             for (j=0; helpText[i][j]; j++) {
@@ -4289,8 +4320,8 @@ void printHelpScreen() {
         }
         overlayDisplayBuffer(&dbuf);
 
-        // Tab toggles the scheme in place (persisted); space/esc/click dismisses; other keys ignored.
-        // Tab is delivered raw (never scheme-remapped), so it stays the toggle in either scheme.
+        // Tab toggles the scheme in place (persisted); anything else dismisses. Tab is delivered raw
+        // (never scheme-remapped), so it stays the toggle regardless of the active scheme.
         nextBrogueEvent(&theEvent, false, false, false);
         if (theEvent.eventType == KEYSTROKE && theEvent.param1 == TAB_KEY) {
             rogueKeyboardScheme = (rogueKeyboardScheme == KEYBOARD_SCHEME_MODERN)
@@ -4299,7 +4330,7 @@ void printHelpScreen() {
         } else if (theEvent.eventType == MOUSE_UP
                    || (theEvent.eventType == KEYSTROKE
                        && (theEvent.param1 == ACKNOWLEDGE_KEY || theEvent.param1 == ESCAPE_KEY))) {
-            done = true;
+            done = true; // space / esc / click dismisses; other keys are ignored (matches waitForAcknowledgment)
         }
     } while (!done);
 
@@ -4327,17 +4358,22 @@ static void printDiscoveries(short category, short count, unsigned short itemCha
         }
     }
 
+    short row = 0; // iOS port (iBrogue): display row, separate from kind index, so hidden kinds leave no gap
     for (i = 0; i < count; i++) {
+        // iOS port (iBrogue): the inactive themed set's potions don't exist this run -- omit them entirely.
+        if (category == POTION && potionKindAbsentThisSeed(i)) {
+            continue;
+        }
         if (theTable[i].identified) {
             theColor = &white;
-            plotCharToBuffer(itemCharacter, (windowpos){ x, y + i }, &itemColor, &black, dbuf);
+            plotCharToBuffer(itemCharacter, (windowpos){ x, y + row }, &itemColor, &black, dbuf);
         } else {
             theColor = &darkGray;
             magic = magicCharDiscoverySuffix(category, i);
             if (magic == 1) {
-                plotCharToBuffer(G_GOOD_MAGIC, (windowpos){ x, y + i }, &goodColor, &black, dbuf);
+                plotCharToBuffer(G_GOOD_MAGIC, (windowpos){ x, y + row }, &goodColor, &black, dbuf);
             } else if (magic == -1) {
-                plotCharToBuffer(G_BAD_MAGIC, (windowpos){ x, y + i }, &badColor, &black, dbuf);
+                plotCharToBuffer(G_BAD_MAGIC, (windowpos){ x, y + row }, &badColor, &black, dbuf);
             }
         }
         strcpy(buf, theTable[i].name);
@@ -4352,7 +4388,8 @@ static void printDiscoveries(short category, short count, unsigned short itemCha
 
         upperCase(buf);
         strcat(buf, " ");
-        printString(buf, x + 2, y + i, theColor, &black, dbuf);
+        printString(buf, x + 2, y + row, theColor, &black, dbuf);
+        row++;
     }
 }
 
@@ -4723,10 +4760,20 @@ short printMonsterInfo(creature *monst, short y, boolean dim, boolean highlight)
         upperCase(monstName);
 
         if (monst == &player) {
+            // iOS port (Brogue SE): while the Lone Wolf solo aura is active, title the player "Lone Wolf"
+            // in place of "YOU". The (lit)/(dark) illumination tag (with its leading space) is preserved
+            // -- both fit the 20-col sidebar; only the longer "(invisible)" tag is suppressed on the rare
+            // invisible turn so nothing is cut off.
+            const boolean loneWolf = (rogue.loneWolfTier > 0);
+            if (loneWolf) {
+                strcpy(monstName, "Lone Wolf");
+            }
             strcat(monstName, " xxxx");
             encodeMessageColor(monstName, strlen(monstName) - 4, &monstForeColor);
             if (player.status[STATUS_INVISIBLE]) {
-                strcat(monstName, "(invisible)");
+                if (!loneWolf) {
+                    strcat(monstName, "(invisible)");
+                }
             } else if (playerInDarkness()) {
                 //encodeMessageColor(monstName, strlen(monstName) - 4, &playerInDarknessColor);
                 strcat(monstName, "(dark)");
@@ -4823,6 +4870,12 @@ short printMonsterInfo(creature *monst, short y, boolean dim, boolean highlight)
                             monst->poisonAmount);
                     printProgressBar(0, y++, buf2, monst->status[i], monst->maxStatus[i], &redBar, dim);
                 }
+            } else if (i == STATUS_CONFUSED && monst->status[i] > 0) {
+                // iOS port (iBrogue): confusion caused by catching fire (see exposeCreatureToFire) is
+                // the same STATUS_CONFUSED, but reads as "Panic" while the creature is still burning.
+                printProgressBar(0, y++,
+                                 (monst->status[STATUS_BURNING] > 0 ? "Panic" : statusEffectCatalog[i].name),
+                                 monst->status[i], monst->maxStatus[i], &redBar, dim);
             } else if (statusEffectCatalog[i].name[0] && monst->status[i] > 0) {
                 printProgressBar(0, y++, statusEffectCatalog[i].name, monst->status[i], monst->maxStatus[i], &redBar, dim);
             }
