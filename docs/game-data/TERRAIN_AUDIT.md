@@ -353,6 +353,31 @@ bolt-style or thrown capture, not the step-in path.
 
 ---
 
+## 10. Movement-noise emission (noise system)
+
+The SE noise system reads terrain two ways (see `docs/design/noise-system.md`):
+
+- **Propagation** — terrain *between* a noise source and the player muffles sound *in transit*, via the
+  per-turn sound map: vision-blocking-but-passable tiles (dense foliage / closed door / smoke,
+  `T_OBSTRUCTS_VISION`) cost extra to cross; walls (`T_OBSTRUCTS_PASSABILITY`, incl. `CRYSTAL_WALL`) block
+  sound entirely (it routes around).
+- **Emission** — the tile a creature *steps into* changes how loud that step *is*, a signed modifier
+  (`terrainNoiseModifier` → `tileNoiseValue`, Monsters.c) added to the detection roll. Loudest-magnitude
+  layer wins. Flavor-grounded by each tile's catalog description ("crunches/creaks underfoot", etc.).
+
+| Emission tier | Value | Tiles |
+|---|---|---|
+| Crunch / creak | **+10** (`NOISE_TERRAIN_CRUNCH`) | `GRASS`, `DEAD_GRASS`, `GRAY_FUNGUS`, `LUMINESCENT_FUNGUS`, `HAY`, `ASH`, `RUBBLE`, `BRIDGE` |
+| Rustle / squelch | **+6** (`NOISE_TERRAIN_RUSTLE`) | `FOLIAGE`, `DEAD_FOLIAGE`, `TRAMPLED_FOLIAGE`, `FUNGUS_FOREST`, `TRAMPLED_FUNGUS_FOREST`, `MUD` |
+| Splash | **+8** (`NOISE_TERRAIN_SPLASH`) | `SHALLOW_WATER` — note: water *hides scent* (`playerScentWaterPenalty`) but *broadcasts splash* |
+| Soft (dampen) | **−8** (`NOISE_TERRAIN_SOFT`) | `CARPET`, `SPIDERWEB` (+ a future `MOSS`) |
+| Neutral | 0 | stone floor, `MARBLE_FLOOR`, `DEEP_WATER` (submergers already silenced), everything else |
+
+Values are tunable `NOISE_TERRAIN_*` constants in `Rogue.h`. The modifier is direction-agnostic — it makes
+the *source* louder/quieter, so it will also feed the future monster-hears-player detection.
+
+---
+
 ## Source index
 
 | Subject | File:line |

@@ -153,6 +153,13 @@
 #define NOISE_FALLOFF_PER_TILE          3   // detection lost per effective tile beyond the near field
 #define NOISE_DOOR_COST                 4   // extra sound-map cost to pass a closed door / foliage / smoke
 #define NOISE_DOOR_LISTEN_BONUS         10  // detection bonus while standing next to a closed door (0 = off)
+// Terrain EMISSION: how much the terrain a creature steps into adds to / dampens the noise of that step
+// (distinct from the sound map's propagation damping above). Signed, smaller than the monster tiers since
+// it only modulates on top. Read at the destination cell (terrainNoiseModifier). Direction-agnostic.
+#define NOISE_TERRAIN_CRUNCH            10  // crunchy/creaky underfoot: grass, fungus, hay, ash, rubble, bridge
+#define NOISE_TERRAIN_RUSTLE            6   // rustle/squelch: dense foliage, fungus forest, mud
+#define NOISE_TERRAIN_SPLASH            8   // wading shallow water (hides your scent, but splashes loudly)
+#define NOISE_TERRAIN_SOFT              (-8) // muffles footsteps: carpet, spiderweb (+ future moss)
 #define D_ALWAYS_DETECT_SOUND           0   // debug: force every off-screen monster move to be heard,
                                             // bypassing the perception roll (draws no RNG). 1 = full
                                             // detection. (Pre-ship: see pre-ship-debug-checklist.md.)

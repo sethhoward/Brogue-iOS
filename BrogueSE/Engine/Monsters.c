@@ -4377,19 +4377,59 @@ static short noiseLevelForMonsterMove(const creature *monst) {
 }
 #endif
 
+// iOS port (Brogue SE): noise system -- terrain EMISSION. How much a single tile adds to (or dampens)
+// the noise of a step taken on it, regardless of which layer it occupies. Flavor-grounded: the catalog
+// says grass/ash "crunch underfoot" and the rope bridge "creaks underfoot"; carpet/web are soft.
+#if NOISE_SYSTEM_ENABLED
+static short tileNoiseValue(enum tileType tile) {
+    switch (tile) {
+        case GRASS: case DEAD_GRASS: case GRAY_FUNGUS: case LUMINESCENT_FUNGUS: case HAY:
+        case ASH: case RUBBLE: case BRIDGE:
+            return NOISE_TERRAIN_CRUNCH;    // crunches / creaks underfoot
+        case FOLIAGE: case DEAD_FOLIAGE: case TRAMPLED_FOLIAGE:
+        case FUNGUS_FOREST: case TRAMPLED_FUNGUS_FOREST:
+        case MUD:
+            return NOISE_TERRAIN_RUSTLE;    // rustle of dense growth / squelch of mud
+        case SHALLOW_WATER:
+            return NOISE_TERRAIN_SPLASH;    // wading splashes
+        case CARPET: case SPIDERWEB:
+            return NOISE_TERRAIN_SOFT;      // soft / sticky -- muffles footsteps
+        default:
+            return 0;                       // stone, marble, floor, gas, etc. -- neutral
+    }
+}
+
+// The signed terrain emission modifier at a cell: the loudest-magnitude noise value across its layers
+// (a cell usually has just one relevant feature; on the rare overlap, e.g. grass at a water's edge, the
+// louder wins). Read at the destination the creature steps into.
+static short terrainNoiseModifier(pos loc) {
+    short best = 0;
+    for (enum dungeonLayers layer = DUNGEON; layer < NUMBER_TERRAIN_LAYERS; layer++) {
+        const short v = tileNoiseValue(pmapAt(loc)->layers[layer]);
+        if (abs(v) > abs(best)) {
+            best = v;
+        }
+    }
+    return best;
+}
+#endif
+
 // iOS port (Brogue SE): noise system. Called when a monster takes a self-willed step from
 // (originX, originY) to its current loc. If the player couldn't see it step (origin not VISIBLE) and
 // passes the perception roll, record a noise event anchored on its new cell. Anchoring on the
 // destination makes a hidden->visible step read as an "announcement" and avoids double-firing when a
 // monster steps into darkness (that step was witnessed; its next hidden step makes the noise).
 //
-// Perception ADDS the player's awareness, the monster's noisiness, and a distance/terrain term:
+// Perception ADDS the player's awareness, the monster's noisiness, distance, terrain, and a door bonus:
 //     detectChance = clamp(NOISE_BASE_PERCEPTION + awarenessEnchant*NOISE_AWARENESS_PER_ENCHANT
-//                          + noiseModifier + distanceModifier + doorListenBonus, 0, NOISE_PERCEPTION_CEILING)
+//                          + noiseModifier + distanceModifier + terrainNoiseModifier + doorListenBonus,
+//                          0, NOISE_PERCEPTION_CEILING)
 // awarenessEnchant = rogue.awarenessBonus / 20 (net Ring-of-Awareness enchant); noiseModifier is the
 // monster's signed tier from noiseLevelForMonsterMove; distanceModifier comes from the per-turn sound
 // map (soundDistanceAt: near-field boost, then falloff, silent if unreachable -- so walls/doors and
-// range all bake in); doorListenBonus rewards standing at a closed door. Additive (not a multiplicative
+// range all bake in -- this is PROPAGATION); terrainNoiseModifier is the EMISSION term (how loud the
+// step itself is on this tile -- crunchy grass +, soft carpet -); doorListenBonus rewards standing at a
+// closed door. Additive (not a multiplicative
 // loudness scalar) so awareness can compensate for a quiet monster. The roll uses RNG_COSMETIC: it's
 // informational only and must NOT perturb the substantive stream, so noise tuning never desyncs
 // saves/replays and seeds are unaffected. >>> PROMOTE TO SUBSTANTIVE (swap assureCosmeticRNG/restoreRNG
@@ -4424,7 +4464,7 @@ static void monsterEmitMovementNoise(creature *monst, short originX, short origi
                          : -NOISE_FALLOFF_PER_TILE * (soundDist - NOISE_NEARFIELD_RADIUS);
 
         detectChance = clamp(NOISE_BASE_PERCEPTION + awarenessEnchant * NOISE_AWARENESS_PER_ENCHANT
-                             + noiseModifier + distanceModifier
+                             + noiseModifier + distanceModifier + terrainNoiseModifier(monst->loc)
                              + (playerAdjacentToClosedDoor() ? NOISE_DOOR_LISTEN_BONUS : 0),
                              0, NOISE_PERCEPTION_CEILING);
         assureCosmeticRNG; // informational roll -> cosmetic stream; never desyncs saves/replays
