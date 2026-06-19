@@ -25,7 +25,7 @@
 #include "GlobalsBase.h"
 #include "Globals.h"
 
-#define FIRE_CONFUSION_DURATION 3   // iOS port (iBrogue): turns of confusion inflicted on catching fire
+#define FIRE_CONFUSION_DURATION 2   // iOS port (iBrogue): turns of confusion inflicted on catching fire
 
 void exposeCreatureToFire(creature *monst) {
     char buf[COLS], buf2[COLS];
