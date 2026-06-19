@@ -105,22 +105,38 @@
 // Granted deterministically in initializeRogue, so it is recording-safe. Flip to 0 to ship.
 #define D_TELEPATHY_POTION_START        1//(WIZARD_MODE && 0)
 
-// iOS port (Brogue SE): noise system, phase 0. A monster that takes a self-willed step while the
-// player cannot see it emits a perceptible "noise", drawn as a box that radiates from its new
-// cell ("you heard something"). Distance/terrain are deferred; both probability gates are pinned
-// at 100% for the feel-test. Modeled as deterministic game state (it will feed stealth/awareness
-// later), but the >=100 short-circuit on each gate guarantees ZERO substantive RNG draws now, so
-// seeds/saves stay byte-identical to pre-noise builds. See docs/design/noise-system.md.
+// iOS port (Brogue SE): noise system. A monster that takes a self-willed step while the player can't
+// see it emits a perceptible "noise", drawn as a box radiating from its new cell ("you heard
+// something"). Distance/terrain are still deferred (full-map detection). Whether the player PERCEIVES
+// a given noise is a probability:
+//     awarenessEnchant = rogue.awarenessBonus / 20   // net Ring-of-Awareness enchant
+//     detectChance = clamp( (NOISE_BASE_PERCEPTION + awarenessEnchant * NOISE_AWARENESS_PER_ENCHANT)
+//                           * loudness/100,  0, NOISE_PERCEPTION_CEILING )
+// where loudness = noiseLevelForMonsterMove() (monster noisiness; uniform NOISE_DEFAULT_LOUDNESS for
+// now). A ringless character hears at the NOISE_BASE_PERCEPTION floor; each net enchant adds
+// NOISE_AWARENESS_PER_ENCHANT; the ceiling keeps it under 100%. The noise system uses its OWN
+// per-enchant rate (not rogue.awarenessBonus's native +20/enchant) so the climb to the ceiling spans
+// +6 enchants -- a steady reason to keep enchanting the ring -- without disturbing the search /
+// sense-trail systems that read rogue.awarenessBonus directly.
+// The roll uses RNG_COSMETIC (it's informational only -- it changes nothing in the simulation), so it
+// never perturbs the substantive stream: noise tuning never desyncs saves/replays, and seeds are
+// unaffected. PROMOTE TO SUBSTANTIVE only if/when "hearing" starts driving gameplay (e.g. interrupts
+// travel/rest, or feeds monster awareness). See docs/design/noise-system.md.
 #define NOISE_SYSTEM_ENABLED            1   // single kill switch / pre-ship knob (flip to 0 to disable)
-#define NOISE_SOUND_CHECK_CHANCE        100 // monster "sound check" gate -- phase 0: always audible
-#define NOISE_PERCEPTION_CHANCE         100 // player "keen enough to sense it" gate -- phase 0: always
-#define D_ALWAYS_DETECT_SOUND           1   // debug: force every off-screen monster move to be heard,
-                                            // bypassing both gates (draws no RNG). Flip to 0 to use the
-                                            // chances above. (Pre-ship: see pre-ship-debug-checklist.md.)
+#define NOISE_DEFAULT_LOUDNESS          100 // monster noisiness returned by the chokepoint (0..100+; 100 =
+                                            // normal/fully audible). Per-monster values are a later step.
+#define NOISE_BASE_PERCEPTION           25  // detection floor with no awareness (ringless character)
+#define NOISE_AWARENESS_PER_ENCHANT     11  // detect% added per net Ring-of-Awareness enchant. Tuned so
+                                            // floor + 6*this >= ceiling -> +6 maxes detection (longer
+                                            // runway than awarenessBonus's native +20/enchant).
+#define NOISE_PERCEPTION_CEILING        90  // detection ceiling -- never 100%, even at high awareness
+#define D_ALWAYS_DETECT_SOUND           0   // debug: force every off-screen monster move to be heard,
+                                            // bypassing the perception roll (draws no RNG). 1 = full
+                                            // detection. (Pre-ship: see pre-ship-debug-checklist.md.)
 #define NOISE_RIPPLE_RADIUS             3   // tiles the box radiates out (fixed; distance is a later phase)
 #define NOISE_RIPPLE_MS                 300 // total ripple duration; fast-forwards/aborts on player input
 #define NOISE_RIPPLE_MAX_STRENGTH       60  // hilite strength of the innermost ring (fades outward)
-#define NOISE_RIPPLE_PREROLL_MS         160 // pre-roll drawn nothing; if input arrives (held key / repeat /
+#define NOISE_RIPPLE_PREROLL_MS         280 // pre-roll drawn nothing; if input arrives (held key / repeat /
                                             // queued taps) the ripple is skipped so only a deliberate,
                                             // paused player "hears" it. PLATFORM CONTRACT (see
                                             // docs/design/noise-system.md "Platform integration contract"):
