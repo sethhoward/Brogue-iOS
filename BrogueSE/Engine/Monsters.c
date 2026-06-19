@@ -4342,16 +4342,38 @@ void setMonsterLocation(creature *monst, pos newLoc) {
     }
 }
 
-// iOS port (Brogue SE): noise system. The single chokepoint for how loud a monster's movement is, on
-// a 0..100+ "noisiness" scale (100 = normal/fully audible). Uniform for now; the next step reads a
-// per-monster base loudness from the catalog and adjusts for flags (MONST_FLIES -> quieter, etc.).
-// Keep ALL movement-loudness policy here so adding that data stays localized.
-// See docs/design/noise-system.md.
+// iOS port (Brogue SE): noise system. The single chokepoint for a monster's movement noisiness -- a
+// signed modifier added to the player's perception (see NOISE_* tiers in Rogue.h). Normal monsters
+// aren't listed (default 0). Tiers reflect intrinsic bulk/gait, grounded in each monster's flavor
+// text where it has a movement tell (fury "wings beat loudly" -> Loud, acid mound "squelches softly"
+// -> Quiet, etc.). This switch is the single source of truth, mirrored in MONSTERS_AUDIT.md's Noise
+// column. Non-movers (totems/turrets/guardians/eggs) never reach here; submerged movers are skipped
+// upstream in monsterEmitMovementNoise. See docs/design/noise-system.md.
 #if NOISE_SYSTEM_ENABLED
 static short noiseLevelForMonsterMove(const creature *monst) {
-    (void)monst; // uniform for now; per-monster loudness (ogre loud, lurking horror silent, fliers
-                 // quiet, eels conditional) is the next step -- it plugs in right here.
-    return NOISE_DEFAULT_LOUDNESS;
+    switch (monst->info.monsterID) {
+        // Booming (+30): massive, ground-shaking
+        case MK_UNDERWORM: case MK_TENTACLE_HORROR: case MK_GOLEM: case MK_DRAGON:
+        case MK_WARDEN_OF_YENDOR:
+            return NOISE_BOOMING;
+        // Loud (+15): heavy bulk / clattering hooves / loud-winged
+        case MK_OGRE: case MK_TROLL: case MK_OGRE_SHAMAN: case MK_CENTAUR:
+        case MK_FURY: case MK_FLAMEDANCER:
+            return NOISE_LOUD;
+        // Quiet (-15): light / airborne / spectral / stealthy
+        case MK_MONKEY: case MK_BLOAT: case MK_PIT_BLOAT: case MK_EXPLOSIVE_BLOAT:
+        case MK_VAMPIRE_BAT: case MK_ACID_MOUND: case MK_SPIDER: case MK_WRAITH:
+        case MK_LICH: case MK_PIXIE: case MK_IMP: case MK_VAMPIRE:
+        case MK_DAR_BLADEMASTER: case MK_DAR_PRIESTESS: case MK_DAR_BATTLEMAGE:
+        case MK_IFRIT: case MK_PHOENIX: case MK_ANCIENT_SPIRIT:
+            return NOISE_QUIET;
+        // Silent (-30): incorporeal / invisible / weightless magic
+        case MK_WILL_O_THE_WISP: case MK_PHANTOM:
+        case MK_SPECTRAL_BLADE: case MK_SPECTRAL_IMAGE:
+            return NOISE_SILENT;
+        default:
+            return NOISE_NORMAL;
+    }
 }
 #endif
 
@@ -4361,18 +4383,24 @@ static short noiseLevelForMonsterMove(const creature *monst) {
 // destination makes a hidden->visible step read as an "announcement" and avoids double-firing when a
 // monster steps into darkness (that step was witnessed; its next hidden step makes the noise).
 //
-// Perception is a probability combining the player's awareness and the monster's noisiness:
-//     detectChance = clamp((NOISE_BASE_PERCEPTION + rogue.awarenessBonus) * loudness/100, 0, ceiling)
-// rogue.awarenessBonus is 20 * net Ring-of-Awareness enchant, so a ringless character hears at the
-// floor and a ring scales up to (but never reaching) the ceiling. The roll uses RNG_COSMETIC: it's
-// informational only and must NOT perturb the substantive stream, so noise tuning never desyncs
-// saves/replays and seeds are unaffected. >>> PROMOTE TO SUBSTANTIVE (swap assureCosmeticRNG/restoreRNG
-// for a plain rand_percent) ONLY when "hearing" starts driving gameplay -- e.g. interrupting
-// travel/rest or feeding monster awareness. See docs/design/noise-system.md.
+// Perception ADDS the player's awareness and the monster's noisiness:
+//     detectChance = clamp(NOISE_BASE_PERCEPTION + awarenessEnchant*NOISE_AWARENESS_PER_ENCHANT
+//                          + noiseModifier, 0, NOISE_PERCEPTION_CEILING)
+// awarenessEnchant = rogue.awarenessBonus / 20 (net Ring-of-Awareness enchant); noiseModifier is the
+// monster's signed tier from noiseLevelForMonsterMove. Additive (not a multiplicative loudness scalar)
+// so awareness can compensate for a quiet monster. The roll uses RNG_COSMETIC: it's informational only
+// and must NOT perturb the substantive stream, so noise tuning never desyncs saves/replays and seeds
+// are unaffected. >>> PROMOTE TO SUBSTANTIVE (swap assureCosmeticRNG/restoreRNG for a plain
+// rand_percent) ONLY when "hearing" starts driving gameplay -- e.g. interrupting travel/rest or feeding
+// monster awareness. See docs/design/noise-system.md.
 static void monsterEmitMovementNoise(creature *monst, short originX, short originY) {
 #if NOISE_SYSTEM_ENABLED
     if (monst == &player) {
         return; // player-generated noise is a later phase
+    }
+    if (monst->bookkeepingFlags & MB_SUBMERGED) {
+        return; // a submerged creature glides unseen and silent (eel/bog monster/kraken). The splash on
+                // emerge/submerge is the real tell -- a deferred event emitter, not movement noise.
     }
     if (pmap[originX][originY].flags & VISIBLE) {
         return; // the player watched it step -- not "heard", seen
@@ -4380,10 +4408,10 @@ static void monsterEmitMovementNoise(creature *monst, short originX, short origi
     // Debug override: D_ALWAYS_DETECT_SOUND forces every off-screen move to be heard, bypassing the
     // perception roll entirely (draws no RNG). Flip it off (default) to use the awareness model below.
     if (!D_ALWAYS_DETECT_SOUND) {
-        const short loudness = noiseLevelForMonsterMove(monst);
+        const short noiseModifier = noiseLevelForMonsterMove(monst);
         const short awarenessEnchant = rogue.awarenessBonus / 20; // awarenessBonus = 20 * net ring enchant
-        const short perception = NOISE_BASE_PERCEPTION + awarenessEnchant * NOISE_AWARENESS_PER_ENCHANT;
-        const short detectChance = clamp(perception * loudness / 100, 0, NOISE_PERCEPTION_CEILING);
+        const short detectChance = clamp(NOISE_BASE_PERCEPTION + awarenessEnchant * NOISE_AWARENESS_PER_ENCHANT
+                                         + noiseModifier, 0, NOISE_PERCEPTION_CEILING);
         boolean heard;
         assureCosmeticRNG; // informational roll -> cosmetic stream; never desyncs saves/replays
         heard = rand_percent(detectChance);
