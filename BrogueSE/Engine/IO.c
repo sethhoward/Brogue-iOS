@@ -315,6 +315,17 @@ static short actionMenu(short x, boolean playingBack) {
         buttons[buttonCount].hotkey[0] = STEALTH_RANGE_KEY;
         takeActionOurselves[buttonCount] = true;
         buttonCount++;
+#if NOISE_SYSTEM_ENABLED
+        // iOS port (Brogue SE): toggle the noise-system sound-map debug overlay.
+        if (KEYBOARD_LABELS) {
+            sprintf(buttons[buttonCount].text, "  %s[: %s[%s] Display sound map  ", yellowColorEscape, whiteColorEscape, rogue.displaySoundMapMode ? "X" : " ");
+        } else {
+            sprintf(buttons[buttonCount].text, "  [%s] Show sound map  ",   rogue.displaySoundMapMode ? "X" : " ");
+        }
+        buttons[buttonCount].hotkey[0] = SOUND_MAP_KEY;
+        takeActionOurselves[buttonCount] = true;
+        buttonCount++;
+#endif
 
         if (hasGraphics) {
             if (KEYBOARD_LABELS) {
@@ -1518,6 +1529,21 @@ void getCellAppearance(pos loc, enum displayGlyph *returnChar, color *returnFore
             applyColorAugment(&cellBackColor, &orange, 12);
         }
     }
+
+#if NOISE_SYSTEM_ENABLED
+    // iOS port (Brogue SE): noise-system sound-map debug overlay -- a warm heat field that fades with
+    // the player's sound cost-distance, so you can see propagation flow down corridors, leak through
+    // doors, and route around (or be blocked by) walls. Drawn on all reachable cells, including
+    // unexplored ones, since visualizing propagation past what you've seen is the whole point.
+    if (rogue.displaySoundMapMode) {
+        const short d = soundDistanceAt(loc);
+        if (d < 30000) {
+            const short strength = clamp(85 - d * 5, 8, 85); // closer = hotter
+            applyColorAverage(&cellForeColor, &orange, strength);
+            applyColorAverage(&cellBackColor, &orange, strength);
+        }
+    }
+#endif
 
     if ((rogue.trueColorMode || rogue.displayStealthRangeMode)
         && playerCanSeeOrSense(loc.x, loc.y)) {
@@ -2874,6 +2900,18 @@ void executeKeystroke(signed long keystroke, boolean controlKey, boolean shiftKe
                                  &teal, 0);
             }
             break;
+#if NOISE_SYSTEM_ENABLED
+        case SOUND_MAP_KEY:
+            // iOS port (Brogue SE): toggle the noise-system sound-map debug overlay.
+            rogue.displaySoundMapMode = !rogue.displaySoundMapMode;
+            displayLevel();
+            refreshSideBar(-1, -1, false);
+            messageWithColor(rogue.displaySoundMapMode
+                             ? (KEYBOARD_LABELS ? "Sound map displayed. Press '[' again to hide." : "Sound map displayed.")
+                             : (KEYBOARD_LABELS ? "Sound map hidden. Press '[' again to display." : "Sound map hidden."),
+                             &teal, 0);
+            break;
+#endif
         case CALL_KEY:
             call(NULL);
             break;

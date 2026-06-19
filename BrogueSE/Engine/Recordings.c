@@ -667,11 +667,12 @@ static void printPlaybackHelpScreen() {
 }
 
 static void resetPlayback() {
-    boolean omniscient, stealth, trueColors;
+    boolean omniscient, stealth, trueColors, soundMap;
 
     omniscient = rogue.playbackOmniscience;
     stealth = rogue.displayStealthRangeMode;
     trueColors = rogue.trueColorMode;
+    soundMap = rogue.displaySoundMapMode; // iOS port (Brogue SE): noise-system overlay is non-recorded
 
     freeEverything();
     randomNumbersGenerated = 0;
@@ -681,6 +682,7 @@ static void resetPlayback() {
     rogue.playbackOmniscience = omniscient;
     rogue.displayStealthRangeMode = stealth;
     rogue.trueColorMode = trueColors;
+    rogue.displaySoundMapMode = soundMap;
 
     rogue.playbackFastForward = false;
     blackOutScreen();

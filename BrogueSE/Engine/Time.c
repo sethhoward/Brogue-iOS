@@ -720,6 +720,60 @@ static void updateScent() {
     addScentToCell(player.loc.x, player.loc.y, scentPenalty);
 }
 
+// iOS port (Brogue SE): noise system -- the per-turn player "sound map". A cost-flood from the player
+// gives soundDistanceAt(cell) = the effective distance sound travels between that cell and the player:
+// floor costs 1, a vision-blocking-but-passable tile (closed door / dense foliage / thick smoke) costs
+// 1 + NOISE_DOOR_COST (muffled passage -- sound seeps through), walls are impassable (sound routes
+// around them, or is silenced if sealed off). Path distance is symmetric, so the player-sourced flood
+// gives the right value at the monster's cell. Read-only and deterministic -> never perturbs the
+// substantive RNG stream (the perception roll stays cosmetic). Recomputed once per turn after the
+// player's move, before monsters act. Visualize with the sound-map overlay. See docs/design/noise-system.md.
+#if NOISE_SYSTEM_ENABLED
+static short **gSoundMap = NULL;      // effective sound distance from the player (30000 = unreachable)
+static short **gSoundCostMap = NULL;  // per-cell traversal cost fed to dijkstraScan
+
+void recomputeSoundMap(void) {
+    short i, j;
+    if (!gSoundMap) {
+        gSoundMap = allocGrid();
+        gSoundCostMap = allocGrid();
+    }
+    for (i = 0; i < DCOLS; i++) {
+        for (j = 0; j < DROWS; j++) {
+            const pos loc = (pos){ i, j };
+            if (cellHasTerrainFlag(loc, T_OBSTRUCTS_PASSABILITY)) {
+                gSoundCostMap[i][j] = PDS_OBSTRUCTION;       // wall: sound routes around (or is sealed out)
+            } else if (cellHasTerrainFlag(loc, T_OBSTRUCTS_VISION)) {
+                gSoundCostMap[i][j] = 1 + NOISE_DOOR_COST;   // door/foliage/smoke: muffled passage
+            } else {
+                gSoundCostMap[i][j] = 1;
+            }
+        }
+    }
+    fillGrid(gSoundMap, 30000);
+    gSoundMap[player.loc.x][player.loc.y] = 0;
+    dijkstraScan(gSoundMap, gSoundCostMap, true);
+}
+
+short soundDistanceAt(pos loc) {
+    return gSoundMap ? gSoundMap[loc.x][loc.y] : 30000;
+}
+
+boolean playerAdjacentToClosedDoor(void) {
+    for (short dir = 0; dir < DIRECTION_COUNT; dir++) {
+        const pos n = posNeighborInDirection(player.loc, dir);
+        if (coordinatesAreInMap(n.x, n.y) && pmapAt(n)->layers[DUNGEON] == DOOR) {
+            return true;
+        }
+    }
+    return false;
+}
+#else
+void recomputeSoundMap(void) { }
+short soundDistanceAt(pos loc) { (void)loc; return 30000; }
+boolean playerAdjacentToClosedDoor(void) { return false; }
+#endif
+
 short armorStealthAdjustment(item *theArmor) {
     if (!theArmor
         || !(theArmor->category & ARMOR)) {
@@ -2566,6 +2620,8 @@ void playerTurnEnded() {
         }
 
         updateScent();
+        recomputeSoundMap(); // iOS port (Brogue SE): noise system -- rebuild the player sound-distance
+                             // map now (player has moved; monsters act below and read it via the roll).
         // iOS port (Brogue SE): #837 — recompute lighting and the player's stealth range *before*
         // monsters evaluate awareness this turn. The player has already moved (playerMoves updates
         // player.loc, then calls us with no intervening vision pass), so without this the monster

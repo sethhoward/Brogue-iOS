@@ -138,6 +138,21 @@
                                             // floor + 6*this >= ceiling -> +6 maxes detection (longer
                                             // runway than awarenessBonus's native +20/enchant).
 #define NOISE_PERCEPTION_CEILING        90  // detection ceiling -- never 100%, even at high awareness
+// Distance + terrain falloff. A per-turn "sound map" floods cost-distance from the player
+// (recomputeSoundMap): floor costs 1, a vision-blocking-but-passable tile (closed door / dense foliage
+// / thick smoke) costs NOISE_DOOR_COST (sound seeps through, muffled), walls are impassable (sound
+// routes around). soundDistanceAt(cell) -> effective distance d; the detection modifier is:
+//     d <= NOISE_NEARFIELD_RADIUS         -> +NOISE_NEARFIELD_BONUS  (right on top of you, unmistakable)
+//     else                                 -> -NOISE_FALLOFF_PER_TILE * (d - NOISE_NEARFIELD_RADIUS)
+//     unreachable (sealed off)             -> no noise at all
+// Plus NOISE_DOOR_LISTEN_BONUS while the player stands next to a closed door (ear at the door; 0 to
+// disable -- the door cost already favors doors over walls). All read-only/deterministic -> roll stays
+// cosmetic. Visualize with the sound-map overlay (SOUND_MAP_KEY / the display menu).
+#define NOISE_NEARFIELD_RADIUS          2   // within this cost-distance, detection is boosted
+#define NOISE_NEARFIELD_BONUS           15  // the near-field detection boost
+#define NOISE_FALLOFF_PER_TILE          3   // detection lost per effective tile beyond the near field
+#define NOISE_DOOR_COST                 4   // extra sound-map cost to pass a closed door / foliage / smoke
+#define NOISE_DOOR_LISTEN_BONUS         10  // detection bonus while standing next to a closed door (0 = off)
 #define D_ALWAYS_DETECT_SOUND           0   // debug: force every off-screen monster move to be heard,
                                             // bypassing the perception roll (draws no RNG). 1 = full
                                             // detection. (Pre-ship: see pre-ship-debug-checklist.md.)
@@ -1346,6 +1361,7 @@ enum tileFlags {
 #define SWAP_KEY            'w'
 #define TRUE_COLORS_KEY     '\\'
 #define STEALTH_RANGE_KEY   ']'
+#define SOUND_MAP_KEY       '[' // iOS port (Brogue SE): toggle the noise-system sound-map debug overlay
 #define DROP_KEY            'd'
 #define CALL_KEY            'c'
 #define QUIT_KEY            'Q'
@@ -2755,6 +2771,7 @@ typedef struct playerCharacter {
     boolean trueColorMode;              // whether lighting effects are disabled
     boolean hideSeed;                   // whether seed is hidden when pressing SEED_KEY
     boolean displayStealthRangeMode;    // whether your stealth range is displayed
+    boolean displaySoundMapMode;        // iOS port (Brogue SE): noise-system sound-map debug overlay (non-recorded)
     boolean quit;                       // to skip the typical end-game theatrics when the player quits
     uint64_t seed;                      // the master seed for generating the entire dungeon
     short RNG;                          // which RNG are we currently using?
@@ -3399,6 +3416,9 @@ extern "C" {
     void recordNoiseEvent(pos loc); // iOS port (Brogue SE): noise system phase 0 (see docs/design/noise-system.md)
     void flushNoiseRipples(void);   // iOS port (Brogue SE): noise system phase 0
     boolean hasPendingNoise(void);  // iOS port (Brogue SE): noise system phase 0 -- any events awaiting a flush?
+    void recomputeSoundMap(void);   // iOS port (Brogue SE): rebuild the per-turn player sound-distance map
+    short soundDistanceAt(pos loc); // iOS port (Brogue SE): effective sound cost-distance from player (30000 = unreachable)
+    boolean playerAdjacentToClosedDoor(void); // iOS port (Brogue SE): is the player listening at a door?
     void printString(const char *theString, short x, short y, const color *foreColor, const color* backColor, screenDisplayBuffer *dbuf);
     short wrapText(char *to, const char *sourceText, short width);
     short printStringWithWrapping(const char *theString, short x, short y, short width, const color *foreColor,

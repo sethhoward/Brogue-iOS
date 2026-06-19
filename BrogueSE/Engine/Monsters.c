@@ -4383,16 +4383,18 @@ static short noiseLevelForMonsterMove(const creature *monst) {
 // destination makes a hidden->visible step read as an "announcement" and avoids double-firing when a
 // monster steps into darkness (that step was witnessed; its next hidden step makes the noise).
 //
-// Perception ADDS the player's awareness and the monster's noisiness:
+// Perception ADDS the player's awareness, the monster's noisiness, and a distance/terrain term:
 //     detectChance = clamp(NOISE_BASE_PERCEPTION + awarenessEnchant*NOISE_AWARENESS_PER_ENCHANT
-//                          + noiseModifier, 0, NOISE_PERCEPTION_CEILING)
+//                          + noiseModifier + distanceModifier + doorListenBonus, 0, NOISE_PERCEPTION_CEILING)
 // awarenessEnchant = rogue.awarenessBonus / 20 (net Ring-of-Awareness enchant); noiseModifier is the
-// monster's signed tier from noiseLevelForMonsterMove. Additive (not a multiplicative loudness scalar)
-// so awareness can compensate for a quiet monster. The roll uses RNG_COSMETIC: it's informational only
-// and must NOT perturb the substantive stream, so noise tuning never desyncs saves/replays and seeds
-// are unaffected. >>> PROMOTE TO SUBSTANTIVE (swap assureCosmeticRNG/restoreRNG for a plain
-// rand_percent) ONLY when "hearing" starts driving gameplay -- e.g. interrupting travel/rest or feeding
-// monster awareness. See docs/design/noise-system.md.
+// monster's signed tier from noiseLevelForMonsterMove; distanceModifier comes from the per-turn sound
+// map (soundDistanceAt: near-field boost, then falloff, silent if unreachable -- so walls/doors and
+// range all bake in); doorListenBonus rewards standing at a closed door. Additive (not a multiplicative
+// loudness scalar) so awareness can compensate for a quiet monster. The roll uses RNG_COSMETIC: it's
+// informational only and must NOT perturb the substantive stream, so noise tuning never desyncs
+// saves/replays and seeds are unaffected. >>> PROMOTE TO SUBSTANTIVE (swap assureCosmeticRNG/restoreRNG
+// for a plain rand_percent) ONLY when "hearing" starts driving gameplay -- e.g. interrupting travel/rest
+// or feeding monster awareness. See docs/design/noise-system.md.
 static void monsterEmitMovementNoise(creature *monst, short originX, short originY) {
 #if NOISE_SYSTEM_ENABLED
     if (monst == &player) {
@@ -4408,11 +4410,23 @@ static void monsterEmitMovementNoise(creature *monst, short originX, short origi
     // Debug override: D_ALWAYS_DETECT_SOUND forces every off-screen move to be heard, bypassing the
     // perception roll entirely (draws no RNG). Flip it off (default) to use the awareness model below.
     if (!D_ALWAYS_DETECT_SOUND) {
+        const short soundDist = soundDistanceAt(monst->loc);
         const short noiseModifier = noiseLevelForMonsterMove(monst);
         const short awarenessEnchant = rogue.awarenessBonus / 20; // awarenessBonus = 20 * net ring enchant
-        const short detectChance = clamp(NOISE_BASE_PERCEPTION + awarenessEnchant * NOISE_AWARENESS_PER_ENCHANT
-                                         + noiseModifier, 0, NOISE_PERCEPTION_CEILING);
+        short distanceModifier, detectChance;
         boolean heard;
+
+        if (soundDist >= 30000) {
+            return; // no sound path to the player (sealed off) -- inaudible
+        }
+        distanceModifier = (soundDist <= NOISE_NEARFIELD_RADIUS)
+                         ? NOISE_NEARFIELD_BONUS                                  // right on top of you
+                         : -NOISE_FALLOFF_PER_TILE * (soundDist - NOISE_NEARFIELD_RADIUS);
+
+        detectChance = clamp(NOISE_BASE_PERCEPTION + awarenessEnchant * NOISE_AWARENESS_PER_ENCHANT
+                             + noiseModifier + distanceModifier
+                             + (playerAdjacentToClosedDoor() ? NOISE_DOOR_LISTEN_BONUS : 0),
+                             0, NOISE_PERCEPTION_CEILING);
         assureCosmeticRNG; // informational roll -> cosmetic stream; never desyncs saves/replays
         heard = rand_percent(detectChance);
         restoreRNG;
