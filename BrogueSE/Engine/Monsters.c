@@ -4465,7 +4465,8 @@ static void monsterEmitMovementNoise(creature *monst, short originX, short origi
 
         detectChance = clamp(NOISE_BASE_PERCEPTION + awarenessEnchant * NOISE_AWARENESS_PER_ENCHANT
                              + noiseModifier + distanceModifier + terrainNoiseModifier(monst->loc)
-                             + (playerAdjacentToClosedDoor() ? NOISE_DOOR_LISTEN_BONUS : 0),
+                             + (playerAdjacentToClosedDoor() ? NOISE_DOOR_LISTEN_BONUS : 0)
+                             + (rogue.justRested ? NOISE_REST_PERCEPTION_BONUS : 0),
                              0, NOISE_PERCEPTION_CEILING);
         assureCosmeticRNG; // informational roll -> cosmetic stream; never desyncs saves/replays
         heard = rand_percent(detectChance);

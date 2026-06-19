@@ -153,6 +153,11 @@
 #define NOISE_FALLOFF_PER_TILE          3   // detection lost per effective tile beyond the near field
 #define NOISE_DOOR_COST                 4   // extra sound-map cost to pass a closed door / foliage / smoke
 #define NOISE_DOOR_LISTEN_BONUS         10  // detection bonus while standing next to a closed door (0 = off)
+#define NOISE_REST_PERCEPTION_BONUS     10  // detection bonus while resting (listening intently). LIVE on a
+                                            // short rest 'z' (a single manual turn -> ripples animate with the
+                                            // boost). On long rest 'Z' (autoRest) ripples are drained, so the
+                                            // boost is latent there until "hearing interrupts rest" lands
+                                            // (substantive, deferred). Applies whenever rogue.justRested.
 // Terrain EMISSION: how much the terrain a creature steps into adds to / dampens the noise of that step
 // (distinct from the sound map's propagation damping above). Signed, smaller than the monster tiers since
 // it only modulates on top. Read at the destination cell (terrainNoiseModifier). Direction-agnostic.
