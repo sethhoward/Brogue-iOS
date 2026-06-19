@@ -316,7 +316,21 @@ void applyInstantTileEffectsToCreature(creature *monst) {
         && !(monst->bookkeepingFlags & MB_SUBMERGED)) {
         damage = rand_range(15, 20);
         damage = max(damage, monst->info.maxHP / 2);
-        monst->status[STATUS_EXPLOSION_IMMUNITY] = 5;
+        // iOS port (Brogue SE): #816 — grant 6, not 5. The status is decremented once per turn and
+        // explosive damage only fires while it is 0, so a value of N yields N-1 fully-immune turns
+        // (a value of 5 protected only 4 turns, contradicting the "not again for five turns" promise
+        // in Rogue.h). 6 gives the intended five clear turns. Applies to the player and monsters alike.
+        // (The #816 decrement-ordering fix in playerTurnEnded is separate: it stopped the player from
+        // losing one *additional* turn relative to monsters. Both are needed for a true five turns.)
+        monst->status[STATUS_EXPLOSION_IMMUNITY] = 6;
+        // iOS port (Brogue SE): #816 test harness. We only reach this branch when the player was NOT
+        // immune, i.e. on a fresh explosive hit. Log the turn so the gap between hits reveals the
+        // immunity duration, and zero the damage so the test can run indefinitely. Debug only (D_TEST_EXPLOSION).
+        if (D_TEST_EXPLOSION && monst == &player) {
+            sprintf(buf, "[#816] explosive hit on turn %lu", rogue.playerTurnNumber);
+            messageWithColor(buf, &teal, 0);
+            damage = 0;
+        }
         if (monst == &player) {
             rogue.disturbed = true;
             for (layer = 0; layer < NUMBER_TERRAIN_LAYERS && !(tileCatalog[pmap[*x][*y].layers[layer]].flags & T_CAUSES_EXPLOSIVE_DAMAGE); layer++);
@@ -2249,6 +2263,10 @@ static void decrementPlayerStatus() {
     // there). Decrementing it in this function — which runs *after* updateEnvironment, where
     // explosions are spawned and applied to the player — would knock a freshly granted 5 down to 4
     // on the same turn, costing one of the five turns of immunity the engine promises.
+    // D_LEGACY_EXPLOSION_TIMING restores the old (buggy) decrement here for A/B testing the fix.
+    if (D_LEGACY_EXPLOSION_TIMING && player.status[STATUS_EXPLOSION_IMMUNITY]) {
+        player.status[STATUS_EXPLOSION_IMMUNITY]--;
+    }
 
     if (player.status[STATUS_DISCORDANT]) {
         player.status[STATUS_DISCORDANT]--;
@@ -2649,16 +2667,27 @@ void playerTurnEnded() {
                     }
                 }
 
+                // iOS port (Brogue SE): #816 test harness. Refuel a methane inferno + keep the player
+                // alive so explosions recur every immunity cycle (refreshCell=false so the hit lands on
+                // the normal updateEnvironment/applyInstant path, not at spawn time). Debug only.
+                if (D_TEST_EXPLOSION) {
+                    player.currentHP = player.info.maxHP;
+                    spawnDungeonFeature(player.loc.x, player.loc.y, &dungeonFeatureCatalog[DF_METHANE_GAS_ARMAGEDDON], false, false);
+                    spawnDungeonFeature(player.loc.x, player.loc.y, &dungeonFeatureCatalog[DF_PLAIN_FIRE], false, false);
+                }
+
                 // iOS port (Brogue SE): #816 — decrement explosion immunity *before*
                 // updateEnvironment (not in decrementPlayerStatus below, which runs after).
                 // Explosions are spawned inside updateEnvironment (flammable gas igniting ->
                 // GAS_EXPLOSION) and applied to the player immediately via spawnDungeonFeature,
-                // setting STATUS_EXPLOSION_IMMUNITY = 5. If the decrement ran afterward, that fresh
-                // 5 would be reduced to 4 on the same turn and the player could suffer the next
-                // explosion after only 4 turns instead of the intended 5 (Rogue.h: "not again for
-                // five turns"). Monster status already decrements before updateEnvironment
+                // setting STATUS_EXPLOSION_IMMUNITY (see the grant in applyInstantTileEffectsToCreature).
+                // If the decrement ran afterward, that freshly granted value would be reduced on the
+                // same turn and the player would lose one immune turn relative to monsters (the original
+                // #816 asymmetry). The grant value itself (6) is what sets the absolute count of five
+                // clear turns. Monster status already decrements before updateEnvironment
                 // (decrementMonsterStatus, above), so this aligns the player with monsters.
-                if (player.status[STATUS_EXPLOSION_IMMUNITY]) {
+                // D_LEGACY_EXPLOSION_TIMING restores the old post-updateEnvironment decrement for A/B testing.
+                if (!D_LEGACY_EXPLOSION_TIMING && player.status[STATUS_EXPLOSION_IMMUNITY]) {
                     player.status[STATUS_EXPLOSION_IMMUNITY]--;
                 }
                 updateEnvironment(); // Update fire and gas, items floating around in water, monsters falling into chasms, etc.
