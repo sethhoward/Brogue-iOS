@@ -184,6 +184,55 @@
                                             // first step suppressed); iOS keyboard keeps 300ms (a key tap is
                                             // longer, so a shorter delay double-steps) and thus accepts a
                                             // first-step tick. See docs/design/noise-system.md + KNOWN_CAVEATS.md.
+// --- Phase 2: monsters hear the PLAYER (the reverse, SUBSTANTIVE direction) ---------------------
+// The first substantive half of the system: monsters detect the player by sound, augmenting
+// line-of-sight stealth. Two independent per-turn checks, partitioned by monster state:
+//   * SLEEPING monster -> the visual rand_percent(25) spot roll is REMOVED (eyes closed); it wakes
+//     ONLY by sound (or damage / a horde-mate's alarm). This is what makes a quiet approach a real
+//     backstab -- otherwise the visual roll wakes it long before sound matters.
+//   * AWAKE-but-unaware (wandering) -> keeps the visual roll AND gets the sound check.
+// The sound check (mirror of the player-hears-monster formula, but SUBSTANTIVE rand_percent):
+//     d = soundDistanceAt(monst->loc)                 // symmetric: same per-turn player sound map
+//     if (d < 30000 && d <= rogue.stealthRange*2)     // earshot stays tight to today's stealth
+//         hearChance = clamp( NOISE_HEAR_BASE + playerLoudness
+//                             + (d <= NOISE_HEAR_NEARFIELD_RADIUS ? NOISE_HEAR_NEARFIELD_BONUS
+//                                  : -NOISE_HEAR_FALLOFF_PER_TILE * (d - NOISE_HEAR_NEARFIELD_RADIUS)),
+//                             0, NOISE_HEAR_CEILING )
+// where playerLoudness = rogue.playerNoise (set per action; NOISE_PLAYER_SILENT = the player held
+// still -> no check at all). On a hit: loud/point-blank (loudness >= NOISE_HEAR_AGGRO_LOUDNESS or
+// d<=1) -> aggro (alertMonster); else -> investigate (wander to the noise cell, you can slip away).
+// SUBSTANTIVE: NOISE_SYSTEM_ENABLED is a real gameplay flag here -> stays compile-time / run-fixed,
+// never a live mid-run toggle (would desync replays). Fine for SE (GC-silent, no leaderboard).
+// See docs/design/noise-system.md "Phase 2".
+#define NOISE_HEAR_BASE                 15  // base % a monster hears a normal-loudness player action
+#define NOISE_HEAR_NEARFIELD_RADIUS     2   // within this sound-distance, hearing is boosted (point-blank)
+#define NOISE_HEAR_NEARFIELD_BONUS      20  // the near-field hearing boost
+#define NOISE_HEAR_FALLOFF_PER_TILE     4   // hearing % lost per sound-tile beyond the near field
+#define NOISE_HEAR_CEILING              95  // hearing ceiling -- sound alone is never an automatic wake
+#define NOISE_HEAR_AGGRO_LOUDNESS       20  // loudness at/above which a heard noise -> full aggro (else investigate)
+// Player loudness (playerNoiseLevel() base + an action spike). A NEW quantity, NOT currentStealthRange
+// (which bakes in darkness/shadow -- visual, irrelevant to sound -- and lacks terrain/action/levitation).
+#define NOISE_PLAYER_SILENT             (-30000) // sentinel: player made no noise this turn -> no sound check
+#define NOISE_PLAYER_MELEE              30  // loudness spike for a player melee attack (always aggro-tier)
+#define NOISE_PLAYER_THROW              15  // loudness spike for a player throw
+#define NOISE_PLAYER_AGGRAVATED         60  // forced loudness while STATUS_AGGRAVATING (overrides the rest)
+#define NOISE_PLAYER_LEVITATE           (-10) // quieter while levitating (feet off the ground; terrain term skipped)
+#define NOISE_PLAYER_ARMOR_SCALE        2   // loudness per point of armorStealthAdjustment (heavy armor clatters)
+#define NOISE_PLAYER_STEALTH_RING_SCALE 3   // loudness reduced per point of ring-of-stealth bonus
+#define D_NOISE_DEBUG                   1   // debug: print a history line for each detection channel
+                                            // (spotted / hears something / heard you). (Pre-ship: off.)
+// Player sound-footprint ripple (a feel/test aid): when the player makes noise and a visible, not-yet-
+// hunting enemy sits at or near the player's audible radius, draw an expanding ripple from the player out
+// to that radius -- following the sound map (bends around walls, muffles at doors), so you can SEE how far
+// your noise carries and how close a creature is to hearing you. Shown each such turn until the monster
+// starts hunting. Cosmetic (reuses the ripple animation). See docs/design/noise-system.md "Phase 2".
+#define NOISE_PLAYER_RIPPLE_MARGIN      3   // also show the ripple when a monster is this far BEYOND earshot
+                                            // (a "you're almost in range" warning beat); 0 = only within reach
+#define NOISE_PLAYER_RIPPLE_MAX_RADIUS  14  // animation cap on the drawn radius (earshot also caps via stealthRange*2)
+// While a monster is investigating, its glyph ambient-blinks with '?' -- riding the same ~60Hz idle shimmer
+// tick that drives water/hallucination (shuffleTerrainColors(_, true) from the platform bridge while
+// colorsDance is on). This is the half-cycle in idle frames: glyph for N frames, '?' for N frames.
+#define NOISE_INVESTIGATE_BLINK_FRAMES  30  // ~0.5s per half at 60Hz (a slow, readable blink)
 
 // If enabled, runs a benchmark for the performance of repeatedly updating the screen at the start of the game.
 // #define SCREEN_UPDATE_BENCHMARK
@@ -2389,7 +2438,9 @@ enum monsterBookkeepingFlags {
     MB_ALREADY_SEEN             = Fl(23),   // seeing this monster won't interrupt exploration
     MB_ADMINISTRATIVE_DEATH     = Fl(24),   // like the `administrativeDeath` parameter to `killCreature`
     MB_HAS_DIED                 = Fl(25),   // monster has already been killed but not yet removed from `monsters`
-    MB_DOES_NOT_RESURRECT       = Fl(26)    // resurrection altars don't revive monsters summoned by allies
+    MB_DOES_NOT_RESURRECT       = Fl(26),   // resurrection altars don't revive monsters summoned by allies
+    MB_INVESTIGATING            = Fl(27)    // iOS port (Brogue SE): noise system -- heading to a heard-noise
+                                            // cell (monst->investigateLoc) to look, NOT hunting; see noise-system.md
 };
 
 // Defines all creatures, which include monsters and the player:
@@ -2595,6 +2646,8 @@ typedef struct creature {
     pos lastSeenPlayerAt;          // last location at which the monster hunted the player
 
     pos targetCorpseLoc;           // location of the corpse that the monster is approaching to gain its abilities
+    pos investigateLoc;            // iOS port (Brogue SE): noise system -- the heard-noise cell this monster is
+                                   // investigating (valid only while MB_INVESTIGATING). See noise-system.md "Phase 2".
     char targetCorpseName[30];          // name of the deceased monster that we're approaching to gain its abilities
     unsigned long absorptionFlags;      // ability/behavior flags that the monster will gain when absorption is complete
     boolean absorbBehavior;             // above flag is behavior instead of ability (ignored if absorptionBolt is set)
@@ -2826,6 +2879,9 @@ typedef struct playerCharacter {
     short loneWolfStrBonus;             // effective-strength currently added to rogue.strength by Lone Wolf (so it can be removed exactly)
     boolean hasEverHadAlly;            // latches true the first time the player gains any ally this run; gates the polarity reveal
     short stealthRange;                 // distance from which monsters will notice you
+    short playerNoise;                  // iOS port (Brogue SE): loudness the player emitted this turn for the
+                                        // noise system's monster-hears-player check; NOISE_PLAYER_SILENT = none.
+                                        // Set at action sites, read by monsters, reset each playerTurnEnded.
 
     short previousPoisonPercent;        // and your poison proportion, to display percentage alerts for each.
 
@@ -3431,6 +3487,12 @@ extern "C" {
     void recomputeSoundMap(void);   // iOS port (Brogue SE): rebuild the per-turn player sound-distance map
     short soundDistanceAt(pos loc); // iOS port (Brogue SE): effective sound cost-distance from player (30000 = unreachable)
     boolean playerAdjacentToClosedDoor(void); // iOS port (Brogue SE): is the player listening at a door?
+    short playerNoiseLevel(void);   // iOS port (Brogue SE): the player's base loudness (no action spike)
+    void playerEmitNoise(short spike); // iOS port (Brogue SE): set rogue.playerNoise = playerNoiseLevel()+spike
+    void recordMonsterAlert(pos loc, enum displayGlyph glyph); // iOS port (Brogue SE): queue a ?/! tell
+    void flushMonsterAlerts(void);  // iOS port (Brogue SE): animate queued ?/! tells (beside displayMonsterFlashes)
+    void recordPlayerNoiseRipple(short radius); // iOS port (Brogue SE): queue the player's sound-footprint ripple
+    void recordPlayerNoiseRippleIfNeeded(void); // iOS port (Brogue SE): queue it iff a visible unaware enemy is near earshot
     void printString(const char *theString, short x, short y, const color *foreColor, const color* backColor, screenDisplayBuffer *dbuf);
     short wrapText(char *to, const char *sourceText, short width);
     short printStringWithWrapping(const char *theString, short x, short y, short width, const color *foreColor,

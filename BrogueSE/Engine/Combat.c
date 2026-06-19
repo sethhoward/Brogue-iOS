@@ -1220,6 +1220,12 @@ boolean attack(creature *attacker, creature *defender, boolean lungeAttack) {
         rogue.disturbed = true;
     }
 
+    if (attacker == &player) {
+        playerEmitNoise(NOISE_PLAYER_MELEE); // iOS port (Brogue SE): noise system -- a melee swing is loud
+                                             // and aggro-tier (even a whiff); overrides this turn's step
+                                             // noise. See docs/design/noise-system.md "Phase 2".
+    }
+
     defender->status[STATUS_ENTRANCED] = 0;
     if (defender->status[STATUS_MAGICAL_FEAR]) {
         defender->status[STATUS_MAGICAL_FEAR] = 1;

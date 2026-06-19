@@ -392,6 +392,9 @@ void initializeRogue(uint64_t seed) {
     rogue.depthLevel = 1;
     rogue.deepestLevel = 1;
     rogue.scentTurnNumber = 1000;
+#if NOISE_SYSTEM_ENABLED
+    rogue.playerNoise = NOISE_PLAYER_SILENT; // iOS port (Brogue SE): noise system -- silent until the player acts
+#endif
     rogue.playerTurnNumber = 0;
     rogue.absoluteTurnNumber = 0;
     rogue.previousPoisonPercent = 0;

@@ -1025,6 +1025,13 @@ void bakeColor(color *theColor) {
     theColor->redRand = theColor->greenRand = theColor->blueRand = theColor->rand = 0;
 }
 
+#if NOISE_SYSTEM_ENABLED
+// iOS port (Brogue SE): noise system -- "is the investigating-monster glyph currently showing '?'". Toggled
+// on the idle shimmer tick (in shuffleTerrainColors below) and read by getCellAppearance, so a visible
+// investigator's glyph ambient-blinks with '?' on the same clock as water/hallucination. Pure presentation.
+static boolean gNoiseInvestigateBlinkOn = false;
+#endif
+
 void shuffleTerrainColors(short percentOfCells, boolean refreshCells) {
     enum directions dir;
     short i, j;
@@ -1051,6 +1058,26 @@ void shuffleTerrainColors(short percentOfCells, boolean refreshCells) {
                 }
         }
     }
+
+#if NOISE_SYSTEM_ENABLED
+    // Investigate-glyph ambient blink. refreshCells==true marks the periodic idle/animated calls (the
+    // ~60Hz platform shimmer tick during play), so we advance a frame counter only here. When the blink
+    // phase flips, redraw every visible investigating monster's cell so its glyph toggles to/from '?'
+    // (getCellAppearance reads gNoiseInvestigateBlinkOn). Same clock as water/hallucination; cosmetic.
+    if (refreshCells) {
+        static unsigned long idleTick = 0;
+        const boolean phase = (((idleTick++) / NOISE_INVESTIGATE_BLINK_FRAMES) & 1) != 0;
+        if (phase != gNoiseInvestigateBlinkOn) {
+            gNoiseInvestigateBlinkOn = phase;
+            for (creatureIterator it = iterateCreatures(monsters); hasNextCreature(it);) {
+                creature *m = nextCreature(&it);
+                if ((m->bookkeepingFlags & MB_INVESTIGATING) && canSeeMonster(m)) {
+                    refreshDungeonCell(m->loc);
+                }
+            }
+        }
+    }
+#endif
     restoreRNG;
 }
 
@@ -1308,6 +1335,14 @@ void getCellAppearance(pos loc, enum displayGlyph *returnChar, color *returnFore
             } else {
                 cellChar = monst->info.displayChar;
                 cellForeColor = *(monst->info.foreColor);
+#if NOISE_SYSTEM_ENABLED
+                // Noise system: a monster investigating a heard noise blinks its glyph with '?' on the
+                // idle shimmer clock (see shuffleTerrainColors) -- a persistent "this one's searching" tell,
+                // in the creature's own color so it still reads as that creature. Cosmetic.
+                if ((monst->bookkeepingFlags & MB_INVESTIGATING) && gNoiseInvestigateBlinkOn) {
+                    cellChar = (enum displayGlyph)'?';
+                }
+#endif
                 if (monst->status[STATUS_INVISIBLE] || (monst->bookkeepingFlags & MB_SUBMERGED)) {
                     // Invisible allies show up on the screen with a transparency effect.
                     //cellForeColor = cellBackColor;
@@ -2207,15 +2242,30 @@ static short noiseEventCount = 0;
 // release (key-up) step at the tail of a burst is suppressed too. Platform-agnostic -- driven only
 // by the cross-platform input-pending check, not by any iOS held-key state.
 static boolean noiseMovementWasContinuous = false;
+// Phase 2: the player's own sound-footprint ripple for this turn. >0 = pending, the value is the radius
+// to expand to (along the sound map). Cool blue to distinguish it from the grey "you heard something".
+static const color playerNoiseColor = {35, 60, 100, 0, 0, 0, 0, false};
+static short playerRippleRadius = 0;
 #endif
 
 // iOS port (Brogue SE): true if any noise events are waiting to be played. Lets the caller skip the
 // button-overlay/save/restore dance on quiet turns (see the flush site in mainInputLoop).
 boolean hasPendingNoise(void) {
 #if NOISE_SYSTEM_ENABLED
-    return noiseEventCount > 0;
+    return noiseEventCount > 0 || playerRippleRadius > 0;
 #else
     return false;
+#endif
+}
+
+// iOS port (Brogue SE): queue the player's sound-footprint ripple, to expand to `radius` on the next flush.
+void recordPlayerNoiseRipple(short radius) {
+#if NOISE_SYSTEM_ENABLED
+    if (radius > playerRippleRadius) {
+        playerRippleRadius = radius; // loudest action this turn wins
+    }
+#else
+    (void)radius;
 #endif
 }
 
@@ -2258,6 +2308,33 @@ static void noiseRingApply(short r, boolean draw, short strength) {
         }
     }
 }
+
+// iOS port (Brogue SE): draw/erase the player's sound wavefront at cost-distance k -- every cell whose
+// sound-map distance from the player is exactly k. Unlike the monster ripple's geometric Chebyshev ring,
+// this follows the actual sound map: it bends down corridors, jumps (with a muffling pause) past doors,
+// and never crosses a wall -- so the ripple visibly travels only as far, and along, as your noise really
+// carries. soundDistanceAt >= geometric distance, so a box of half-width k around the player is complete.
+static void playerNoiseRingApply(short k, boolean draw, short strength) {
+    short ix, iy;
+    if (k < 1) {
+        return; // ring 0 is the player's own cell; never drawn
+    }
+    for (iy = player.loc.y - k; iy <= player.loc.y + k; iy++) {
+        for (ix = player.loc.x - k; ix <= player.loc.x + k; ix++) {
+            if (!coordinatesAreInMap(ix, iy)) {
+                continue;
+            }
+            if (soundDistanceAt((pos){ ix, iy }) != k) {
+                continue; // only the wavefront exactly k away belongs to this frame's ring
+            }
+            if (draw) {
+                hiliteCell(ix, iy, &playerNoiseColor, strength, false);
+            } else {
+                refreshDungeonCell((pos){ ix, iy });
+            }
+        }
+    }
+}
 #endif // NOISE_SYSTEM_ENABLED
 
 // iOS port (Brogue SE): play every noise event collected this player turn as one synchronized
@@ -2267,10 +2344,12 @@ static void noiseRingApply(short r, boolean draw, short strength) {
 // below). Drains the buffer.
 void flushNoiseRipples(void) {
 #if NOISE_SYSTEM_ENABLED
-    short k, strength, oldRNG, perFramePause;
+    short k, strength, oldRNG, perFramePause, maxRadius;
     boolean fastForward = false;
+    const boolean haveMonsterRings = (noiseEventCount > 0);
+    const boolean havePlayerRing = (playerRippleRadius > 0);
 
-    if (noiseEventCount <= 0) {
+    if (!haveMonsterRings && !havePlayerRing) {
         return;
     }
 
@@ -2278,6 +2357,7 @@ void flushNoiseRipples(void) {
     // ripples would stutter every step and add nothing. Drain silently, never animate.
     if (rogue.automationActive || rogue.autoPlayingLevel) {
         noiseEventCount = 0;
+        playerRippleRadius = 0;
         noiseMovementWasContinuous = false;
         return;
     }
@@ -2297,38 +2377,141 @@ void flushNoiseRipples(void) {
     if (rogue.playbackFastForward || pauseAnimation(NOISE_RIPPLE_PREROLL_MS, PAUSE_BEHAVIOR_DEFAULT)) {
         noiseMovementWasContinuous = true;
         noiseEventCount = 0;
+        playerRippleRadius = 0;
         return;
     }
     if (noiseMovementWasContinuous) {
         noiseMovementWasContinuous = false;
         noiseEventCount = 0;
+        playerRippleRadius = 0;
         return;
     }
 
     oldRNG = rogue.RNG;
     rogue.RNG = RNG_COSMETIC;
 
-    perFramePause = max(1, NOISE_RIPPLE_MS / NOISE_RIPPLE_RADIUS);
+    // Both ripples expand together under one shared cadence: the monster "you heard something" boxes (fixed
+    // NOISE_RIPPLE_RADIUS) and the player's sound footprint (variable playerRippleRadius, sound-map shaped).
+    maxRadius = max(haveMonsterRings ? NOISE_RIPPLE_RADIUS : 0, havePlayerRing ? playerRippleRadius : 0);
+    perFramePause = max(1, NOISE_RIPPLE_MS / max(1, maxRadius));
 
-    for (k = 1; k <= NOISE_RIPPLE_RADIUS && !fastForward; k++) {
-        noiseRingApply(k - 1, false, 0);                                 // erase the previous ring
-        strength = NOISE_RIPPLE_MAX_STRENGTH * (NOISE_RIPPLE_RADIUS - k + 1) / NOISE_RIPPLE_RADIUS;
-        noiseRingApply(k, true, strength);                              // draw the current ring
+    for (k = 1; k <= maxRadius && !fastForward; k++) {
+        if (haveMonsterRings && k <= NOISE_RIPPLE_RADIUS) {
+            noiseRingApply(k - 1, false, 0);                            // erase the previous monster ring
+            strength = NOISE_RIPPLE_MAX_STRENGTH * (NOISE_RIPPLE_RADIUS - k + 1) / NOISE_RIPPLE_RADIUS;
+            noiseRingApply(k, true, strength);                         // draw the current monster ring
+        }
+        if (havePlayerRing && k <= playerRippleRadius) {
+            playerNoiseRingApply(k - 1, false, 0);                     // erase the previous player wavefront
+            strength = NOISE_RIPPLE_MAX_STRENGTH * (playerRippleRadius - k + 1) / playerRippleRadius;
+            playerNoiseRingApply(k, true, strength);                  // draw the current player wavefront
+        }
         if (rogue.playbackFastForward || pauseAnimation(perFramePause, PAUSE_BEHAVIOR_DEFAULT)) {
             fastForward = true;
         }
     }
 
     // Restore every cell any ripple could have touched to its true (hidden) appearance.
-    noiseRingApply(NOISE_RIPPLE_RADIUS, false, 0);
-    {
+    if (haveMonsterRings) {
         short r;
-        for (r = 0; r < NOISE_RIPPLE_RADIUS; r++) {
+        for (r = 0; r <= NOISE_RIPPLE_RADIUS; r++) {
             noiseRingApply(r, false, 0);
+        }
+    }
+    if (havePlayerRing) {
+        short r;
+        for (r = 1; r <= playerRippleRadius; r++) {
+            playerNoiseRingApply(r, false, 0);
         }
     }
 
     noiseEventCount = 0;
+    playerRippleRadius = 0;
+    rogue.RNG = oldRNG;
+#endif
+}
+
+// iOS port (Brogue SE): Phase 2 -- the ?/! "tell" flicked over a monster when it transitions to
+// investigate ('?') or aggro/spotted ('!') via the monster-hears-player system. Recorded during the
+// monster turn (recordMonsterAlert, from Monsters.c, only for monsters the player can see) and flushed
+// once afterward beside displayMonsterFlashes. Pure presentation: never saved, never drives logic, draws
+// on RNG_COSMETIC like every other flash. Engine-side (no platform/RogueScene work -- same plot loop as
+// flashForeground). See docs/design/noise-system.md "Phase 2".
+#if NOISE_SYSTEM_ENABLED
+#define MAX_MONSTER_ALERTS_PER_TURN 64
+#define MONSTER_ALERT_FLICKER_MS    90
+static const color noiseAggroColor       = {100, 18, 18,  0, 0, 0, 0, false}; // reddish -- "there you are!"
+static const color noiseInvestigateColor = {65,  20, 100, 0, 0, 0, 0, false}; // hallucination-ish purple -- "huh?"
+typedef struct { pos loc; enum displayGlyph glyph; } monsterAlert;
+static monsterAlert monsterAlertBuffer[MAX_MONSTER_ALERTS_PER_TURN];
+static short monsterAlertCount = 0;
+#endif
+
+void recordMonsterAlert(pos loc, enum displayGlyph glyph) {
+#if NOISE_SYSTEM_ENABLED
+    if (monsterAlertCount < MAX_MONSTER_ALERTS_PER_TURN) {
+        monsterAlertBuffer[monsterAlertCount].loc = loc;
+        monsterAlertBuffer[monsterAlertCount].glyph = glyph;
+        monsterAlertCount++;
+    }
+#else
+    (void)loc; (void)glyph;
+#endif
+}
+
+void flushMonsterAlerts(void) {
+#if NOISE_SYSTEM_ENABLED
+    short i, cycle, oldRNG;
+    boolean fastForward = false;
+    enum displayGlyph dchar;
+    color fc, bc;
+
+    if (monsterAlertCount <= 0) {
+        return;
+    }
+    // Automation / playback fast-forward: drain without animating (same discipline as the ripple flush).
+    if (rogue.autoPlayingLevel || rogue.automationActive || rogue.playbackFastForward) {
+        monsterAlertCount = 0;
+        return;
+    }
+
+    oldRNG = rogue.RNG;
+    rogue.RNG = RNG_COSMETIC;
+
+    // Concurrent flicker: '!' flickers twice, '?' once (cycle 0 only). All tells of a cycle animate
+    // together, one shared pause -- a roomful of woken monsters costs one flicker's wait, not N.
+    for (cycle = 0; cycle < 2 && !fastForward; cycle++) {
+        for (i = 0; i < monsterAlertCount; i++) {
+            const monsterAlert *a = &monsterAlertBuffer[i];
+            if (cycle == 1 && a->glyph != (enum displayGlyph)'!') {
+                continue;
+            }
+            getCellAppearance(a->loc, &dchar, &fc, &bc);
+            bakeColor(&bc);
+            plotCharWithColor(a->glyph, mapToWindow(a->loc),
+                              (a->glyph == (enum displayGlyph)'!') ? &noiseAggroColor : &noiseInvestigateColor,
+                              &bc);
+        }
+        if (pauseAnimation(MONSTER_ALERT_FLICKER_MS, PAUSE_BEHAVIOR_DEFAULT)) {
+            fastForward = true;
+        }
+        for (i = 0; i < monsterAlertCount; i++) {
+            const monsterAlert *a = &monsterAlertBuffer[i];
+            if (cycle == 1 && a->glyph != (enum displayGlyph)'!') {
+                continue;
+            }
+            refreshDungeonCell(a->loc); // restore the cell's true appearance
+        }
+        if (!fastForward && pauseAnimation(MONSTER_ALERT_FLICKER_MS, PAUSE_BEHAVIOR_DEFAULT)) {
+            fastForward = true;
+        }
+    }
+
+    // Final restore in case a fast-forward left a glyph drawn.
+    for (i = 0; i < monsterAlertCount; i++) {
+        refreshDungeonCell(monsterAlertBuffer[i].loc);
+    }
+    monsterAlertCount = 0;
     rogue.RNG = oldRNG;
 #endif
 }
@@ -2715,6 +2898,7 @@ void nextBrogueEvent(rogueEvent *returnEvent, boolean textInput, boolean colorsD
         if (rogue.creaturesWillFlashThisTurn) {
             displayMonsterFlashes(true);
         }
+        flushMonsterAlerts(); // iOS port (Brogue SE): Phase 2 ?/! tells (no-op on quiet turns)
         do {
             nextKeyOrMouseEvent(returnEvent, textInput, colorsDance); // No mouse clicks outside of the window will register.
         } while (returnEvent->eventType == MOUSE_UP && !locIsInWindow((windowpos){ returnEvent->param1, returnEvent->param2 }));
@@ -5159,6 +5343,12 @@ short printMonsterInfo(creature *monst, short y, boolean dim, boolean highlight)
             } else if (monst->creatureState == MONSTER_FLEEING) {
                 printString("     (Fleeing)      ", 0, y++, (dim ? &darkGray : &gray), &black, 0);
             } else if (monst->creatureState == MONSTER_WANDERING) {
+#if NOISE_SYSTEM_ENABLED
+                if (monst->bookkeepingFlags & MB_INVESTIGATING) {
+                    // iOS port (Brogue SE): noise system -- heading to a heard-noise cell to look (not hunting).
+                    printString("  (Investigating)   ", 0, y++, (dim ? &darkGray : &gray), &black, 0);
+                } else
+#endif
                 if ((monst->bookkeepingFlags & MB_FOLLOWER) && monst->leader && (monst->leader->info.flags & MONST_IMMOBILE)) {
                     // follower of an immobile leader -- i.e. a totem
                     printString("    (Worshiping)    ", 0, y++, (dim ? &darkGray : &gray), &black, 0);

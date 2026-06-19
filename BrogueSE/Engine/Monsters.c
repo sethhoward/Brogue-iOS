@@ -124,6 +124,7 @@ void initializeMonster(creature *monst, boolean itemPossible) {
     monst->newPowerCount = monst->totalPowerCount = 0;
     monst->targetCorpseLoc = INVALID_POS;
     monst->lastSeenPlayerAt = INVALID_POS;
+    monst->investigateLoc = INVALID_POS; // iOS port (Brogue SE): noise system -- no heard noise to investigate yet
     monst->targetWaypointIndex = -1;
     for (int i=0; i < MAX_WAYPOINT_COUNT; i++) {
         monst->waypointAlreadyVisited[i] = rand_range(0, 1);
@@ -1758,6 +1759,8 @@ short distanceBetween(pos loc1, pos loc2) {
 void alertMonster(creature *monst) {
     monst->creatureState = (monst->creatureMode == MODE_PERM_FLEEING ? MONSTER_FLEEING : MONSTER_TRACKING_SCENT);
     monst->lastSeenPlayerAt = player.loc;
+    monst->bookkeepingFlags &= ~MB_INVESTIGATING; // iOS port (Brogue SE): a real target supersedes a vague noise
+    monst->investigateLoc = INVALID_POS;
 }
 
 void wakeUp(creature *monst) {
@@ -1849,7 +1852,15 @@ static boolean awareOfTarget(creature *observer, creature *target) {
         && !(pmapAt(observer->loc)->flags & IN_FIELD_OF_VIEW)) {
         // observer not hunting and player-target not in field of view
         retval = false;
-    } else if (perceivedDistance <= awareness) {
+    } else if (perceivedDistance <= awareness
+#if NOISE_SYSTEM_ENABLED
+               // iOS port (Brogue SE): Phase 2 -- the visual spot roll no longer wakes a SLEEPING
+               // monster (its eyes are closed). A sleeper wakes by SOUND (checkPlayerHeard) or damage;
+               // an awake-but-unaware (wandering) monster still gets this sight roll. This is what makes
+               // a quiet approach a real backstab. See docs/design/noise-system.md "Phase 2".
+               && observer->creatureState != MONSTER_SLEEPING
+#endif
+               ) {
         // within range but currently unaware
         retval = rand_percent(25);
     } else {
@@ -1881,6 +1892,107 @@ static void wanderToward(creature *monst, pos destination) {
         }
     }
 }
+
+#if NOISE_SYSTEM_ENABLED
+// iOS port (Brogue SE): Phase 2 -- monsters hear the player. SUBSTANTIVE (changes monster behaviour, so
+// real rand_percent, not the cosmetic player-hears-monster roll). See docs/design/noise-system.md.
+enum monsterHearing { HEARD_NONE = 0, HEARD_FAINT, HEARD_LOUD };
+
+// The generic noise->hearing primitive: does `monst` hear a noise of `strength` emitted at `noiseLoc`,
+// given the sound cost-distance `soundDist` from that source to the monster? HEARD_FAINT -> the monster
+// only knows roughly where it came from (investigate); HEARD_LOUD -> it knows exactly (aggro). The player
+// check below is its first caller; a thrown-dagger distraction (deferred) will call it with the landing
+// cell + a flood from there. (Static for now; promote to extern when the dart phase lands.)
+static enum monsterHearing monsterHearsNoise(creature *monst, pos noiseLoc, short strength, short soundDist) {
+    short hearChance;
+    (void)noiseLoc; // unused by the roll (soundDist already encodes distance); kept for the generic contract
+    if (strength <= NOISE_PLAYER_SILENT          // silent action -- nothing to hear
+        || soundDist >= 30000                    // no sound path to the source (sealed off)
+        || soundDist > rogue.stealthRange * 2) { // beyond earshot -- kept tight to today's stealth reach
+        return HEARD_NONE;
+    }
+    hearChance = clamp(NOISE_HEAR_BASE + strength
+                       + (soundDist <= NOISE_HEAR_NEARFIELD_RADIUS
+                          ? NOISE_HEAR_NEARFIELD_BONUS
+                          : -NOISE_HEAR_FALLOFF_PER_TILE * (soundDist - NOISE_HEAR_NEARFIELD_RADIUS)),
+                       0, NOISE_HEAR_CEILING);
+    if (!rand_percent(hearChance)) {
+        return HEARD_NONE;
+    }
+    return (strength >= NOISE_HEAR_AGGRO_LOUDNESS || soundDist <= 1) ? HEARD_LOUD : HEARD_FAINT;
+}
+
+// The player-noise channel: does this monster hear the player's action this turn, and if so react.
+// HEARD_LOUD -> full aggro (alertMonster, wakes the horde); HEARD_FAINT -> investigate (wander to the
+// noise cell; move away after and it finds nothing). Queues the ?/! tell (visible monsters) + debug log.
+static enum monsterHearing checkPlayerHeard(creature *monst) {
+    enum monsterHearing heard;
+    if (rogue.playerNoise <= NOISE_PLAYER_SILENT) {
+        return HEARD_NONE; // the player held still this turn -- emitted no sound
+    }
+    heard = monsterHearsNoise(monst, player.loc, rogue.playerNoise, soundDistanceAt(monst->loc));
+    if (heard == HEARD_LOUD) {
+        wakeUp(monst); // full hunt + alert nearby horde-mates (alertMonster + ticks, like being spotted)
+        if (canSeeMonster(monst)) {
+            recordMonsterAlert(monst->loc, (enum displayGlyph)'!');
+        }
+#if D_NOISE_DEBUG
+        message("[noise] a monster has heard you", 0);
+#endif
+    } else if (heard == HEARD_FAINT) {
+        // Investigate -- come LOOK at where the sound was, but do NOT start hunting. The monster enters the
+        // MB_INVESTIGATING state: it paths to the exact noise cell (investigateLoc), keeps doing the normal
+        // sight checks, and escalates to a real hunt only if it SPOTS you (or hears you LOUD). If it arrives
+        // and you're gone, it gives up and wanders. This is what preserves the stealth radius: make a noise
+        // and stay -> it walks over and the 25% sight roll eventually catches you; make a noise and leave the
+        // room before it spots you -> it finds an empty cell and you've escaped. (Pathing is by a real
+        // distance map to the cell -- not the coarse waypoint system that earlier sent heard monsters the
+        // wrong way; see monsterPathTowardLoc + the WANDERING block in monstersTurn.)
+        if (monst->creatureState == MONSTER_SLEEPING) {
+            monst->creatureState = MONSTER_WANDERING; // wake it, but only enough to investigate
+        }
+        monst->investigateLoc = player.loc;
+        monst->bookkeepingFlags |= MB_INVESTIGATING;
+        // The '?' "searching" tell is pulsed every turn while investigating (in the WANDERING nav below),
+        // not once here -- so a visible investigator's glyph visibly cycles with '?' until it gives up or hunts.
+#if D_NOISE_DEBUG
+        message("[noise] a monster hears something", 0);
+#endif
+    }
+    return heard;
+}
+
+// iOS port (Brogue SE): Phase 2 feel/test aid -- if the player made noise this turn and a VISIBLE,
+// not-yet-hunting enemy sits at or near the player's audible radius, queue the player's sound-footprint
+// ripple (drawn out to that radius along the sound map). Re-evaluated every turn, so it keeps showing
+// while you make noise next to an unaware creature and stops once it starts hunting (or leaves range).
+// One ripple from the player covers all directions, so a roomful of monsters is handled at once.
+void recordPlayerNoiseRippleIfNeeded(void) {
+    short r;
+    if (rogue.playerNoise <= NOISE_PLAYER_SILENT) {
+        return; // silent this turn -- no footprint to show
+    }
+    // The audible radius: the cost-distance at which hearChance is still > 0 for this loudness (mirror of
+    // monsterHearsNoise), capped by the earshot gate and a sane animation bound.
+    r = NOISE_HEAR_NEARFIELD_RADIUS + max(0, NOISE_HEAR_BASE + rogue.playerNoise) / NOISE_HEAR_FALLOFF_PER_TILE;
+    r = min(r, rogue.stealthRange * 2);
+    r = clamp(r, 1, NOISE_PLAYER_RIPPLE_MAX_RADIUS);
+    for (creatureIterator it = iterateCreatures(monsters); hasNextCreature(it);) {
+        creature *monst = nextCreature(&it);
+        if (monst->creatureState != MONSTER_ALLY
+            && monst->creatureState != MONSTER_TRACKING_SCENT       // not already hunting ("until it hunts")
+            && !(monst->bookkeepingFlags & MB_CAPTIVE)
+            && canSeeMonster(monst)
+            && monstersAreEnemies(&player, monst)
+            && soundDistanceAt(monst->loc) <= r + NOISE_PLAYER_RIPPLE_MARGIN) {
+            recordPlayerNoiseRipple(r);
+            return;
+        }
+    }
+}
+#else
+void recordPlayerNoiseRippleIfNeeded(void) {}
+#endif
 
 // iOS port (iBrogue): base % chance to sense a pursuer giving up the chase; the ring of awareness
 // (rogue.awarenessBonus, +20/enchant) is added on top. Kept low for the typical character -- who
@@ -1936,11 +2048,40 @@ void updateMonsterState(creature *monst) {
         }
     }
 
+#if NOISE_SYSTEM_ENABLED
+    // iOS port (Brogue SE): Phase 2 sound channel. An unaware (sleeping/wandering) non-ally monster may
+    // HEAR the player's action this turn -- the only thing that wakes a sleeper now that the visual spot
+    // roll no longer applies to them (see awareOfTarget). LOUD/point-blank -> full aggro (handled here,
+    // return so the sight/scent chain below can't immediately downgrade it); FAINT -> investigate the
+    // noise cell (state set to WANDERING, then fall through so the chain can still UPGRADE to a hunt if
+    // the monster also sees you). Runs alongside, not instead of, sight/scent.
+    if (monst->creatureMode == MODE_NORMAL
+        && (monst->creatureState == MONSTER_SLEEPING || monst->creatureState == MONSTER_WANDERING)
+        && !(monst->bookkeepingFlags & MB_CAPTIVE)) { // a captive shouldn't be roused by your noise
+        // LOUD -> aggro (alertMonster/wakeUp set TRACKING_SCENT): return so the chain's
+        // "TRACKING_SCENT && !awareOfPlayer" branch can't immediately downgrade the fresh alert.
+        // FAINT -> investigate (WANDERING + MB_INVESTIGATING): fall through -- nothing in the chain
+        // downgrades a wanderer, and the chain's "wandering && sees you -> alertMonster" can still
+        // escalate the investigator into a real hunt the moment it spots you.
+        if (checkPlayerHeard(monst) == HEARD_LOUD) {
+            return;
+        }
+    }
+#endif
+
     if ((monst->creatureState == MONSTER_WANDERING)
         && awareOfPlayer
         && (pmapAt(player.loc)->flags & IN_FIELD_OF_VIEW)) {
         // If wandering and you notice the player, start tracking the scent.
         alertMonster(monst);
+#if NOISE_SYSTEM_ENABLED && D_NOISE_DEBUG
+        message("[noise] a monster has spotted you", 0); // visual channel (the ! tell fires via alertMonster path)
+#endif
+#if NOISE_SYSTEM_ENABLED
+        if (canSeeMonster(monst)) {
+            recordMonsterAlert(monst->loc, (enum displayGlyph)'!'); // spotted -> "!" tell, like hearing loud
+        }
+#endif
     } else if (monst->creatureState == MONSTER_SLEEPING) {
         // if sleeping, the monster has a chance to awaken
         if (awareOfPlayer) {
@@ -2330,6 +2471,29 @@ static void pathTowardCreature(creature *monst, creature *target) {
 
     moveMonsterPassivelyTowards(monst, targetLoc, (monst->creatureState != MONSTER_ALLY));
 }
+
+#if NOISE_SYSTEM_ENABLED
+// iOS port (Brogue SE): step one move toward an arbitrary cell (not a creature, not via scent or the coarse
+// waypoint system) -- used by the noise-investigate behaviour to walk to a heard-noise cell. Greedy when the
+// cell is in a traversible straight line; otherwise a real distance-map flood routes it around walls. Returns
+// true if it actually moved (false = arrived/blocked, so the caller can give up). See noise-system.md "Phase 2".
+static boolean monsterPathTowardLoc(creature *monst, pos loc) {
+    short dir;
+    short **distMap;
+    if (traversiblePathBetween(monst, loc.x, loc.y)) {
+        return moveMonsterPassivelyTowards(monst, loc, false);
+    }
+    distMap = allocGrid();
+    fillGrid(distMap, 0);
+    calculateDistances(distMap, loc.x, loc.y, T_DIVIDES_LEVEL, monst, true, false);
+    dir = nextStep(distMap, monst->loc, monst, true);
+    freeGrid(distMap);
+    if (dir == NO_DIRECTION) {
+        return false;
+    }
+    return moveMonsterPassivelyTowards(monst, posNeighborInDirection(monst->loc, dir), false);
+}
+#endif
 
 static boolean creatureEligibleForSwarming(creature *monst) {
     if ((monst->info.flags & (MONST_IMMOBILE | MONST_GETS_TURN_ON_ACTIVATION | MONST_MAINTAINS_DISTANCE))
@@ -4232,6 +4396,22 @@ void monstersTurn(creature *monst) {
                 monsterMillAbout(monst, 30); // Other followers mill about like your allies do.
             }
         } else {
+#if NOISE_SYSTEM_ENABLED
+            // iOS port (Brogue SE): noise-investigate. If we heard a noise, walk to that exact cell (not a
+            // coarse waypoint) to look. On arrival -- or if the path is blocked -- we found nothing: give up
+            // and resume normal wandering. (Spotting the player en route escalates us to a hunt up in
+            // updateMonsterState's "wandering && sees you" branch, which clears MB_INVESTIGATING.)
+            if ((monst->bookkeepingFlags & MB_INVESTIGATING) && isPosInMap(monst->investigateLoc)) {
+                if (!posEq(monst->loc, monst->investigateLoc)
+                    && monsterPathTowardLoc(monst, monst->investigateLoc)) {
+                    // (The "searching" '?' tell is the ambient glyph blink driven off the idle shimmer
+                    // clock -- see gNoiseInvestigateBlinkOn / getCellAppearance -- not a per-turn pulse.)
+                    return; // stepped toward the noise
+                }
+                monst->bookkeepingFlags &= ~MB_INVESTIGATING; // arrived / blocked -> give up
+                monst->investigateLoc = INVALID_POS;
+            }
+#endif
             // Step toward the chosen waypoint.
             dir = NO_DIRECTION;
             if (isValidWanderDestination(monst, monst->targetWaypointIndex)) {
@@ -4412,6 +4592,35 @@ static short terrainNoiseModifier(pos loc) {
     }
     return best;
 }
+
+// iOS port (Brogue SE): the player's BASE loudness (no per-action spike) for the Phase-2 monster-hears-
+// player check. A NEW quantity, deliberately NOT currentStealthRange -- that bakes in darkness/shadow
+// (visual concealment, irrelevant to sound) and lacks terrain/levitation. Shares armor / aggravation /
+// stealth-ring with stealth; adds terrain underfoot and levitation. See docs/design/noise-system.md.
+short playerNoiseLevel(void) {
+    short noise;
+    if (player.status[STATUS_AGGRAVATING] > 0) {
+        return NOISE_PLAYER_AGGRAVATED; // magically loud -- drowns out everything else
+    }
+    noise = armorStealthAdjustment(rogue.armor) * NOISE_PLAYER_ARMOR_SCALE; // heavy armor clatters (>=0)
+    if (player.status[STATUS_LEVITATING]) {
+        noise += NOISE_PLAYER_LEVITATE;          // feet off the ground -- quietest travel, no terrain contact
+    } else {
+        noise += terrainNoiseModifier(player.loc); // crunchy grass +, soft carpet -
+    }
+    noise -= rogue.stealthBonus * NOISE_PLAYER_STEALTH_RING_SCALE; // ring of stealth muffles
+    return noise;
+}
+
+// Set rogue.playerNoise to this turn's emitted loudness (base + an action spike). Called at the action
+// chokepoints (step = spike 0, melee = NOISE_PLAYER_MELEE, throw = NOISE_PLAYER_THROW); reset to
+// NOISE_PLAYER_SILENT each playerTurnEnded so a still/resting player emits nothing and is never heard.
+void playerEmitNoise(short spike) {
+    rogue.playerNoise = playerNoiseLevel() + spike;
+}
+#else
+short playerNoiseLevel(void) { return 0; }
+void playerEmitNoise(short spike) { (void)spike; rogue.playerNoise = NOISE_PLAYER_SILENT; }
 #endif
 
 // iOS port (Brogue SE): noise system. Called when a monster takes a self-willed step from

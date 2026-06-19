@@ -6989,6 +6989,12 @@ static void throwItem(item *theItem, creature *thrower, pos targetLoc, short max
 
     thrower->ticksUntilTurn = thrower->attackSpeed;
 
+    if (thrower == &player) {
+        playerEmitNoise(NOISE_PLAYER_THROW); // iOS port (Brogue SE): noise system -- the throw itself is
+                                             // heard at the player's cell. (The item's LANDING noise --
+                                             // the distraction tool -- is a deferred phase.)
+    }
+
     if (thrower != &player
         && (pmapAt(originLoc)->flags & IN_FIELD_OF_VIEW)) {
 

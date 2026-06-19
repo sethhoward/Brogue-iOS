@@ -2902,6 +2902,14 @@ void playerTurnEnded() {
 
     rogue.justRested = false;
     rogue.justSearched = false;
+#if NOISE_SYSTEM_ENABLED
+    // iOS port (Brogue SE): noise system Phase 2. Monsters have now acted on this turn's player noise, so:
+    // (1) queue the player's sound-footprint ripple if a visible, still-unaware enemy is near earshot (a
+    // feel/test aid -- read while playerNoise is still set); then (2) reset loudness to silent. Silence is
+    // the default; only an explicit noisy action (step/melee/throw) sets it. See noise-system.md "Phase 2".
+    recordPlayerNoiseRippleIfNeeded();
+    rogue.playerNoise = NOISE_PLAYER_SILENT;
+#endif
     updateFlavorText();
 
     if (!rogue.updatedMapToShoreThisTurn) {
