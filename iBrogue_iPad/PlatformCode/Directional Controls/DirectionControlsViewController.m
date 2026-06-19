@@ -81,7 +81,14 @@ static NSInteger const kDragHintMaxShows = 3;
     self.directionalButton = (UIButton *)sender;
     self.buttonDown = YES;
     
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.4 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+    // iOS port (Brogue SE): initial delay lowered 0.4 -> 0.1 so the first auto-repeat lands inside the
+    // noise system's pre-roll window (NOISE_RIPPLE_PREROLL_MS in Rogue.h, currently 160ms), letting the
+    // engine recognise the first step of a hold as continuous movement and suppress its noise ripple.
+    // COUPLING: keep this comfortably below NOISE_RIPPLE_PREROLL_MS. A touch tap is short enough that 0.1s
+    // doesn't cause accidental extra steps here -- unlike a physical key tap, which is why the keyboard
+    // (BrogueViewController.swift) keeps a safe 0.3s and accepts its first-step tick instead. Tradeoff
+    // (see KNOWN_CAVEATS.md): a d-pad press held >0.1s starts running sooner than with the old 0.4s.
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.1 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         if (self.buttonDown) {
             [self.repeatTimer invalidate];
             self.repeatTimer = nil;

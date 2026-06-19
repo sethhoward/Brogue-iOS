@@ -523,6 +523,16 @@ void initializeRogue(uint64_t seed) {
         theItem = addItemToPack(theItem);
     }
 
+    if (D_TELEPATHY_POTION_START) {
+        // iOS port (Brogue SE): playtest grant of 3 potions of telepathy so off-screen monsters are
+        // visible while tuning the noise system. Added deterministically here (not as a recorded input),
+        // so it reconstructs identically on replay.
+        theItem = generateItem(POTION, POTION_TELEPATHY);
+        theItem->quantity = 3;
+        identify(theItem);
+        theItem = addItemToPack(theItem);
+    }
+
     DEBUG {
         theItem = generateItem(RING, RING_CLAIRVOYANCE);
         theItem->enchant1 = max(DROWS, DCOLS);

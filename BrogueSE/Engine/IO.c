@@ -594,6 +594,24 @@ void mainInputLoop() {
 
         const pos originLoc = player.loc;
 
+#if NOISE_SYSTEM_ENABLED
+        // iOS port (Brogue SE): play the just-completed turn's off-screen-movement noise here, in the
+        // input loop, rather than mid-turn in playerTurnEnded. The bottom button bar is a transient
+        // overlay (Buttons.c buttonInputLoop save/overlay/restore) that lives only on screen, never in
+        // the persistent display buffer, so the ripple's commitDraws would reconcile it away and flicker
+        // it every step. We re-apply the bar overlay around the animation so the committed frames keep it.
+        // See docs/design/noise-system.md ("button-bar flicker").
+        if (hasPendingNoise()) {
+            screenDisplayBuffer noiseButtonsBuf;
+            clearDisplayBuffer(&noiseButtonsBuf);
+            drawButtonsInState(&state, &noiseButtonsBuf);
+            const SavedDisplayBuffer noiseRbuf = saveDisplayBuffer();
+            overlayDisplayBuffer(&noiseButtonsBuf);
+            flushNoiseRipples();
+            restoreDisplayBuffer(&noiseRbuf);
+        }
+#endif
+
         if (playingBack && rogue.cursorMode) {
             temporaryMessage("Examine what? (<hjklyubn>, mouse, or <tab>)", 0);
         }
@@ -2145,6 +2163,148 @@ void colorFlash(const color *theColor, unsigned long reqTerrainFlags,
             fastForward = true;
         }
     }
+}
+
+// iOS port (Brogue SE): noise system, phase 0. See docs/design/noise-system.md.
+// A transient, per-player-turn buffer of cells where an off-screen monster made a perceptible
+// noise. Monsters record events as they move (recordNoiseEvent, from Monsters.c); the events are
+// drained once per turn (flushNoiseRipples, from Time.c). This is purely presentation state: it is
+// never saved (it is rebuilt every turn) and never drives game logic, so it cannot affect replay
+// determinism. The animation uses RNG_COSMETIC like every other flash.
+#if NOISE_SYSTEM_ENABLED
+#define MAX_NOISE_EVENTS_PER_TURN   256
+// pale grey/white -- reads as an abstract "sensation", not an elemental effect:
+static const color noiseFlashColor = {85, 85, 100, 0, 0, 0, 0, false};
+static pos noiseEventBuffer[MAX_NOISE_EVENTS_PER_TURN];
+static short noiseEventCount = 0;
+// I/O-layer continuous-movement memory: true while the player is mid-hold / rapid-tapping, so the
+// release (key-up) step at the tail of a burst is suppressed too. Platform-agnostic -- driven only
+// by the cross-platform input-pending check, not by any iOS held-key state.
+static boolean noiseMovementWasContinuous = false;
+#endif
+
+// iOS port (Brogue SE): true if any noise events are waiting to be played. Lets the caller skip the
+// button-overlay/save/restore dance on quiet turns (see the flush site in mainInputLoop).
+boolean hasPendingNoise(void) {
+#if NOISE_SYSTEM_ENABLED
+    return noiseEventCount > 0;
+#else
+    return false;
+#endif
+}
+
+// iOS port (Brogue SE): record a noise event at loc, to be drawn on the next flush.
+void recordNoiseEvent(pos loc) {
+#if NOISE_SYSTEM_ENABLED
+    if (noiseEventCount < MAX_NOISE_EVENTS_PER_TURN) {
+        noiseEventBuffer[noiseEventCount++] = loc;
+    }
+    // On overflow we silently drop the event; 256 simultaneous off-screen movers in one turn is
+    // far beyond any real level, and a missed cosmetic ripple is harmless.
+#else
+    (void)loc;
+#endif
+}
+
+#if NOISE_SYSTEM_ENABLED
+// iOS port (Brogue SE): draw/erase the hollow Chebyshev-distance ring of radius r around every
+// recorded noise event. draw==true hilites with the given strength; draw==false restores the
+// cell's true (hidden) appearance. r==0 is the single center cell.
+static void noiseRingApply(short r, boolean draw, short strength) {
+    short e, dx, dy, ix, iy;
+    for (e = 0; e < noiseEventCount; e++) {
+        for (dx = -r; dx <= r; dx++) {
+            for (dy = -r; dy <= r; dy++) {
+                if (max(abs(dx), abs(dy)) != r) {
+                    continue; // interior cell -- only the ring edge belongs to radius r
+                }
+                ix = noiseEventBuffer[e].x + dx;
+                iy = noiseEventBuffer[e].y + dy;
+                if (!coordinatesAreInMap(ix, iy)) {
+                    continue;
+                }
+                if (draw) {
+                    hiliteCell(ix, iy, &noiseFlashColor, strength, false);
+                } else {
+                    refreshDungeonCell((pos){ ix, iy });
+                }
+            }
+        }
+    }
+}
+#endif // NOISE_SYSTEM_ENABLED
+
+// iOS port (Brogue SE): play every noise event collected this player turn as one synchronized
+// animation -- a hollow box expanding from each source, all rings advancing together (one shared
+// pause per frame), so a pack of monsters costs one ripple's worth of wait, not N. Only a deliberate,
+// paused player should "hear" the noise; continuous/automated movement skips it (see the two gates
+// below). Drains the buffer.
+void flushNoiseRipples(void) {
+#if NOISE_SYSTEM_ENABLED
+    short k, strength, oldRNG, perFramePause;
+    boolean fastForward = false;
+
+    if (noiseEventCount <= 0) {
+        return;
+    }
+
+    // Gate 1 -- autopilot. Auto-explore (x), travel, and autoplay (a) run many turns in a burst;
+    // ripples would stutter every step and add nothing. Drain silently, never animate.
+    if (rogue.automationActive || rogue.autoPlayingLevel) {
+        noiseEventCount = 0;
+        noiseMovementWasContinuous = false;
+        return;
+    }
+
+    // Gate 2 -- continuous movement, detected entirely at the I/O layer (no platform held-key state).
+    // Pre-roll: pause briefly while drawing NOTHING and watch for input. A held key / d-pad repeat
+    // lands *during* the first ring's pause -- after that ring is committed -- so the pre-roll moves
+    // that detection window ahead of any drawing.
+    //   - input arrives  => we're mid-hold / rapid-tapping: skip, and remember it's continuous.
+    //   - no input, but we WERE continuous => this is the release (key-up) step at the tail of the
+    //     burst: skip it too, and exit continuous movement. (Without this, the last step always
+    //     animated, which felt wrong.)
+    //   - no input, wasn't continuous => a genuine deliberate, paused step: fall through and animate.
+    // The first step of a hold is indistinguishable from a deliberate step here (no input is pending
+    // yet -- the d-pad adds a 0.4s delay before repeats), so it animates once; that single "tick" on
+    // starting to move, then silence while held, reads fine.
+    if (rogue.playbackFastForward || pauseAnimation(NOISE_RIPPLE_PREROLL_MS, PAUSE_BEHAVIOR_DEFAULT)) {
+        noiseMovementWasContinuous = true;
+        noiseEventCount = 0;
+        return;
+    }
+    if (noiseMovementWasContinuous) {
+        noiseMovementWasContinuous = false;
+        noiseEventCount = 0;
+        return;
+    }
+
+    oldRNG = rogue.RNG;
+    rogue.RNG = RNG_COSMETIC;
+
+    perFramePause = max(1, NOISE_RIPPLE_MS / NOISE_RIPPLE_RADIUS);
+
+    for (k = 1; k <= NOISE_RIPPLE_RADIUS && !fastForward; k++) {
+        noiseRingApply(k - 1, false, 0);                                 // erase the previous ring
+        strength = NOISE_RIPPLE_MAX_STRENGTH * (NOISE_RIPPLE_RADIUS - k + 1) / NOISE_RIPPLE_RADIUS;
+        noiseRingApply(k, true, strength);                              // draw the current ring
+        if (rogue.playbackFastForward || pauseAnimation(perFramePause, PAUSE_BEHAVIOR_DEFAULT)) {
+            fastForward = true;
+        }
+    }
+
+    // Restore every cell any ripple could have touched to its true (hidden) appearance.
+    noiseRingApply(NOISE_RIPPLE_RADIUS, false, 0);
+    {
+        short r;
+        for (r = 0; r < NOISE_RIPPLE_RADIUS; r++) {
+            noiseRingApply(r, false, 0);
+        }
+    }
+
+    noiseEventCount = 0;
+    rogue.RNG = oldRNG;
+#endif
 }
 
 #define bCurve(x)   (((x) * (x) + 11) / (10 * ((x) * (x) + 1)) - 0.1)

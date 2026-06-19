@@ -4342,6 +4342,51 @@ void setMonsterLocation(creature *monst, pos newLoc) {
     }
 }
 
+// iOS port (Brogue SE): noise system, phase 0. The single chokepoint for how loud a monster's
+// movement is, on a 0-100 "sound check" scale. Phase 0: every monster is fully audible. Phase 1
+// will read a per-monster base loudness from the catalog, subtract for MONST_FLIES, etc. -- keep
+// ALL movement-loudness policy here so adding that data stays localized.
+// See docs/design/noise-system.md.
+#if NOISE_SYSTEM_ENABLED
+static short noiseLevelForMonsterMove(const creature *monst) {
+    (void)monst; // phase 0 ignores the monster; the catalog field arrives in phase 1
+    return NOISE_SOUND_CHECK_CHANCE;
+}
+#endif
+
+// iOS port (Brogue SE): noise system, phase 0. Called when a monster takes a self-willed step from
+// (originX, originY) to its current loc. If the player could not see it step (origin not VISIBLE),
+// and it passes both gates, record a noise event anchored on its new cell. Anchoring on the
+// destination makes a hidden->visible step read as an "announcement" and avoids double-firing when
+// a monster steps into darkness (that step was witnessed; its next hidden step makes the noise).
+// Both gates are written so chance >= 100 short-circuits and draws ZERO substantive RNG, keeping
+// seeds/saves byte-identical to pre-noise builds; below 100 they use the substantive rand_percent
+// and become deterministic game state. See docs/design/noise-system.md.
+static void monsterEmitMovementNoise(creature *monst, short originX, short originY) {
+#if NOISE_SYSTEM_ENABLED
+    if (monst == &player) {
+        return; // player-generated noise is a later phase
+    }
+    if (pmap[originX][originY].flags & VISIBLE) {
+        return; // the player watched it step -- not "heard", seen
+    }
+    // Debug override: D_ALWAYS_DETECT_SOUND forces every off-screen move to be heard, bypassing both
+    // gates entirely (and drawing no RNG). Flip it off to exercise the real chances below. In phase 0
+    // those chances are pinned at 100 anyway, so the override and the gates currently agree; the toggle
+    // earns its keep once phase 1 gives monsters real loudness / the player real perception.
+    if (!D_ALWAYS_DETECT_SOUND) {
+        short loudness = noiseLevelForMonsterMove(monst); // gate 1: monster's sound check
+        if (!(loudness >= 100 || rand_percent(loudness))) {
+            return; // moved quietly enough to go unheard
+        }
+        if (!(NOISE_PERCEPTION_CHANCE >= 100 || rand_percent(NOISE_PERCEPTION_CHANCE))) {
+            return; // gate 2: player wasn't keen enough to sense it
+        }
+    }
+    recordNoiseEvent(monst->loc); // monst->loc is already the destination
+#endif
+}
+
 /// @brief Tries to move a monster one space or perform a melee attack in the given direction.
 /// Handles confused movement, turn-consuming non-movement actions like vomiting, and unique
 /// attack patterns (axe-like, whip, spear). Fast-moving monsters get 2 turns, moving one
@@ -4527,6 +4572,9 @@ boolean moveMonster(creature *monst, short dx, short dy) {
                 // okay we're moving!
                 setMonsterLocation(monst, (pos){ newX, newY });
                 monst->ticksUntilTurn = monst->movementSpeed;
+                // iOS port (Brogue SE): noise system phase 0 -- a self-willed step the player can't
+                // see makes a perceptible noise. (x, y) is the origin; monst->loc is now the dest.
+                monsterEmitMovementNoise(monst, x, y);
                 return true;
             }
         }

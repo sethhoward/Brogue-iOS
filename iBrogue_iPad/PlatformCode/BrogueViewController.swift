@@ -207,7 +207,16 @@ final class BrogueViewController: UIViewController {
     // delay, then at a steady interval. See keyRepeatInitialDelay/keyRepeatInterval and isRepeatable(...).
     fileprivate var keyRepeatTimer: Timer?
     fileprivate var repeatingKey: QueuedKeyEvent?
-    private let keyRepeatInitialDelay: TimeInterval = 0.4
+    // iOS port (Brogue SE): kept at a safe 0.3s as a tap-vs-hold guard. A physical key tap lasts ~100-150ms,
+    // so a shorter delay (we briefly tried 0.1s to match the d-pad) makes a normal tap auto-repeat into an
+    // accidental second step. Because 0.3s is ABOVE the noise system's pre-roll window
+    // (NOISE_RIPPLE_PREROLL_MS in Rogue.h, 160ms), the first step of a HELD keyboard direction can't be
+    // recognised as continuous movement and animates one "you heard something" tick before repeats begin --
+    // this is the documented graceful degradation (see KNOWN_CAVEATS.md "Noise system / movement key-repeat"),
+    // accepted in favour of correct tap behaviour. The d-pad (DirectionControlsViewController.m) uses 0.1s
+    // instead: a touch tap is shorter than a key tap, so it stays under the pre-roll and gets full
+    // first-step suppression without accidental steps.
+    private let keyRepeatInitialDelay: TimeInterval = 0.3
     private let keyRepeatInterval: TimeInterval = 0.1
 
     // ── Safe-area action buttons ─────────────────────────────────────────

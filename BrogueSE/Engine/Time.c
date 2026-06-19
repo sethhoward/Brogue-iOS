@@ -2725,6 +2725,17 @@ void playerTurnEnded() {
             displayLevel();
         }
 
+        // iOS port (Brogue SE): noise ripples are PLAYED from mainInputLoop, where the bottom button
+        // bar (a transient on-screen overlay, not in the persistent display buffer) can be re-applied
+        // around the animation's commitDraws -- otherwise it flickers off every step. Here we only drain
+        // events during automated multi-turn movement (travel/explore/rest/search/autoplay), which never
+        // animates, so they don't pile up into a burst when control returns to the player. The automation
+        // gate inside flushNoiseRipples discards without animating or committing. See
+        // docs/design/noise-system.md.
+        if (rogue.automationActive || rogue.autoPlayingLevel) {
+            flushNoiseRipples();
+        }
+
         for (creatureIterator it = iterateCreatures(monsters); hasNextCreature(it);) {
             creature *monst = nextCreature(&it);
             if (canSeeMonster(monst) && !(monst->bookkeepingFlags & (MB_WAS_VISIBLE | MB_ALREADY_SEEN))) {

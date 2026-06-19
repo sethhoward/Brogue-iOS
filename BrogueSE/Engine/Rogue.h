@@ -100,6 +100,40 @@
 // initializeRogue, so it is recording-safe. Flip to 0 to ship.
 #define D_EMPTY_BOTTLE_START            0//(WIZARD_MODE && 0)
 
+// iOS port (Brogue SE): start with 3 potions of telepathy for playtesting the noise system -- telepathy
+// reveals off-screen monsters so you can correlate the noise box-ripples with the creatures making them.
+// Granted deterministically in initializeRogue, so it is recording-safe. Flip to 0 to ship.
+#define D_TELEPATHY_POTION_START        1//(WIZARD_MODE && 0)
+
+// iOS port (Brogue SE): noise system, phase 0. A monster that takes a self-willed step while the
+// player cannot see it emits a perceptible "noise", drawn as a box that radiates from its new
+// cell ("you heard something"). Distance/terrain are deferred; both probability gates are pinned
+// at 100% for the feel-test. Modeled as deterministic game state (it will feed stealth/awareness
+// later), but the >=100 short-circuit on each gate guarantees ZERO substantive RNG draws now, so
+// seeds/saves stay byte-identical to pre-noise builds. See docs/design/noise-system.md.
+#define NOISE_SYSTEM_ENABLED            1   // single kill switch / pre-ship knob (flip to 0 to disable)
+#define NOISE_SOUND_CHECK_CHANCE        100 // monster "sound check" gate -- phase 0: always audible
+#define NOISE_PERCEPTION_CHANCE         100 // player "keen enough to sense it" gate -- phase 0: always
+#define D_ALWAYS_DETECT_SOUND           1   // debug: force every off-screen monster move to be heard,
+                                            // bypassing both gates (draws no RNG). Flip to 0 to use the
+                                            // chances above. (Pre-ship: see pre-ship-debug-checklist.md.)
+#define NOISE_RIPPLE_RADIUS             3   // tiles the box radiates out (fixed; distance is a later phase)
+#define NOISE_RIPPLE_MS                 300 // total ripple duration; fast-forwards/aborts on player input
+#define NOISE_RIPPLE_MAX_STRENGTH       60  // hilite strength of the innermost ring (fades outward)
+#define NOISE_RIPPLE_PREROLL_MS         160 // pre-roll drawn nothing; if input arrives (held key / repeat /
+                                            // queued taps) the ripple is skipped so only a deliberate,
+                                            // paused player "hears" it. PLATFORM CONTRACT (see
+                                            // docs/design/noise-system.md "Platform integration contract"):
+                                            // for held-movement suppression to work, BOTH the platform's
+                                            // key-repeat INITIAL delay (first press -> first repeat) and its
+                                            // REPEAT interval must be < this value, with jitter margin. If a
+                                            // platform synthesizes input with a longer artificial delay (iOS
+                                            // originally 0.4s; many OS native auto-repeats are 250-500ms),
+                                            // ripples leak on held steps. iOS d-pad uses 100ms (under this ->
+                                            // first step suppressed); iOS keyboard keeps 300ms (a key tap is
+                                            // longer, so a shorter delay double-steps) and thus accepts a
+                                            // first-step tick. See docs/design/noise-system.md + KNOWN_CAVEATS.md.
+
 // If enabled, runs a benchmark for the performance of repeatedly updating the screen at the start of the game.
 // #define SCREEN_UPDATE_BENCHMARK
 
@@ -3338,6 +3372,9 @@ extern "C" {
     void flashForeground(short *x, short *y, const color **flashColor, short *flashStrength, short count, short frames);
     void flashCell(const color *theColor, short frames, short x, short y);
     void colorFlash(const color *theColor, unsigned long reqTerrainFlags, unsigned long reqTileFlags, short frames, short maxRadius, short x, short y);
+    void recordNoiseEvent(pos loc); // iOS port (Brogue SE): noise system phase 0 (see docs/design/noise-system.md)
+    void flushNoiseRipples(void);   // iOS port (Brogue SE): noise system phase 0
+    boolean hasPendingNoise(void);  // iOS port (Brogue SE): noise system phase 0 -- any events awaiting a flush?
     void printString(const char *theString, short x, short y, const color *foreColor, const color* backColor, screenDisplayBuffer *dbuf);
     short wrapText(char *to, const char *sourceText, short width);
     short printStringWithWrapping(const char *theString, short x, short y, short width, const color *foreColor,
