@@ -2431,89 +2431,145 @@ void flushNoiseRipples(void) {
 #endif
 }
 
-// iOS port (Brogue SE): Phase 2 -- the ?/! "tell" flicked over a monster when it transitions to
-// investigate ('?') or aggro/spotted ('!') via the monster-hears-player system. Recorded during the
-// monster turn (recordMonsterAlert, from Monsters.c, only for monsters the player can see) and flushed
-// once afterward beside displayMonsterFlashes. Pure presentation: never saved, never drives logic, draws
-// on RNG_COSMETIC like every other flash. Engine-side (no platform/RogueScene work -- same plot loop as
-// flashForeground). See docs/design/noise-system.md "Phase 2".
-#if NOISE_SYSTEM_ENABLED
-#define MAX_MONSTER_ALERTS_PER_TURN 64
-#define MONSTER_ALERT_FLICKER_MS    90
-static const color noiseAggroColor       = {100, 18, 18,  0, 0, 0, 0, false}; // reddish -- "there you are!"
-static const color noiseInvestigateColor = {65,  20, 100, 0, 0, 0, 0, false}; // hallucination-ish purple -- "huh?"
-typedef struct { pos loc; enum displayGlyph glyph; } monsterAlert;
-static monsterAlert monsterAlertBuffer[MAX_MONSTER_ALERTS_PER_TURN];
-static short monsterAlertCount = 0;
-#endif
+// iOS port (Brogue SE): THE COSMETIC ANIMATION LAYER. A small registry of RNG_COSMETIC, non-blocking
+// effects, advanced on the idle shimmer tick (advanceCosmeticAnimations, from the platform bridge beside
+// shuffleTerrainColors) and drawn as a DIRTY-CELL OVERLAY on top of getCellAppearance -- so it composites
+// over water/lava/hallucination shimmer without touching them. Effects play their full frame-life
+// regardless of input: never blocking, never fast-forward-erased. Never saved, never gates logic (same
+// seed+inputs => identical game regardless of what animated). Part 1 hosts the '!' alert glyph; the
+// ripples and the '?' investigate-blink migrate here in Part 2. See docs/guides/cosmetic-animation-layer.md.
+#define MAX_COSMETIC_EFFECTS        64
+#define MAX_COSMETIC_PAINTED_CELLS  1024  // headroom for ring effects (Part 2); cells painted in one frame
+#define CE_ALERT_FLICKER_FRAMES     6     // idle ticks per on/off half of the '!' flicker (~0.1s at 60Hz)
+#define CE_ALERT_LIFE_FRAMES        (4 * CE_ALERT_FLICKER_FRAMES) // two on/off cycles, then expire
 
-void recordMonsterAlert(pos loc, enum displayGlyph glyph) {
-#if NOISE_SYSTEM_ENABLED
-    if (monsterAlertCount < MAX_MONSTER_ALERTS_PER_TURN) {
-        monsterAlertBuffer[monsterAlertCount].loc = loc;
-        monsterAlertBuffer[monsterAlertCount].glyph = glyph;
-        monsterAlertCount++;
+static const color cosmeticAlertColor = {100, 18, 18, 0, 0, 0, 0, false}; // reddish '!' -- "there you are!"
+
+// Effect kinds hosted by the layer. Part 1: CE_ALERT_GLYPH only; Part 2 adds CE_RIPPLE_MONSTER,
+// CE_RIPPLE_PLAYER, CE_INVESTIGATE_BLINK. (File-local for now; promote to Rogue.h if a spawner ever
+// needs to take a kind parameter.)
+enum cosmeticEffectKind { CE_ALERT_GLYPH };
+
+typedef struct {
+    boolean active;
+    enum cosmeticEffectKind kind;
+    pos origin;
+    enum displayGlyph glyph;
+    const color *tint;
+    short frameAge;     // idle ticks since spawn (drives flicker/phase)
+    short frameLife;    // ticks to live, then expire
+} cosmeticEffect;
+
+static cosmeticEffect gCosmeticEffects[MAX_COSMETIC_EFFECTS];
+static boolean gCosmeticPaintedNow[DCOLS][DROWS];               // cells painted THIS frame (membership)
+static pos gCosmeticCells[2][MAX_COSMETIC_PAINTED_CELLS];       // ping-pong: last/this frame's painted cells
+static short gCosmeticCellCount[2] = {0, 0};
+static short gCosmeticCur = 0;                                  // index of the LAST-frame buffer
+
+static short cosmeticFreeSlot(void) {
+    for (short i = 0; i < MAX_COSMETIC_EFFECTS; i++) {
+        if (!gCosmeticEffects[i].active) {
+            return i;
+        }
     }
-#else
-    (void)loc; (void)glyph;
-#endif
+    return -1; // pool full -- drop (a missed cosmetic flash is harmless)
 }
 
-void flushMonsterAlerts(void) {
-#if NOISE_SYSTEM_ENABLED
-    short i, cycle, oldRNG;
-    boolean fastForward = false;
-    enum displayGlyph dchar;
-    color fc, bc;
-
-    if (monsterAlertCount <= 0) {
+// iOS port (Brogue SE): spawn a one-shot glyph flicker (e.g. '!') over a cell. Cosmetic; suppressed during
+// automation / playback fast-forward (matches the old drain-without-animating behavior).
+void cosmeticSpawnAlertGlyph(pos loc, enum displayGlyph glyph) {
+    if (!coordinatesAreInMap(loc.x, loc.y)
+        || rogue.automationActive || rogue.autoPlayingLevel || rogue.playbackFastForward) {
         return;
     }
-    // Automation / playback fast-forward: drain without animating (same discipline as the ripple flush).
-    if (rogue.autoPlayingLevel || rogue.automationActive || rogue.playbackFastForward) {
-        monsterAlertCount = 0;
+    const short i = cosmeticFreeSlot();
+    if (i < 0) {
         return;
+    }
+    gCosmeticEffects[i].active = true;
+    gCosmeticEffects[i].kind = CE_ALERT_GLYPH;
+    gCosmeticEffects[i].origin = loc;
+    gCosmeticEffects[i].glyph = glyph;
+    gCosmeticEffects[i].tint = &cosmeticAlertColor;
+    gCosmeticEffects[i].frameAge = 0;
+    gCosmeticEffects[i].frameLife = CE_ALERT_LIFE_FRAMES;
+}
+
+// iOS port (Brogue SE): drop all effects + restore tracking (level change / playback reset).
+void clearCosmeticAnimations(void) {
+    for (short i = 0; i < MAX_COSMETIC_EFFECTS; i++) {
+        gCosmeticEffects[i].active = false;
+    }
+    gCosmeticCellCount[0] = gCosmeticCellCount[1] = 0;
+}
+
+// iOS port (Brogue SE): one tick of the cosmetic layer -- age/expire effects, then DIRTY-CELL recomposite:
+// paint this frame's active-effect cells over the base, and restore any cell painted last frame but not
+// this one. Scoped strictly to effect cells (never the button-bar row), so the commitDraws diff is
+// respected and clean cells are never touched. The caller commits. RNG_COSMETIC throughout.
+void advanceCosmeticAnimations(void) {
+    short i, c, nowIdx, oldRNG;
+    boolean anyActive = false;
+
+    for (i = 0; i < MAX_COSMETIC_EFFECTS; i++) {
+        if (gCosmeticEffects[i].active) { anyActive = true; break; }
+    }
+    if (!anyActive && gCosmeticCellCount[gCosmeticCur] == 0) {
+        return; // nothing to paint and nothing to restore
     }
 
     oldRNG = rogue.RNG;
     rogue.RNG = RNG_COSMETIC;
 
-    // Concurrent flicker: '!' flickers twice, '?' once (cycle 0 only). All tells of a cycle animate
-    // together, one shared pause -- a roomful of woken monsters costs one flicker's wait, not N.
-    for (cycle = 0; cycle < 2 && !fastForward; cycle++) {
-        for (i = 0; i < monsterAlertCount; i++) {
-            const monsterAlert *a = &monsterAlertBuffer[i];
-            if (cycle == 1 && a->glyph != (enum displayGlyph)'!') {
-                continue;
-            }
-            getCellAppearance(a->loc, &dchar, &fc, &bc);
-            bakeColor(&bc);
-            plotCharWithColor(a->glyph, mapToWindow(a->loc),
-                              (a->glyph == (enum displayGlyph)'!') ? &noiseAggroColor : &noiseInvestigateColor,
-                              &bc);
-        }
-        if (pauseAnimation(MONSTER_ALERT_FLICKER_MS, PAUSE_BEHAVIOR_DEFAULT)) {
-            fastForward = true;
-        }
-        for (i = 0; i < monsterAlertCount; i++) {
-            const monsterAlert *a = &monsterAlertBuffer[i];
-            if (cycle == 1 && a->glyph != (enum displayGlyph)'!') {
-                continue;
-            }
-            refreshDungeonCell(a->loc); // restore the cell's true appearance
-        }
-        if (!fastForward && pauseAnimation(MONSTER_ALERT_FLICKER_MS, PAUSE_BEHAVIOR_DEFAULT)) {
-            fastForward = true;
+    // 1. age + expire
+    for (i = 0; i < MAX_COSMETIC_EFFECTS; i++) {
+        if (gCosmeticEffects[i].active && ++gCosmeticEffects[i].frameAge >= gCosmeticEffects[i].frameLife) {
+            gCosmeticEffects[i].active = false;
         }
     }
 
-    // Final restore in case a fast-forward left a glyph drawn.
-    for (i = 0; i < monsterAlertCount; i++) {
-        refreshDungeonCell(monsterAlertBuffer[i].loc);
+    // 2. paint this frame's cells (membership-deduped), recording them into the "now" buffer
+    memset(gCosmeticPaintedNow, 0, sizeof(gCosmeticPaintedNow));
+    nowIdx = 1 - gCosmeticCur;
+    gCosmeticCellCount[nowIdx] = 0;
+    for (i = 0; i < MAX_COSMETIC_EFFECTS; i++) {
+        cosmeticEffect *e = &gCosmeticEffects[i];
+        if (!e->active) {
+            continue;
+        }
+        switch (e->kind) {
+            case CE_ALERT_GLYPH: {
+                // one-shot flicker: ON for alternating CE_ALERT_FLICKER_FRAMES windows; OFF windows paint
+                // nothing, so the cell restores to base -> the glyph blinks.
+                const boolean on = ((e->frameAge / CE_ALERT_FLICKER_FRAMES) & 1) == 0;
+                if (on && !gCosmeticPaintedNow[e->origin.x][e->origin.y]) {
+                    enum displayGlyph dchar; color fc, bc;
+                    gCosmeticPaintedNow[e->origin.x][e->origin.y] = true;
+                    if (gCosmeticCellCount[nowIdx] < MAX_COSMETIC_PAINTED_CELLS) {
+                        gCosmeticCells[nowIdx][gCosmeticCellCount[nowIdx]++] = e->origin;
+                    }
+                    getCellAppearance(e->origin, &dchar, &fc, &bc);
+                    bakeColor(&bc);
+                    plotCharWithColor(e->glyph, mapToWindow(e->origin), e->tint, &bc);
+                }
+                break;
+            }
+            default:
+                break;
+        }
     }
-    monsterAlertCount = 0;
+
+    // 3. restore cells painted last frame but not this frame
+    for (c = 0; c < gCosmeticCellCount[gCosmeticCur]; c++) {
+        const pos p = gCosmeticCells[gCosmeticCur][c];
+        if (!gCosmeticPaintedNow[p.x][p.y]) {
+            refreshDungeonCell(p);
+        }
+    }
+
+    // 4. this frame becomes last frame
+    gCosmeticCur = nowIdx;
     rogue.RNG = oldRNG;
-#endif
 }
 
 #define bCurve(x)   (((x) * (x) + 11) / (10 * ((x) * (x) + 1)) - 0.1)
@@ -2898,7 +2954,9 @@ void nextBrogueEvent(rogueEvent *returnEvent, boolean textInput, boolean colorsD
         if (rogue.creaturesWillFlashThisTurn) {
             displayMonsterFlashes(true);
         }
-        flushMonsterAlerts(); // iOS port (Brogue SE): Phase 2 ?/! tells (no-op on quiet turns)
+        // iOS port (Brogue SE): cosmetic-layer effects (the '!' alert glyph, etc.) are pumped by
+        // advanceCosmeticAnimations() in the platform bridge's idle loop (beside shuffleTerrainColors),
+        // which nextKeyOrMouseEvent enters below -- no per-turn flush needed here.
         do {
             nextKeyOrMouseEvent(returnEvent, textInput, colorsDance); // No mouse clicks outside of the window will register.
         } while (returnEvent->eventType == MOUSE_UP && !locIsInWindow((windowpos){ returnEvent->param1, returnEvent->param2 }));

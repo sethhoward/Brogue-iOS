@@ -1934,7 +1934,7 @@ static enum monsterHearing checkPlayerHeard(creature *monst) {
     if (heard == HEARD_LOUD) {
         wakeUp(monst); // full hunt + alert nearby horde-mates (alertMonster + ticks, like being spotted)
         if (canSeeMonster(monst)) {
-            recordMonsterAlert(monst->loc, (enum displayGlyph)'!');
+            cosmeticSpawnAlertGlyph(monst->loc, (enum displayGlyph)'!');
         }
 #if D_NOISE_DEBUG
         message("[noise] a monster has heard you", 0);
@@ -2079,7 +2079,7 @@ void updateMonsterState(creature *monst) {
 #endif
 #if NOISE_SYSTEM_ENABLED
         if (canSeeMonster(monst)) {
-            recordMonsterAlert(monst->loc, (enum displayGlyph)'!'); // spotted -> "!" tell, like hearing loud
+            cosmeticSpawnAlertGlyph(monst->loc, (enum displayGlyph)'!'); // spotted -> "!" tell, like hearing loud
         }
 #endif
     } else if (monst->creatureState == MONSTER_SLEEPING) {

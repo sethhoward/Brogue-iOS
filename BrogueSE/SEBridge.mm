@@ -452,6 +452,8 @@ void nextKeyOrMouseEvent(rogueEvent *returnEvent, boolean textInput, boolean col
 
         if (colorsDance) {
             shuffleTerrainColors(3, true);
+            advanceCosmeticAnimations(); // iOS port (Brogue SE): tick the cosmetic animation layer on the
+                                         // same idle clock as the terrain shimmer; commitDraws() pushes both.
             commitDraws();
         }
 

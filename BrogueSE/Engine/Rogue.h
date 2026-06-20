@@ -171,7 +171,7 @@
 #define NOISE_RIPPLE_RADIUS             3   // tiles the box radiates out (fixed; distance is a later phase)
 #define NOISE_RIPPLE_MS                 300 // total ripple duration; fast-forwards/aborts on player input
 #define NOISE_RIPPLE_MAX_STRENGTH       60  // hilite strength of the innermost ring (fades outward)
-#define NOISE_RIPPLE_PREROLL_MS         280 // pre-roll drawn nothing; if input arrives (held key / repeat /
+#define NOISE_RIPPLE_PREROLL_MS         150 // pre-roll drawn nothing; if input arrives (held key / repeat /
                                             // queued taps) the ripple is skipped so only a deliberate,
                                             // paused player "hears" it. PLATFORM CONTRACT (see
                                             // docs/design/noise-system.md "Platform integration contract"):
@@ -3489,8 +3489,9 @@ extern "C" {
     boolean playerAdjacentToClosedDoor(void); // iOS port (Brogue SE): is the player listening at a door?
     short playerNoiseLevel(void);   // iOS port (Brogue SE): the player's base loudness (no action spike)
     void playerEmitNoise(short spike); // iOS port (Brogue SE): set rogue.playerNoise = playerNoiseLevel()+spike
-    void recordMonsterAlert(pos loc, enum displayGlyph glyph); // iOS port (Brogue SE): queue a ?/! tell
-    void flushMonsterAlerts(void);  // iOS port (Brogue SE): animate queued ?/! tells (beside displayMonsterFlashes)
+    void cosmeticSpawnAlertGlyph(pos loc, enum displayGlyph glyph); // iOS port (Brogue SE): cosmetic layer -- one-shot '!' flicker
+    void advanceCosmeticAnimations(void);   // iOS port (Brogue SE): cosmetic layer -- one tick (from the platform idle loop)
+    void clearCosmeticAnimations(void);     // iOS port (Brogue SE): cosmetic layer -- drop all (level/playback reset)
     void recordPlayerNoiseRipple(short radius); // iOS port (Brogue SE): queue the player's sound-footprint ripple
     void recordPlayerNoiseRippleIfNeeded(void); // iOS port (Brogue SE): queue it iff a visible unaware enemy is near earshot
     void printString(const char *theString, short x, short y, const color *foreColor, const color* backColor, screenDisplayBuffer *dbuf);
