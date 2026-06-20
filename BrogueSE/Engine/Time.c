@@ -2781,16 +2781,9 @@ void playerTurnEnded() {
             displayLevel();
         }
 
-        // iOS port (Brogue SE): noise ripples are PLAYED from mainInputLoop, where the bottom button
-        // bar (a transient on-screen overlay, not in the persistent display buffer) can be re-applied
-        // around the animation's commitDraws -- otherwise it flickers off every step. Here we only drain
-        // events during automated multi-turn movement (travel/explore/rest/search/autoplay), which never
-        // animates, so they don't pile up into a burst when control returns to the player. The automation
-        // gate inside flushNoiseRipples discards without animating or committing. See
-        // docs/design/noise-system.md.
-        if (rogue.automationActive || rogue.autoPlayingLevel) {
-            flushNoiseRipples();
-        }
+        // iOS port (Brogue SE): noise ripples (and the rest of the cosmetic layer) are now driven by
+        // advanceCosmeticAnimations from the platform bridge's idle loop -- no per-turn flush/drain here.
+        // Spawns are themselves suppressed during automation (see cosmeticSpawn*), so nothing piles up.
 
         for (creatureIterator it = iterateCreatures(monsters); hasNextCreature(it);) {
             creature *monst = nextCreature(&it);
@@ -2909,6 +2902,9 @@ void playerTurnEnded() {
     // the default; only an explicit noisy action (step/melee/throw) sets it. See noise-system.md "Phase 2".
     recordPlayerNoiseRippleIfNeeded();
     rogue.playerNoise = NOISE_PLAYER_SILENT;
+    // (3) rebuild the '?' investigate-blink effects to match this turn's visible investigators (the blink
+    // is a cosmetic-layer effect now; this is its per-turn lifecycle -- spawn/follow/despawn).
+    cosmeticRefreshInvestigateBlinks();
 #endif
     updateFlavorText();
 

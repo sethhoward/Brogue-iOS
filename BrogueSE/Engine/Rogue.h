@@ -35,8 +35,8 @@
 #define USE_UNICODE
 
 // Brogue version number (for main engine)
-#define BROGUE_MAJOR 1
-#define BROGUE_MINOR 15
+#define BROGUE_MAJOR 2
+#define BROGUE_MINOR 0
 #define BROGUE_PATCH 1
 
 // Expanding a macro as a string constant requires two levels of macros
@@ -168,22 +168,11 @@
 #define D_ALWAYS_DETECT_SOUND           0   // debug: force every off-screen monster move to be heard,
                                             // bypassing the perception roll (draws no RNG). 1 = full
                                             // detection. (Pre-ship: see pre-ship-debug-checklist.md.)
-#define NOISE_RIPPLE_RADIUS             3   // tiles the box radiates out (fixed; distance is a later phase)
-#define NOISE_RIPPLE_MS                 300 // total ripple duration; fast-forwards/aborts on player input
+#define NOISE_RIPPLE_RADIUS             3   // tiles a monster "heard something" box radiates out
 #define NOISE_RIPPLE_MAX_STRENGTH       60  // hilite strength of the innermost ring (fades outward)
-#define NOISE_RIPPLE_PREROLL_MS         150 // pre-roll drawn nothing; if input arrives (held key / repeat /
-                                            // queued taps) the ripple is skipped so only a deliberate,
-                                            // paused player "hears" it. PLATFORM CONTRACT (see
-                                            // docs/design/noise-system.md "Platform integration contract"):
-                                            // for held-movement suppression to work, BOTH the platform's
-                                            // key-repeat INITIAL delay (first press -> first repeat) and its
-                                            // REPEAT interval must be < this value, with jitter margin. If a
-                                            // platform synthesizes input with a longer artificial delay (iOS
-                                            // originally 0.4s; many OS native auto-repeats are 250-500ms),
-                                            // ripples leak on held steps. iOS d-pad uses 100ms (under this ->
-                                            // first step suppressed); iOS keyboard keeps 300ms (a key tap is
-                                            // longer, so a shorter delay double-steps) and thus accepts a
-                                            // first-step tick. See docs/design/noise-system.md + KNOWN_CAVEATS.md.
+// Ripple TIMING + interruption now live in the cosmetic animation layer (IO.c: CE_RIPPLE_*, advanced on the
+// platform idle tick, uninterruptible). The old blocking-pause pre-roll / held-key suppression -- and the
+// platform key-repeat-timing contract it required -- are gone. See docs/guides/cosmetic-animation-layer.md.
 // --- Phase 2: monsters hear the PLAYER (the reverse, SUBSTANTIVE direction) ---------------------
 // The first substantive half of the system: monsters detect the player by sound, augmenting
 // line-of-sight stealth. Two independent per-turn checks, partitioned by monster state:
@@ -3481,19 +3470,18 @@ extern "C" {
     void flashForeground(short *x, short *y, const color **flashColor, short *flashStrength, short count, short frames);
     void flashCell(const color *theColor, short frames, short x, short y);
     void colorFlash(const color *theColor, unsigned long reqTerrainFlags, unsigned long reqTileFlags, short frames, short maxRadius, short x, short y);
-    void recordNoiseEvent(pos loc); // iOS port (Brogue SE): noise system phase 0 (see docs/design/noise-system.md)
-    void flushNoiseRipples(void);   // iOS port (Brogue SE): noise system phase 0
-    boolean hasPendingNoise(void);  // iOS port (Brogue SE): noise system phase 0 -- any events awaiting a flush?
     void recomputeSoundMap(void);   // iOS port (Brogue SE): rebuild the per-turn player sound-distance map
     short soundDistanceAt(pos loc); // iOS port (Brogue SE): effective sound cost-distance from player (30000 = unreachable)
     boolean playerAdjacentToClosedDoor(void); // iOS port (Brogue SE): is the player listening at a door?
     short playerNoiseLevel(void);   // iOS port (Brogue SE): the player's base loudness (no action spike)
     void playerEmitNoise(short spike); // iOS port (Brogue SE): set rogue.playerNoise = playerNoiseLevel()+spike
     void cosmeticSpawnAlertGlyph(pos loc, enum displayGlyph glyph); // iOS port (Brogue SE): cosmetic layer -- one-shot '!' flicker
+    void cosmeticSpawnRippleMonster(pos loc);   // iOS port (Brogue SE): cosmetic layer -- monster "heard something" ripple
+    void cosmeticSpawnRipplePlayer(short radius);// iOS port (Brogue SE): cosmetic layer -- player's sound-footprint ripple
+    void cosmeticRefreshInvestigateBlinks(void); // iOS port (Brogue SE): cosmetic layer -- per-turn '?' blink rebuild
     void advanceCosmeticAnimations(void);   // iOS port (Brogue SE): cosmetic layer -- one tick (from the platform idle loop)
     void clearCosmeticAnimations(void);     // iOS port (Brogue SE): cosmetic layer -- drop all (level/playback reset)
-    void recordPlayerNoiseRipple(short radius); // iOS port (Brogue SE): queue the player's sound-footprint ripple
-    void recordPlayerNoiseRippleIfNeeded(void); // iOS port (Brogue SE): queue it iff a visible unaware enemy is near earshot
+    void recordPlayerNoiseRippleIfNeeded(void); // iOS port (Brogue SE): spawn the player ripple iff a visible unaware enemy is near earshot
     void printString(const char *theString, short x, short y, const color *foreColor, const color* backColor, screenDisplayBuffer *dbuf);
     short wrapText(char *to, const char *sourceText, short width);
     short printStringWithWrapping(const char *theString, short x, short y, short width, const color *foreColor,

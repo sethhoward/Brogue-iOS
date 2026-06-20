@@ -1985,7 +1985,7 @@ void recordPlayerNoiseRippleIfNeeded(void) {
             && canSeeMonster(monst)
             && monstersAreEnemies(&player, monst)
             && soundDistanceAt(monst->loc) <= r + NOISE_PLAYER_RIPPLE_MARGIN) {
-            recordPlayerNoiseRipple(r);
+            cosmeticSpawnRipplePlayer(r);
             return;
         }
     }
@@ -4404,8 +4404,8 @@ void monstersTurn(creature *monst) {
             if ((monst->bookkeepingFlags & MB_INVESTIGATING) && isPosInMap(monst->investigateLoc)) {
                 if (!posEq(monst->loc, monst->investigateLoc)
                     && monsterPathTowardLoc(monst, monst->investigateLoc)) {
-                    // (The "searching" '?' tell is the ambient glyph blink driven off the idle shimmer
-                    // clock -- see gNoiseInvestigateBlinkOn / getCellAppearance -- not a per-turn pulse.)
+                    // (The "searching" '?' tell is the cosmetic-layer CE_INVESTIGATE_BLINK effect, rebuilt
+                    // each turn in cosmeticRefreshInvestigateBlinks -- not a per-turn pulse here.)
                     return; // stepped toward the noise
                 }
                 monst->bookkeepingFlags &= ~MB_INVESTIGATING; // arrived / blocked -> give up
@@ -4684,7 +4684,7 @@ static void monsterEmitMovementNoise(creature *monst, short originX, short origi
             return; // not perceived this time
         }
     }
-    recordNoiseEvent(monst->loc); // monst->loc is already the destination
+    cosmeticSpawnRippleMonster(monst->loc); // monst->loc is already the destination
 #endif
 }
 
