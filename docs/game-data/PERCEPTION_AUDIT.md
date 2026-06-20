@@ -232,10 +232,10 @@ the loudest layer of the cell. (Distinct from the sound-map **propagation** in �
 
 | Tier | Value | Tiles |
 |---|---|---|
-| `NOISE_TERRAIN_CRUNCH` | +10 | grass, fungus, hay, ash, rubble, bridge |
-| `NOISE_TERRAIN_SPLASH` | +8 | shallow water (loud splash — even as it hides scent) |
-| `NOISE_TERRAIN_RUSTLE` | +6 | dense foliage, fungus forest, mud |
-| `NOISE_TERRAIN_SOFT` | −8 | carpet, spiderweb |
+| `NOISE_TERRAIN_CRUNCH` | +8 | grass, fungus, hay, ash, rubble, bridge |
+| `NOISE_TERRAIN_SPLASH` | +6 | shallow water (loud splash — even as it hides scent) |
+| `NOISE_TERRAIN_RUSTLE` | +4 | dense foliage, fungus forest, mud |
+| `NOISE_TERRAIN_SOFT` | −6 | carpet, spiderweb |
 
 Monster movement-noise tiers (`noiseLevelForMonsterMove`, the `NOISE_*` body-type tiers): SILENT −30,
 QUIET −15, NORMAL 0, LOUD +15, BOOMING +30.
@@ -257,6 +257,11 @@ could never see you. But hearing only ever produces *investigate* (or aggro at p
 actually lock onto you by sight it must still close into the sight radius with LoS. The two ranges
 nesting this way is the whole feel: noise pulls a distant monster toward you; stealth governs whether it
 finds you once it arrives.
+
+Because a monster can react to you from outside your own FOV, the player would otherwise have *no* way to
+know they'd alerted something around a corner — an information asymmetry that quietly makes the game harder.
+The **off-screen `?` alert** (§5) compensates: the moment your noise newly alerts an unseen monster, a `?`
+flashes at its cell so you learn "something out there heard me," even though you can't see it.
 
 ### 4.2 The state machine
 A non-ally monster is in exactly one `creatureState`, with `MB_INVESTIGATING` layered on `WANDERING`:
@@ -308,16 +313,35 @@ FAINT │  │ (§3.2.6)                                  spot (§3.2.5)│   �
 - **`(Investigating)`** appears in the monster's sidebar status while `MB_INVESTIGATING`.
 - **`?` blink** — an investigating monster's glyph ambient-blinks with `?` (slow, ~0.5s/half), riding
   the cosmetic animation layer's idle tick. A spotted/loud-heard monster flashes **`!`** once.
+- **Off-screen `?` alert (+ message + haptic)** — when your noise *newly* alerts a monster **out of your
+  field of view** (around a corner, through a wall), three things fire together as the player's only tell
+  that an unseen creature heard them:
+  - a one-shot **`?`** flashes at its cell (cosmetic layer);
+  - a history line — *"Something nearby stirs at the noise."* — logged once;
+  - on iPhone, **one short, sharp haptic** (`noiseDetectionHaptic(0)`).
+  This is deliberate compensating feedback for the LoS asymmetry (§4.1): monsters hear you without line of
+  sight, so you get a reciprocal "something unseen just reacted to me" cue. Always `?` (never `!`) — off-screen
+  you can't know whether it's merely investigating or already hunting, only that *something* stirred. Fires
+  once per new alert (not every turn it re-hears you), so it reads as an event, not a tracker. A **visible**
+  monster gets the precise `!`/`?` tells above instead (no message/haptic — you're watching it).
+- **"Now hunting" haptic** — when an *investigator* locks onto you (any `alertMonster` while it held
+  `MB_INVESTIGATING` — i.e. it spotted you, or heard you point-blank), iPhone fires **two quick sharp taps**
+  (`noiseDetectionHaptic(1)`). A monster that starts hunting purely by sight (never heard you) gets no
+  haptic — this is scoped to the noise/investigate flow. Both haptic stages are suppressed during fast
+  playback / automation (loading a save replays every turn — no buzz storm) and respect the user's
+  iPhone-only haptics toggle.
 - **"Heard something" ripple** — the §3.3 grey box-ripple for an unseen monster's move.
 - **Player sound-footprint ripple** — when you make noise and a visible, not-yet-hunting enemy is at/near
   your audible radius, a blue ripple radiates from you along the sound map, so you can *see* how far your
   noise carries. Shown until that monster starts hunting.
 
-All four are drawn on the **cosmetic animation layer** — see
-[../guides/cosmetic-animation-layer.md](../guides/cosmetic-animation-layer.md).
+The `?`/`!`/ripple tells are drawn on the **cosmetic animation layer** — see
+[../guides/cosmetic-animation-layer.md](../guides/cosmetic-animation-layer.md). The haptics cross to the
+platform via the `playDetectionHaptic:` host hook (`BrogueCEHost` → `SEBridge.mm` → `BrogueViewController`).
 
-`D_NOISE_DEBUG` ([Rogue.h](../../BrogueSE/Engine/Rogue.h)) prints a message log line per detection event
-("a monster hears something" / "has heard you" / "has spotted you"). **Pre-ship: off.**
+`D_NOISE_DEBUG` ([Rogue.h](../../BrogueSE/Engine/Rogue.h), **default 0**) prints a raw developer log line per
+detection channel ("a monster hears something" / "has heard you" / "has spotted you"). Off by default now
+that player-facing flavor + the off-screen `?` cover it; flip to 1 for dev tracing.
 
 ---
 
@@ -358,7 +382,8 @@ All four are drawn on the **cosmetic animation layer** — see
 | `NOISE_RIPPLE_RADIUS / MAX_STRENGTH` | 3 / 60 | "heard something" ripple size/brightness |
 | **Shared / terrain** | | |
 | `NOISE_DOOR_COST` | 4 | extra sound-map cost through a door/foliage/smoke |
-| `NOISE_TERRAIN_CRUNCH / SPLASH / RUSTLE / SOFT` | 10 / 8 / 6 / −8 | terrain emission (§3.4) |
+| `NOISE_TERRAIN_CRUNCH / SPLASH / RUSTLE / SOFT` | 8 / 6 / 4 / −6 | terrain emission (§3.4) |
 | `NOISE_*` body tiers (QUIET…BOOMING) | −15…+30 | per-monster movement loudness |
 | `NOISE_INVESTIGATE_BLINK_FRAMES` | 30 | `?` blink cadence |
-| `D_NOISE_DEBUG` | 1 | per-event debug log (pre-ship: 0) |
+| `D_NOISE_DEBUG` | 0 | raw per-event dev log (flip to 1 to trace detection) |
+| `detectionStyle / detectionIntensity / detectionDoubleGap` (Swift) | .rigid / 0.7 / 0.09s | iPhone detection-haptic feel (`BrogueViewController`) |

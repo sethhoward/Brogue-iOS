@@ -731,15 +731,13 @@ static void updateScent() {
 #if NOISE_SYSTEM_ENABLED
 static short **gSoundMap = NULL;      // effective sound distance from the player (30000 = unreachable)
 static short **gSoundCostMap = NULL;  // per-cell traversal cost fed to dijkstraScan
+static short **gImpactSoundMap = NULL;// effective sound distance from a non-player source (thrown impact, trap, ...)
 
-void recomputeSoundMap(void) {
-    short i, j;
-    if (!gSoundMap) {
-        gSoundMap = allocGrid();
-        gSoundCostMap = allocGrid();
-    }
-    for (i = 0; i < DCOLS; i++) {
-        for (j = 0; j < DROWS; j++) {
+// Build the per-cell traversal cost from current terrain (shared by the player map and any impact map):
+// floor 1, vision-blocking-but-passable (door/foliage/smoke) 1 + NOISE_DOOR_COST, walls impassable.
+static void buildSoundCostMap(void) {
+    for (short i = 0; i < DCOLS; i++) {
+        for (short j = 0; j < DROWS; j++) {
             const pos loc = (pos){ i, j };
             if (cellHasTerrainFlag(loc, T_OBSTRUCTS_PASSABILITY)) {
                 gSoundCostMap[i][j] = PDS_OBSTRUCTION;       // wall: sound routes around (or is sealed out)
@@ -750,13 +748,36 @@ void recomputeSoundMap(void) {
             }
         }
     }
-    fillGrid(gSoundMap, 30000);
-    gSoundMap[player.loc.x][player.loc.y] = 0;
-    dijkstraScan(gSoundMap, gSoundCostMap, true);
+}
+
+// Cost-flood from an arbitrary `source` into `outMap` (shared by the player map and any impact map).
+static void floodSoundFrom(pos source, short **outMap) {
+    buildSoundCostMap();
+    fillGrid(outMap, 30000);
+    outMap[source.x][source.y] = 0;
+    dijkstraScan(outMap, gSoundCostMap, true);
+}
+
+void recomputeSoundMap(void) {
+    if (!gSoundMap)     { gSoundMap = allocGrid(); }
+    if (!gSoundCostMap) { gSoundCostMap = allocGrid(); }
+    floodSoundFrom(player.loc, gSoundMap);
 }
 
 short soundDistanceAt(pos loc) {
     return gSoundMap ? gSoundMap[loc.x][loc.y] : 30000;
+}
+
+// iOS port (Brogue SE): environmental-sound propagation -- the same cost-flood, but from an arbitrary
+// source cell (a thrown item's impact, a sprung trap, ...). See docs/design/environmental-sounds.md.
+void recomputeImpactSoundMap(pos source) {
+    if (!gImpactSoundMap) { gImpactSoundMap = allocGrid(); }
+    if (!gSoundCostMap)   { gSoundCostMap = allocGrid(); }
+    floodSoundFrom(source, gImpactSoundMap);
+}
+
+short impactSoundDistanceAt(pos loc) {
+    return gImpactSoundMap ? gImpactSoundMap[loc.x][loc.y] : 30000;
 }
 
 boolean playerAdjacentToClosedDoor(void) {
@@ -771,6 +792,8 @@ boolean playerAdjacentToClosedDoor(void) {
 #else
 void recomputeSoundMap(void) { }
 short soundDistanceAt(pos loc) { (void)loc; return 30000; }
+void recomputeImpactSoundMap(pos source) { (void)source; }
+short impactSoundDistanceAt(pos loc) { (void)loc; return 30000; }
 boolean playerAdjacentToClosedDoor(void) { return false; }
 #endif
 

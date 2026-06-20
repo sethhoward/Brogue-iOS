@@ -2199,13 +2199,15 @@ void colorFlash(const color *theColor, unsigned long reqTerrainFlags,
 static const color cosmeticAlertColor = {100, 18, 18, 0, 0, 0, 0, false}; // reddish '!' -- "there you are!"
 static const color cosmeticNoiseColor = {85, 85, 100, 0, 0, 0, 0, false}; // pale grey -- monster "heard something"
 static const color cosmeticPlayerColor = {35, 60, 100, 0, 0, 0, 0, false}; // cool blue -- the player's own noise
+static const color cosmeticImpactColor = {100, 85, 30, 0, 0, 0, 0, false}; // warm amber -- an environmental impact (thrown item)
 
-// Identity (channel) of the SINGLETON player-ripple effect: its address is the dedupe key (latest-wins).
+// Identity (channel) of the SINGLETON player- and impact-ripple effects: address is the dedupe key (latest-wins).
 static const char gCosmeticPlayerRippleChannel = 0;
+static const char gCosmeticImpactRippleChannel = 0;
 
 // Effect kinds hosted by the layer. RIPPLE_* paint via hiliteCell (color overlay); ALERT/BLINK via a
 // glyph (plotCharWithColor). (File-local; promote to Rogue.h if a spawner ever needs a kind parameter.)
-enum cosmeticEffectKind { CE_ALERT_GLYPH, CE_RIPPLE_MONSTER, CE_RIPPLE_PLAYER, CE_INVESTIGATE_BLINK };
+enum cosmeticEffectKind { CE_ALERT_GLYPH, CE_RIPPLE_MONSTER, CE_RIPPLE_PLAYER, CE_RIPPLE_IMPACT, CE_INVESTIGATE_BLINK };
 
 typedef struct {
     boolean active;
@@ -2312,6 +2314,37 @@ void cosmeticSpawnRipplePlayer(short radius) {
     gCosmeticEffects[i].tint = &cosmeticPlayerColor;
     gCosmeticEffects[i].maxRadius = radius;
     gCosmeticEffects[i].channel = &gCosmeticPlayerRippleChannel;
+    gCosmeticEffects[i].frameAge = 0;
+    gCosmeticEffects[i].frameLife = radius * CE_RIPPLE_EXPAND_FRAMES;
+}
+
+// iOS port (Brogue SE): the environmental-sound impact ripple -- an amber wavefront expanding from `source`
+// along the impact sound map out to `radius`. SINGLETON (latest impact wins): a fresh throw supersedes a
+// stale ripple. Cosmetic; see docs/design/environmental-sounds.md.
+void cosmeticSpawnRippleImpact(pos source, short radius) {
+    if (radius < 1 || rogue.automationActive || rogue.autoPlayingLevel || rogue.playbackFastForward) {
+        return;
+    }
+    short i = -1;
+    for (short j = 0; j < MAX_COSMETIC_EFFECTS; j++) {
+        if (gCosmeticEffects[j].active && gCosmeticEffects[j].kind == CE_RIPPLE_IMPACT) {
+            i = j; // reuse (replace) the in-flight impact ripple
+            break;
+        }
+    }
+    if (i < 0) {
+        i = cosmeticFreeSlot();
+    }
+    if (i < 0) {
+        return;
+    }
+    gCosmeticEffects[i].active = true;
+    gCosmeticEffects[i].kind = CE_RIPPLE_IMPACT;
+    gCosmeticEffects[i].origin = source;
+    gCosmeticEffects[i].glyph = 0;
+    gCosmeticEffects[i].tint = &cosmeticImpactColor;
+    gCosmeticEffects[i].maxRadius = radius;
+    gCosmeticEffects[i].channel = &gCosmeticImpactRippleChannel;
     gCosmeticEffects[i].frameAge = 0;
     gCosmeticEffects[i].frameLife = radius * CE_RIPPLE_EXPAND_FRAMES;
 }
@@ -2440,7 +2473,9 @@ void advanceCosmeticAnimations(void) {
     // 2a. ripples first (color-hilite), so glyph kinds below can override on any shared cell
     for (i = 0; i < MAX_COSMETIC_EFFECTS; i++) {
         cosmeticEffect *e = &gCosmeticEffects[i];
-        if (!e->active || (e->kind != CE_RIPPLE_MONSTER && e->kind != CE_RIPPLE_PLAYER) || e->maxRadius < 1) {
+        if (!e->active
+            || (e->kind != CE_RIPPLE_MONSTER && e->kind != CE_RIPPLE_PLAYER && e->kind != CE_RIPPLE_IMPACT)
+            || e->maxRadius < 1) {
             continue;
         }
         const short waveR = e->frameAge / CE_RIPPLE_EXPAND_FRAMES + 1; // current wavefront radius
@@ -2458,11 +2493,14 @@ void advanceCosmeticAnimations(void) {
                     }
                 }
             }
-        } else { // CE_RIPPLE_PLAYER -- the sound-map wavefront at cost-distance waveR from the player
+        } else { // CE_RIPPLE_PLAYER / CE_RIPPLE_IMPACT -- the sound-map wavefront at cost-distance waveR from the source
             short ix, iy;
             for (iy = e->origin.y - waveR; iy <= e->origin.y + waveR; iy++) {
                 for (ix = e->origin.x - waveR; ix <= e->origin.x + waveR; ix++) {
-                    if (!coordinatesAreInMap(ix, iy) || soundDistanceAt((pos){ ix, iy }) != waveR) {
+                    const short d = (e->kind == CE_RIPPLE_IMPACT)
+                                  ? impactSoundDistanceAt((pos){ ix, iy })
+                                  : soundDistanceAt((pos){ ix, iy });
+                    if (!coordinatesAreInMap(ix, iy) || d != waveR) {
                         continue;
                     }
                     const pos p = (pos){ ix, iy };

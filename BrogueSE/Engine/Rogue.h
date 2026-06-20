@@ -105,6 +105,12 @@
 // Granted deterministically in initializeRogue, so it is recording-safe. Flip to 0 to ship.
 #define D_TELEPATHY_POTION_START        1//(WIZARD_MODE && 0)
 
+// iOS port (Brogue SE): start with 3 potions of invisibility for playtesting -- invisibility drops your
+// stealth range to 1, so it's a quick way to exercise the noise/stealth interaction (monsters can still
+// HEAR you while you're invisible). Granted deterministically in initializeRogue, so it is recording-safe.
+// Flip to 0 to ship.
+#define D_INVISIBILITY_POTION_START     1//(WIZARD_MODE && 0)
+
 // iOS port (Brogue SE): noise system. A monster that takes a self-willed step while the player can't
 // see it emits a perceptible "noise", drawn as a box radiating from its new cell ("you heard
 // something"). Distance/terrain are still deferred (full-map detection). Whether the player PERCEIVES
@@ -161,10 +167,32 @@
 // Terrain EMISSION: how much the terrain a creature steps into adds to / dampens the noise of that step
 // (distinct from the sound map's propagation damping above). Signed, smaller than the monster tiers since
 // it only modulates on top. Read at the destination cell (terrainNoiseModifier). Direction-agnostic.
-#define NOISE_TERRAIN_CRUNCH            10  // crunchy/creaky underfoot: grass, fungus, hay, ash, rubble, bridge
-#define NOISE_TERRAIN_RUSTLE            6   // rustle/squelch: dense foliage, fungus forest, mud
-#define NOISE_TERRAIN_SPLASH            8   // wading shallow water (hides your scent, but splashes loudly)
-#define NOISE_TERRAIN_SOFT              (-8) // muffles footsteps: carpet, spiderweb (+ future moss)
+#define NOISE_TERRAIN_CRUNCH            8   // crunchy/creaky underfoot: grass, fungus, hay, ash, rubble, bridge
+#define NOISE_TERRAIN_SPLASH            6   // wading shallow water (hides your scent, but splashes loudly)
+#define NOISE_TERRAIN_RUSTLE            4   // rustle/squelch: dense foliage, fungus forest, mud
+#define NOISE_TERRAIN_SOFT              (-6) // muffles footsteps: carpet, spiderweb (+ future moss)
+// Environmental / impact sounds -- a sound emitted at an arbitrary cell (a thrown item's impact, a sprung
+// trap, ...), with a GUARANTEED investigate radius (no hear roll) so a distraction reliably draws monsters.
+// radius(cost-tiles) = clamp(NOISE_IMPACT_BASE_RADIUS + (itemLoudness + surfaceMod)/NOISE_IMPACT_SCALE, MIN, MAX).
+// See docs/design/environmental-sounds.md and docs/game-data/PERCEPTION_AUDIT.md.
+#define NOISE_IMPACT_BASE_RADIUS        2   // cost-tiles at zero effective loudness
+#define NOISE_IMPACT_SCALE              4   // effective loudness per +1 tile of radius
+#define NOISE_IMPACT_MIN_RADIUS         1
+#define NOISE_IMPACT_MAX_RADIUS         10  // kept under full earshot (stealthRange*2): draws a room, not the floor
+// Item impact loudness (mass of the thrown thing)
+#define NOISE_IMPACT_LIGHT              4   // dart, incendiary dart, scroll, food
+#define NOISE_IMPACT_LIGHT_MEDIUM       8   // dagger / light blade
+#define NOISE_IMPACT_MEDIUM             14  // javelin, spear
+#define NOISE_IMPACT_HEAVY              22  // mace/axe/hammer/broadsword, armor
+#define NOISE_IMPACT_SHATTER            20  // potion (glass shatter; also delivers its effect)
+// Impact SURFACE modifier (what it struck) -- a DEDICATED tier, not terrainNoiseModifier: impacts on soft
+// ground are MUFFLED (the inverse of footsteps, which crunch on grass).
+#define NOISE_IMPACT_WALL               10  // clang off a solid obstruction -- loudest
+#define NOISE_IMPACT_WATER              4   // splash
+#define NOISE_IMPACT_FLOOR              0   // hard ground -- baseline
+#define NOISE_IMPACT_SOFT               (-6) // grass/foliage/fungus/mud -- cushioned landing
+#define NOISE_IMPACT_CARPET             (-10)// carpet/web -- nearly silent
+#define NOISE_IMPACT_BODY               (-8) // struck a creature -- muffled thud (accurate kill = quiet)
 #define D_ALWAYS_DETECT_SOUND           0   // debug: force every off-screen monster move to be heard,
                                             // bypassing the perception roll (draws no RNG). 1 = full
                                             // detection. (Pre-ship: see pre-ship-debug-checklist.md.)
@@ -206,7 +234,7 @@
 // acquires you in ~1 turn (no more "stands next to you, blind" dance), while a noise made across the room
 // still grants a window to break line of sight and slip away. See awareOfTarget + docs/design/noise-system.md.
 #define INVESTIGATE_SPOT_ADJACENT_CHANCE 95  // spot chance/turn when point-blank (1 tile)
-#define INVESTIGATE_SPOT_FALLOFF         15  // spot chance lost per tile of distance
+#define INVESTIGATE_SPOT_FALLOFF         20  // spot chance lost per tile of distance
 #define INVESTIGATE_SPOT_FLOOR           25  // never below the vanilla passive-wanderer baseline (continuity)
 // Player loudness (playerNoiseLevel() base + an action spike). A NEW quantity, NOT currentStealthRange
 // (which bakes in darkness/shadow -- visual, irrelevant to sound -- and lacks terrain/action/levitation).
@@ -217,8 +245,9 @@
 #define NOISE_PLAYER_LEVITATE           (-10) // quieter while levitating (feet off the ground; terrain term skipped)
 #define NOISE_PLAYER_ARMOR_SCALE        2   // loudness per point of armorStealthAdjustment (heavy armor clatters)
 #define NOISE_PLAYER_STEALTH_RING_SCALE 3   // loudness reduced per point of ring-of-stealth bonus
-#define D_NOISE_DEBUG                   1   // debug: print a history line for each detection channel
-                                            // (spotted / hears something / heard you). (Pre-ship: off.)
+#define D_NOISE_DEBUG                   0   // debug: print a raw history line for each detection channel
+                                            // (spotted / hears something / heard you). Player-facing flavor +
+                                            // the off-screen '?' tell now cover this; flip to 1 for dev tracing.
 // Player sound-footprint ripple (a feel/test aid): when the player makes noise and a visible, not-yet-
 // hunting enemy sits at or near the player's audible radius, draw an expanding ripple from the player out
 // to that radius -- following the sound map (bends around walls, muffles at doors), so you can SEE how far
@@ -1631,6 +1660,8 @@ enum itemFlags {
 
     ITEM_KIND_AUTO_ID       = Fl(22),   // the item type will become known when the item is picked up.
     ITEM_PLAYER_AVOIDS      = Fl(23),   // explore and travel will try to avoid picking the item up
+    ITEM_THROWN_DISTRACTION = Fl(24),   // iOS port (Brogue SE): noise system -- thrown as a distraction; the first
+                                        // investigating creature to reach it claims it (consumed/carried off)
 };
 
 #define KEY_ID_MAXIMUM  20
@@ -2651,6 +2682,8 @@ typedef struct creature {
                                    // investigating (valid only while MB_INVESTIGATING). See noise-system.md "Phase 2".
     pos slumberLoc;                // iOS port (Brogue SE): noise system -- where a noise-roused sleeper was sleeping,
                                    // so it can return there and doze off again (valid only while MB_RETURNING_HOME).
+    short investigateStrength;     // iOS port (Brogue SE): noise system -- the distance-adjusted heard-strength that
+                                   // set the current investigateLoc; a new noise re-targets only if louder/closer.
     char targetCorpseName[30];          // name of the deceased monster that we're approaching to gain its abilities
     unsigned long absorptionFlags;      // ability/behavior flags that the monster will gain when absorption is complete
     boolean absorbBehavior;             // above flag is behavior instead of ability (ignored if absorptionBolt is set)
@@ -3486,12 +3519,16 @@ extern "C" {
     void colorFlash(const color *theColor, unsigned long reqTerrainFlags, unsigned long reqTileFlags, short frames, short maxRadius, short x, short y);
     void recomputeSoundMap(void);   // iOS port (Brogue SE): rebuild the per-turn player sound-distance map
     short soundDistanceAt(pos loc); // iOS port (Brogue SE): effective sound cost-distance from player (30000 = unreachable)
+    void recomputeImpactSoundMap(pos source); // iOS port (Brogue SE): flood the sound map from an arbitrary source
+    short impactSoundDistanceAt(pos loc);     // iOS port (Brogue SE): effective sound cost-distance from that source
+    void emitEnvironmentalNoise(pos source, short strength, item *sourceItem); // iOS port (Brogue SE): guaranteed-investigate sound
     boolean playerAdjacentToClosedDoor(void); // iOS port (Brogue SE): is the player listening at a door?
     short playerNoiseLevel(void);   // iOS port (Brogue SE): the player's base loudness (no action spike)
     void playerEmitNoise(short spike); // iOS port (Brogue SE): set rogue.playerNoise = playerNoiseLevel()+spike
     void cosmeticSpawnAlertGlyph(pos loc, enum displayGlyph glyph); // iOS port (Brogue SE): cosmetic layer -- one-shot '!' flicker
     void cosmeticSpawnRippleMonster(pos loc);   // iOS port (Brogue SE): cosmetic layer -- monster "heard something" ripple
     void cosmeticSpawnRipplePlayer(short radius);// iOS port (Brogue SE): cosmetic layer -- player's sound-footprint ripple
+    void cosmeticSpawnRippleImpact(pos source, short radius); // iOS port (Brogue SE): cosmetic layer -- environmental-sound impact ripple
     void cosmeticRefreshInvestigateBlinks(void); // iOS port (Brogue SE): cosmetic layer -- per-turn '?' blink rebuild
     void advanceCosmeticAnimations(void);   // iOS port (Brogue SE): cosmetic layer -- one tick (from the platform idle loop)
     void clearCosmeticAnimations(void);     // iOS port (Brogue SE): cosmetic layer -- drop all (level/playback reset)

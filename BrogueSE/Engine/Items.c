@@ -6968,6 +6968,63 @@ static boolean detonateFloorPotionAt(short x, short y, boolean fiery) {
 // a staff charge, a one-shot incendiary -- are bounded). Flip back to true to restore the consumed-dart probe.
 static const boolean dartsProbeAndConsumeOnPotions = false;
 
+#if NOISE_SYSTEM_ENABLED
+// iOS port (Brogue SE): how loud a thrown item is WHEN IT LANDS -- a mass tier. See environmental-sounds.md.
+static short itemImpactLoudness(const item *theItem) {
+    if (theItem->category & POTION) {
+        return NOISE_IMPACT_SHATTER;    // glass shatter (also delivers its effect)
+    }
+    if (theItem->category & ARMOR) {
+        return NOISE_IMPACT_HEAVY;       // a hurled cuirass clatters
+    }
+    if (theItem->category & WEAPON) {
+        switch (theItem->kind) {
+            case DART:
+            case INCENDIARY_DART:
+                return NOISE_IMPACT_LIGHT;
+            case DAGGER:
+                return NOISE_IMPACT_LIGHT_MEDIUM;
+            case JAVELIN:
+            case SPEAR:
+                return NOISE_IMPACT_MEDIUM;
+            default:
+                return NOISE_IMPACT_HEAVY; // maces/axes/hammers/swords -- you've hurled away real gear
+        }
+    }
+    return NOISE_IMPACT_LIGHT;            // scrolls, food, wands, etc. -- light/quiet
+}
+
+// iOS port (Brogue SE): the surface an item strikes shapes how loud the impact is -- a DEDICATED tier
+// (impacts on soft ground are MUFFLED, the inverse of footsteps, which crunch on grass). hitWall = it
+// clanged a solid obstruction. A struck creature is the quietest (the muffled thud behind "accuracy = stealth").
+static short impactSurfaceModifier(pos loc, boolean hitWall) {
+    if (hitWall) {
+        return NOISE_IMPACT_WALL;
+    }
+    if (pmap[loc.x][loc.y].flags & (HAS_MONSTER | HAS_PLAYER)) {
+        return NOISE_IMPACT_BODY;
+    }
+    boolean water = false, carpet = false, soft = false;
+    for (enum dungeonLayers layer = DUNGEON; layer < NUMBER_TERRAIN_LAYERS; layer++) {
+        switch (pmap[loc.x][loc.y].layers[layer]) {
+            case DEEP_WATER: case SHALLOW_WATER:
+                water = true; break;
+            case CARPET: case SPIDERWEB:
+                carpet = true; break;
+            case GRASS: case DEAD_GRASS: case GRAY_FUNGUS: case LUMINESCENT_FUNGUS: case HAY:
+            case FOLIAGE: case DEAD_FOLIAGE: case TRAMPLED_FOLIAGE:
+            case FUNGUS_FOREST: case TRAMPLED_FUNGUS_FOREST: case MUD:
+                soft = true; break;
+            default: break;
+        }
+    }
+    if (water)  return NOISE_IMPACT_WATER;
+    if (carpet) return NOISE_IMPACT_CARPET;
+    if (soft)   return NOISE_IMPACT_SOFT;
+    return NOISE_IMPACT_FLOOR;
+}
+#endif
+
 static void throwItem(item *theItem, creature *thrower, pos targetLoc, short maxDistance) {
     short i, numCells;
     creature *monst = NULL;
@@ -6989,11 +7046,10 @@ static void throwItem(item *theItem, creature *thrower, pos targetLoc, short max
 
     thrower->ticksUntilTurn = thrower->attackSpeed;
 
-    if (thrower == &player) {
-        playerEmitNoise(NOISE_PLAYER_THROW); // iOS port (Brogue SE): noise system -- the throw itself is
-                                             // heard at the player's cell. (The item's LANDING noise --
-                                             // the distraction tool -- is a deferred phase.)
-    }
+    // iOS port (Brogue SE): noise system -- the throw itself is SILENT at the player's hand (a rogue's
+    // craft). All the noise is at the IMPACT (the landing-noise hook after the trajectory loop), so a
+    // thrown distraction draws monsters to where it LANDS, never to where you stand. (Revisit a source
+    // term for heavy armor later -- see docs/design/environmental-sounds.md §7.)
 
     if (thrower != &player
         && (pmapAt(originLoc)->flags & IN_FIELD_OF_VIEW)) {
@@ -7085,6 +7141,21 @@ static void throwItem(item *theItem, creature *thrower, pos targetLoc, short max
             break;
         }
     }
+
+#if NOISE_SYSTEM_ENABLED
+    // iOS port (Brogue SE): the LANDING noise. A thrown item's impact is an environmental sound that draws
+    // monsters to the cell -- the distraction tool. Only player throws that DIDN'T strike a creature (a hit
+    // is combat; the victim is already alerted, and the throw itself is silent at the player's hand -- the
+    // rogue's craft). Non-potions that come to rest are tagged so the first investigator to arrive claims
+    // them (consume-on-arrival). See docs/design/environmental-sounds.md.
+    if (thrower == &player && !(pmap[x][y].flags & (HAS_MONSTER | HAS_PLAYER))) {
+        const short impactStrength = itemImpactLoudness(theItem) + impactSurfaceModifier((pos){ x, y }, hitSomethingSolid);
+        if (!(theItem->category & POTION)) {
+            theItem->flags |= ITEM_THROWN_DISTRACTION;
+        }
+        emitEnvironmentalNoise((pos){ x, y }, impactStrength, theItem);
+    }
+#endif
 
     // iOS port (iBrogue): a potion lobbed INTO deep water doesn't shatter -- it bobs on the surface and
     // rides the current to shore via the game's own item drift (the T_MOVES_ITEMS sweep in

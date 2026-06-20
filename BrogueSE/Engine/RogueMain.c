@@ -536,6 +536,16 @@ void initializeRogue(uint64_t seed) {
         theItem = addItemToPack(theItem);
     }
 
+    if (D_INVISIBILITY_POTION_START) {
+        // iOS port (Brogue SE): playtest grant of 3 potions of invisibility so the stealth/noise
+        // interaction can be tested (invisibility forces stealth range to 1, but you can still be heard).
+        // Added deterministically here (not as a recorded input), so it reconstructs identically on replay.
+        theItem = generateItem(POTION, POTION_INVISIBILITY);
+        theItem->quantity = 3;
+        identify(theItem);
+        theItem = addItemToPack(theItem);
+    }
+
     DEBUG {
         theItem = generateItem(RING, RING_CLAIRVOYANCE);
         theItem->enchant1 = max(DROWS, DCOLS);

@@ -126,6 +126,7 @@ void initializeMonster(creature *monst, boolean itemPossible) {
     monst->lastSeenPlayerAt = INVALID_POS;
     monst->investigateLoc = INVALID_POS; // iOS port (Brogue SE): noise system -- no heard noise to investigate yet
     monst->slumberLoc = INVALID_POS;     // iOS port (Brogue SE): noise system -- no bed to return to yet
+    monst->investigateStrength = 0;      // iOS port (Brogue SE): noise system -- louder/closer arbitration baseline
     monst->targetWaypointIndex = -1;
     for (int i=0; i < MAX_WAYPOINT_COUNT; i++) {
         monst->waypointAlreadyVisited[i] = rand_range(0, 1);
@@ -1757,13 +1758,37 @@ short distanceBetween(pos loc1, pos loc2) {
     return max(abs(loc1.x - loc2.x), abs(loc1.y - loc2.y));
 }
 
+#if NOISE_SYSTEM_ENABLED
+// iOS port (Brogue SE): host hook -- fire a detection haptic on iPhone (no-op elsewhere / without a haptic
+// engine). Defined in SEBridge.mm. stage 0 = something just began investigating you; 1 = an investigator
+// locked onto you (now hunting). Suppressed during fast playback / automation so loading a save -- which
+// replays every turn -- doesn't buzz repeatedly. See PERCEPTION_AUDIT.md.
+extern void cePlayDetectionHaptic(int stage);
+static void noiseDetectionHaptic(short stage) {
+    if (!rogue.playbackFastForward && !rogue.automationActive && !rogue.autoPlayingLevel) {
+        cePlayDetectionHaptic(stage);
+    }
+}
+#endif
+
 void alertMonster(creature *monst) {
+#if NOISE_SYSTEM_ENABLED
+    // An investigator that becomes alerted has just *found* you -> the "now hunting" double-tap (a plain
+    // wanderer/sleeper spotting you by sight is not a noise event, so it gets no haptic).
+    const boolean wasInvestigating = (monst->bookkeepingFlags & MB_INVESTIGATING) != 0;
+#endif
     monst->creatureState = (monst->creatureMode == MODE_PERM_FLEEING ? MONSTER_FLEEING : MONSTER_TRACKING_SCENT);
     monst->lastSeenPlayerAt = player.loc;
     monst->bookkeepingFlags &= ~MB_INVESTIGATING; // iOS port (Brogue SE): a real target supersedes a vague noise
     monst->investigateLoc = INVALID_POS;
     monst->bookkeepingFlags &= ~MB_RETURNING_HOME; // iOS port (Brogue SE): hunting the player abandons the bed
     monst->slumberLoc = INVALID_POS;
+    monst->investigateStrength = 0;                // iOS port (Brogue SE): clear louder/closer arbitration state
+#if NOISE_SYSTEM_ENABLED
+    if (wasInvestigating) {
+        noiseDetectionHaptic(1);
+    }
+#endif
 }
 
 void wakeUp(creature *monst) {
@@ -1943,19 +1968,37 @@ static enum monsterHearing monsterHearsNoise(creature *monst, pos noiseLoc, shor
 // noise cell; move away after and it finds nothing). Queues the ?/! tell (visible monsters) + debug log.
 static enum monsterHearing checkPlayerHeard(creature *monst) {
     enum monsterHearing heard;
+    short soundDist;
     if (rogue.playerNoise <= NOISE_PLAYER_SILENT) {
         return HEARD_NONE; // the player held still this turn -- emitted no sound
     }
-    heard = monsterHearsNoise(monst, player.loc, rogue.playerNoise, soundDistanceAt(monst->loc));
+    soundDist = soundDistanceAt(monst->loc);
+    heard = monsterHearsNoise(monst, player.loc, rogue.playerNoise, soundDist);
     if (heard == HEARD_LOUD) {
+        // Was it unaware before this noise? (Determines whether this is a *new* alert worth telegraphing.)
+        const boolean newlyAlerted = (monst->creatureState != MONSTER_TRACKING_SCENT);
         wakeUp(monst); // full hunt + alert nearby horde-mates (alertMonster + ticks, like being spotted)
         if (canSeeMonster(monst)) {
             cosmeticSpawnAlertGlyph(monst->loc, (enum displayGlyph)'!');
+        } else if (newlyAlerted) {
+            // iOS port (Brogue SE): off-screen tell. You can't see what you alerted, only that something
+            // around a corner (out of FOV) reacted to your noise -- compensating feedback for the fact that
+            // monsters hear you without line of sight. A '?' at its cell: you don't know if it's merely
+            // looking or charging, so '?' (uncertain), never the precise '!' (which means you can see it).
+            cosmeticSpawnAlertGlyph(monst->loc, (enum displayGlyph)'?');
         }
 #if D_NOISE_DEBUG
         message("[noise] a monster has heard you", 0);
 #endif
     } else if (heard == HEARD_FAINT) {
+        const boolean newlyAlerted = !(monst->bookkeepingFlags & MB_INVESTIGATING); // first turn of this investigate?
+        // Louder/closer arbitration: a faint footstep can't yank an investigator off a louder/closer noise
+        // (e.g. a thrown dart). Only (re)target if newly alerted or this noise is at least as loud as the
+        // one that set the current target. See emitEnvironmentalNoise + docs/design/environmental-sounds.md.
+        const short effective = rogue.playerNoise - soundDist; // distance-adjusted heard strength
+        if (!newlyAlerted && effective < monst->investigateStrength) {
+            return heard;
+        }
         // Investigate -- come LOOK at where the sound was, but do NOT start hunting. The monster enters the
         // MB_INVESTIGATING state: it paths to the exact noise cell (investigateLoc), keeps doing the normal
         // sight checks, and escalates to a real hunt only if it SPOTS you (or hears you LOUD). If it arrives
@@ -1975,14 +2018,68 @@ static enum monsterHearing checkPlayerHeard(creature *monst) {
             }
         }
         monst->investigateLoc = player.loc;
+        monst->investigateStrength = effective;
         monst->bookkeepingFlags |= MB_INVESTIGATING;
         // The '?' "searching" tell is pulsed every turn while investigating (in the WANDERING nav below),
         // not once here -- so a visible investigator's glyph visibly cycles with '?' until it gives up or hunts.
-#if D_NOISE_DEBUG
-        message("[noise] a monster hears something", 0);
-#endif
+        // For an OFF-screen monster (no blink, since you can't see it) we instead flash a one-shot '?' at its
+        // cell the moment it's first alerted -- "something around the corner heard you." Only on the new alert
+        // (not every subsequent turn it re-hears you), so it reads as an event, not a tracker. Paired with a
+        // history line + a short iPhone haptic, this is the player's only tell that an unseen creature heard
+        // them (a visible one shows the '?' blink instead). See PERCEPTION_AUDIT.md.
+        if (newlyAlerted && !canSeeMonster(monst)) {
+            cosmeticSpawnAlertGlyph(monst->loc, (enum displayGlyph)'?');
+            message("Something nearby stirs at the noise.", 0); // flavor: an unseen creature has heard you
+            noiseDetectionHaptic(0);                             // iPhone: one short, sharp tap
+        }
     }
     return heard;
+}
+
+// iOS port (Brogue SE): emit an environmental sound of `strength` at `source` (a thrown item's impact, a
+// sprung trap, ...). GUARANTEED -- every eligible non-hunting enemy within the strength-derived cost-radius
+// investigates the source cell, NO hear roll, so a distraction reliably draws monsters (the skill is in
+// placement). Louder/closer arbitration (investigateStrength) keeps a quiet footstep from stealing an
+// investigator off a loud impact; hunters aren't diverted (design principle #3). Spawns the singleton
+// impact ripple. SUBSTANTIVE (changes monster state). See docs/design/environmental-sounds.md.
+void emitEnvironmentalNoise(pos source, short strength, item *sourceItem) {
+    const short radius = clamp(NOISE_IMPACT_BASE_RADIUS + strength / NOISE_IMPACT_SCALE,
+                               NOISE_IMPACT_MIN_RADIUS, NOISE_IMPACT_MAX_RADIUS);
+    (void)sourceItem; // consume-on-arrival keys on the item's ITEM_THROWN_DISTRACTION tag (set by the thrower)
+    recomputeImpactSoundMap(source);
+    for (creatureIterator it = iterateCreatures(monsters); hasNextCreature(it);) {
+        creature *monst = nextCreature(&it);
+        if (monst->creatureState == MONSTER_ALLY
+            || monst->creatureState == MONSTER_TRACKING_SCENT   // a committed hunter isn't diverted (principle #3)
+            || monst->creatureMode != MODE_NORMAL
+            || (monst->bookkeepingFlags & MB_CAPTIVE)
+            || !monstersAreEnemies(&player, monst)) {
+            continue;
+        }
+        const short d = impactSoundDistanceAt(monst->loc);
+        if (d > radius) {
+            continue; // outside the guaranteed radius (and walls/doors already shaped the flood)
+        }
+        const short effective = strength - d; // distance-adjusted heard strength (for louder/closer arbitration)
+        const boolean already = (monst->bookkeepingFlags & MB_INVESTIGATING) != 0;
+        if (already && effective < monst->investigateStrength) {
+            continue; // a louder/closer noise already owns this investigator
+        }
+        if (monst->creatureState == MONSTER_SLEEPING) {
+            monst->creatureState = MONSTER_WANDERING;
+            if (!(monst->bookkeepingFlags & MB_IS_DORMANT)) {
+                monst->slumberLoc = monst->loc; // can return to bed afterward (reuses MB_RETURNING_HOME)
+            }
+        }
+        monst->investigateLoc = source;
+        monst->investigateStrength = effective;
+        monst->bookkeepingFlags |= MB_INVESTIGATING;
+        if (!already && !canSeeMonster(monst)) {
+            cosmeticSpawnAlertGlyph(monst->loc, (enum displayGlyph)'?'); // unseen reaction tell
+            noiseDetectionHaptic(0);
+        }
+    }
+    cosmeticSpawnRippleImpact(source, radius);
 }
 
 // iOS port (Brogue SE): Phase 2 feel/test aid -- if the player made noise this turn and a VISIBLE,
@@ -4431,8 +4528,29 @@ void monstersTurn(creature *monst) {
                     // each turn in cosmeticRefreshInvestigateBlinks -- not a per-turn pulse here.)
                     return; // stepped toward the noise
                 }
-                // Arrived / blocked -> found nothing. Stop investigating; if we were roused from a bed, head
-                // back to it (falls through to the MB_RETURNING_HOME block just below) instead of wandering off.
+                // Arrived (or blocked) -> found nothing. If we actually reached the cell and a thrown
+                // distraction item lies here, the investigator claims it (consume-on-arrival): for now it is
+                // disturbed and lost forever -- the cost that stops throw-and-retrieve from being free, infinite
+                // crowd-control (CLAUDE.md principle #3). (Thieves carrying it off is slice 2.)
+                if (posEq(monst->loc, monst->investigateLoc)
+                    && (pmap[monst->loc.x][monst->loc.y].flags & HAS_ITEM)) {
+                    item *claimed = itemAtLoc(monst->loc);
+                    if (claimed && (claimed->flags & ITEM_THROWN_DISTRACTION)) {
+                        if (playerCanSee(monst->loc.x, monst->loc.y)) {
+                            char cbuf[COLS*3], cinm[COLS*3], cmnm[COLS*3];
+                            itemName(claimed, cinm, false, true, NULL);
+                            monsterName(cmnm, monst, true);
+                            sprintf(cbuf, "%s disturbs %s, and it is lost.", cmnm, cinm);
+                            message(cbuf, 0);
+                        }
+                        removeItemFromChain(claimed, floorItems);
+                        pmap[monst->loc.x][monst->loc.y].flags &= ~(HAS_ITEM | ITEM_DETECTED);
+                        refreshDungeonCell(monst->loc);
+                        deleteItem(claimed);
+                    }
+                }
+                // Stop investigating; if we were roused from a bed, head back to it (falls through to the
+                // MB_RETURNING_HOME block just below) instead of wandering off.
                 monst->bookkeepingFlags &= ~MB_INVESTIGATING;
                 monst->investigateLoc = INVALID_POS;
                 if (isPosInMap(monst->slumberLoc)) {
