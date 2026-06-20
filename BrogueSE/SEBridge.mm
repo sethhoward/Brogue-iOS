@@ -711,6 +711,12 @@ void cePlayerTookDamage(int severity) {
     if (gHost) [gHost playDamageHaptic:severity];
 }
 
+// iOS port (Brogue SE): Monsters.c (noise system) calls this when an unseen creature
+// reacts to the player's noise. stage 0 = began investigating (one tap), 1 = now hunting (two taps).
+void cePlayDetectionHaptic(int stage) {
+    if (gHost) [gHost playDetectionHaptic:stage];
+}
+
 // iOS port (iBrogue): Items.c calls this around the throw/zap aiming loop.
 void ceSetTargeting(boolean isTargeting) {
     if (gHost) [gHost setTargeting:(BOOL)isTargeting];

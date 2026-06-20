@@ -380,6 +380,13 @@ final class BrogueViewController: UIViewController {
         // Damage severity levels passed up from the engine (see Combat.c).
         static let severityLowHealth = 1
         static let severityFatal = 2
+
+        // Noise-detection feedback (Brogue SE noise system, see Monsters.c). Sharp/crisp
+        // so it reads as an "alert," distinct from the softer damage thuds.
+        static let detectionStyle: UIImpactFeedbackGenerator.FeedbackStyle = .rigid
+        static let detectionIntensity: CGFloat = 0.7
+        static let detectionDoubleGap: TimeInterval = 0.09  // gap between the two "now hunting" taps
+        static let detectionStageHunting = 1                // stage >= this -> double tap
     }
 
     /// Tactile feedback when an action button is tapped.
@@ -407,6 +414,9 @@ final class BrogueViewController: UIViewController {
     private let strongDamageHaptics = UIImpactFeedbackGenerator(style: Haptics.strongDamageStyle)
     private let deathHaptics = UINotificationFeedbackGenerator()
 
+    /// Generator for noise-detection feedback (sharp taps when something hears you).
+    private let detectionHaptics = UIImpactFeedbackGenerator(style: Haptics.detectionStyle)
+
     /// Tactile feedback when the player takes damage, scaled by severity (computed
     /// by the engine): 0 = ordinary hit (very light), 1 = hit while under 40%
     /// health, the threshold of the engine's low-health flash (stronger), 2 =
@@ -430,12 +440,34 @@ final class BrogueViewController: UIViewController {
         }
     }
 
+    /// Tactile feedback when an unseen creature reacts to the player's noise (Brogue
+    /// SE noise system): stage 0 = something just began investigating you (one short,
+    /// sharp tap); stage 1 = an investigator locked onto you and is now hunting (two
+    /// quick taps). Respects the haptics setting and is iPhone-only. Called from the
+    /// SE bridge on the engine's background thread, so it hops to main.
+    @objc func noiseDetectionHaptic(_ stage: Int) {
+        guard hapticsEnabled, UIDevice.current.userInterfaceIdiom == .phone else { return }
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self else { return }
+            self.detectionHaptics.impactOccurred(intensity: Haptics.detectionIntensity)
+            self.detectionHaptics.prepare()
+            if stage >= Haptics.detectionStageHunting {   // it found you — a second quick tap
+                DispatchQueue.main.asyncAfter(deadline: .now() + Haptics.detectionDoubleGap) { [weak self] in
+                    guard let self = self else { return }
+                    self.detectionHaptics.impactOccurred(intensity: Haptics.detectionIntensity)
+                    self.detectionHaptics.prepare()
+                }
+            }
+        }
+    }
+
     /// Warms the take-damage generators so the first hit isn't dropped by a cold
     /// Taptic Engine. Called when gameplay controls appear.
     private func prepareDamageHaptics() {
         lightDamageHaptics.prepare()
         strongDamageHaptics.prepare()
         deathHaptics.prepare()
+        detectionHaptics.prepare()
     }
 
     /// iPhone "left-handed" magnifier mode: when on, the magnifier sits to the

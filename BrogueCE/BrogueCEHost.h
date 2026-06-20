@@ -80,6 +80,13 @@ NS_ASSUME_NONNULL_BEGIN
 // haptics setting and device support, so the engine can call it freely.
 - (void)playDamageHaptic:(NSInteger)severity;
 
+// iOS port (Brogue SE): fire a haptic when an unseen creature reacts to the player's
+// noise. stage 0 = something just began investigating you (one short, sharp tap);
+// stage 1 = an investigator locked onto you and is now hunting (two quick taps).
+// iPhone-only; the host gates on its own haptics setting and device support, so the
+// engine can call it freely. (Only the SE engine calls this; CE never does.)
+- (void)playDetectionHaptic:(NSInteger)stage;
+
 // True while the player is aiming a throw/zap (the engine's targeting loop), so
 // the host can move the escape button aside and enable the aiming magnifier.
 - (void)setTargeting:(BOOL)targeting;

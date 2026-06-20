@@ -85,6 +85,10 @@ final class CEHost: NSObject, BrogueCEHost {
         viewController?.playerTookDamage(severity)
     }
 
+    func playDetectionHaptic(_ stage: Int) {
+        viewController?.noiseDetectionHaptic(stage)
+    }
+
     func setTargeting(_ targeting: Bool) {
         viewController?.setCETargeting(targeting)
     }
