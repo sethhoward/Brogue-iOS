@@ -307,6 +307,63 @@ FAINT │  │ (§3.2.6)                                  spot (§3.2.5)│   �
 - **Stack stealth** (darkness + shadow + rest + ring) shrinks *both* your sight radius *and* your
   loudness (the ring and armor terms are shared), so a stealth build is quiet on both axes.
 
+### 4.4 Worked probabilities — sneaking up (old stealth vs. SE)
+
+These are the numbers behind the design: *how does sneaking up on an enemy compare to vanilla?* All
+figures below use a **sleeping** target and one **worked scenario**: the player **walking in grass with
+leather armor**, no stealth ring, **stealth range 7**, straight-line open approach. Two things set the
+baseline:
+
+- **Leather armor is silent** — its strength requirement (10) is below the threshold, so
+  `armorStealthAdjustment = max(0, 10−12) = 0`. It adds nothing to loudness.
+- **Grass is the noise**: `NOISE_TERRAIN_CRUNCH = +8` (§3.4). So `playerNoise = 8` per step.
+
+Remember the systems detect a sleeper *completely differently*: **old** = a flat **25%/turn** sight roll
+inside sight range (`stealthRange` tiles), **requires LoS**, and a hit = **instant hunt**. **SE** = the
+hear roll only (sleepers are deaf to sight), **no LoS needed**, and range 2+ is only **investigate**.
+
+**Per-step detection chance** (`hearChance = clamp(15 + 8 + nearfield/falloff, 0, 95)`):
+
+| Range (tiles) | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 |
+|---|---|---|---|---|---|---|---|---|
+| **SE** (grass, leather) | 43%* | 43% | 19% | 15% | 11% | 7% | 3% | 0% |
+| Old vanilla (flat) | 25% | 25% | 25% | 25% | 25% | 25% | 25% | 0%† |
+
+\* point-blank (`d ≤ 1`) is LOUD → instant hunt; range 2+ is FAINT → investigate.  † vanilla's 25% only
+applies inside sight range (`stealthRange` tiles) *and* with line of sight.
+
+**Cumulative — probability the target is still asleep when you reach each range** (approaching from range 7;
+each step is an independent roll):
+
+| Reached range | **SE (grass)** | Old (stealth 7) |
+|---|---|---|
+| 7 | 97% | 75% |
+| 6 | 90% | 56% |
+| 5 | 80% | 42% |
+| 4 | 68% | 32% |
+| 3 | 55% | 24% |
+| 2 | 32% | 18% |
+| **1 → backstab lands** | **~18%** | **~13%** |
+
+**What the tables show:**
+- **Per step, SE is *gentler* at range** — only point-blank (1–2 tiles) is hotter (43% vs 25%); from range 3
+  out it's well *below* the flat 25% and falls off fast.
+- **End-to-end, the backstab odds are close** (~18% vs ~13%) — SE is a *modest* upgrade in this scenario
+  (grass is the loudest common ground; on stone, `playerNoise = 0`, SE jumps to ~34% — much better).
+- **The risk profile is inverted.** SE keeps you safe across the mid-range and concentrates *all* the danger
+  in the last two tiles (the `+20` near-field spike); old bled you uniformly at 25% every step. SE = "stroll
+  in, then thread a needle at the doorstep"; old = "every step is a coin you can lose."
+- **Standing still is free in SE** (`0%/turn` — you emit nothing); old rolled 25%/turn just for being in
+  sight range. SE rewards patience absolutely.
+- **A blown sneak is more recoverable in SE** — range 3+ detection is only *investigate*, not the *instant
+  hunt* of old; and **accuracy = stealth** (a thrown hit is a muffled body-thud, a miss clangs off the wall
+  and wakes the room — see [environmental sounds, §3.3](../design/environmental-sounds.md)).
+
+**The headline:** average difficulty is roughly preserved (so the game isn't unbalanced), but the variance
+moves from the RNG to *your decisions* — terrain, stillness, line of sight. Old stealth *happened to you*;
+SE stealth is something you *operate*. (All figures shift with terrain and lighting; these are one worked
+point, not a guarantee.)
+
 ---
 
 ## 5. Legibility (the tells)

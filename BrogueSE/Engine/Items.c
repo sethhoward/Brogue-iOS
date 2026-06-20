@@ -6160,6 +6160,67 @@ static pos pullMouseClickDuringPlayback(void) {
 /// the player to the target (e.g. throwing an item or using a staff/wand). The best path to the target is determined
 /// and highlighted. If possible, an inital target is chosen automatically. The player can cycle through additional
 /// targets (if any) with the tab key. Alternatively, the player can manually choose a target.
+#if NOISE_SYSTEM_ENABLED
+// iOS port (Brogue SE): the throw NOISE PREVIEW -- a live, static "audible radius" wash drawn while aiming,
+// so you can see how loud a throw will be (and how far it carries, bending around walls) before committing.
+// Reflects the selected item + the projected impact surface + the cost-flood, never monster positions, so
+// it can't be a detection tool. See docs/design/environmental-sounds.md.
+static short itemImpactLoudness(const item *theItem);          // (defined below, near throwItem)
+static short impactSurfaceModifier(pos loc, boolean hitWall);  // (defined below, near throwItem)
+static const color throwNoisePreviewColor = {80, 65, 25, 0, 0, 0, 0, false}; // faint amber wash
+
+// Where a thrown item would stop along `coords`: first creature -> that cell; first wall -> the open cell
+// before it; else the last cell. Mirrors throwItem's landing logic.
+static pos previewThrowImpact(const pos coords[], short numCells, boolean *hitWall) {
+    *hitWall = false;
+    for (short i = 0; i < numCells; i++) {
+        const pos c = coords[i];
+        if (pmap[c.x][c.y].flags & (HAS_MONSTER | HAS_PLAYER)) {
+            return c; // would strike a creature
+        }
+        if (cellHasTerrainFlag(c, (T_OBSTRUCTS_PASSABILITY | T_OBSTRUCTS_VISION))) {
+            *hitWall = true;
+            return (i > 0) ? coords[i - 1] : coords[0]; // rests on the open cell before the obstruction
+        }
+    }
+    return (numCells > 0) ? coords[numCells - 1] : player.loc;
+}
+
+// Erase a previously-drawn preview wash by refreshing its bounding box (covers exactly what was painted).
+static void erasePreviewBox(pos center, short radius) {
+    if (!isPosInMap(center) || radius < 1) {
+        return;
+    }
+    for (short iy = center.y - radius; iy <= center.y + radius; iy++) {
+        for (short ix = center.x - radius; ix <= center.x + radius; ix++) {
+            if (coordinatesAreInMap(ix, iy)) {
+                refreshDungeonCell((pos){ ix, iy });
+            }
+        }
+    }
+}
+
+// Draw the audible-radius wash for the throw currently aimed along `coords`; returns the radius and reports
+// the impact cell via *outImpact (so the caller can erase the same region next frame). Flood-accurate.
+static short drawThrowNoisePreview(const item *theItem, const pos coords[], short numCells, pos *outImpact) {
+    boolean hitWall;
+    const pos impact = previewThrowImpact(coords, numCells, &hitWall);
+    const short strength = itemImpactLoudness(theItem) + impactSurfaceModifier(impact, hitWall);
+    const short radius = clamp(NOISE_IMPACT_BASE_RADIUS + strength / NOISE_IMPACT_SCALE,
+                               NOISE_IMPACT_MIN_RADIUS, NOISE_IMPACT_MAX_RADIUS);
+    recomputeImpactSoundMap(impact);
+    for (short iy = impact.y - radius; iy <= impact.y + radius; iy++) {
+        for (short ix = impact.x - radius; ix <= impact.x + radius; ix++) {
+            if (coordinatesAreInMap(ix, iy) && impactSoundDistanceAt((pos){ ix, iy }) <= radius) {
+                hiliteCell(ix, iy, &throwNoisePreviewColor, 25, true); // faint wash; trajectory draws on top
+            }
+        }
+    }
+    *outImpact = impact;
+    return radius;
+}
+#endif
+
 /// @param returnLoc The location of the chosen target, if any.
 /// @param maxDistance The maximum throwing/blinking distance. Used to provide a visual cue to the player.
 /// @param targetMode Determines how targets are chosen based on the action (e.g. throw, use staff/wand).
@@ -6178,6 +6239,11 @@ boolean chooseTarget(pos *returnLoc,
     boolean stopAtTarget = (targetMode == AUTOTARGET_MODE_THROW);
     color trajColor;
     bolt theBolt;
+#if NOISE_SYSTEM_ENABLED
+    const boolean showNoisePreview = (targetMode == AUTOTARGET_MODE_THROW && theItem != NULL); // throw noise tell
+    pos previewImpact = INVALID_POS;
+    short previewRadius = 0;
+#endif
 
     // choose the bolt and color to use for highlighting the path to the target
     if (theItem && (targetMode == AUTOTARGET_MODE_USE_STAFF_OR_WAND)
@@ -6249,6 +6315,11 @@ boolean chooseTarget(pos *returnLoc,
         if (canceled) {
             refreshDungeonCell(oldTargetLoc);
             hiliteTrajectory(coordinates, numCells, true, &theBolt, &trajColor);
+#if NOISE_SYSTEM_ENABLED
+            if (showNoisePreview) {
+                erasePreviewBox(previewImpact, previewRadius);
+            }
+#endif
             confirmMessages();
             rogue.cursorLoc = INVALID_POS;
             uiMode = oldUiMode;
@@ -6279,6 +6350,11 @@ boolean chooseTarget(pos *returnLoc,
 
         refreshDungeonCell(oldTargetLoc);
         hiliteTrajectory(coordinates, numCells, true, &theBolt, &trajColor);
+#if NOISE_SYSTEM_ENABLED
+        if (showNoisePreview) {
+            erasePreviewBox(previewImpact, previewRadius); // clear last frame's audible-radius wash
+        }
+#endif
 
         if (!targetConfirmed) {
             numCells = getLineCoordinates(coordinates, originLoc, targetLoc, &theBolt);
@@ -6289,6 +6365,11 @@ boolean chooseTarget(pos *returnLoc,
             if (stopAtTarget) {
                 numCells = min(numCells, distanceBetween(player.loc, targetLoc));
             }
+#if NOISE_SYSTEM_ENABLED
+            if (showNoisePreview) { // paint the audible radius UNDER the trajectory (drawn next), so the aim line stays on top
+                previewRadius = drawThrowNoisePreview(theItem, coordinates, numCells, &previewImpact);
+            }
+#endif
             distance = hiliteTrajectory(coordinates, numCells, false, &theBolt, &trajColor);
             cursorInTrajectory = false;
             for (i=0; i<distance; i++) {
@@ -6311,6 +6392,11 @@ boolean chooseTarget(pos *returnLoc,
     }
     hiliteTrajectory(coordinates, numCells, true, &theBolt, &trajColor);
     refreshDungeonCell(oldTargetLoc);
+#if NOISE_SYSTEM_ENABLED
+    if (showNoisePreview) {
+        erasePreviewBox(previewImpact, previewRadius);
+    }
+#endif
 
     uiMode = oldUiMode;
     ceSetTargeting(false); // iOS port (iBrogue): aiming finished

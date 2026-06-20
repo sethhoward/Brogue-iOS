@@ -2497,10 +2497,13 @@ void advanceCosmeticAnimations(void) {
             short ix, iy;
             for (iy = e->origin.y - waveR; iy <= e->origin.y + waveR; iy++) {
                 for (ix = e->origin.x - waveR; ix <= e->origin.x + waveR; ix++) {
+                    if (!coordinatesAreInMap(ix, iy)) {
+                        continue; // bounds FIRST -- the sound-map lookups below index the grid directly
+                    }
                     const short d = (e->kind == CE_RIPPLE_IMPACT)
                                   ? impactSoundDistanceAt((pos){ ix, iy })
                                   : soundDistanceAt((pos){ ix, iy });
-                    if (!coordinatesAreInMap(ix, iy) || d != waveR) {
+                    if (d != waveR) {
                         continue;
                     }
                     const pos p = (pos){ ix, iy };

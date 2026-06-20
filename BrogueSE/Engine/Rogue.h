@@ -103,13 +103,13 @@
 // iOS port (Brogue SE): start with 3 potions of telepathy for playtesting the noise system -- telepathy
 // reveals off-screen monsters so you can correlate the noise box-ripples with the creatures making them.
 // Granted deterministically in initializeRogue, so it is recording-safe. Flip to 0 to ship.
-#define D_TELEPATHY_POTION_START        1//(WIZARD_MODE && 0)
+#define D_TELEPATHY_POTION_START        0//(WIZARD_MODE && 0)
 
 // iOS port (Brogue SE): start with 3 potions of invisibility for playtesting -- invisibility drops your
 // stealth range to 1, so it's a quick way to exercise the noise/stealth interaction (monsters can still
 // HEAR you while you're invisible). Granted deterministically in initializeRogue, so it is recording-safe.
 // Flip to 0 to ship.
-#define D_INVISIBILITY_POTION_START     1//(WIZARD_MODE && 0)
+#define D_INVISIBILITY_POTION_START     0//(WIZARD_MODE && 0)
 
 // iOS port (Brogue SE): noise system. A monster that takes a self-willed step while the player can't
 // see it emits a perceptible "noise", drawn as a box radiating from its new cell ("you heard

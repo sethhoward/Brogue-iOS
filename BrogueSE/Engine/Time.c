@@ -765,7 +765,7 @@ void recomputeSoundMap(void) {
 }
 
 short soundDistanceAt(pos loc) {
-    return gSoundMap ? gSoundMap[loc.x][loc.y] : 30000;
+    return (gSoundMap && coordinatesAreInMap(loc.x, loc.y)) ? gSoundMap[loc.x][loc.y] : 30000;
 }
 
 // iOS port (Brogue SE): environmental-sound propagation -- the same cost-flood, but from an arbitrary
@@ -777,7 +777,7 @@ void recomputeImpactSoundMap(pos source) {
 }
 
 short impactSoundDistanceAt(pos loc) {
-    return gImpactSoundMap ? gImpactSoundMap[loc.x][loc.y] : 30000;
+    return (gImpactSoundMap && coordinatesAreInMap(loc.x, loc.y)) ? gImpactSoundMap[loc.x][loc.y] : 30000;
 }
 
 boolean playerAdjacentToClosedDoor(void) {
