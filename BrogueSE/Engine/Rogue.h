@@ -2437,8 +2437,11 @@ enum monsterBookkeepingFlags {
     MB_ADMINISTRATIVE_DEATH     = Fl(24),   // like the `administrativeDeath` parameter to `killCreature`
     MB_HAS_DIED                 = Fl(25),   // monster has already been killed but not yet removed from `monsters`
     MB_DOES_NOT_RESURRECT       = Fl(26),   // resurrection altars don't revive monsters summoned by allies
-    MB_INVESTIGATING            = Fl(27)    // iOS port (Brogue SE): noise system -- heading to a heard-noise
+    MB_INVESTIGATING            = Fl(27),   // iOS port (Brogue SE): noise system -- heading to a heard-noise
                                             // cell (monst->investigateLoc) to look, NOT hunting; see noise-system.md
+    MB_RETURNING_HOME           = Fl(28)    // iOS port (Brogue SE): noise system -- a sleeper roused by noise that
+                                            // investigated and found nothing is trudging back to its bed
+                                            // (monst->slumberLoc) to doze off again; see PERCEPTION_AUDIT.md
 };
 
 // Defines all creatures, which include monsters and the player:
@@ -2646,6 +2649,8 @@ typedef struct creature {
     pos targetCorpseLoc;           // location of the corpse that the monster is approaching to gain its abilities
     pos investigateLoc;            // iOS port (Brogue SE): noise system -- the heard-noise cell this monster is
                                    // investigating (valid only while MB_INVESTIGATING). See noise-system.md "Phase 2".
+    pos slumberLoc;                // iOS port (Brogue SE): noise system -- where a noise-roused sleeper was sleeping,
+                                   // so it can return there and doze off again (valid only while MB_RETURNING_HOME).
     char targetCorpseName[30];          // name of the deceased monster that we're approaching to gain its abilities
     unsigned long absorptionFlags;      // ability/behavior flags that the monster will gain when absorption is complete
     boolean absorbBehavior;             // above flag is behavior instead of ability (ignored if absorptionBolt is set)

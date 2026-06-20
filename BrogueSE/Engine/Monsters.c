@@ -125,6 +125,7 @@ void initializeMonster(creature *monst, boolean itemPossible) {
     monst->targetCorpseLoc = INVALID_POS;
     monst->lastSeenPlayerAt = INVALID_POS;
     monst->investigateLoc = INVALID_POS; // iOS port (Brogue SE): noise system -- no heard noise to investigate yet
+    monst->slumberLoc = INVALID_POS;     // iOS port (Brogue SE): noise system -- no bed to return to yet
     monst->targetWaypointIndex = -1;
     for (int i=0; i < MAX_WAYPOINT_COUNT; i++) {
         monst->waypointAlreadyVisited[i] = rand_range(0, 1);
@@ -1761,6 +1762,8 @@ void alertMonster(creature *monst) {
     monst->lastSeenPlayerAt = player.loc;
     monst->bookkeepingFlags &= ~MB_INVESTIGATING; // iOS port (Brogue SE): a real target supersedes a vague noise
     monst->investigateLoc = INVALID_POS;
+    monst->bookkeepingFlags &= ~MB_RETURNING_HOME; // iOS port (Brogue SE): hunting the player abandons the bed
+    monst->slumberLoc = INVALID_POS;
 }
 
 void wakeUp(creature *monst) {
@@ -1963,6 +1966,13 @@ static enum monsterHearing checkPlayerHeard(creature *monst) {
         // wrong way; see monsterPathTowardLoc + the WANDERING block in monstersTurn.)
         if (monst->creatureState == MONSTER_SLEEPING) {
             monst->creatureState = MONSTER_WANDERING; // wake it, but only enough to investigate
+            // Remember the bed: a sleeper roused by noise that investigates and finds nothing will trudge
+            // back here and doze off again (see the MB_RETURNING_HOME block in monstersTurn) -- rather than
+            // wander off. Recorded ONLY for genuine sleepers (a monster already wandering has no bed) and not
+            // for dormant lurkers (they burst out, they don't sleep). See PERCEPTION_AUDIT.md.
+            if (!(monst->bookkeepingFlags & MB_IS_DORMANT)) {
+                monst->slumberLoc = monst->loc;
+            }
         }
         monst->investigateLoc = player.loc;
         monst->bookkeepingFlags |= MB_INVESTIGATING;
@@ -4421,8 +4431,30 @@ void monstersTurn(creature *monst) {
                     // each turn in cosmeticRefreshInvestigateBlinks -- not a per-turn pulse here.)
                     return; // stepped toward the noise
                 }
-                monst->bookkeepingFlags &= ~MB_INVESTIGATING; // arrived / blocked -> give up
+                // Arrived / blocked -> found nothing. Stop investigating; if we were roused from a bed, head
+                // back to it (falls through to the MB_RETURNING_HOME block just below) instead of wandering off.
+                monst->bookkeepingFlags &= ~MB_INVESTIGATING;
                 monst->investigateLoc = INVALID_POS;
+                if (isPosInMap(monst->slumberLoc)) {
+                    monst->bookkeepingFlags |= MB_RETURNING_HOME;
+                }
+            }
+            // Return to bed: a noise-roused sleeper that found nothing trudges back to where it was sleeping
+            // and dozes off again. If it can't reach the bed (no path / blocked), it gives up and wanders --
+            // per design, a blocked return always falls back to ordinary wandering (below). Only ever set for
+            // genuine sleepers (see checkPlayerHeard), so this never touches a monster that began wandering.
+            if ((monst->bookkeepingFlags & MB_RETURNING_HOME) && isPosInMap(monst->slumberLoc)) {
+                if (!posEq(monst->loc, monst->slumberLoc)
+                    && monsterPathTowardLoc(monst, monst->slumberLoc)) {
+                    return; // trudging back toward the bed
+                }
+                monst->bookkeepingFlags &= ~MB_RETURNING_HOME;
+                if (posEq(monst->loc, monst->slumberLoc)) {
+                    monst->creatureState = MONSTER_SLEEPING; // home at last -> doze off
+                    monst->slumberLoc = INVALID_POS;
+                    return; // asleep; nothing further this turn
+                }
+                monst->slumberLoc = INVALID_POS; // blocked / no path home -> abandon bed, wander (below)
             }
 #endif
             // Step toward the chosen waypoint.

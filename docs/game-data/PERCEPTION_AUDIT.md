@@ -154,9 +154,25 @@ A FAINT hear sets `creatureState = MONSTER_WANDERING` + the **`MB_INVESTIGATING`
 with `investigateLoc = player.loc`. The monster is **not hunting**: it walks to that *exact cell*
 (real distance-map pathing via `monsterPathTowardLoc`, **not** scent, **not** the coarse waypoint
 system) to look. While investigating its glyph blinks with `?` (§5). It escalates to a real hunt only
-if it **spots you** or **hears you LOUD**; if it arrives and you're gone, it drops the flag and resumes
-ordinary wandering. **This is the state that keeps stealth meaningful** — noise *attracts*, it doesn't
-auto-reveal. See §4.3.
+if it **spots you** or **hears you LOUD**; if it arrives and you're gone, it found nothing → see §3.2.6.
+**This is the state that keeps stealth meaningful** — noise *attracts*, it doesn't auto-reveal. See §4.3.
+
+#### 3.2.6 Returning to bed — `MB_RETURNING_HOME`
+When an investigator finds nothing (arrives at the empty noise cell, or its path is blocked), what it
+does next depends on **where it came from** ([Monsters.c, monstersTurn WANDERING block](../../BrogueSE/Engine/Monsters.c)):
+
+- **Roused from sleep** → it recorded its bed (`slumberLoc`, set in `checkPlayerHeard` only for a genuine
+  `MONSTER_SLEEPING` monster, never a dormant lurker). It drops `MB_INVESTIGATING`, takes
+  **`MB_RETURNING_HOME`**, and **trudges back to that exact cell** (same `monsterPathTowardLoc`). On
+  arrival → `creatureState = MONSTER_SLEEPING` (it dozes off again). **If it can't reach the bed**
+  (no path / the cell is blocked) → it abandons the bed and falls back to ordinary wandering.
+- **Already wandering when it heard you** → no bed was ever recorded → it just resumes wandering, exactly
+  as before. *(The whole feature is scoped to sleep-roused monsters; a natural wanderer is untouched.)*
+
+Precedence: hearing you again mid-return re-sets `MB_INVESTIGATING`, which is checked first, so a fresh
+noise pulls it back into investigating; the bed persists (only cleared on arrive-home, blocked-return, or
+committing to a hunt via `alertMonster`/`wakeUp`), so once the new investigation fizzles it heads home
+again. A return-home monster shows no `?`/`(Investigating)` tell — those key on `MB_INVESTIGATING`.
 
 #### 3.2.5 Investigate → hunt: the proximity-scaled spot roll
 Once investigating, the bridge to a hunt is the §2.3 sight roll — but for an investigator it is
@@ -246,29 +262,41 @@ finds you once it arrives.
 A non-ally monster is in exactly one `creatureState`, with `MB_INVESTIGATING` layered on `WANDERING`:
 
 ```
-                 hear LOUD / melee / spotted
-   SLEEPING ───────────────────────────────────► TRACKING_SCENT (hunting)
-      │  ▲                                              ▲   │
- hear │  │ (never woken by sight alone — SE)            │   │ lose scent &
-FAINT │  │                                  spot (§3.2.5)│   │ out of range
-      ▼  │                                              │   ▼
-   WANDERING ◄──── give up (arrived, empty) ──── WANDERING + MB_INVESTIGATING
-      │                                                  ▲
-      └──────────── hear FAINT (investigateLoc = you) ───┘
+                       hear LOUD / melee / spotted (§3.2.5)
+   SLEEPING ─────────────────────────────────────────────► TRACKING_SCENT (hunting)
+      │  ▲                                                       ▲   │
+ hear │  │ reach bed                                             │   │ lose scent &
+FAINT │  │ (§3.2.6)                                  spot (§3.2.5)│   │ out of range
+      ▼  │                                                       │   ▼
+  WANDERING                                              WANDERING ◄──┘
+   + MB_INVESTIGATING ──── give up, was a sleeper ────►  + MB_RETURNING_HOME
+      ▲   │                                                  │
+      │   │ give up, was already wandering / blocked return  │
+      │   ▼                                                  │
+   WANDERING ◄────────────────────────────────────────────  ┘
+      │   ▲
+      └───┘ hear FAINT again (re-investigate; bed persists)
 ```
 
 - **SLEEPING** → wakes only by **sound** (LOUD → hunt; FAINT → investigate) or damage. *Not* by sight.
+  On a FAINT wake it records its **bed** (`slumberLoc`) so it can return.
 - **WANDERING** → milling; gets the flat-25% sight roll and can hear you.
 - **WANDERING + MB_INVESTIGATING** → actively walking to your last noise cell; proximity-scaled sight
-  roll; `?` blink.
-- **TRACKING_SCENT** → hunting (alerts the horde on entry); `alertMonster` clears `MB_INVESTIGATING`.
+  roll; `?` blink. On giving up: *was a sleeper* → `MB_RETURNING_HOME`; *was already wandering* → plain
+  `WANDERING`.
+- **WANDERING + MB_RETURNING_HOME** → trudging back to its bed; reach it → `SLEEPING`; blocked → plain
+  `WANDERING`. No `?` tell.
+- **TRACKING_SCENT** → hunting (alerts the horde on entry); `alertMonster`/`wakeUp` clears
+  `MB_INVESTIGATING`, `MB_RETURNING_HOME`, and the bed.
 - **FLEEING / ALLY** → outside this system's scope.
 
 ### 4.3 What this buys the player (the design intent)
 - **Make noise and stay (rest, fight)** → the investigator walks over and the proximity roll catches you
   within a turn or two of reaching you → hunt. Resting next to a sleeper is a gamble.
-- **Make noise and leave before it sees you** → it investigates an empty cell, finds nothing, wanders
-  off → **you escaped.** Noise *attracts*; it doesn't reveal.
+- **Make noise and leave before it sees you** → it investigates an empty cell, finds nothing → **you
+  escaped.** Noise *attracts*; it doesn't reveal. A monster you woke from sleep then **walks back to its
+  bed and dozes off** (§3.2.6) rather than roaming — so a single stray noise doesn't permanently turn a
+  sleeping floor into a wandering one (unless the bed is now unreachable, in which case it wanders).
 - **Go silent** (hold still) → you emit nothing; even an adjacent wanderer is back to the flat 25%
   sight coin. Silence buys uncertainty.
 - **Stack stealth** (darkness + shadow + rest + ring) shrinks *both* your sight radius *and* your
