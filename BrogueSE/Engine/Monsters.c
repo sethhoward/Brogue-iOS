@@ -1862,7 +1862,20 @@ static boolean awareOfTarget(creature *observer, creature *target) {
 #endif
                ) {
         // within range but currently unaware
-        retval = rand_percent(25);
+#if NOISE_SYSTEM_ENABLED
+        if (observer->bookkeepingFlags & MB_INVESTIGATING) {
+            // iOS port (Brogue SE): Phase 2 -- an actively-investigating monster (it heard you and walked
+            // over to look) acquires by proximity, not the flat 25%: near-certain point-blank, decaying to
+            // the vanilla baseline at range. awarenessDistance returns ~2x tiles, so halve it for the curve.
+            const short tilesAway = perceivedDistance / 2;
+            const short chance = clamp(INVESTIGATE_SPOT_ADJACENT_CHANCE - (tilesAway - 1) * INVESTIGATE_SPOT_FALLOFF,
+                                       INVESTIGATE_SPOT_FLOOR, INVESTIGATE_SPOT_ADJACENT_CHANCE);
+            retval = rand_percent(chance);
+        } else
+#endif
+        {
+            retval = rand_percent(25);
+        }
     } else {
         retval = false;
     }

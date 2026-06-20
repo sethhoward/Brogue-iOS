@@ -199,6 +199,15 @@
 #define NOISE_HEAR_FALLOFF_PER_TILE     4   // hearing % lost per sound-tile beyond the near field
 #define NOISE_HEAR_CEILING              95  // hearing ceiling -- sound alone is never an automatic wake
 #define NOISE_HEAR_AGGRO_LOUDNESS       20  // loudness at/above which a heard noise -> full aggro (else investigate)
+// Investigate->hunt acquisition. An actively-investigating monster (MB_INVESTIGATING -- it heard you and
+// walked over to look) is MORE perceptive than a monster that just happens to wander into stealth range:
+// its per-turn spot roll is proximity-scaled instead of the flat vanilla 25%. Near-certain point-blank,
+// decaying by FALLOFF per tile down to the vanilla baseline FLOOR -- so a creature that closes to adjacent
+// acquires you in ~1 turn (no more "stands next to you, blind" dance), while a noise made across the room
+// still grants a window to break line of sight and slip away. See awareOfTarget + docs/design/noise-system.md.
+#define INVESTIGATE_SPOT_ADJACENT_CHANCE 95  // spot chance/turn when point-blank (1 tile)
+#define INVESTIGATE_SPOT_FALLOFF         15  // spot chance lost per tile of distance
+#define INVESTIGATE_SPOT_FLOOR           25  // never below the vanilla passive-wanderer baseline (continuity)
 // Player loudness (playerNoiseLevel() base + an action spike). A NEW quantity, NOT currentStealthRange
 // (which bakes in darkness/shadow -- visual, irrelevant to sound -- and lacks terrain/action/levitation).
 #define NOISE_PLAYER_SILENT             (-30000) // sentinel: player made no noise this turn -> no sound check
