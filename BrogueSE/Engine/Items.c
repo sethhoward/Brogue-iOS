@@ -7060,6 +7060,9 @@ static short itemImpactLoudness(const item *theItem) {
     if (theItem->category & POTION) {
         return NOISE_IMPACT_SHATTER;    // glass shatter (also delivers its effect)
     }
+    if (theItem->category & SCROLL) {
+        return NOISE_IMPACT_PAPER;       // a sheet of parchment flutters down -- the quietest throw
+    }
     if (theItem->category & ARMOR) {
         return NOISE_IMPACT_HEAVY;       // a hurled cuirass clatters
     }
@@ -7077,7 +7080,7 @@ static short itemImpactLoudness(const item *theItem) {
                 return NOISE_IMPACT_HEAVY; // maces/axes/hammers/swords -- you've hurled away real gear
         }
     }
-    return NOISE_IMPACT_LIGHT;            // scrolls, food, wands, etc. -- light/quiet
+    return NOISE_IMPACT_LIGHT;            // food, wands, charms, etc. -- light/quiet
 }
 
 // iOS port (Brogue SE): the surface an item strikes shapes how loud the impact is -- a DEDICATED tier

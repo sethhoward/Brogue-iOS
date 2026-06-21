@@ -32,6 +32,26 @@ See `BrogueCE/Engine/IOS_MODIFICATIONS.md` (faithful CE) and
 
 ## Change log
 
+### 2026-06-21 — Thrown scrolls are the quietest throw (paper impact tier)
+
+**What.** A thrown scroll now lands much more quietly than other light items. It was lumped into
+`NOISE_IMPACT_LIGHT` (4 — shared with darts, incendiary darts, food), giving a ~3-tile audible impact radius
+on hard floor. It now has its own `NOISE_IMPACT_PAPER` tier (0), so a scroll's landing draws a ~2-tile radius
+on stone and clamps to 1 on soft ground / carpet (effectively silent).
+
+**Why.** A sheet of parchment fluttering to the floor shouldn't clatter like a hurled dart. As a distraction
+tool a scroll is now a poor lure (it barely carries) — appropriate, and no downside since scrolls aren't
+thrown for effect. Scoped to scrolls only; food / wands / charms / rings stay at `NOISE_IMPACT_LIGHT`.
+
+**Where.** `Rogue.h` — new `NOISE_IMPACT_PAPER` define. `Items.c` — `itemImpactLoudness()` gains a
+`category & SCROLL` branch returning it (ahead of the catch-all `NOISE_IMPACT_LIGHT`). The tier feeds the
+existing radius formula, so the change flows uniformly to the aim-time noise-preview wash, the impact sound
+map (what monsters hear), and the cosmetic impact ripple. `docs/design/environmental-sounds.md` item-loudness
+table updated.
+
+**Determinism / saves.** Pure tunable constant + a category test; no RNG, no new fields. Diverges replays
+from pre-change recordings like any gameplay change. SE-only; gated by `NOISE_SYSTEM_ENABLED`.
+
 ### 2026-06-21 — Ring of light: emboldened allies hold a standoff behind you (out of spear reach)
 
 **What.** Refines the ring-of-light ally behavior (see the 2026-06-12 cornerstone entry). While a ring of

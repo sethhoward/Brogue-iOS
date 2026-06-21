@@ -253,7 +253,8 @@
 #define NOISE_IMPACT_MIN_RADIUS         1
 #define NOISE_IMPACT_MAX_RADIUS         10  // kept under full earshot (stealthRange*2): draws a room, not the floor
 // Item impact loudness (mass of the thrown thing)
-#define NOISE_IMPACT_LIGHT              4   // dart, incendiary dart, scroll, food
+#define NOISE_IMPACT_PAPER              0   // scroll -- a fluttering sheet of parchment, the quietest throw
+#define NOISE_IMPACT_LIGHT              4   // dart, incendiary dart, food
 #define NOISE_IMPACT_LIGHT_MEDIUM       8   // dagger / light blade
 #define NOISE_IMPACT_MEDIUM             14  // javelin, spear
 #define NOISE_IMPACT_HEAVY              22  // mace/axe/hammer/broadsword, armor
