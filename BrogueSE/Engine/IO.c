@@ -2207,7 +2207,7 @@ static const char gCosmeticImpactRippleChannel = 0;
 
 // Effect kinds hosted by the layer. RIPPLE_* paint via hiliteCell (color overlay); ALERT/BLINK via a
 // glyph (plotCharWithColor). (File-local; promote to Rogue.h if a spawner ever needs a kind parameter.)
-enum cosmeticEffectKind { CE_ALERT_GLYPH, CE_RIPPLE_MONSTER, CE_RIPPLE_PLAYER, CE_RIPPLE_IMPACT, CE_INVESTIGATE_BLINK };
+enum cosmeticEffectKind { CE_ALERT_GLYPH, CE_RIPPLE_MONSTER, CE_RIPPLE_PLAYER, CE_RIPPLE_IMPACT, CE_INVESTIGATE_BLINK, CE_ALERT_BLINK };
 
 typedef struct {
     boolean active;
@@ -2219,6 +2219,7 @@ typedef struct {
     const void *channel;       // SINGLETON identity (NULL = ACCUMULATE); blink = creature*, player ripple = sentinel
     short frameAge;            // idle ticks since spawn (drives flicker / ripple expansion)
     short frameLife;           // ticks to live then expire; 0 = persistent (managed externally, e.g. the blink)
+    short turnsLeft;           // CE_ALERT_BLINK: player-turns remaining before the '!' fades (managed per-turn)
 } cosmeticEffect;
 
 static cosmeticEffect gCosmeticEffects[MAX_COSMETIC_EFFECTS];
@@ -2237,8 +2238,9 @@ static short cosmeticFreeSlot(void) {
     return -1; // pool full -- drop (a missed cosmetic flash is harmless)
 }
 
-// iOS port (Brogue SE): spawn a one-shot glyph flicker (e.g. '!') over a cell. Cosmetic; suppressed during
-// automation / playback fast-forward (matches the old drain-without-animating behavior).
+// iOS port (Brogue SE): spawn a one-shot glyph flicker (the off-screen '?' tell) over a cell. Cosmetic;
+// suppressed during automation / playback fast-forward (matches the old drain-without-animating behavior).
+// (The visible '!' is the turn-bounded, monster-riding cosmeticSpawnAlertBlink instead.)
 void cosmeticSpawnAlertGlyph(pos loc, enum displayGlyph glyph) {
     if (!coordinatesAreInMap(loc.x, loc.y)
         || rogue.automationActive || rogue.autoPlayingLevel || rogue.playbackFastForward) {
@@ -2414,6 +2416,77 @@ void cosmeticRefreshInvestigateBlinks(void) {
         gCosmeticEffects[i].channel = (const void *)m;
         gCosmeticEffects[i].frameAge = 0;
         gCosmeticEffects[i].frameLife = 0; // persistent; this rebuild manages its lifetime
+        gCosmeticEffects[i].turnsLeft = 0; // unused for the investigate blink
+    }
+}
+
+// iOS port (Brogue SE): spawn (or refresh) the persistent '!' alert-blink for a VISIBLE monster that has just
+// locked onto the player (heard you loud / spotted you) -- the alert counterpart to the '?' investigate-blink.
+// Creature-keyed and follows the monster the same way (cosmeticTickAlertBlinks), but instead of living as long
+// as a flag it counts down NOISE_ALERT_BLINK_TURNS player-turns, then fades. Re-triggering refreshes that
+// countdown rather than stacking a second '!'. Suppressed during automation / playback fast-forward. (Pointer
+// is only compared, never dereferenced here -- the live-monster follow in the tick keeps it from dangling.)
+void cosmeticSpawnAlertBlink(creature *monst) {
+    short i;
+    if (monst == NULL || !coordinatesAreInMap(monst->loc.x, monst->loc.y)
+        || rogue.automationActive || rogue.autoPlayingLevel || rogue.playbackFastForward) {
+        return;
+    }
+    for (i = 0; i < MAX_COSMETIC_EFFECTS; i++) {
+        if (gCosmeticEffects[i].active && gCosmeticEffects[i].kind == CE_ALERT_BLINK
+            && gCosmeticEffects[i].channel == (const void *)monst) {
+            gCosmeticEffects[i].origin = monst->loc;
+            gCosmeticEffects[i].turnsLeft = NOISE_ALERT_BLINK_TURNS; // refresh the countdown, don't stack
+            return;
+        }
+    }
+    i = cosmeticFreeSlot();
+    if (i < 0) {
+        return; // pool full -- a missed cosmetic tell is harmless
+    }
+    gCosmeticEffects[i].active = true;
+    gCosmeticEffects[i].kind = CE_ALERT_BLINK;
+    gCosmeticEffects[i].origin = monst->loc;
+    gCosmeticEffects[i].glyph = (enum displayGlyph)'!';
+    gCosmeticEffects[i].tint = &cosmeticAlertColor; // reddish "there you are!"
+    gCosmeticEffects[i].maxRadius = 0;
+    gCosmeticEffects[i].channel = (const void *)monst;
+    gCosmeticEffects[i].frameAge = 0;
+    gCosmeticEffects[i].frameLife = 0; // persistent re: frame-aging; turnsLeft governs its life
+    gCosmeticEffects[i].turnsLeft = NOISE_ALERT_BLINK_TURNS;
+}
+
+// iOS port (Brogue SE): per-turn lifecycle for the '!' alert-blinks (sibling to cosmeticRefreshInvestigateBlinks,
+// called once per player-turn). Follow each blink's monster to its new cell; drop it if the monster is gone or
+// no longer visible; otherwise count down NOISE_ALERT_BLINK_TURNS -- at zero the '!' fades. Suppressed during
+// automation / playback. (Pointer only compared against live monsters, never dereferenced for a freed creature.)
+void cosmeticTickAlertBlinks(void) {
+    short i;
+    if (rogue.automationActive || rogue.autoPlayingLevel || rogue.playbackFastForward) {
+        for (i = 0; i < MAX_COSMETIC_EFFECTS; i++) {
+            if (gCosmeticEffects[i].active && gCosmeticEffects[i].kind == CE_ALERT_BLINK) {
+                gCosmeticEffects[i].active = false;
+            }
+        }
+        return;
+    }
+    for (i = 0; i < MAX_COSMETIC_EFFECTS; i++) {
+        cosmeticEffect *e = &gCosmeticEffects[i];
+        if (!e->active || e->kind != CE_ALERT_BLINK) {
+            continue;
+        }
+        boolean stillValid = false;
+        for (creatureIterator it = iterateCreatures(monsters); hasNextCreature(it);) {
+            creature *m = nextCreature(&it);
+            if ((const void *)m == e->channel && canSeeMonster(m)) {
+                e->origin = m->loc; // follow the monster to its new cell
+                stillValid = true;
+                break;
+            }
+        }
+        if (!stillValid || --e->turnsLeft <= 0) {
+            e->active = false; // monster gone/out of sight, or the countdown ran out
+        }
     }
 }
 
@@ -2524,8 +2597,8 @@ void advanceCosmeticAnimations(void) {
         boolean show = false;
         if (e->kind == CE_ALERT_GLYPH) {
             show = ((e->frameAge / CE_ALERT_FLICKER_FRAMES) & 1) == 0; // flicker on/off
-        } else if (e->kind == CE_INVESTIGATE_BLINK) {
-            show = blinkOn; // global unison phase
+        } else if (e->kind == CE_INVESTIGATE_BLINK || e->kind == CE_ALERT_BLINK) {
+            show = blinkOn; // global unison phase ('?' investigate / '!' alert)
         }
         if (show && coordinatesAreInMap(e->origin.x, e->origin.y)) {
             enum displayGlyph dchar; color fc, bc;
@@ -5385,7 +5458,7 @@ short printMonsterInfo(creature *monst, short y, boolean dim, boolean highlight)
                     printString("  (Investigating)   ", 0, y++, (dim ? &darkGray : &gray), &black, 0);
                 } else
 #endif
-                if ((monst->bookkeepingFlags & MB_FOLLOWER) && monst->leader && (monst->leader->info.flags & MONST_IMMOBILE)) {
+                if (monsterIsWorshiper(monst)) {
                     // follower of an immobile leader -- i.e. a totem
                     printString("    (Worshiping)    ", 0, y++, (dim ? &darkGray : &gray), &black, 0);
                 } else if ((monst->bookkeepingFlags & MB_FOLLOWER) && monst->leader && (monst->leader->bookkeepingFlags & MB_CAPTIVE)) {

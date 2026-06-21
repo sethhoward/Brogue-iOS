@@ -113,24 +113,37 @@
 
 // iOS port (Brogue SE): noise system. A monster that takes a self-willed step while the player can't
 // see it emits a perceptible "noise", drawn as a box radiating from its new cell ("you heard
-// something"). Distance/terrain are still deferred (full-map detection). Whether the player PERCEIVES
-// a given noise is a probability that ADDS the player's awareness and the monster's noisiness:
-//     awarenessEnchant = rogue.awarenessBonus / 20   // net Ring-of-Awareness enchant
-//     detectChance = clamp( NOISE_BASE_PERCEPTION + awarenessEnchant * NOISE_AWARENESS_PER_ENCHANT
-//                           + noiseModifier,  0, NOISE_PERCEPTION_CEILING )
-// where noiseModifier = noiseLevelForMonsterMove() -- a signed per-monster tier (see the NOISE_* tier
-// constants below; Normal = 0, loud monsters positive, quiet/silent negative). ADDITIVE (not a
-// multiplicative loudness scalar) was chosen so awareness can COMPENSATE for a quiet monster -- a keen
-// listener (high ring) still catches a Silent creature sometimes, instead of silence hard-gating
-// detection regardless of awareness. A ringless character hears at the NOISE_BASE_PERCEPTION floor;
-// each net enchant adds NOISE_AWARENESS_PER_ENCHANT; the ceiling keeps it under 100%. The noise system
-// uses its OWN per-enchant rate (not rogue.awarenessBonus's native +20/enchant) so the climb to the
-// ceiling spans +6 enchants -- a steady reason to keep enchanting -- without disturbing the search /
-// sense-trail systems that read rogue.awarenessBonus directly.
+// something"). Perception is a TWO-STAGE model that deliberately SEPARATES range from probability
+// ("bigger ears, not a louder world"). Substantiated by the E / P(>=1) cumulative tables in
+// docs/game-data/PERCEPTION_AUDIT.md (an approach is a sequence of independent per-step rolls, so the
+// useful numbers are EXPECTED ripples E and chance-of-at-least-one P over the whole approach):
+//
+//   (1) RANGE GATE -- is the step audible at all this turn?
+//         awarenessEnchant = rogue.awarenessBonus / 20   // net Ring-of-Awareness enchant
+//         audibleRadius = NOISE_AUDIBLE_RADIUS_BASE
+//                       + awarenessEnchant * NOISE_AWARENESS_RANGE_PER_ENCHANT   // ring = bigger EARS
+//                       + (player at a closed door ? NOISE_DOOR_LISTEN_RANGE : 0)
+//         soundDistanceAt(monster) > audibleRadius (or sealed off) -> no roll, inaudible.
+//       The gate bounds ACCUMULATION: a short ringless ear means only the last few steps of an approach
+//       roll at all, so a normal monster crossing open stone while you rest is heard ~1/3 of the time,
+//       not every step. THE RING'S PRIMARY EFFECT IS TO EXTEND THIS RADIUS: +6 reaches ~half the map.
+//
+//   (2) PROBABILITY -- within the ear, how likely is THIS step heard?
+//         detectChance = clamp( NOISE_BASE_PERCEPTION + awarenessEnchant * NOISE_AWARENESS_PER_ENCHANT
+//                               + noiseModifier + distanceModifier + terrainNoiseModifier
+//                               + doorListenBonus + restBonus, 0, NOISE_PERCEPTION_CEILING )
+//         detectChance = detectChance * NOISE_PERCEPTION_SCALE / 100     // global A/B playtest knob
+//       Per-step chance stays MODEST and fairly flat across the ear (gentle falloff) -> spread-out,
+//       directional pings, not a wall. noiseModifier = noiseLevelForMonsterMove() (signed per-monster
+//       tier below). Still ADDITIVE so the small NOISE_AWARENESS_PER_ENCHANT lets a high ring hear
+//       quiet/silent creatures, without the old behavior of slamming every step to the ceiling.
+//
+// NOISE_PERCEPTION_SCALE is the single A/B tuning lever: 100 = baseline, <100 toward lucky-roll, >100
+// toward generous -- slide the whole ringless feel without re-deriving every constant.
 // The roll uses RNG_COSMETIC (it's informational only -- it changes nothing in the simulation), so it
 // never perturbs the substantive stream: noise tuning never desyncs saves/replays, and seeds are
 // unaffected. PROMOTE TO SUBSTANTIVE only if/when "hearing" starts driving gameplay (e.g. interrupts
-// travel/rest, or feeds monster awareness). See docs/design/noise-system.md.
+// travel/rest, or feeds monster awareness). See docs/design/noise-system.md and PERCEPTION_AUDIT.md.
 #define NOISE_SYSTEM_ENABLED            1   // single kill switch / pre-ship knob (flip to 0 to disable)
 // Per-monster noisiness tiers (the signed modifier noiseLevelForMonsterMove returns). Assigned per
 // monster in that chokepoint; mirrored in docs/game-data/MONSTERS_AUDIT.md's Noise column.
@@ -139,11 +152,65 @@
 #define NOISE_LOUD                      15  // heavy bulk / clattering / loud-winged
 #define NOISE_BOOMING                   30  // massive, ground-shaking
 #define NOISE_SILENT                    (-30) // incorporeal / invisible / weightless magic
-#define NOISE_BASE_PERCEPTION           25  // detection floor with no awareness (ringless character)
-#define NOISE_AWARENESS_PER_ENCHANT     11  // detect% added per net Ring-of-Awareness enchant. Tuned so
-                                            // floor + 6*this >= ceiling -> +6 maxes detection (longer
-                                            // runway than awarenessBonus's native +20/enchant).
-#define NOISE_PERCEPTION_CEILING        90  // detection ceiling -- never 100%, even at high awareness
+#define NOISE_BASE_PERCEPTION           8   // detection floor with no awareness (ringless character)
+#define NOISE_AWARENESS_PER_ENCHANT     2   // detect% added per net Ring-of-Awareness enchant. Deliberately
+                                            // SMALL: the ring's main job is RANGE (NOISE_AWARENESS_RANGE_
+                                            // PER_ENCHANT), not probability. This sliver only lifts a quiet/
+                                            // silent monster's near-zero per-step chance off the floor, so a
+                                            // high ring still "hears the quiet things" (awareness compensates
+                                            // for quiet) without slamming every step to the ceiling.
+#define NOISE_PERCEPTION_CEILING        85  // PER-STEP cap on a single roll -- NOT a cap on cumulative
+                                            // detection. It is a safety valve for the loud corner cases:
+                                            // a Booming monster (+30) on crunchy grass (+8) at near-field
+                                            // (+10) while you rest (+6) at a door (+8) would otherwise blow
+                                            // past 100% on one step; this clamps it so no single step is
+                                            // ever a certainty. It does NOT govern the headline ring numbers
+                                            // (e.g. +6 ~ 95%): those are CUMULATIVE over a whole approach
+                                            // (1 - product of per-step misses across ~radius tiles), and the
+                                            // peak single-step chance there is only ~24%, far below this cap.
+                                            // To move the cumulative high end, use the radius / floor below,
+                                            // NOT this. Lowering this only bites the loud/near-field stack.
+// The RANGE gate: a hard audible radius (cost-tiles) decides whether an off-screen step is heard at all.
+// The ring extends it (bigger ears, not a louder world); standing at a door extends it through that door.
+// See the two-stage model comment above and the E/P tables in docs/game-data/PERCEPTION_AUDIT.md.
+#define NOISE_AUDIBLE_RADIUS_BASE       6   // ringless audible radius (cost-tiles); controls accumulation
+#define NOISE_AWARENESS_RANGE_PER_ENCHANT 5 // audible-radius tiles added per net ring enchant (+6 ~ half map)
+#define NOISE_AUDIBLE_FLOOR             1   // Minimum per-step % for a NORMAL-loudness step anywhere inside
+                                            // the audible radius. Applied to the ambient (listener +
+                                            // propagation) BEFORE the monster's tier is added -- so a
+                                            // Silent (-30) / Quiet (-15) creature is still pulled below it and
+                                            // stays effectively sight-only even within earshot.
+                                            //
+                                            // WHY IT EXISTS: the per-tile falloff drives the raw chance to 0
+                                            // well before the radius gate, so without a floor a ring's extended
+                                            // radius would be DEAD range (gated in, but silenced). The floor
+                                            // makes the bigger ears REAL reach -- faint, accumulating pings out
+                                            // to the edge.
+                                            //
+                                            // AS A LEVER: this is the primary dial for the HIGH end of the ring
+                                            // ladder, because it fills the long tail that only high rings own.
+                                            // Cumulative P(>=1) for a normal monster (stone, resting), by floor:
+                                            //   floor 5 -> +1 54%  +3 79%  +6 95%   (current)
+                                            //   floor 2 -> +1 48%  +3 69%  +6 89%
+                                            //   floor 0 -> +1 45%  +3 62%  +6 82%
+                                            // Lowering it trims the top hardest but DOES sag the whole ladder
+                                            // (incl. the +1..+4 band). For a top-only change that leaves +1..+4
+                                            // identical, cap NOISE_AWARENESS_MAX_ENCHANT instead. See the E/P
+                                            // tables in docs/game-data/PERCEPTION_AUDIT.md.
+
+
+// Global A/B playtest masters (kept together -- the two knobs you slide while feel-testing):
+//   NOISE_PERCEPTION_SCALE -- x% on the final per-step detect% (loudness per step). <100 lucky-roll, >100 generous.
+//   NOISE_RING_RANGE_SCALE -- x% on the Ring of Awareness RANGE contribution (how far the "bigger ears" reach).
+//                             Orthogonal to PERCEPTION_SCALE: one tunes loudness-per-step, this tunes ring reach.
+//   NOISE_AWARENESS_MAX_ENCHANT -- net ring enchant is capped here for BOTH range and the per-step bump, so
+//                             detection stops growing past +6 (already a superpower; +6 is the design cap).
+// ##########
+#define NOISE_PERCEPTION_SCALE          100
+#define NOISE_RING_RANGE_SCALE          100
+#define NOISE_AWARENESS_MAX_ENCHANT     6
+// ##########
+
 // Distance + terrain falloff. A per-turn "sound map" floods cost-distance from the player
 // (recomputeSoundMap): floor costs 1, a vision-blocking-but-passable tile (closed door / dense foliage
 // / thick smoke) costs NOISE_DOOR_COST (sound seeps through, muffled), walls are impassable (sound
@@ -151,15 +218,20 @@
 //     d <= NOISE_NEARFIELD_RADIUS         -> +NOISE_NEARFIELD_BONUS  (right on top of you, unmistakable)
 //     else                                 -> -NOISE_FALLOFF_PER_TILE * (d - NOISE_NEARFIELD_RADIUS)
 //     unreachable (sealed off)             -> no noise at all
-// Plus NOISE_DOOR_LISTEN_BONUS while the player stands next to a closed door (ear at the door; 0 to
-// disable -- the door cost already favors doors over walls). All read-only/deterministic -> roll stays
-// cosmetic. Visualize with the sound-map overlay (SOUND_MAP_KEY / the display menu).
-#define NOISE_NEARFIELD_RADIUS          2   // within this cost-distance, detection is boosted
-#define NOISE_NEARFIELD_BONUS           15  // the near-field detection boost
-#define NOISE_FALLOFF_PER_TILE          3   // detection lost per effective tile beyond the near field
-#define NOISE_DOOR_COST                 4   // extra sound-map cost to pass a closed door / foliage / smoke
-#define NOISE_DOOR_LISTEN_BONUS         10  // detection bonus while standing next to a closed door (0 = off)
-#define NOISE_REST_PERCEPTION_BONUS     10  // detection bonus while resting (listening intently). LIVE on a
+// Plus NOISE_DOOR_LISTEN_BONUS (probability) AND NOISE_DOOR_LISTEN_RANGE (ear-on-door extends the
+// audible radius through it) while the player stands next to a closed door. Together they restore --
+// but never exceed -- open-air hearing for a monster behind that door (the muffle is negated, not beaten).
+// All read-only/deterministic -> roll stays cosmetic. Visualize with the sound-map overlay (SOUND_MAP_KEY).
+#define NOISE_NEARFIELD_RADIUS          1//2// ### <=this cost-distance = "right on top of you, unseen" (corner/
+                                            // foliage/dark/blind): flat boost. Kept at 1 so an open-stone
+                                            // approach's last tile doesn't auto-ping (stone stays stealthy).
+#define NOISE_NEARFIELD_BONUS           10  // the near-field detection boost
+#define NOISE_FALLOFF_PER_TILE          2   // detection lost per effective tile beyond the near field (gentle
+                                            // -> flat, directional pings inside the ear; the gate sets range)
+#define NOISE_DOOR_COST                 3   // extra sound-map cost to pass a closed door / foliage / smoke
+#define NOISE_DOOR_LISTEN_BONUS         8   // detection bonus while standing next to a closed door (0 = off)
+#define NOISE_DOOR_LISTEN_RANGE         4   // audible-radius tiles added while at a door (hear through it)
+#define NOISE_REST_PERCEPTION_BONUS     6   // detection bonus while resting (listening intently). LIVE on a
                                             // short rest 'z' (a single manual turn -> ripples animate with the
                                             // boost). On long rest 'Z' (autoRest) ripples are drained, so the
                                             // boost is latent there until "hearing interrupts rest" lands
@@ -167,6 +239,7 @@
 // Terrain EMISSION: how much the terrain a creature steps into adds to / dampens the noise of that step
 // (distinct from the sound map's propagation damping above). Signed, smaller than the monster tiers since
 // it only modulates on top. Read at the destination cell (terrainNoiseModifier). Direction-agnostic.
+// These are shared values with both monster and player. Changing them also changes the probability of a player snake attack.
 #define NOISE_TERRAIN_CRUNCH            8   // crunchy/creaky underfoot: grass, fungus, hay, ash, rubble, bridge
 #define NOISE_TERRAIN_SPLASH            6   // wading shallow water (hides your scent, but splashes loudly)
 #define NOISE_TERRAIN_RUSTLE            4   // rustle/squelch: dense foliage, fungus forest, mud
@@ -240,7 +313,7 @@
 // (which bakes in darkness/shadow -- visual, irrelevant to sound -- and lacks terrain/action/levitation).
 #define NOISE_PLAYER_SILENT             (-30000) // sentinel: player made no noise this turn -> no sound check
 #define NOISE_PLAYER_MELEE              30  // loudness spike for a player melee attack (always aggro-tier)
-#define NOISE_PLAYER_THROW              15  // loudness spike for a player throw
+#define NOISE_PLAYER_THROW              2   // loudness spike for a player throw
 #define NOISE_PLAYER_AGGRAVATED         60  // forced loudness while STATUS_AGGRAVATING (overrides the rest)
 #define NOISE_PLAYER_LEVITATE           (-10) // quieter while levitating (feet off the ground; terrain term skipped)
 #define NOISE_PLAYER_ARMOR_SCALE        2   // loudness per point of armorStealthAdjustment (heavy armor clatters)
@@ -260,6 +333,10 @@
 // tick that drives water/hallucination (shuffleTerrainColors(_, true) from the platform bridge while
 // colorsDance is on). This is the half-cycle in idle frames: glyph for N frames, '?' for N frames.
 #define NOISE_INVESTIGATE_BLINK_FRAMES  30  // ~0.5s per half at 60Hz (a slow, readable blink)
+// When a VISIBLE monster locks onto you (hears you loud / spots you), a reddish '!' rides its glyph -- the
+// alert counterpart to the investigate '?'. Unlike the '?' (which lives as long as MB_INVESTIGATING), the
+// '!' is bounded: it follows the monster for this many player-turns, then fades. Adjustable; baseline 2.
+#define NOISE_ALERT_BLINK_TURNS         2   // player-turns the visible '!' "I see you" tell rides the monster
 
 // If enabled, runs a benchmark for the performance of repeatedly updating the screen at the start of the game.
 // #define SCREEN_UPDATE_BENCHMARK
@@ -3525,7 +3602,9 @@ extern "C" {
     boolean playerAdjacentToClosedDoor(void); // iOS port (Brogue SE): is the player listening at a door?
     short playerNoiseLevel(void);   // iOS port (Brogue SE): the player's base loudness (no action spike)
     void playerEmitNoise(short spike); // iOS port (Brogue SE): set rogue.playerNoise = playerNoiseLevel()+spike
-    void cosmeticSpawnAlertGlyph(pos loc, enum displayGlyph glyph); // iOS port (Brogue SE): cosmetic layer -- one-shot '!' flicker
+    void cosmeticSpawnAlertGlyph(pos loc, enum displayGlyph glyph); // iOS port (Brogue SE): cosmetic layer -- one-shot '?'/'!' flicker at a cell
+    void cosmeticSpawnAlertBlink(creature *monst); // iOS port (Brogue SE): cosmetic layer -- creature-keyed '!' that rides the monster for N turns
+    void cosmeticTickAlertBlinks(void);         // iOS port (Brogue SE): cosmetic layer -- per-turn '!' follow + countdown/expire
     void cosmeticSpawnRippleMonster(pos loc);   // iOS port (Brogue SE): cosmetic layer -- monster "heard something" ripple
     void cosmeticSpawnRipplePlayer(short radius);// iOS port (Brogue SE): cosmetic layer -- player's sound-footprint ripple
     void cosmeticSpawnRippleImpact(pos source, short radius); // iOS port (Brogue SE): cosmetic layer -- environmental-sound impact ripple
@@ -3688,6 +3767,7 @@ extern "C" {
     boolean monsterWillAttackTarget(const creature *attacker, const creature *defender);
     boolean monstersAreTeammates(const creature *monst1, const creature *monst2);
     boolean monstersAreEnemies(const creature *monst1, const creature *monst2);
+    boolean monsterIsWorshiper(const creature *monst); // iOS port (Brogue SE): follower of an immobile idol/totem
     void initializeGender(creature *monst);
     boolean stringsMatch(const char *str1, const char *str2);
     void resolvePronounEscapes(char *text, creature *monst);

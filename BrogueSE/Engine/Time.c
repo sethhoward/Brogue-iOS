@@ -2928,6 +2928,8 @@ void playerTurnEnded() {
     // (3) rebuild the '?' investigate-blink effects to match this turn's visible investigators (the blink
     // is a cosmetic-layer effect now; this is its per-turn lifecycle -- spawn/follow/despawn).
     cosmeticRefreshInvestigateBlinks();
+    // (4) advance the '!' alert-blinks: follow each to its monster's new cell and count down its turn life.
+    cosmeticTickAlertBlinks();
 #endif
     updateFlavorText();
 

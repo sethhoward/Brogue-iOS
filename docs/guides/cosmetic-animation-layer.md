@@ -40,9 +40,13 @@ replaces all of that.
   so glyphs win on shared cells) → restores cells painted *last* frame but not this one
   (`refreshDungeonCell`, re-deriving the base incl. shimmer). A two-buffer (ping-pong) painted-cell
   set makes restore O(effect cells), not O(map).
-- **Kinds** (`enum cosmeticEffectKind`, file-local): `CE_ALERT_GLYPH` (one-shot flicker, e.g. `!`),
-  `CE_RIPPLE_MONSTER` (grey geometric box from a cell), `CE_RIPPLE_PLAYER` (blue sound-map wavefront
-  from the player), `CE_INVESTIGATE_BLINK` (`?` glyph blinking over an investigating monster).
+- **Kinds** (`enum cosmeticEffectKind`, file-local): `CE_ALERT_GLYPH` (one-shot flicker at a cell —
+  the off-screen `?` "something reacted around the corner" tell), `CE_RIPPLE_MONSTER` (grey geometric
+  box from a cell), `CE_RIPPLE_PLAYER` (blue sound-map wavefront from the player),
+  `CE_INVESTIGATE_BLINK` (`?` glyph blinking over an investigating monster, lives as long as
+  `MB_INVESTIGATING`), `CE_ALERT_BLINK` (red `!` blinking over a monster that has *locked onto* you —
+  the alert counterpart; like the investigate blink it follows the monster, but it is turn-bounded:
+  `NOISE_ALERT_BLINK_TURNS` player-turns, then fades).
 - **Coalescing** (`channel` + the spawn logic): `ACCUMULATE` (+ same-cell merge) for monster ripples;
   `SINGLETON`/latest-wins for the player ripple (keyed by a sentinel address) and per-monster for the
   blink (keyed by the creature pointer — *only compared, never dereferenced* outside the live-monster
@@ -65,10 +69,20 @@ replaces all of that.
 4. **Call your spawn** from wherever the event happens (gameplay code). If the effect tracks live game
    state (like the blink), rebuild it once per turn from `playerTurnEnded`.
 
-**Worked example — the `!` alert glyph (the simplest tenant):** `cosmeticSpawnAlertGlyph(loc, '!')` drops
-a `CE_ALERT_GLYPH` (red tint, `frameLife = CE_ALERT_LIFE_FRAMES`). In `advance`, it paints `!` over its
-cell during alternating `CE_ALERT_FLICKER_FRAMES` windows (off windows paint nothing → the cell restores
-→ it flickers), then expires. Called from `Monsters.c` when a monster spots/hears-loud the player.
+**Worked example — the `?` alert glyph (the simplest tenant):** `cosmeticSpawnAlertGlyph(loc, '?')` drops
+a `CE_ALERT_GLYPH` (red tint, `frameLife = CE_ALERT_LIFE_FRAMES`). In `advance`, it paints the glyph over
+its cell during alternating `CE_ALERT_FLICKER_FRAMES` windows (off windows paint nothing → the cell
+restores → it flickers), then expires. Called from `Monsters.c` as the *off-screen* tell (a monster you
+can't see reacted to your noise).
+
+**Worked example — the `!` alert blink (turn-bounded, follows the monster):** when a **visible** monster
+locks onto you, `cosmeticSpawnAlertBlink(monst)` drops a `CE_ALERT_BLINK` keyed by the creature pointer
+(red tint, `frameLife = 0`, `turnsLeft = NOISE_ALERT_BLINK_TURNS`). It blinks in unison with the `?`
+investigate blink (`blinkOn`), and `cosmeticTickAlertBlinks()` — called once per turn from
+`playerTurnEnded` beside `cosmeticRefreshInvestigateBlinks()` — follows the monster to its new cell and
+counts `turnsLeft` down; at zero (or when the monster dies / leaves sight) the `!` fades. Re-locking
+refreshes the countdown instead of stacking a second `!`. This is the structural template for *any*
+"glyph that rides a creature for N turns" effect.
 
 ## Porting to other platforms (Windows / Linux / SDL / curses)
 
@@ -110,10 +124,11 @@ platform's key-repeat timing to fall inside a window. That fragility is gone.)
 | Lever | Effect |
 |---|---|
 | `MAX_COSMETIC_EFFECTS` / `MAX_COSMETIC_PAINTED_CELLS` | pool / per-frame paint caps |
-| `CE_ALERT_FLICKER_FRAMES`, `CE_ALERT_LIFE_FRAMES` | `!` flicker speed / total linger |
+| `CE_ALERT_FLICKER_FRAMES`, `CE_ALERT_LIFE_FRAMES` | off-screen `?` flicker speed / total linger |
 | `CE_RIPPLE_FRAMES_PER_RING` | how fast ripple rings expand |
 | `NOISE_RIPPLE_RADIUS`, `NOISE_RIPPLE_MAX_STRENGTH` | monster-ripple size / brightness (`Rogue.h`) |
-| `NOISE_INVESTIGATE_BLINK_FRAMES` | `?` blink cadence (`Rogue.h`) |
+| `NOISE_INVESTIGATE_BLINK_FRAMES` | `?` / `!` blink cadence (shared unison phase) (`Rogue.h`) |
+| `NOISE_ALERT_BLINK_TURNS` | player-turns the visible `!` rides a monster before fading (`Rogue.h`) |
 | `cosmeticAlertColor` / `cosmeticNoiseColor` / `cosmeticPlayerColor` | effect tints |
 
 ## Determinism note

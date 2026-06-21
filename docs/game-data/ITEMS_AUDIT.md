@@ -380,6 +380,15 @@ keyed off `rogue.awarenessBonus`:
   +7 = 90% cap), with `1 + max(0, enchant − 7)` rolls (each success reveals one more item). Gated on
   `awarenessBonus > 0` (cursed senses nothing); action-triggered RNG, replay-stable. See the
   identification audit §5h and `senseFloorPolarityFromAwareness` (`Items.c`).
+- **Hear unseen monsters farther (Brogue SE noise system).** Awareness extends how far off-screen monster
+  movement registers as a "heard something" ripple. The ring's primary effect here is **range, not
+  probability** ("bigger ears, not a louder world"): each net enchant adds `NOISE_AWARENESS_RANGE_PER_ENCHANT`
+  (5) tiles to the audible radius — ringless ≈ 6 tiles, **+6 ≈ 36 tiles (~half the map)** — while only a
+  small `NOISE_AWARENESS_PER_ENCHANT` (2%) is added to the per-step chance (just enough that a high ring can
+  hear quiet/silent creatures). A within-earshot floor (`NOISE_AUDIBLE_FLOOR`) keeps that extended range
+  *real* — faint but accumulating pings out to the edge — so the practical detection climbs sharply with
+  enchant (none ~35% → +1 ~54% → +3 ~79% → +6 ~95% over an approach). Cosmetic/replay-safe. See
+  **PERCEPTION_AUDIT.md §3.3** for the full two-stage model and the cumulative E / P(≥1) detection tables.
 
 ### Ring of wisdom — iOS-port effects
 

@@ -1979,7 +1979,7 @@ static enum monsterHearing checkPlayerHeard(creature *monst) {
         const boolean newlyAlerted = (monst->creatureState != MONSTER_TRACKING_SCENT);
         wakeUp(monst); // full hunt + alert nearby horde-mates (alertMonster + ticks, like being spotted)
         if (canSeeMonster(monst)) {
-            cosmeticSpawnAlertGlyph(monst->loc, (enum displayGlyph)'!');
+            cosmeticSpawnAlertBlink(monst); // '!' rides the visible monster for NOISE_ALERT_BLINK_TURNS turns
         } else if (newlyAlerted) {
             // iOS port (Brogue SE): off-screen tell. You can't see what you alerted, only that something
             // around a corner (out of FOV) reacted to your noise -- compensating feedback for the fact that
@@ -2199,7 +2199,7 @@ void updateMonsterState(creature *monst) {
 #endif
 #if NOISE_SYSTEM_ENABLED
         if (canSeeMonster(monst)) {
-            cosmeticSpawnAlertGlyph(monst->loc, (enum displayGlyph)'!'); // spotted -> "!" tell, like hearing loud
+            cosmeticSpawnAlertBlink(monst); // spotted -> '!' tell rides the monster for NOISE_ALERT_BLINK_TURNS turns
         }
 #endif
     } else if (monst->creatureState == MONSTER_SLEEPING) {
@@ -4508,7 +4508,7 @@ void monstersTurn(creature *monst) {
         if (monst->bookkeepingFlags & MB_FOLLOWER) {
             if (distanceBetween((pos){x, y}, monst->leader->loc) > 2) {
                 pathTowardCreature(monst, monst->leader);
-            } else if (monst->leader->info.flags & MONST_IMMOBILE) {
+            } else if (monsterIsWorshiper(monst)) {
                 monsterMillAbout(monst, 100); // Worshipers will pace frenetically.
             } else if (monst->leader->bookkeepingFlags & MB_CAPTIVE) {
                 monsterMillAbout(monst, 10); // Captors are languid.
@@ -4685,6 +4685,16 @@ void setMonsterLocation(creature *monst, pos newLoc) {
     }
 }
 
+// iOS port (Brogue SE): a "worshiper" -- a follower whose leader is an immobile idol/totem. It can't
+// usefully path anywhere, so it paces frenetically around the shrine (monsterMillAbout, 100). Shared
+// predicate behind the sidebar "(Worshiping)" status, that gait, and the noise tier below, so the
+// "follower of an immobile leader" test lives in one place.
+boolean monsterIsWorshiper(const creature *monst) {
+    return (monst->bookkeepingFlags & MB_FOLLOWER)
+        && monst->leader
+        && (monst->leader->info.flags & MONST_IMMOBILE);
+}
+
 // iOS port (Brogue SE): noise system. The single chokepoint for a monster's movement noisiness -- a
 // signed modifier added to the player's perception (see NOISE_* tiers in Rogue.h). Normal monsters
 // aren't listed (default 0). Tiers reflect intrinsic bulk/gait, grounded in each monster's flavor
@@ -4694,6 +4704,11 @@ void setMonsterLocation(creature *monst, pos newLoc) {
 // upstream in monsterEmitMovementNoise. See docs/design/noise-system.md.
 #if NOISE_SYSTEM_ENABLED
 static short noiseLevelForMonsterMove(const creature *monst) {
+    // A worshiper's frenetic pacing around its idol is a clamor heard regardless of species -- this
+    // overrides the intrinsic per-species tier below. (A loud "there's a shrine nearby" tell.)
+    if (monsterIsWorshiper(monst)) {
+        return NOISE_LOUD;
+    }
     switch (monst->info.monsterID) {
         // Booming (+30): massive, ground-shaking
         case MK_UNDERWORM: case MK_TENTACLE_HORROR: case MK_GOLEM: case MK_DRAGON:
@@ -4723,6 +4738,13 @@ static short noiseLevelForMonsterMove(const creature *monst) {
 // iOS port (Brogue SE): noise system -- terrain EMISSION. How much a single tile adds to (or dampens)
 // the noise of a step taken on it, regardless of which layer it occupies. Flavor-grounded: the catalog
 // says grass/ash "crunch underfoot" and the rope bridge "creaks underfoot"; carpet/web are soft.
+//
+// SHARED BY BOTH NOISE DIRECTIONS -- read at whoever's step (terrainNoiseModifier):
+//   * the MONSTER step -> monsterEmitMovementNoise (the cosmetic "heard something" ripple), and
+//   * the PLAYER step  -> playerNoiseLevel (SUBSTANTIVE: feeds monsterHearsNoise / sneak-attack parity).
+// So these values are NOT free to retune in isolation -- making grass louder also makes the PLAYER
+// louder on grass (harder to sneak-attack from it). Tune terrain only with the player-loudness /
+// backstab side in mind. See docs/game-data/PERCEPTION_AUDIT.md (§3.3, §3.4).
 #if NOISE_SYSTEM_ENABLED
 static short tileNoiseValue(enum tileType tile) {
     switch (tile) {
@@ -4824,22 +4846,39 @@ static void monsterEmitMovementNoise(creature *monst, short originX, short origi
     if (!D_ALWAYS_DETECT_SOUND) {
         const short soundDist = soundDistanceAt(monst->loc);
         const short noiseModifier = noiseLevelForMonsterMove(monst);
-        const short awarenessEnchant = rogue.awarenessBonus / 20; // awarenessBonus = 20 * net ring enchant
+        const short awarenessEnchant = min(rogue.awarenessBonus / 20, NOISE_AWARENESS_MAX_ENCHANT);
+                                       // net ring enchant (20 per level), capped at the design ceiling so
+                                       // detection stops growing past +6 (caps BOTH range and per-step bump)
+        const boolean atDoor = playerAdjacentToClosedDoor();
+        // Two-stage perception (see Rogue.h): (1) RANGE GATE -- the ring extends the audible radius
+        // ("bigger ears"), and an ear at a door extends it through that door. Beyond the radius (or sealed
+        // off) the step draws no roll, which is what bounds accumulation across a multi-turn approach.
+        const short audibleRadius = NOISE_AUDIBLE_RADIUS_BASE
+                                  + (awarenessEnchant * NOISE_AWARENESS_RANGE_PER_ENCHANT * NOISE_RING_RANGE_SCALE) / 100
+                                  + (atDoor ? NOISE_DOOR_LISTEN_RANGE : 0);
         short distanceModifier, detectChance;
         boolean heard;
 
-        if (soundDist >= 30000) {
-            return; // no sound path to the player (sealed off) -- inaudible
+        if (soundDist >= 30000 || soundDist > audibleRadius) {
+            return; // sealed off, or beyond the player's hearing this turn -- inaudible
         }
+        // (2) PROBABILITY -- within the ear, modest and fairly flat so pings spread out (directional).
         distanceModifier = (soundDist <= NOISE_NEARFIELD_RADIUS)
                          ? NOISE_NEARFIELD_BONUS                                  // right on top of you
                          : -NOISE_FALLOFF_PER_TILE * (soundDist - NOISE_NEARFIELD_RADIUS);
 
-        detectChance = clamp(NOISE_BASE_PERCEPTION + awarenessEnchant * NOISE_AWARENESS_PER_ENCHANT
-                             + noiseModifier + distanceModifier + terrainNoiseModifier(monst->loc)
-                             + (playerAdjacentToClosedDoor() ? NOISE_DOOR_LISTEN_BONUS : 0)
-                             + (rogue.justRested ? NOISE_REST_PERCEPTION_BONUS : 0),
-                             0, NOISE_PERCEPTION_CEILING);
+        // The AMBIENT chance (listener + propagation + environment) is floored to NOISE_AUDIBLE_FLOOR so a
+        // normal-loudness step stays faintly audible ANYWHERE in earshot -- this is what makes the ring's
+        // extended radius real reach instead of range the falloff already zeroed. The monster's signed tier
+        // is added AFTER the floor, so a Silent/Quiet creature is still pulled to ~0 even within earshot.
+        short ambientChance = NOISE_BASE_PERCEPTION + awarenessEnchant * NOISE_AWARENESS_PER_ENCHANT
+                            + distanceModifier + terrainNoiseModifier(monst->loc)
+                            + (atDoor ? NOISE_DOOR_LISTEN_BONUS : 0)
+                            + (rogue.justRested ? NOISE_REST_PERCEPTION_BONUS : 0);
+        ambientChance = max(ambientChance, NOISE_AUDIBLE_FLOOR);
+        detectChance = clamp(ambientChance + noiseModifier, 0, NOISE_PERCEPTION_CEILING);
+        // Global A/B playtest scalar (NOISE_PERCEPTION_SCALE: 100 = baseline, <100 quieter, >100 louder).
+        detectChance = clamp((detectChance * NOISE_PERCEPTION_SCALE) / 100, 0, NOISE_PERCEPTION_CEILING);
         assureCosmeticRNG; // informational roll -> cosmetic stream; never desyncs saves/replays
         heard = rand_percent(detectChance);
         restoreRNG;
