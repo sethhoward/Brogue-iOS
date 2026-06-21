@@ -3533,41 +3533,81 @@ static void monsterMillAbout(creature *monst, short movementChance) {
     }
 }
 
-// iOS port (iBrogue): ring of light. Picks the cell an emboldened ally should rally to when it would
-// otherwise flee: a passable tile adjacent to the player, on the far side from the threat, so the
-// player's body shields it while it heals in the light. "Farthest player-adjacent cell from the threat"
-// naturally resolves to directly behind the player, and degrades gracefully when the player isn't
-// between them (it just picks the safest nearby tile). Returns INVALID_POS if none is reachable, in
-// which case the caller falls back to a normal flee.
-static pos allyRallyShieldCell(creature *monst, creature *threat) {
+// iOS port (iBrogue): ring of light. Tiles BEHIND the player an emboldened ally should hold station on
+// while the ring is worn -- the standoff distance band. Lower bound is the key safety value: a
+// MA_ATTACKS_PENETRATE enemy ("spear", two opponents in a line) adjacent to the player skewers the cell
+// directly behind the player too, so the old "tuck directly behind as a body-shield" cell sat squarely in
+// that penetration line. Holding >= 2 tiles back (>= 3 from an adjacent attacker, beyond the spear's reach)
+// keeps the ally out of the line; the upper bound keeps it tucked tight in the light rather than drifting
+// to the aura edge.
+#define ALLY_STANDOFF_MIN_DIST 2
+#define ALLY_STANDOFF_MAX_DIST 3
+
+// iOS port (iBrogue): ring of light. Picks the cell an emboldened ally should hold while the ring is worn:
+// a passable, reachable tile ~2 steps behind the player on the far side from the threat -- close enough to
+// stay in the light (regen + embolden) but out of a spear's two-tile penetration line, so an enemy attacking
+// the player can't also kill the ally tucked behind. Generalizes the old allyRallyShieldCell, which sheltered
+// the ally DIRECTLY behind the player (i.e. inside that line). Scans the tight standoff band around the
+// player and scores: prefer the MIN-distance standoff, then the far side from the threat (which resolves to
+// directly behind the player). Deterministic (state-derived, fixed scan order, strict-better tiebreak; no
+// RNG). Returns INVALID_POS if no suitable cell is reachable, in which case the caller falls back.
+static pos allyStandoffCell(creature *monst, creature *threat) {
     pos best = INVALID_POS;
-    short bestDist = -1;
-    enum directions dir;
+    long bestScore = 0;
+    boolean found = false;
 
-    for (dir = 0; dir < DIRECTION_COUNT; dir++) {
-        const short nx = player.loc.x + nbDirs[dir][0];
-        const short ny = player.loc.y + nbDirs[dir][1];
-        const pos c = (pos){ nx, ny };
-        creature *occupant;
-        short d;
+    for (short dx = -ALLY_STANDOFF_MAX_DIST; dx <= ALLY_STANDOFF_MAX_DIST; dx++) {
+        for (short dy = -ALLY_STANDOFF_MAX_DIST; dy <= ALLY_STANDOFF_MAX_DIST; dy++) {
+            const short cx = player.loc.x + dx;
+            const short cy = player.loc.y + dy;
+            const pos c = (pos){ cx, cy };
+            creature *occupant;
+            short distToPlayer;
+            long score;
 
-        if (!coordinatesAreInMap(nx, ny)
-            || cellHasTerrainFlag(c, T_OBSTRUCTS_PASSABILITY)
-            || monsterAvoids(monst, c)
-            || diagonalBlocked(player.loc.x, player.loc.y, nx, ny, false)) {
-            continue;
-        }
-        occupant = monsterAtLoc(c);
-        if (occupant && occupant != monst && !canPass(monst, occupant)) {
-            continue;
-        }
-        d = distanceBetween(c, threat->loc);
-        if (d > bestDist) {
-            bestDist = d;
-            best = c;
+            if (!coordinatesAreInMap(cx, cy)) {
+                continue;
+            }
+            distToPlayer = distanceBetween(player.loc, c);
+            if (distToPlayer < ALLY_STANDOFF_MIN_DIST || distToPlayer > ALLY_STANDOFF_MAX_DIST) {
+                continue;
+            }
+            if (threat && distanceBetween(c, threat->loc) < 3) {
+                continue; // still within a spear's reach of the attacker -- not a safe standoff
+            }
+            if (cellHasTerrainFlag(c, T_OBSTRUCTS_PASSABILITY) || monsterAvoids(monst, c)) {
+                continue;
+            }
+            occupant = monsterAtLoc(c);
+            if (occupant && occupant != monst && !canPass(monst, occupant)) {
+                continue;
+            }
+            if (!traversiblePathBetween(monst, cx, cy)) {
+                continue;
+            }
+            // Tight standoff first (penalize drift past MIN), then farthest from the threat (= directly behind you).
+            score = -(long)abs(distToPlayer - ALLY_STANDOFF_MIN_DIST) * 100
+                    + (threat ? distanceBetween(c, threat->loc) : 0);
+            if (!found || score > bestScore) {
+                found = true;
+                bestScore = score;
+                best = c;
+            }
         }
     }
     return best;
+}
+
+// iOS port (iBrogue): ring of light. Which ally types adopt the BACKLINE standoff -- hanging ~2 tiles behind
+// you while *you* tank, rather than pressing into the front rank. Scoped to the fragile skirmishers (monkey,
+// common goblin), whose role is harassment/support, not holding a line. Deliberately NOT bruiser/tank allies
+// (ogre, troll, golem, goblin chieftain, ...): those are meant to venture ahead and soak hits, so they keep
+// the vanilla "engage anything within leash" behavior. (Only gates the healthy backline; the low-HP retreat
+// rally still pulls *any* emboldened ally to the standoff -- even a tank should fall back when near death.)
+// Extend this set if more light allies should hold back.
+static boolean allyHoldsBackline(const creature *monst) {
+    return monst->info.monsterID == MK_MONKEY
+        || monst->info.monsterID == MK_GOBLIN;
 }
 
 /// @brief Handles the given allied monster's turn under normal circumstances
@@ -3636,20 +3676,21 @@ static void moveAlly(creature *monst) {
     if (allyFlees(monst, closestMonster)) {
         // iOS port (iBrogue): ring of light. Rather than scatter to the generic safety map (which leads
         // an emboldened ally *out* of your light, abandoning the defense/regen keeping it alive), it
-        // rallies to a tile behind you -- shielded by your body and bathed in the light, where it heals
-        // and waits to re-engage. Falls through to a normal flee if no such tile is reachable.
+        // rallies to a standoff tile ~2 steps behind you -- bathed in the light, where it heals and waits
+        // to re-engage, but out of a spear's penetration line (see allyStandoffCell). Falls through to a
+        // normal flee if no such tile is reachable.
         if (monst->status[STATUS_EMBOLDENED] && rogue.lightRingBonus > 0) {
-            const pos shield = allyRallyShieldCell(monst, closestMonster);
+            const pos shield = allyStandoffCell(monst, closestMonster);
             if (isPosInMap(shield)) {
                 if (posEq(monst->loc, shield)) {
-                    return; // already tucked in behind the player; hold position and heal (turn already consumed)
+                    return; // already holding the standoff behind you; hold position and heal (turn already consumed)
                 }
-                // willingToAttackPlayer = false: route *around* the player to the sheltered cell, never into them.
+                // willingToAttackPlayer = false: route *around* the player to the standoff cell, never into them.
                 if (moveMonsterPassivelyTowards(monst, shield, false)) {
                     return;
                 }
             }
-            // couldn't reach a sheltered cell (player surrounded or walled in); fall through to normal flee.
+            // couldn't reach a standoff cell (player surrounded or walled in); fall through to normal flee.
         }
         if (monsterHasBoltEffect(monst, BE_BLINKING)
             && ((monst->info.flags & MONST_ALWAYS_USE_ABILITY) || rand_percent(30))
@@ -3683,6 +3724,33 @@ static void moveAlly(creature *monst) {
     if (monstUseMagic(monst)) { // if he actually cast a spell
         monst->ticksUntilTurn = monst->attackSpeed * (monst->info.flags & MONST_CAST_SPELLS_SLOWLY ? 2 : 1);
         return;
+    }
+
+    // iOS port (iBrogue): ring of light. A healthy emboldened ally fights as a BACKLINE while the ring is
+    // worn: when the player is the one in melee (an enemy adjacent to the player) and the ally can't strike
+    // anything this turn, it holds a standoff tile ~2 steps behind the player rather than pressing up into
+    // the front rank -- staying in the light (regen + embolden) but out of a spear's two-tile penetration
+    // line, where an enemy attacking the player would otherwise also kill the ally lined up directly behind.
+    // This is gated entirely on the ring (STATUS_EMBOLDENED + a positive lightRingBonus): without it, allies
+    // behave exactly as before. It still charges in whenever it can actually reach an enemy
+    // (shortestDistance == 1 -> skips this and falls through to attack), so it isn't a passive standoff.
+    if (monst->status[STATUS_EMBOLDENED] && rogue.lightRingBonus > 0
+        && allyHoldsBackline(monst)                                  // fragile skirmishers only -- tanks push ahead
+        && closestMonster
+        && shortestDistance > 1                                      // can't land a blow this turn
+        && distanceBetween(closestMonster->loc, player.loc) <= 1     // the player is tanking the fray
+        && distanceBetween((pos){x, y}, player.loc) <= effectiveLightAuraRadius()) { // an in-light follower, not off on its own
+
+        const pos standoff = allyStandoffCell(monst, closestMonster);
+        if (isPosInMap(standoff)) {
+            if (posEq(monst->loc, standoff)) {
+                return; // already holding the backline; stay in the light and wait to re-engage
+            }
+            if (moveMonsterPassivelyTowards(monst, standoff, false)) {
+                return;
+            }
+        }
+        // no reachable standoff cell (corridor walled in, player surrounded) -> fall through to normal behavior
     }
 
     if (monst->bookkeepingFlags & MB_SEIZED) {

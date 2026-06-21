@@ -32,6 +32,38 @@ See `BrogueCE/Engine/IOS_MODIFICATIONS.md` (faithful CE) and
 
 ## Change log
 
+### 2026-06-21 — Ring of light: emboldened allies hold a standoff behind you (out of spear reach)
+
+**What.** Refines the ring-of-light ally behavior (see the 2026-06-12 cornerstone entry). While a ring of
+light is worn (`STATUS_EMBOLDENED` + a positive `rogue.lightRingBonus`), an emboldened ally now keeps a
+**standoff position ~2 tiles behind the player** instead of tucking directly behind you, in two situations:
+- *Retreating* — the low-HP rally cell (formerly `allyRallyShieldCell`, the tile **directly** behind you).
+- *Backline* — at full HP, when **you** are the one in melee (an enemy adjacent to you) and the ally can't
+  land a blow this turn, it holds the standoff rather than pressing up into the front rank. It still charges
+  in whenever it can actually reach an enemy, so it isn't a passive turret. **Scoped to fragile skirmishers**
+  (`allyHoldsBackline()` — currently monkey + common goblin); bruiser/tank allies (ogre, troll, golem, goblin
+  chieftain, …) keep the vanilla engage-anything behavior so they venture ahead and soak hits.
+
+**Why.** The old "tuck **directly** behind the player as a body-shield" cell sat squarely in a spear's line:
+a `MA_ATTACKS_PENETRATE` enemy ("attacks up to two opponents in a line") adjacent to the player also hits the
+cell directly behind, so the ally tucked there got skewered through the player — especially in 1-wide
+corridors where it can't flank and just stacks up behind you. Holding ≥ 2 tiles back puts the ally beyond the
+spear's two-tile reach (≥ 3 from an adjacent attacker) while still inside the light aura, so it keeps the
+embolden + regen. Gives the ring a clean **frontline-player / backline-ally** identity. Scoped entirely to the
+ring: with no positive `lightRingBonus`, allies behave exactly as before.
+
+**Where.** `Monsters.c` — `allyRallyShieldCell()` generalized/renamed to `allyStandoffCell()`: it now scans
+a tight band `ALLY_STANDOFF_MIN_DIST`(2)..`ALLY_STANDOFF_MAX_DIST`(3) tiles around the player, rejects cells
+within a spear's reach of the threat (`distanceBetween(c, threat) < 3`), and scores nearest-standoff-first
+then far-side-from-threat (which resolves to directly behind you). Used by the existing retreat path in
+`moveAlly()` and by a new ring-gated backline block (after the spellcast check, before the leash/engagement
+logic). Both reachability checks fall through to prior behavior if no standoff tile is reachable.
+
+**Determinism / saves.** `allyStandoffCell()` is pure state-derived (fixed scan order, strict-better tiebreak,
+no RNG) and moves via the existing deterministic `moveMonsterPassivelyTowards`; no new persistent fields.
+Reconstructs identically on replay; diverges replays from pre-change recordings like any gameplay change.
+SE-only. `ALLY_STANDOFF_*` distances are tunable.
+
 ### 2026-06-21 — Off-screen combat emits a sound ripple from the monster
 
 **What.** When two creatures fight outside the player's view (the "you hear combat in the distance" /
@@ -1297,14 +1329,18 @@ adds, keyed off a new `rogue.lightRingBonus` (net enchant of worn rings of light
   - **Accuracy** small flat `EMBOLDEN_ACCURACY_BONUS` (8) — applied in `monsterAccuracyAdjusted()`.
     **No damage bonus, deliberately** — damage compounds with `empowerMonster` leveling into an
     unbeatable squad; the buff is survivability + presence only.
-  - **Courage / rally** — `moveAlly()` extends the attack leash to the aura radius (an emboldened ally
-    engages anything in your light). And when it *would* flee at low HP, it doesn't scatter to the generic
-    safety map (which would lead it *out* of the light, abandoning the defense/regen keeping it alive);
-    instead `allyRallyShieldCell()` sends it to a tile **behind you** -- shielded by your body, in the
-    light, where it heals and waits to re-engage. It falls back to a normal flee if no sheltered tile is
-    reachable. (Earlier drafts made emboldened allies simply *never* flee; that was rejected because our
-    own regen is tuned not to out-heal combat damage, so "never retreat" would have gotten allies killed --
-    the rally preserves self-preservation while keeping them in the buff aura.)
+  - **Courage / rally / backline** — `moveAlly()` extends the attack leash to the aura radius (an
+    emboldened ally engages anything in your light). When it *would* flee at low HP, it doesn't scatter to
+    the generic safety map (which would lead it *out* of the light, abandoning the defense/regen keeping it
+    alive); instead `allyStandoffCell()` sends it to a tile **~2 steps behind you** -- in the light, where it
+    heals and waits to re-engage. And even at full HP, a fragile **skirmisher** ally (`allyHoldsBackline()` --
+    monkey + common goblin; not tanks like ogres) holds that same standoff cell when *you* are in melee and it
+    can't strike this turn, rather than crowding the front rank (the **backline**, see the 2026-06-21
+    follow-up). Both fall back to normal behavior if no standoff tile is reachable. The standoff is
+    ~2 tiles back (not directly behind) specifically so a spear-style `MA_ATTACKS_PENETRATE` enemy adjacent to
+    you can't skewer the ally through you. (Earlier drafts made emboldened allies simply *never* flee; that
+    was rejected because our own regen is tuned not to out-heal combat damage, so "never retreat" would have
+    gotten allies killed -- the rally preserves self-preservation while keeping them in the buff aura.)
   - **Regeneration** — extra, capped `regenStep` in `decrementMonsterStatus()` (cap
     `EMBOLDEN_REGEN_PERCENT_CAP` 300%). Always-on but recovery-paced: tops off an ally between fights,
     never out-heals focused damage mid-fight (no combat-gating — the engine has no clean combat flag and
