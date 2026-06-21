@@ -268,12 +268,23 @@ static short actionMenu(short x, boolean playingBack) {
             buttons[buttonCount].hotkey[0] = AUTO_REST_KEY;
             buttonCount++;
 
-            if (KEYBOARD_LABELS) {
-                sprintf(buttons[buttonCount].text, "  %sA: %sAutopilot  ",              yellowColorEscape, whiteColorEscape);
+            // iOS port (Brogue SE): 'A' is re-apply-last-staff under the modern scheme (autopilot is
+            // keyless there) and autopilot under classic, so this menu entry tracks the active scheme.
+            if (rogueKeyboardScheme == KEYBOARD_SCHEME_MODERN) {
+                if (KEYBOARD_LABELS) {
+                    sprintf(buttons[buttonCount].text, "  %sA: %sRe-apply staff  ",          yellowColorEscape, whiteColorEscape);
+                } else {
+                    strcpy(buttons[buttonCount].text, "  Re-apply staff  ");
+                }
+                buttons[buttonCount].hotkey[0] = REAPPLY_KEY;
             } else {
-                strcpy(buttons[buttonCount].text, "  Autopilot  ");
+                if (KEYBOARD_LABELS) {
+                    sprintf(buttons[buttonCount].text, "  %sA: %sAutopilot  ",              yellowColorEscape, whiteColorEscape);
+                } else {
+                    strcpy(buttons[buttonCount].text, "  Autopilot  ");
+                }
+                buttons[buttonCount].hotkey[0] = AUTOPLAY_KEY;
             }
-            buttons[buttonCount].hotkey[0] = AUTOPLAY_KEY;
             buttonCount++;
 
             if (KEYBOARD_LABELS) {
@@ -2961,6 +2972,7 @@ signed long applyKeyboardScheme(signed long keystroke, boolean *controlKey, bool
                 case 'p': return MESSAGE_ARCHIVE_KEY; // messages move off 'M' (now run-down-left)
                 case 'P': return ASCEND_KEY;       // Shift+P = ascend stairs (shift-gated for safety)
                 case ':': return DESCEND_KEY;      // Shift+; = descend stairs
+                case 'A': return REAPPLY_KEY;      // Shift+A = re-apply last staff (displaces autopilot, which is keyless in modern; the iOS button sends REAPPLY_KEY directly so it works in every scheme)
                 // vi-key left-hand movement is removed in modern: h/y/b/n (and their run forms) never
                 // move the player -- the right-hand grid is the only mover. y/n stay usable for yes/no
                 // and as item letters: those prompts read via buttonInputLoop with textInput == true,
@@ -3161,6 +3173,18 @@ void executeKeystroke(signed long keystroke, boolean controlKey, boolean shiftKe
                 // iOS port (iBrogue): when there is no valid last-thrown item to
                 // rethrow, fall through to a normal throw prompt instead of no-opping.
                 throwCommand(NULL, false);
+            }
+            break;
+        case REAPPLY_KEY:
+            // iOS port (Brogue SE): re-apply the last staff zapped (apply-side mirror of RETHROW_KEY).
+            // Staves only; never auto-targets -- apply() routes to useStaffOrWand(), which always
+            // prompts for a direction. If the remembered staff is gone (never set, dropped, or
+            // stolen), fall through to the normal apply prompt instead of no-opping. An empty
+            // remembered staff that is still carried is handled inside useStaffOrWand() ("no charges").
+            if (rogue.lastStaffZapped != NULL && itemIsCarried(rogue.lastStaffZapped)) {
+                apply(rogue.lastStaffZapped);
+            } else {
+                apply(NULL);
             }
             break;
         case RELABEL_KEY:
@@ -4765,7 +4789,7 @@ void printHelpScreen() {
         "              s  ****search for secrets (control-s: long search)",
         "shift-P / shift-:  ****travel up / down stairs",
         "              x  ****auto-explore (control-x: fast forward)",
-        "              A  ****autopilot (control-A: fast forward)",
+        "              A  ****re-apply the last staff zapped",
         "              p  ****display old messages",
         "              G  ****toggle graphical tiles (when available)",
         "              S  ****save and exit",

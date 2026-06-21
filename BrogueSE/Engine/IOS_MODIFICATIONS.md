@@ -32,6 +32,42 @@ See `BrogueCE/Engine/IOS_MODIFICATIONS.md` (faithful CE) and
 
 ## Change log
 
+### 2026-06-21 — Re-apply last staff (`A` in the Modern scheme; apply-side mirror of rethrow)
+
+**What.** A new command re-applies the **last staff zapped** — the apply-side mirror of `T`
+rethrow. It is bound to a dedicated canonical key `REAPPLY_KEY` (`128+20`, private range beside
+`UNKNOWN_KEY`). Under the **Modern** keyboard scheme, physical `A` remaps to it (displacing
+autopilot, which becomes keyless in Modern); under **Classic**, `A` stays `AUTOPLAY_KEY`. It also
+appears as a bindable iOS shortcut button ("Re-apply staff", SE-only). It tracks **staves only**
+(never wands/charms) and **never auto-targets** — it routes through `apply()` → `useStaffOrWand()`,
+which always shows the interactive "Direction?" aim prompt, so target choice stays the player's.
+
+**Why.** Re-zapping a staff every turn in a fight is a common rhythm (staves recharge), and the only
+prior `A` binding — autopilot — is low-value on a touch device. Wands are excluded by design (finite
+charges, no recharge: a re-zap hotkey would just burn a scarce resource). A *dedicated* key rather
+than reusing `'A'` keeps the iOS button scheme-independent (the button sends `REAPPLY_KEY` raw,
+bypassing `applyKeyboardScheme`, so it means re-apply in every scheme) and keeps recordings
+scheme-independent (the canonical `REAPPLY_KEY` is recorded, never `'A'` — see
+`docs/design/keyboard-schemes.md`).
+
+**Edge cases (mirroring rethrow).** If the remembered staff was never set, was dropped, or was
+stolen (`!itemIsCarried`), `A` falls through to the normal `apply(NULL)` prompt instead of no-opping.
+An empty-but-carried remembered staff is left to `useStaffOrWand()`'s existing "no charges" message.
+
+**Determinism.** `rogue.lastStaffZapped` is set inside `useStaffOrWand()` on the confirmed-zap path
+(`STAFF`-guarded, so zapping a wand never overwrites it), including a fizzle (an unidentified 0-charge
+staff still reaches that point). It is set on the same input path every replay, so saves/recordings
+stay in sync.
+
+**Where.**
+- `Rogue.h` — `REAPPLY_KEY` `#define`; `item *lastStaffZapped` on the `rogue` struct.
+- `Items.c` — `useStaffOrWand()` records `rogue.lastStaffZapped` after `confirmedTarget`.
+- `IO.c` — `applyKeyboardScheme()` Modern maps `A → REAPPLY_KEY`; `executeKeystroke()` gains a
+  `REAPPLY_KEY` case; `actionMenu()`'s `A` entry is scheme-conditional (Re-apply staff vs Autopilot);
+  `printHelpScreen()`'s `modernHelp` `A` line now reads re-apply.
+- `iBrogue_iPad/PlatformCode/BrogueViewController.swift` — `Command.seOnly` flag + filter; catalog
+  entry + `wand.and.rays` symbol for the re-apply key.
+
 ### 2026-06-21 — Ring of wisdom speeds up auto-identification of worn armor & rings
 
 **What.** A worn **ring of wisdom** now makes worn **armor** and **rings** auto-identify-by-use faster — ~10%

@@ -7757,6 +7757,15 @@ static boolean useStaffOrWand(item *theItem) {
 
         rogue.featRecord[FEAT_PURE_WARRIOR] = false;
 
+        // iOS port (Brogue SE): remember the last staff zapped for the re-apply (REAPPLY_KEY)
+        // command. Staves only -- zapping a wand never overwrites it. Recorded on any confirmed
+        // zap, including a fizzle (an unidentified 0-charge staff still reaches this point); an
+        // identified empty staff returns earlier and never gets here. Set on the same input path
+        // every replay, so it stays deterministic / save-safe.
+        if (theItem->category == STAFF) {
+            rogue.lastStaffZapped = theItem;
+        }
+
         if (theItem->charges > 0) {
 
             creature *monst = monsterAtLoc(zapTarget);

@@ -1538,6 +1538,12 @@ enum tileFlags {
 #define CREATE_ITEM_MONSTER_KEY 'C'
 #define EXPLORE_KEY         'x'
 #define AUTOPLAY_KEY        'A'
+// iOS port (Brogue SE): re-apply the last staff zapped (the apply-side mirror of RETHROW_KEY).
+// Dedicated canonical code rather than 'A' so the on-screen iOS button (which bypasses keyboard-
+// scheme remapping) means re-apply in every scheme, and recordings stay scheme-independent. Under
+// the modern scheme physical 'A' remaps to this (see applyKeyboardScheme); under classic 'A' stays
+// AUTOPLAY_KEY. Value sits in the private range beside UNKNOWN_KEY and fits a UInt8 key event.
+#define REAPPLY_KEY         (128+20)
 #define SEED_KEY            '~'
 #define EASY_MODE_KEY       '&'
 #define ESCAPE_KEY          '\033'
@@ -3007,6 +3013,7 @@ typedef struct playerCharacter {
     pos cursorLoc;                      // used for the return key functionality
     creature *lastTarget;               // to keep track of the last monster the player has thrown at or zapped
     item *lastItemThrown;
+    item *lastStaffZapped;              // iOS port (Brogue SE): last staff zapped, for the re-apply (REAPPLY_KEY) command; staves only (never wands/charms). Set deterministically on a confirmed zap, so save replays stay in sync.
     short rewardRoomsGenerated;         // to meter the number of reward machines
     short insightAltarsBuilt;           // iOS port (iBrogue): guaranteed altars-of-insight built so far this run; obligations carry forward to the next level if a level can't fit the room
     boolean goldGoblinSpawned;          // iOS port (iBrogue): the gold goblin appears at most once per run

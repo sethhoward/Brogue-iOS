@@ -234,7 +234,15 @@ final class BrogueViewController: UIViewController {
         /// CE-only commands (e.g. re-throw) are hidden from the rebind menus
         /// while the Classic engine is active, since 1.7.5 doesn't handle them.
         var ceOnly: Bool = false
+        /// SE-only commands (e.g. re-apply staff) are shown only while Brogue SE
+        /// is active, since neither Classic nor CE handles them.
+        var seOnly: Bool = false
     }
+
+    /// Canonical key code for the SE re-apply-last-staff command (REAPPLY_KEY in
+    /// Rogue.h, `128+20`). Sent directly (raw) so it bypasses keyboard-scheme
+    /// remapping and means re-apply in every scheme.
+    private static let reapplyKeyCode: UInt8 = 128 + 20
 
     /// Commands a side button may be bound to. Names mirror printHelpScreen().
     private static let commandCatalog: [Command] = [
@@ -250,6 +258,7 @@ final class BrogueViewController: UIViewController {
         Command(key: "e".ascii, name: "Equip",             category: "Item Actions"),
         Command(key: "r".ascii, name: "Remove",            category: "Item Actions"),
         Command(key: "a".ascii, name: "Apply / use",       category: "Item Actions"),
+        Command(key: reapplyKeyCode, name: "Re-apply staff", category: "Item Actions", seOnly: true),
         Command(key: "t".ascii, name: "Throw",             category: "Item Actions"),
         Command(key: "T".ascii, name: "Re-throw at last monster", category: "Item Actions", ceOnly: true),
         Command(key: "d".ascii, name: "Drop",              category: "Item Actions"),
@@ -273,6 +282,7 @@ final class BrogueViewController: UIViewController {
         "e".ascii: "shield.lefthalf.filled",
         "r".ascii: "xmark.shield",
         "a".ascii: "wand.and.stars",
+        reapplyKeyCode: "wand.and.rays",
         "t".ascii: "paperplane.fill",
         "T".ascii: "paperplane.circle.fill",
         "d".ascii: "arrow.down.circle",
@@ -1923,9 +1933,12 @@ extension BrogueViewController: UIContextMenuInteractionDelegate {
     /// Sectioned menu of bindable commands for one side-button slot. Each row
     /// shows the human-readable name and the key; the current binding is checked.
     /// Commands offered in the rebind menus for the active engine. CE-only
-    /// commands (e.g. re-throw) are dropped while Classic is running.
+    /// commands (e.g. re-throw) are dropped while Classic is running; SE-only
+    /// commands (e.g. re-apply staff) are shown only while Brogue SE is running.
     private func availableCommands() -> [Command] {
-        BrogueViewController.commandCatalog.filter { currentEngine.isCEFamily || !$0.ceOnly }
+        BrogueViewController.commandCatalog.filter {
+            (currentEngine.isCEFamily || !$0.ceOnly) && (currentEngine == .se || !$0.seOnly)
+        }
     }
 
     private func rebindMenu(forSlot slot: Int) -> UIMenu {
