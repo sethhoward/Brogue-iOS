@@ -2926,6 +2926,9 @@ extension BrogueViewController {
         // Never while pinching / two-finger panning the map — the magnifier would
         // fight the gesture and lag behind the moving cells.
         guard !zoomGestureInProgress else { return false }
+        // Never while a hardware keyboard is attached — the player is driving by
+        // keyboard, not touch, so the touch loupe is just noise.
+        guard !hardwareKeyboardConnected else { return false }
         let engineAllowsMagnifier = currentEngine.isCEFamily
             ? (gameplayControlsActive || isTargeting)
             : lastBrogueGameEvent.canShowMagnifyingGlass
@@ -3172,6 +3175,9 @@ extension BrogueViewController {
         DispatchQueue.main.async { [weak self] in
             self?.refreshDirectionPadVisibility()
             self?.refreshEscButtonVisibility()
+            // Drop any touch loupe still on screen when a keyboard is plugged in
+            // mid-play — canShowMagnifier now refuses to re-show it.
+            if connected { self?.hideMagnifier() }
         }
     }
 
