@@ -1270,6 +1270,17 @@ boolean attack(creature *attacker, creature *defender, boolean lungeAttack) {
         return false;
     }
 
+    if (sightUnseen) {
+        // iOS port (Brogue SE): noise system -- off-screen combat the player can only "hear" (the
+        // "you hear combat in the distance" / "...die in combat" messages) gets a cosmetic sound ripple
+        // so the player can locate the fight. Fires on EVERY off-screen exchange (hit, miss, or kill),
+        // unlike the once-per-turn message throttle, and radiates from the MONSTER -- not the ally/player
+        // landing the blow (the ally is the listener's "side"; the enemy is what we're locating). Cosmetic
+        // and RNG-silent; same-cell merge keeps repeated swings from stacking. See docs/design/noise-system.md.
+        creature *noiseSource = (attacker == &player || attacker->creatureState == MONSTER_ALLY) ? defender : attacker;
+        cosmeticSpawnRippleMonster(noiseSource->loc);
+    }
+
     if (sneakAttack || defenderWasAsleep || defenderWasParalyzed || lungeAttack || attackHit(attacker, defender)) {
         // If the attack hit:
         damage = (defender->info.flags & (MONST_IMMUNE_TO_WEAPONS | MONST_INVULNERABLE)
@@ -1371,16 +1382,23 @@ boolean attack(creature *attacker, creature *defender, boolean lungeAttack) {
                 rogue.featRecord[FEAT_DRAGONSLAYER] = true;
             }
         } else { // if the defender survived
-            if (!rogue.blockCombatText && (canSeeMonster(attacker) || canSeeMonster(defender))) {
-                attackVerb(verb, attacker, max(damage - (attacker->info.damage.lowerBound * monsterDamageAdjustmentAmount(attacker) / FP_FACTOR), 0) * 100
-                           / max(1, (attacker->info.damage.upperBound - attacker->info.damage.lowerBound) * monsterDamageAdjustmentAmount(attacker) / FP_FACTOR));
-                sprintf(buf, "%s %s %s%s", attackerName, verb, defenderName, explicationClause);
+            // iOS port (Brogue SE): noise system -- the survive-hit "you hear combat in the distance" tell
+            // was upstream dead code. Its `if (sightUnseen)` sat inside an outer
+            // `(canSeeMonster(attacker) || canSeeMonster(defender))` guard -- the logical negation of
+            // `sightUnseen` -- so an off-screen NON-FATAL hit produced no message at all (only misses and
+            // kills were audible). Branch on `sightUnseen` first, as the miss/kill sites already do, so an
+            // unseen landed blow is heard; the visible verb message keeps its own visibility guard (where it
+            // belongs). See docs/design/noise-system.md.
+            if (!rogue.blockCombatText) {
                 if (sightUnseen) {
                     if (!rogue.heardCombatThisTurn) {
                         rogue.heardCombatThisTurn = true;
                         combatMessage("you hear combat in the distance", 0);
                     }
-                } else {
+                } else if (canSeeMonster(attacker) || canSeeMonster(defender)) {
+                    attackVerb(verb, attacker, max(damage - (attacker->info.damage.lowerBound * monsterDamageAdjustmentAmount(attacker) / FP_FACTOR), 0) * 100
+                               / max(1, (attacker->info.damage.upperBound - attacker->info.damage.lowerBound) * monsterDamageAdjustmentAmount(attacker) / FP_FACTOR));
+                    sprintf(buf, "%s %s %s%s", attackerName, verb, defenderName, explicationClause);
                     combatMessage(buf, messageColorFromVictim(defender));
                 }
             }

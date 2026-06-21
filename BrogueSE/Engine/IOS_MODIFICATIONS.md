@@ -32,6 +32,44 @@ See `BrogueCE/Engine/IOS_MODIFICATIONS.md` (faithful CE) and
 
 ## Change log
 
+### 2026-06-21 — Off-screen combat emits a sound ripple from the monster
+
+**What.** When two creatures fight outside the player's view (the "you hear combat in the distance" /
+"you hear something die in combat" messages), the fight now also paints a cosmetic grey sound ripple — the
+same "you heard something" box-ripple the noise system already uses — so the player can *locate* the
+distant combat, not just read about it. The ripple radiates from the **monster**, not the ally/player who
+landed the blow: the listener's own side isn't what we're trying to point at; the enemy is.
+
+**Why.** The text alone gives no direction. The ripple is the existing visual vocabulary for "a sound came
+from over there," so reusing it for combat noise is consistent with the rest of the perception system. It
+fires on **every** off-screen exchange — hit, miss, *or* kill — rather than the once-per-turn cadence of the
+message itself (`rogue.heardCombatThisTurn`); a flurry of swings should keep pinging.
+
+**Companion text fix (upstream dead code).** While here we also repaired the off-screen **non-fatal hit**,
+which upstream renders silently in *all three* engines (CE + Classic too). In the defender-survived branch,
+the "you hear combat in the distance" line sat inside an outer `(canSeeMonster(attacker) ||
+canSeeMonster(defender))` guard — the exact logical negation of `sightUnseen` — so its `if (sightUnseen)`
+sub-branch was unreachable: an out-of-sight blow that *landed but didn't kill* produced no message at all
+(only misses and kills were audible). The miss and kill sites branch on `sightUnseen` directly and were
+always correct; the survive site now matches them. **SE-only** — left unfixed in faithful CE/Classic; a
+candidate to push upstream separately.
+
+**Where.** `Combat.c`, in `attack()`:
+- *Ripple* — just before the hit/miss resolution (`attackHit`) and after the seize/levitate early-returns, a
+  single `if (sightUnseen)` block spawns `cosmeticSpawnRippleMonster()` from
+  `(attacker == &player || attacker->creatureState == MONSTER_ALLY) ? defender->loc : attacker->loc`. Placed
+  ahead of the branch so it covers hit, miss, and kill uniformly and is independent of the message throttle.
+- *Text fix* — the defender-survived branch was restructured to test `!rogue.blockCombatText` then
+  `sightUnseen` first (emit the distance tell), `else if (canSeeMonster(...))` for the visible verb message,
+  dropping the redundant outer visibility guard.
+
+`sightUnseen` already excludes any attack involving the player (the player is always "visible" to
+themselves), so both only apply to monster-vs-monster / monster-vs-ally combat. Marked
+`// iOS port (Brogue SE):`. See `docs/design/noise-system.md`.
+
+**Determinism.** `cosmeticSpawnRippleMonster` is purely cosmetic (no substantive RNG) and self-suppresses
+during automation / autoplay / playback fast-forward. Saves/replays are unaffected.
+
 ### 2026-06-18 — Darts removed as a potion-identification channel
 
 **What.** A thrown dart or javelin landing on a dropped potion **no longer detonates it** — it simply drops
