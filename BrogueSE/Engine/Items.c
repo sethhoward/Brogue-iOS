@@ -1988,6 +1988,49 @@ static short effectiveRingEnchant(item *theItem) {
     }
 }
 
+// iOS port (iBrogue): ring of wisdom accelerates auto-identification-by-use for worn ARMOR and RINGS
+// (weapons are out of scope). The base requirement (item->charges, seeded from gameConst->armorDelayToAutoID
+// / ringDelayToAutoID) is NOT lowered; a worn wisdom ring just makes the countdown tick down faster, and the
+// consumed familiarity is permanent (banked -- removing the ring only stops further speedup). The lever is
+// reductionPct = WISDOM_AUTOID_PCT_PER_LEVEL * wisdomBonus, clamped: +50% (2x speed) at the cap, and cursed
+// wisdom slows it down to -100% (2x slower), mirroring the other wisdom levers (rest-insight, recharge).
+#define WISDOM_AUTOID_PCT_PER_LEVEL   10   // % faster per net wisdom-ring enchant
+#define WISDOM_AUTOID_MAX_FASTER_PCT  50   // cap: never quicker than 2x
+#define WISDOM_AUTOID_MAX_SLOWER_PCT  100  // floor: cursed wisdom never slower than 2x
+
+static short wisdomAutoIDReductionPct(void) {
+    long pct = (long)WISDOM_AUTOID_PCT_PER_LEVEL * rogue.wisdomBonus;
+    if (pct >  WISDOM_AUTOID_MAX_FASTER_PCT) pct =  WISDOM_AUTOID_MAX_FASTER_PCT;
+    if (pct < -WISDOM_AUTOID_MAX_SLOWER_PCT) pct = -WISDOM_AUTOID_MAX_SLOWER_PCT;
+    return (short)pct;
+}
+
+// Charges to consume this worn-turn for an armor/ring auto-ID countdown. A Bresenham step on the turn clock
+// realizes the wisdom rate exactly on average -- 100/(100-reductionPct) charges per turn -- as an integer
+// 0, 1, or 2 (no fractional charges, no new save field; derived from already-deterministic state, so it
+// reconstructs identically on replay). reductionPct 0 -> a flat 1/turn (vanilla).
+short wisdomAutoIDChargeStep(void) {
+    const short pct = wisdomAutoIDReductionPct();
+    if (pct == 0) {
+        return 1;
+    }
+    const long denom = 100 - pct;                   // [50, 200], never 0
+    const long t = (long)rogue.absoluteTurnNumber;
+    if (t < 1) {
+        return 1;
+    }
+    return (short)((t * 100) / denom - ((t - 1) * 100) / denom);
+}
+
+// The auto-ID wait as the player should see it, adjusted for the wisdom lever: fewer turns while a wisdom
+// ring is worn, more while it is cursed. (charges is now a familiarity counter that drains faster/slower
+// than 1/turn; this converts the remainder back into perceived turns.) Never below 1.
+static short wisdomAutoIDDisplayTurns(short charges) {
+    const short pct = wisdomAutoIDReductionPct();
+    const long turns = ((long)charges * (100 - pct) + 99) / 100; // ceil(charges * (100-pct)/100)
+    return (short)(turns < 1 ? 1 : turns);
+}
+
 static short apparentRingBonus(const enum ringKind kind) {
     item *rings[2] = {rogue.ringLeft, rogue.ringRight}, *ring;
     short retval = 0;
@@ -2218,10 +2261,11 @@ void itemDetails(char *buf, item *theItem) {
                             (theItem->charges == gameConst->weaponKillsToAutoID ? "" : " more"),
                             (theItem->charges == 1 ? "enemy" : "enemies"));
                 } else {
+                    const short shownTurns = wisdomAutoIDDisplayTurns(theItem->charges); // iOS port (iBrogue): ring of wisdom-adjusted
                     sprintf(buf2, "It will reveal its secrets if worn for %i%s turn%s. ",
-                            theItem->charges,
+                            shownTurns,
                             (theItem->charges == gameConst->armorDelayToAutoID ? "" : " more"),
-                            (theItem->charges == 1 ? "" : "s"));
+                            (shownTurns == 1 ? "" : "s"));
                 }
                 strcat(buf, buf2);
             }
@@ -2785,10 +2829,11 @@ void itemDetails(char *buf, item *theItem) {
                     }
                 }
             } else {
+                const short shownTurns = wisdomAutoIDDisplayTurns(theItem->charges); // iOS port (iBrogue): ring of wisdom-adjusted
                 sprintf(buf2, "\n\nIt will reveal its secrets if worn for %i%s turn%s",
-                        theItem->charges,
+                        shownTurns,
                         (theItem->charges == gameConst->ringDelayToAutoID ? "" : " more"),
-                        (theItem->charges == 1 ? "" : "s"));
+                        (shownTurns == 1 ? "" : "s"));
                 strcat(buf, buf2);
 
                 if (!(theItem->flags & ITEM_IDENTIFIED) && (theItem->charges < gameConst->ringDelayToAutoID || (theItem->flags & ITEM_MAGIC_DETECTED))) {

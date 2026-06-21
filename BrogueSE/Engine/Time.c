@@ -2046,7 +2046,8 @@ static void processIncrementalAutoID() {
             && theItem->charges > 0
             && (!(theItem->flags & ITEM_IDENTIFIED) || ((theItem->category & RING) && !ringTable[theItem->kind].identified))) {
 
-            theItem->charges--;
+            theItem->charges -= wisdomAutoIDChargeStep(); // iOS port (iBrogue): a worn ring of wisdom ticks
+                                                          // this countdown down faster (armor + rings)
             if (theItem->charges <= 0) {
                 itemName(theItem, theItemName, false, false, NULL);
                 sprintf(buf, "you are now familiar enough with your %s to identify it.", theItemName);

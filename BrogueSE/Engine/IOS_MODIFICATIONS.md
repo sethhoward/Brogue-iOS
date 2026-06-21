@@ -32,6 +32,42 @@ See `BrogueCE/Engine/IOS_MODIFICATIONS.md` (faithful CE) and
 
 ## Change log
 
+### 2026-06-21 — Ring of wisdom speeds up auto-identification of worn armor & rings
+
+**What.** A worn **ring of wisdom** now makes worn **armor** and **rings** auto-identify-by-use faster — ~10%
+faster per net enchant level, capped at +50% (2× speed). A *cursed* wisdom ring slows it instead, down to
+−100% (2× slower), mirroring how cursed wisdom already slows rest-insight and staff recharge. **Weapons are
+out of scope** (their auto-ID is the per-kill timer, left at vanilla 20 kills).
+
+**Why.** Ring of wisdom is the staff/identification amplifier ring; speeding gear familiarization is a natural
+extension of its "arcane insight" identity and pairs with the existing wisdom levers (rest-insight threshold,
+detect-magic count, staff recharge). The cap keeps a deep ring from making ID instant.
+
+**Mechanism (banked accelerated countdown — the threshold is never lowered).** The base requirement is
+unchanged: `item->charges` still seeds from `gameConst->armorDelayToAutoID` (1000) / `ringDelayToAutoID`
+(1500) and auto-IDs at `≤ 0`. Only the per-turn decrement changes. In `processIncrementalAutoID()` the worn
+armor/ring countdown subtracts `wisdomAutoIDChargeStep()` instead of a flat 1. That step is a **Bresenham tick
+on the turn clock** (`rogue.absoluteTurnNumber`): it averages exactly `100/(100 − reductionPct)` charges per
+turn but only ever subtracts an integer **0, 1, or 2** — so no fractional charges, **no new save field**, and
+the consumed familiarity is permanent (banked: removing the ring just reverts the step to 1). The progress
+bar (`charges/threshold`) and generation are untouched.
+
+**Display.** The inventory inspector's "reveal its secrets if worn for N turns" line shows the
+wisdom-adjusted estimate (`ceil(charges × (100 − reductionPct)/100)`) for armor and rings, so the countdown
+stays honest now that it isn't a flat 1/turn. The weapon "defeat N enemies" line is unchanged.
+
+**Where.** `Items.c` — `wisdomAutoIDReductionPct()` / `wisdomAutoIDChargeStep()` / `wisdomAutoIDDisplayTurns()`
+(near `effectiveRingEnchant`), plus the two inspector blocks (armor + ring). `Time.c` —
+`processIncrementalAutoID()` decrement. `Rogue.h` — `wisdomAutoIDChargeStep` prototype. Lever constants
+`WISDOM_AUTOID_PCT_PER_LEVEL` (10) / `WISDOM_AUTOID_MAX_FASTER_PCT` (50) / `WISDOM_AUTOID_MAX_SLOWER_PCT`
+(100) are tunable. A worn-but-unidentified wisdom ring already contributes a partial `wisdomBonus`
+(`effectiveRingEnchant`), so it speeds its own/other gear's ID before you know it's wisdom — consistent with
+how every ring effect applies pre-ID; not special-cased.
+
+**Determinism / saves.** Step derives only from `rogue.absoluteTurnNumber` + `rogue.wisdomBonus` + `charges`,
+all already deterministic/replayed; no struct changes. Reconstructs identically on replay; diverges replays
+from pre-change recordings like any gameplay change. SE-only.
+
 ### 2026-06-21 — Thrown scrolls are the quietest throw (paper impact tier)
 
 **What.** A thrown scroll now lands much more quietly than other light items. It was lumped into

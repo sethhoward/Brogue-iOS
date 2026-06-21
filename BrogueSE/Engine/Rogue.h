@@ -3886,6 +3886,7 @@ extern "C" {
                        boolean targetCanLeaveMap);
     void identifyItemKind(item *theItem);
     void autoIdentify(item *theItem);
+    short wisdomAutoIDChargeStep(void); // iOS port (iBrogue): ring of wisdom speeds armor/ring auto-ID-by-use
     boolean fillEmptyBottle(item *bottle, short newPotionKind, const char *flavorText); // iOS port (iBrogue): empty-bottle capture
     void showEmptyBottleCaptureHint(void); // iOS port (iBrogue): empty-bottle v2 contextual capture hint
     boolean freezeCreature(creature *monst, short freezeTurns, short slowTurns); // iOS port (iBrogue): shared freeze (staff of frost bolt + frost cloud)
