@@ -107,25 +107,37 @@ Damage is `{lowerBound, upperBound, clumpFactor}`. `strengthReq` is the strength
 without penalty. The "Attribute" column is the special melee behavior flag assigned in
 `makeItemInto` (`Items.c:221`).
 
-| # | Weapon | StrReq | Damage (lo–hi, clump) | Freq | MktVal | Attribute flag / behavior |
-|---|---|---|---|---|---|---|
-| 0 | dagger | 12 | 3–4 (1) | 10 | 190 | `ITEM_SNEAK_ATTACK_BONUS` — sneak attacks deal **5×** instead of 3× |
-| 1 | sword | 14 | 7–9 (1) | 10 | 440 | (plain) |
-| 2 | broadsword | 19 | 14–22 (1) | 10 | 990 | (plain, heavy) |
-| 3 | whip | 14 | 3–5 (1) | 10 | 440 | `ITEM_ATTACKS_EXTEND` — reaches enemies up to 5 spaces away |
-| 4 | rapier | 15 | 3–5 (1) | 10 | 440 | `ITEM_ATTACKS_QUICKLY | ITEM_LUNGE_ATTACKS` — attacks twice as fast; lunge = 3× and never misses |
-| 5 | flail | 17 | 9–15 (1) | 10 | 440 | `ITEM_PASS_ATTACKS` — free attack when moving between two cells adjacent to a foe |
-| 6 | mace | 16 | 16–20 (1) | 10 | 660 | `ITEM_ATTACKS_STAGGER` — extra recovery turn on hit; knockback |
-| 7 | war hammer | 20 | 25–35 (1) | 10 | 1100 | `ITEM_ATTACKS_STAGGER` — extra recovery turn on hit; knockback |
-| 8 | spear | 13 | 4–5 (1) | 10 | 330 | `ITEM_ATTACKS_PENETRATE` — hits adjacent foe + foe directly behind |
-| 9 | war pike | 18 | 11–15 (1) | 10 | 880 | `ITEM_ATTACKS_PENETRATE` |
-| 10 | axe | 15 | 7–9 (1) | 10 | 550 | `ITEM_ATTACKS_ALL_ADJACENT` — hits all adjacent foes |
-| 11 | war axe | 19 | 12–17 (1) | 10 | 990 | `ITEM_ATTACKS_ALL_ADJACENT` |
-| 12 | dart | **0** | 2–4 (1) | **0** | 15 | thrown; stacks 5–18; can't be magical/runic |
-| 13 | incendiary dart | 12 | 1–2 (1) | 10 | 25 | thrown; stacks 3–6; explodes into fire |
-| 14 | javelin | 15 | 3–11 (3) | 10 | 40 | thrown; stacks 5–18 |
+| # | Weapon | StrReq | Damage (lo–hi, clump) | Noise | Freq | MktVal | Attribute flag / behavior |
+|---|---|---|---|---|---|---|---|
+| 0 | dagger | 12 | 3–4 (1) | LIGHT (12) | 10 | 190 | `ITEM_SNEAK_ATTACK_BONUS` — sneak attacks deal **5×** instead of 3× |
+| 1 | sword | 14 | 7–9 (1) | NORMAL (22) | 10 | 440 | (plain) |
+| 2 | broadsword | 19 | 14–22 (1) | HEAVY (32) | 10 | 990 | (plain, heavy) |
+| 3 | whip | 14 | 3–5 (1) | LIGHT (12) | 10 | 440 | `ITEM_ATTACKS_EXTEND` — reaches enemies up to 5 spaces away |
+| 4 | rapier | 15 | 3–5 (1) | LIGHT (12) | 10 | 440 | `ITEM_ATTACKS_QUICKLY | ITEM_LUNGE_ATTACKS` — attacks twice as fast; lunge = 3× and never misses |
+| 5 | flail | 17 | 9–15 (1) | HEAVY (32) | 10 | 440 | `ITEM_PASS_ATTACKS` — free attack when moving between two cells adjacent to a foe |
+| 6 | mace | 16 | 16–20 (1) | HEAVY (32) | 10 | 660 | `ITEM_ATTACKS_STAGGER` — extra recovery turn on hit; knockback |
+| 7 | war hammer | 20 | 25–35 (1) | BOOMING (45) | 10 | 1100 | `ITEM_ATTACKS_STAGGER` — extra recovery turn on hit; knockback |
+| 8 | spear | 13 | 4–5 (1) | NORMAL (22) | 10 | 330 | `ITEM_ATTACKS_PENETRATE` — hits adjacent foe + foe directly behind |
+| 9 | war pike | 18 | 11–15 (1) | HEAVY (32) | 10 | 880 | `ITEM_ATTACKS_PENETRATE` |
+| 10 | axe | 15 | 7–9 (1) | NORMAL (22) | 10 | 550 | `ITEM_ATTACKS_ALL_ADJACENT` — hits all adjacent foes |
+| 11 | war axe | 19 | 12–17 (1) | HEAVY (32) | 10 | 990 | `ITEM_ATTACKS_ALL_ADJACENT` |
+| 12 | dart | **0** | 2–4 (1) | thrown¹ | **0** | 15 | thrown; stacks 5–18; can't be magical/runic |
+| 13 | incendiary dart | 12 | 1–2 (1) | thrown¹ | 10 | 25 | thrown; stacks 3–6; explodes into fire |
+| 14 | javelin | 15 | 3–11 (3) | thrown¹ | 10 | 40 | thrown; stacks 5–18 |
 
 Notes:
+- **Noise** (Brogue SE noise system) is the loudness spike a melee swing emits — the per-weapon tier from
+  `weaponMeleeLoudness()` (`Combat.c`), stacked on the player's base loudness (armor/terrain/ring of
+  stealth). Tiers are tunable `#define`s in `Rogue.h` (`NOISE_MELEE_LIGHT/NORMAL/HEAVY/BOOMING`). A
+  **clean hit** emits the listed value; a **miss** adds `NOISE_MELEE_MISS_PENALTY` (+10). Only **LIGHT
+  (12)** sits below the aggro threshold (`NOISE_HEAR_AGGRO_LOUDNESS` = 20), so a clean LIGHT-weapon kill
+  only makes unseen *bystanders* investigate rather than swarm — the dagger/rapier/whip are the
+  assassin's tier. Auto-hits (sneak/asleep/paralyzed/lunge) count as a clean connect → stay quiet. Heavy
+  armor's base clatter can still push a LIGHT weapon over the line. Unarmed = LIGHT. Full mechanics:
+  [PERCEPTION_AUDIT.md §3.2.1](PERCEPTION_AUDIT.md).
+- ¹ Thrown weapons don't melee; their *impact* loudness on landing uses a separate mass tier
+  (`itemImpactLoudness()`, `NOISE_IMPACT_*`) — see [PERCEPTION_AUDIT.md](PERCEPTION_AUDIT.md) / the
+  environmental-sounds doc.
 - Darts have frequency 0, so they never appear in the normal weapon raffle; they spawn via
   blueprints / special placement. Throwing weapons (`dart`, `incendiary dart`, `javelin`)
   are forced non-cursed, non-runic, non-magical and given a random `quiverNumber`

@@ -313,7 +313,21 @@
 // Player loudness (playerNoiseLevel() base + an action spike). A NEW quantity, NOT currentStealthRange
 // (which bakes in darkness/shadow -- visual, irrelevant to sound -- and lacks terrain/action/levitation).
 #define NOISE_PLAYER_SILENT             (-30000) // sentinel: player made no noise this turn -> no sound check
-#define NOISE_PLAYER_MELEE              30  // loudness spike for a player melee attack (always aggro-tier)
+// Per-weapon melee loudness tiers -- the SPIKE weaponMeleeLoudness() returns, added on top of
+// playerNoiseLevel() (armor clatter + terrain + levitation + ring of stealth). A clean connect emits
+// the bare tier (a muffled thud); a MISS adds NOISE_MELEE_MISS_PENALTY (the whiff/clang betrays you --
+// "accuracy = stealth", the same philosophy as itemImpactLoudness's BODY-vs-WALL surface tiers). Only
+// the LIGHT tier sits BELOW NOISE_HEAR_AGGRO_LOUDNESS (20) on a hit, so a clean dagger kill merely makes
+// bystanders INVESTIGATE while a whiff (12 + penalty) crosses the line and aggroes -- the principle-3
+// counter-pressure on the quiet-dagger build. (Heavy armor's base clatter can also push a LIGHT weapon
+// over the line on a hit: you can't stealth-dagger in plate -- intended emergent behavior.) Weapon->tier
+// mapping lives in weaponMeleeLoudness(); mirrored in ITEMS_AUDIT / PERCEPTION_AUDIT. These five are the
+// only melee-noise tuning levers -- retune freely (RNG-silent, save-safe). See docs/design/noise-system.md.
+#define NOISE_MELEE_LIGHT               12  // dagger, rapier, whip, unarmed -- finesse/light; sub-aggro on a hit
+#define NOISE_MELEE_NORMAL              22  // sword, axe, spear -- ordinary one-handers
+#define NOISE_MELEE_HEAVY               32  // broadsword, flail, mace, war axe, war pike -- two-handed heft
+#define NOISE_MELEE_BOOMING             45  // war hammer -- wakes the whole floor
+#define NOISE_MELEE_MISS_PENALTY        10  // a missed swing rings out -- the counter-pressure knob
 #define NOISE_PLAYER_THROW              2   // loudness spike for a player throw
 #define NOISE_PLAYER_AGGRAVATED         60  // forced loudness while STATUS_AGGRAVATING (overrides the rest)
 #define NOISE_PLAYER_LEVITATE           (-10) // quieter while levitating (feet off the ground; terrain term skipped)

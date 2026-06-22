@@ -32,6 +32,41 @@ See `BrogueCE/Engine/IOS_MODIFICATIONS.md` (faithful CE) and
 
 ## Change log
 
+### 2026-06-21 — Noise system: per-weapon melee loudness (replaces the flat melee spike)
+
+**What.** Player melee noise was a single flat spike (`NOISE_PLAYER_MELEE` = 30, always aggro-tier).
+It is now a **per-weapon tier** returned by a new `weaponMeleeLoudness(weapon, connected)` lookup
+(`Combat.c`, a `switch (weapon->kind)` mirroring the existing thrown-item `itemImpactLoudness()`):
+
+| Tier | Spike | Weapons |
+|---|---|---|
+| `NOISE_MELEE_LIGHT` | 12 | dagger, rapier, whip, **unarmed** (`weapon == NULL`) |
+| `NOISE_MELEE_NORMAL` | 22 | sword, axe, spear |
+| `NOISE_MELEE_HEAVY` | 32 | broadsword, flail, mace, war axe, war pike |
+| `NOISE_MELEE_BOOMING` | 45 | war hammer |
+
+Only **LIGHT (12)** sits below the aggro threshold (`NOISE_HEAR_AGGRO_LOUDNESS` = 20), so a clean
+LIGHT-weapon hit reaches unseen *bystanders* only as a *faint* "investigate" ping, not full aggro —
+the dagger/rapier/whip/unarmed become a genuine stealth-kill tool. A **miss** adds
+`NOISE_MELEE_MISS_PENALTY` (+10), so a LIGHT whiff (22) crosses back to aggro — *accuracy = stealth*,
+the same philosophy as `itemImpactLoudness`'s BODY-vs-WALL surface tiers. Auto-hits
+(sneak/asleep/paralyzed/lunge) count as connected → stay quiet, rewarding the assassin path; this is the
+design-principle-3 counter-pressure on the quiet-dagger build. Noise is a pure function of weapon
+**kind** (enchant/runic irrelevant). The base loudness (`playerNoiseLevel()`: armor clatter, terrain,
+levitation, ring of stealth) still rides underneath, so heavy armor can push even a LIGHT weapon over the
+aggro line on a hit (*you can't stealth-dagger in plate* — intended).
+
+**Where.** `Rogue.h` — removed `NOISE_PLAYER_MELEE`; added `NOISE_MELEE_LIGHT/NORMAL/HEAVY/BOOMING` +
+`NOISE_MELEE_MISS_PENALTY` (the five tuning levers). `Combat.c` — new `weaponMeleeLoudness()`; in
+`attack()` the `playerEmitNoise(...)` call **moved from the top of the function to just after the
+hit/miss roll** (so it can branch on connect vs. whiff) and the roll is captured once into `attackLanded`
+to avoid double-rolling `attackHit()`. `Monsters.c` — comment on `playerEmitNoise` updated.
+
+**Determinism.** Pure function of weapon kind + the pre-existing substantive `attackHit` roll — no new
+RNG, save/replay-safe. SE-only gameplay; gated by `NOISE_SYSTEM_ENABLED`. Marked in-code with
+`// iOS port (Brogue SE):`. Docs: `PERCEPTION_AUDIT.md` §3.2.1/§3.2.3/§7, `ITEMS_AUDIT.md` §1 (Noise
+column), `docs/design/noise-system.md` Phase 2.
+
 ### 2026-06-21 — Re-apply last staff (`A` in the Modern scheme; apply-side mirror of rethrow)
 
 **What.** A new command re-applies the **last staff zapped** — the apply-side mirror of `T`

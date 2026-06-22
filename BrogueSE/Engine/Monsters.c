@@ -4866,7 +4866,7 @@ short playerNoiseLevel(void) {
 }
 
 // Set rogue.playerNoise to this turn's emitted loudness (base + an action spike). Called at the action
-// chokepoints (step = spike 0, melee = NOISE_PLAYER_MELEE, throw = NOISE_PLAYER_THROW); reset to
+// chokepoints (step = spike 0, melee = weaponMeleeLoudness() per-weapon tier, throw = NOISE_PLAYER_THROW); reset to
 // NOISE_PLAYER_SILENT each playerTurnEnded so a still/resting player emits nothing and is never heard.
 void playerEmitNoise(short spike) {
     rogue.playerNoise = playerNoiseLevel() + spike;

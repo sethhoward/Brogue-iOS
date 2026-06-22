@@ -1184,6 +1184,42 @@ void processStaggerHit(creature *attacker, creature *defender) {
     }
 }
 
+// iOS port (Brogue SE): noise system -- how loud a PLAYER melee swing is. A per-weapon mass/finesse
+// tier (the spike passed to playerEmitNoise, stacked on playerNoiseLevel()'s armor/terrain/ring base)
+// plus a miss penalty: a clean connect is a muffled thud, a whiff rings out ("accuracy = stealth",
+// mirroring itemImpactLoudness's BODY-vs-WALL surface tiers for throws). Pure function of weapon KIND
+// (enchant/runic irrelevant) -> RNG-silent and save-safe. Tier values + the miss penalty are the
+// tuning levers in Rogue.h (NOISE_MELEE_*). See docs/design/noise-system.md "Phase 2".
+static short weaponMeleeLoudness(const item *weapon, boolean connected) {
+    short loudness;
+    if (weapon == NULL) {
+        loudness = NOISE_MELEE_LIGHT;            // bare fists/claws -- quiet
+    } else {
+        switch (weapon->kind) {
+            case DAGGER:
+            case RAPIER:
+            case WHIP:
+                loudness = NOISE_MELEE_LIGHT;     // finesse / light blades -- the assassin's tier
+                break;
+            case SWORD:
+            case AXE:
+            case SPEAR:
+                loudness = NOISE_MELEE_NORMAL;    // ordinary one-handers
+                break;
+            case HAMMER:
+                loudness = NOISE_MELEE_BOOMING;   // war hammer -- wakes the floor
+                break;
+            default:
+                loudness = NOISE_MELEE_HEAVY;     // broadsword/flail/mace/war axe/war pike -- two-handed heft
+                break;
+        }
+    }
+    if (!connected) {
+        loudness += NOISE_MELEE_MISS_PENALTY;     // a whiff/clang betrays you
+    }
+    return loudness;
+}
+
 // returns whether the attack hit
 boolean attack(creature *attacker, creature *defender, boolean lungeAttack) {
     short damage, specialDamage, poisonDamage;
@@ -1218,12 +1254,6 @@ boolean attack(creature *attacker, creature *defender, boolean lungeAttack) {
 
     if ((attacker == &player || defender == &player) && !rogue.blockCombatText) {
         rogue.disturbed = true;
-    }
-
-    if (attacker == &player) {
-        playerEmitNoise(NOISE_PLAYER_MELEE); // iOS port (Brogue SE): noise system -- a melee swing is loud
-                                             // and aggro-tier (even a whiff); overrides this turn's step
-                                             // noise. See docs/design/noise-system.md "Phase 2".
     }
 
     defender->status[STATUS_ENTRANCED] = 0;
@@ -1281,7 +1311,17 @@ boolean attack(creature *attacker, creature *defender, boolean lungeAttack) {
         cosmeticSpawnRippleMonster(noiseSource->loc);
     }
 
-    if (sneakAttack || defenderWasAsleep || defenderWasParalyzed || lungeAttack || attackHit(attacker, defender)) {
+    boolean attackLanded = (sneakAttack || defenderWasAsleep || defenderWasParalyzed || lungeAttack || attackHit(attacker, defender));
+
+    if (attacker == &player) {
+        // iOS port (Brogue SE): noise system -- emit the player's melee loudness AFTER the hit/miss roll
+        // (not at the top of the function as before), so a clean connect is a muffled per-weapon thud
+        // while a whiff adds NOISE_MELEE_MISS_PENALTY and rings out. Auto-hits (sneak/asleep/paralyzed/
+        // lunge) count as connected -> stay quiet, rewarding the assassin path. See weaponMeleeLoudness().
+        playerEmitNoise(weaponMeleeLoudness(rogue.weapon, attackLanded));
+    }
+
+    if (attackLanded) {
         // If the attack hit:
         damage = (defender->info.flags & (MONST_IMMUNE_TO_WEAPONS | MONST_INVULNERABLE)
                   ? 0 : randClump(attacker->info.damage) * monsterDamageAdjustmentAmount(attacker) / FP_FACTOR);

@@ -120,9 +120,25 @@ loudness = AGGRAVATING ? 60
 ```
 
 `playerEmitNoise(spike)` sets `rogue.playerNoise = playerNoiseLevel() + spike`, where the spike is the
-action: **move 0, throw +15, melee +30** ([Movement.c], [Items.c], [Combat.c]). At end of turn it resets
-to `NOISE_PLAYER_SILENT` (−30000) — *holding still emits nothing and is never heard.* Note melee's +30
-is ≥ the aggro threshold (§3.2.3): **attacking always aggros anything that hears it.**
+action: **move 0, throw +15, melee = a per-weapon tier** ([Movement.c], [Items.c], [Combat.c]). At end
+of turn it resets to `NOISE_PLAYER_SILENT` (−30000) — *holding still emits nothing and is never heard.*
+
+**Melee is no longer a flat spike — it is the per-weapon `weaponMeleeLoudness()` tier** ([Combat.c],
+emitted *after* the hit/miss roll, not before it):
+
+| Tier | Spike | Weapons | On a hit |
+|---|---|---|---|
+| `NOISE_MELEE_LIGHT` | 12 | dagger, rapier, whip, **unarmed** | **below** aggro (20) → bystanders only *investigate* |
+| `NOISE_MELEE_NORMAL` | 22 | sword, axe, spear | aggro |
+| `NOISE_MELEE_HEAVY` | 32 | broadsword, flail, mace, war axe, war pike | aggro |
+| `NOISE_MELEE_BOOMING` | 45 | war hammer | aggro, large radius |
+
+A **miss** adds `NOISE_MELEE_MISS_PENALTY` (+10) — "accuracy = stealth": a clean connect is a muffled
+thud, a whiff rings out. Auto-hits (sneak / asleep / paralyzed / lunge) count as connected → stay quiet,
+so the stealth-kill path is rewarded; flailing at an alert or armored foe betrays you. Noise is a pure
+function of weapon **kind** (enchant/runic irrelevant). The base term still rides underneath, so heavy
+armor's clatter can push even a LIGHT weapon over the aggro line on a hit — *you can't stealth-dagger
+in plate.* See ITEMS_AUDIT §weapons (Noise column) and the lever table §6.
 
 #### 3.2.2 The hear roll — `monsterHearsNoise()`
 [Monsters.c:1906](../../BrogueSE/Engine/Monsters.c). **Earshot gate:** `soundDist > stealthRange * 2`
@@ -141,7 +157,10 @@ Rolled with a **substantive `rand_percent`** (it changes monster behavior).
 [Monsters.c:1928](../../BrogueSE/Engine/Monsters.c). On a hit, *how* it's heard:
 
 - **LOUD** (`playerLoudness >= NOISE_HEAR_AGGRO_LOUDNESS(20)` **or** `soundDist <= 1`) → `wakeUp()`:
-  full hunt **and** rouses the nearby horde. Melee is always this tier.
+  full hunt **and** rouses the nearby horde. Most melee is this tier — **except a clean hit with a
+  LIGHT-tier weapon** (dagger/rapier/whip/unarmed, spike 12), which falls below 20 and so reaches distant
+  bystanders only as FAINT (§3.2.1). The monster you actually strike wakes from damage regardless; the
+  tier governs the *bystanders*. A LIGHT-weapon **miss** (12 + 10 penalty = 22) crosses back to LOUD.
 - **FAINT** (else) → **investigate** (§3.2.4): it knows roughly where, not that it was *you*.
 
 Gated to `MODE_NORMAL`, state `SLEEPING|WANDERING`, non-captive
@@ -510,7 +529,9 @@ that player-facing flavor + the off-screen `?` cover it; flip to 1 for dev traci
 | `NOISE_HEAR_FALLOFF_PER_TILE` | 4 | hearing lost per sound-tile beyond near field |
 | `NOISE_HEAR_CEILING` | 95 | hearing cap (sound never auto-wakes) |
 | `NOISE_HEAR_AGGRO_LOUDNESS` | 20 | loudness ≥ this (or `d≤1`) → aggro, else investigate |
-| `NOISE_PLAYER_MELEE / THROW / AGGRAVATED / LEVITATE` | 30 / 15 / 60 / −10 | action loudness spikes |
+| `NOISE_PLAYER_THROW / AGGRAVATED / LEVITATE` | 15 / 60 / −10 | non-melee action loudness spikes |
+| `NOISE_MELEE_LIGHT / NORMAL / HEAVY / BOOMING` | 12 / 22 / 32 / 45 | per-weapon melee spike (`weaponMeleeLoudness()`, §3.2.1) |
+| `NOISE_MELEE_MISS_PENALTY` | 10 | added to a missed swing ("accuracy = stealth") |
 | `NOISE_PLAYER_ARMOR_SCALE / STEALTH_RING_SCALE` | 2 / 3 | armor / ring contribution to loudness |
 | `INVESTIGATE_SPOT_ADJACENT_CHANCE / FALLOFF / FLOOR` | 95 / 15 / 25 | investigate→hunt proximity curve (§3.2.5) |
 | **Player hears monster (cosmetic) — two-stage, §3.3** | | |
