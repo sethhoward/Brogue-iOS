@@ -1769,6 +1769,17 @@ static void noiseDetectionHaptic(short stage) {
         cePlayDetectionHaptic(stage);
     }
 }
+
+// iOS port (Brogue SE): host hook -- fire a haptic when a noisy WORLD EVENT happens near the player (a
+// distinct channel from noiseDetectionHaptic, which is "something heard YOU"). Defined in SEBridge.mm.
+// kind 0 = a trap's soft click underfoot (gentle); 1 = reward-room machinery grinding shut (pronounced).
+// Same playback/automation suppression as the detection haptic so replaying a save doesn't buzz.
+extern void cePlayEnvironmentalNoiseHaptic(int kind);
+void environmentalNoiseHaptic(short kind) {
+    if (!rogue.playbackFastForward && !rogue.automationActive && !rogue.autoPlayingLevel) {
+        cePlayEnvironmentalNoiseHaptic(kind);
+    }
+}
 #endif
 
 void alertMonster(creature *monst) {

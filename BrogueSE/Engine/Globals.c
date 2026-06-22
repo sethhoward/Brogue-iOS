@@ -755,9 +755,9 @@ dungeonFeature dungeonFeatureCatalog[NUMBER_DUNGEON_FEATURES] = {
     {DOOR,                      DUNGEON,    0,      0,      0},
     {OPEN_IRON_DOOR_INERT,      DUNGEON,    0,      0,      0,  "", GENERIC_FLASH_LIGHT},
     {ALTAR_CAGE_OPEN,           DUNGEON,    0,      0,      0,  "the cages lift off of the altars as you approach.", GENERIC_FLASH_LIGHT},
-    {ALTAR_CAGE_CLOSED,         DUNGEON,    0,      0,      (DFF_EVACUATE_CREATURES_FIRST), "the cages lower to cover the altars.", GENERIC_FLASH_LIGHT},
+    {ALTAR_CAGE_CLOSED,         DUNGEON,    0,      0,      (DFF_EVACUATE_CREATURES_FIRST | DFF_EMITS_NOISE), "the cages lower to cover the altars.", GENERIC_FLASH_LIGHT},
     {ALTAR_INERT,               DUNGEON,    0,      0,      0},
-    {FLOOR_FLOODABLE,           DUNGEON,    0,      0,      0,  "the altar retracts into the ground with a grinding sound.", GENERIC_FLASH_LIGHT},
+    {FLOOR_FLOODABLE,           DUNGEON,    0,      0,      DFF_EMITS_NOISE,  "the altar retracts into the ground with a grinding sound.", GENERIC_FLASH_LIGHT},
     {PORTAL_LIGHT,              SURFACE,    0,      0,      (DFF_EVACUATE_CREATURES_FIRST | DFF_ACTIVATE_DORMANT_MONSTER), "the archway flashes, and you catch a glimpse of another world!"},
     {MACHINE_GLYPH_INACTIVE,    DUNGEON,    0,      0,      0},
     {MACHINE_GLYPH,             DUNGEON,    0,      0,      0},
@@ -834,17 +834,17 @@ dungeonFeature dungeonFeatureCatalog[NUMBER_DUNGEON_FEATURES] = {
     // machine components
 
     // commutation altars
-    {COMMUTATION_ALTAR_INERT,   DUNGEON,    0,      0,      0,  "the items on the two altars flash with a brilliant light!", SCROLL_ENCHANTMENT_LIGHT},
+    {COMMUTATION_ALTAR_INERT,   DUNGEON,    0,      0,      DFF_EMITS_NOISE,  "the items on the two altars flash with a brilliant light!", SCROLL_ENCHANTMENT_LIGHT},
     {PIPE_GLOWING,              SURFACE,    90,     60,     0},
     {PIPE_INERT,                SURFACE,    0,      0,      0,  "", SCROLL_ENCHANTMENT_LIGHT},
 
     // resurrection altars
-    {RESURRECTION_ALTAR_INERT,  DUNGEON,    0,      0,      DFF_RESURRECT_ALLY, "An old friend emerges from a bloom of sacred light!", EMPOWERMENT_LIGHT},
+    {RESURRECTION_ALTAR_INERT,  DUNGEON,    0,      0,      (DFF_RESURRECT_ALLY | DFF_EMITS_NOISE), "An old friend emerges from a bloom of sacred light!", EMPOWERMENT_LIGHT},
     {MACHINE_TRIGGER_FLOOR_REPEATING, LIQUID, 300,  100,    DFF_SUPERPRIORITY, "", 0, 0, 0, CARPET},
 
     // sacrifice altars
     {SACRIFICE_ALTAR,           DUNGEON,    0,      0,      0,  "a demonic presence whispers its demand: \"Bring to me the marked sacrifice!\""},
-    {SACRIFICE_LAVA,            DUNGEON,    0,      0,      0,  "demonic cackling echoes through the room as the altar plunges downward!"},
+    {SACRIFICE_LAVA,            DUNGEON,    0,      0,      DFF_EMITS_NOISE,  "demonic cackling echoes through the room as the altar plunges downward!"},
     {ALTAR_CAGE_RETRACTABLE,    DUNGEON,    0,      0,      0},
 
     // coffin bursts open to reveal vampire:
@@ -979,11 +979,11 @@ dungeonFeature dungeonFeatureCatalog[NUMBER_DUNGEON_FEATURES] = {
 
     // iOS port (iBrogue): an insight altar promotes to its inert form after a sacrifice (visual flash;
     // the reveal message is emitted by performInsightSacrifice so it appears once, not once per altar)
-    {INSIGHT_ALTAR_INERT,       DUNGEON,    0,      0,      0,  "", SCROLL_ENCHANTMENT_LIGHT},
+    {INSIGHT_ALTAR_INERT,       DUNGEON,    0,      0,      DFF_EMITS_NOISE,  "", SCROLL_ENCHANTMENT_LIGHT},
 
     // iOS port (iBrogue): a transference altar promotes to its inert form after a transfer (visual flash;
     // the message is emitted by performEnchantTransfer so it appears once, not once per altar)
-    {TRANSFER_ALTAR_INERT,      DUNGEON,    0,      0,      0,  "", SCROLL_ENCHANTMENT_LIGHT},
+    {TRANSFER_ALTAR_INERT,      DUNGEON,    0,      0,      DFF_EMITS_NOISE,  "", SCROLL_ENCHANTMENT_LIGHT},
 
     // iOS port (iBrogue): empty-bottle v2 potion of ice -- a freezing cloud (gas-layer volume, like the
     // other potion gas clouds). effectRadius/flashColor give the cyan burst on shatter.

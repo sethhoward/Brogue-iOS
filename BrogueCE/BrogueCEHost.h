@@ -87,6 +87,13 @@ NS_ASSUME_NONNULL_BEGIN
 // engine can call it freely. (Only the SE engine calls this; CE never does.)
 - (void)playDetectionHaptic:(NSInteger)stage;
 
+// iOS port (Brogue SE): fire a haptic when a noisy WORLD EVENT happens near the player --
+// a distinct channel from playDetectionHaptic ("something heard YOU"). kind 0 = a trap's
+// soft click underfoot (gentle); kind 1 = reward-room machinery grinding shut (pronounced).
+// iPhone-only; the host gates on its own haptics setting and device support, so the engine
+// can call it freely. (Only the SE engine calls this; CE never does.)
+- (void)playEnvironmentalNoiseHaptic:(NSInteger)kind;
+
 // True while the player is aiming a throw/zap (the engine's targeting loop), so
 // the host can move the escape button aside and enable the aiming magnifier.
 - (void)setTargeting:(BOOL)targeting;

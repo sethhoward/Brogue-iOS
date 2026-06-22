@@ -246,6 +246,25 @@ void applyInstantTileEffectsToCreature(creature *monst) {
             // usually means an invisible monster
             message("a pressure plate clicks!", 0);
         }
+#if NOISE_SYSTEM_ENABLED
+        // iOS port (Brogue SE): the pressure plate's soft mechanical click is an environmental noise -- nearby
+        // unaware monsters investigate the trap tile. Skip the alarm trap (fireType DF_AGGRAVATE_TRAP), which
+        // already broadcasts a level-wide aggravate; a soft local click on top of that would be redundant.
+        // Detect BEFORE the promotion loop below (which mutates the tile out from under fireType).
+        boolean isAlarmTrap = false;
+        for (layer = 0; layer < NUMBER_TERRAIN_LAYERS; layer++) {
+            if ((tileCatalog[pmap[*x][*y].layers[layer]].flags & T_IS_DF_TRAP)
+                && tileCatalog[pmap[*x][*y].layers[layer]].fireType == DF_AGGRAVATE_TRAP) {
+                isAlarmTrap = true;
+            }
+        }
+        if (!isAlarmTrap) {
+            emitEnvironmentalNoise((pos){ *x, *y }, NOISE_TRAP_CLICK, NULL);
+            if (monst == &player) {
+                environmentalNoiseHaptic(0); // gentle: the click felt underfoot (only when YOU spring it)
+            }
+        }
+#endif
         for (layer = 0; layer < NUMBER_TERRAIN_LAYERS; layer++) {
             if (tileCatalog[pmap[*x][*y].layers[layer]].flags & T_IS_DF_TRAP) {
                 spawnDungeonFeature(*x, *y, &(dungeonFeatureCatalog[tileCatalog[pmap[*x][*y].layers[layer]].fireType]), true, false);

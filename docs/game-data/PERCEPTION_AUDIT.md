@@ -554,7 +554,12 @@ that player-facing flavor + the off-screen `?` cover it; flip to 1 for dev traci
 | `NOISE_DOOR_COST` | 4 | extra sound-map cost through a door/foliage/smoke |
 | `NOISE_TERRAIN_CRUNCH / SPLASH / RUSTLE / SOFT` | 8 / 6 / 4 / −6 | terrain emission (§3.4) |
 | `NOISE_*` body tiers (QUIET…BOOMING) | −15…+30 | per-monster movement loudness |
+| **Environmental emitters (non-item `emitEnvironmentalNoise`)** | | |
+| `NOISE_TRAP_CLICK` | 6 | sprung pressure plate's soft click (radius ~3); skips the alarm trap, which already aggravates the level (`Time.c`) |
+| `NOISE_ALTAR_GRIND` | 15 | reward-room machinery grinding shut (radius ~5); fired by `DFF_EMITS_NOISE` in `spawnDungeonFeature` (`Architect.c`/`Globals.c`) |
 | `NOISE_INVESTIGATE_BLINK_FRAMES` | 30 | `?` / `!` blink cadence (shared) |
 | `NOISE_ALERT_BLINK_TURNS` | 2 | player-turns the visible `!` rides a locked-on monster before fading |
 | `D_NOISE_DEBUG` | 0 | raw per-event dev log (flip to 1 to trace detection) |
 | `detectionStyle / detectionIntensity / detectionDoubleGap` (Swift) | .rigid / 0.7 / 0.09s | iPhone detection-haptic feel (`BrogueViewController`) |
+| `trapClickStyle / trapClickIntensity` (Swift) | .light / 0.5 | iPhone trap-click haptic (gentle, single tick) — fired only when the **player** springs the trap |
+| `altarGrindStyle / altarGrindIntensity / altarGrindDoubleGap` (Swift) | .heavy / 1.0 / 0.07s | iPhone altar-grind haptic (pronounced, heavy thud + second tap) |

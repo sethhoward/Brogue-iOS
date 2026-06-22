@@ -766,6 +766,12 @@ void cePlayDetectionHaptic(int stage) {
     if (gHost) [gHost playDetectionHaptic:stage];
 }
 
+// iOS port (Brogue SE): Time.c (trap click) and Architect.c (altar grind, via DFF_EMITS_NOISE)
+// call this when a noisy world event happens near the player. kind 0 = gentle trap click, 1 = pronounced altar grind.
+void cePlayEnvironmentalNoiseHaptic(int kind) {
+    if (gHost) [gHost playEnvironmentalNoiseHaptic:kind];
+}
+
 // iOS port (iBrogue): Items.c calls this around the throw/zap aiming loop.
 void ceSetTargeting(boolean isTargeting) {
     if (gHost) [gHost setTargeting:(BOOL)isTargeting];

@@ -267,6 +267,14 @@
 #define NOISE_IMPACT_SOFT               (-6) // grass/foliage/fungus/mud -- cushioned landing
 #define NOISE_IMPACT_CARPET             (-10)// carpet/web -- nearly silent
 #define NOISE_IMPACT_BODY               (-8) // struck a creature -- muffled thud (accurate kill = quiet)
+// Non-item environmental emitters (same emitEnvironmentalNoise / guaranteed-investigate-radius channel).
+#define NOISE_TRAP_CLICK                6   // a sprung pressure plate's soft mechanical snap (radius ~3); quieter
+                                            // than a thrown dart so it can't become a free monster-luring tool.
+                                            // Emitted for every trap EXCEPT the alarm trap (DF_AGGRAVATE_TRAP),
+                                            // which already broadcasts a level-wide aggravate. See Time.c.
+#define NOISE_ALTAR_GRIND               15  // reward-room machinery grinding/sealing shut (radius ~5) -- a real
+                                            // counter-pressure for using altars, but well short of the alarm
+                                            // trap's whole-level reach. Emitted via DFF_EMITS_NOISE. See Architect.c.
 #define D_ALWAYS_DETECT_SOUND           0   // debug: force every off-screen monster move to be heard,
                                             // bypassing the perception roll (draws no RNG). 1 = full
                                             // detection. (Pre-ship: see pre-ship-debug-checklist.md.)
@@ -2212,6 +2220,7 @@ enum DFFlags {
     DFF_AGGRAVATES_MONSTERS         = Fl(8),    // Will act as though an aggravate monster scroll of effectRadius radius had been read at that point.
     DFF_RESURRECT_ALLY              = Fl(9),    // Will bring back to life your most recently deceased ally.
     DFF_CLEAR_LOWER_PRIORITY_TERRAIN= Fl(10),   // Erase terrain with a lower priority in the footprint of this DF.
+    DFF_EMITS_NOISE                 = Fl(11),   // iOS port (Brogue SE): on spawn, emit an environmental noise (NOISE_ALTAR_GRIND) at the origin -- reward-room machinery grinding shut draws nearby wanderers. Mirrors DFF_AGGRAVATES_MONSTERS.
 };
 
 enum boltEffects {
@@ -3621,6 +3630,7 @@ extern "C" {
     void recomputeImpactSoundMap(pos source); // iOS port (Brogue SE): flood the sound map from an arbitrary source
     short impactSoundDistanceAt(pos loc);     // iOS port (Brogue SE): effective sound cost-distance from that source
     void emitEnvironmentalNoise(pos source, short strength, item *sourceItem); // iOS port (Brogue SE): guaranteed-investigate sound
+    void environmentalNoiseHaptic(short kind); // iOS port (Brogue SE): iPhone haptic for a noisy world event (0 = trap click, 1 = altar grind)
     boolean playerAdjacentToClosedDoor(void); // iOS port (Brogue SE): is the player listening at a door?
     short playerNoiseLevel(void);   // iOS port (Brogue SE): the player's base loudness (no action spike)
     void playerEmitNoise(short spike); // iOS port (Brogue SE): set rogue.playerNoise = playerNoiseLevel()+spike

@@ -89,6 +89,10 @@ final class CEHost: NSObject, BrogueCEHost {
         viewController?.noiseDetectionHaptic(stage)
     }
 
+    func playEnvironmentalNoiseHaptic(_ kind: Int) {
+        viewController?.environmentalNoiseHaptic(kind)
+    }
+
     func setTargeting(_ targeting: Bool) {
         viewController?.setCETargeting(targeting)
     }

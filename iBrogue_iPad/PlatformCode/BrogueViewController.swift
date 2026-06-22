@@ -397,6 +397,17 @@ final class BrogueViewController: UIViewController {
         static let detectionIntensity: CGFloat = 0.7
         static let detectionDoubleGap: TimeInterval = 0.09  // gap between the two "now hunting" taps
         static let detectionStageHunting = 1                // stage >= this -> double tap
+
+        // Environmental-noise feedback (Brogue SE noise system, see Time.c / Architect.c): a noisy
+        // WORLD EVENT near the player, distinct from the detection "alert." kind 0 = a trap's soft
+        // click underfoot (gentle, single light tick); kind 1 = reward-room machinery grinding shut
+        // (pronounced, heavy thud + a short second tap to evoke the grind).
+        static let trapClickStyle: UIImpactFeedbackGenerator.FeedbackStyle = .light
+        static let trapClickIntensity: CGFloat = 0.5        // gentle (but >= the ~0.4 perceptible floor)
+        static let altarGrindStyle: UIImpactFeedbackGenerator.FeedbackStyle = .heavy
+        static let altarGrindIntensity: CGFloat = 1.0       // the heaviest noise haptic in the game
+        static let altarGrindDoubleGap: TimeInterval = 0.07 // gap before the grind's second tap
+        static let envNoiseKindAltar = 1                    // kind >= this -> pronounced (double-tap grind)
     }
 
     /// Tactile feedback when an action button is tapped.
@@ -426,6 +437,11 @@ final class BrogueViewController: UIViewController {
 
     /// Generator for noise-detection feedback (sharp taps when something hears you).
     private let detectionHaptics = UIImpactFeedbackGenerator(style: Haptics.detectionStyle)
+
+    /// Generators for environmental-noise feedback: a gentle tick for a trap click and a
+    /// heavy thud for an altar grinding shut.
+    private let trapClickHaptics = UIImpactFeedbackGenerator(style: Haptics.trapClickStyle)
+    private let altarGrindHaptics = UIImpactFeedbackGenerator(style: Haptics.altarGrindStyle)
 
     /// Tactile feedback when the player takes damage, scaled by severity (computed
     /// by the engine): 0 = ordinary hit (very light), 1 = hit while under 40%
@@ -471,6 +487,30 @@ final class BrogueViewController: UIViewController {
         }
     }
 
+    /// Tactile feedback when a noisy world event happens near the player (Brogue SE noise
+    /// system): kind 0 = a trap's soft click underfoot (one gentle light tick); kind 1 = an
+    /// altar / reward-room machinery grinding shut (a heavy thud followed by a short second
+    /// tap, evoking the grind). Respects the haptics setting and is iPhone-only. Called from
+    /// the SE bridge on the engine's background thread, so it hops to main.
+    @objc func environmentalNoiseHaptic(_ kind: Int) {
+        guard hapticsEnabled, UIDevice.current.userInterfaceIdiom == .phone else { return }
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self else { return }
+            if kind >= Haptics.envNoiseKindAltar {            // altar grind — heavy thud + a second tap
+                self.altarGrindHaptics.impactOccurred(intensity: Haptics.altarGrindIntensity)
+                self.altarGrindHaptics.prepare()
+                DispatchQueue.main.asyncAfter(deadline: .now() + Haptics.altarGrindDoubleGap) { [weak self] in
+                    guard let self = self else { return }
+                    self.altarGrindHaptics.impactOccurred(intensity: Haptics.altarGrindIntensity)
+                    self.altarGrindHaptics.prepare()
+                }
+            } else {                                          // trap click — one gentle tick
+                self.trapClickHaptics.impactOccurred(intensity: Haptics.trapClickIntensity)
+                self.trapClickHaptics.prepare()
+            }
+        }
+    }
+
     /// Warms the take-damage generators so the first hit isn't dropped by a cold
     /// Taptic Engine. Called when gameplay controls appear.
     private func prepareDamageHaptics() {
@@ -478,6 +518,8 @@ final class BrogueViewController: UIViewController {
         strongDamageHaptics.prepare()
         deathHaptics.prepare()
         detectionHaptics.prepare()
+        trapClickHaptics.prepare()
+        altarGrindHaptics.prepare()
     }
 
     /// iPhone "left-handed" magnifier mode: when on, the magnifier sits to the

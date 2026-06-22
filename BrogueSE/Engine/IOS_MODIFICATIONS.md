@@ -32,6 +32,48 @@ See `BrogueCE/Engine/IOS_MODIFICATIONS.md` (faithful CE) and
 
 ## Change log
 
+### 2026-06-21 — Noise system: traps click and altars grind (two new environmental emitters + iPhone haptics)
+
+**What.** Two new world-event sounds on the existing `emitEnvironmentalNoise` channel (guaranteed-investigate
+radius, no hear roll), each with an iPhone haptic:
+- **Trap click** — a sprung pressure plate emits a soft noise (`NOISE_TRAP_CLICK = 6`, radius ~3) so nearby
+  unaware enemies investigate the trap tile. The **alarm trap is skipped** (its `fireType` is
+  `DF_AGGRAVATE_TRAP`, which already broadcasts a level-wide aggravate — a soft local click on top is
+  redundant). A **gentle** haptic fires only when the **player** personally springs the trap.
+- **Altar grind** — reward-room machinery sealing shut emits a louder noise (`NOISE_ALTAR_GRIND = 15`,
+  radius ~5), drawing wanderers toward the altar. A **pronounced** haptic (heavy thud + a short second tap)
+  fires on every grind.
+
+**Why.** Principle #3 counter-pressure: setting off a trap or triggering an altar now *costs* you by pulling
+nearby monsters to the spot, rather than being silent/free. Reuses the existing primitive (principle #2)
+rather than bespoke code. The trap click is deliberately quieter than a thrown dart so it can't become a free
+monster-luring tool. The haptics are a distinct channel from the detection haptic ("something heard *you*").
+
+**Where (engine).**
+- `Rogue.h` — new levers `NOISE_TRAP_CLICK` / `NOISE_ALTAR_GRIND` (in the `NOISE_*` block); new
+  `DFF_EMITS_NOISE = Fl(11)` dungeon-feature flag; declaration of `environmentalNoiseHaptic()`.
+- `Time.c` (`handleCreatureTerrainInteraction`, pressure-plate block) — emits `NOISE_TRAP_CLICK` for all
+  traps except the alarm trap (detected by `fireType == DF_AGGRAVATE_TRAP` *before* the promotion loop
+  mutates the tile); gentle haptic gated to `monst == &player`.
+- `Architect.c` (`spawnDungeonFeature`, `if (succeeded)` block) — mirrors the `DFF_AGGRAVATES_MONSTERS`
+  handler: when a DF has `DFF_EMITS_NOISE`, emit `NOISE_ALTAR_GRIND` at the origin + the pronounced haptic.
+- `Globals.c` (`dungeonFeatureCatalog`) — tagged the 7 close-and-seal DF rows with `DFF_EMITS_NOISE`:
+  `DF_ITEM_CAGE_CLOSE`, `DF_ALTAR_RETRACT`, `DF_ALTAR_COMMUTE`, `DF_ALTAR_RESURRECT`, `DF_SACRIFICE_COMPLETE`,
+  and SE's `DF_ALTAR_INSIGHT_INERT` / `DF_ALTAR_TRANSFER_INERT`.
+- `Monsters.c` — `environmentalNoiseHaptic()` wrapper (extern `cePlayEnvironmentalNoiseHaptic`), same
+  playback/automation suppression as `noiseDetectionHaptic`. All marked `// iOS port (Brogue SE):` and gated
+  by `#if NOISE_SYSTEM_ENABLED` (matching `emitEnvironmentalNoise`'s own guard).
+
+**Where (bridge/platform).** New host hook `cePlayEnvironmentalNoiseHaptic(int kind)` in `SEBridge.mm` →
+`playEnvironmentalNoiseHaptic:` on `BrogueCEHost` (`BrogueCE/BrogueCEHost.h`, SE-only, like the detection
+haptic) → `CEHost.swift` → `environmentalNoiseHaptic(_:)` in `BrogueViewController.swift` (dedicated
+`.light`/`.heavy` generators + `Haptics` constants; iPhone-only; respects the haptics setting; warmed in
+`prepareDamageHaptics`).
+
+**Determinism.** `emitEnvironmentalNoise` draws no RNG (a deterministic radius gate sets `MB_INVESTIGATING`);
+the haptics/ripples are cosmetic and self-suppress during playback/automation. Saves/replays unaffected. See
+`docs/game-data/PERCEPTION_AUDIT.md` §7.
+
 ### 2026-06-21 — Noise system: per-weapon melee loudness (replaces the flat melee spike)
 
 **What.** Player melee noise was a single flat spike (`NOISE_PLAYER_MELEE` = 30, always aggro-tier).
