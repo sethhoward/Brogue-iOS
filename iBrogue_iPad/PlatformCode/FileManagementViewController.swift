@@ -19,6 +19,7 @@
 //
 
 import UIKit
+import UniformTypeIdentifiers
 
 /// Lists the player's saved games (`.broguesave`) and replays (`.broguerec`) from
 /// the app's Documents folder and lets them delete or share each file via swipe
@@ -73,15 +74,22 @@ final class FileManagementViewController: UITableViewController {
     /// only wired up for the Brogue SE engine.
     private let allowsDuplicate: Bool
 
-    init(directory: URL? = nil, allowsDuplicate: Bool = false) {
+    /// When true, an "Import" button copies an external `.broguesave`/`.broguerec`
+    /// (picked via the document browser) into this directory. Debug aid for loading
+    /// a save someone shared — e.g. testing a reported bug against their exact game.
+    private let allowsImport: Bool
+
+    init(directory: URL? = nil, allowsDuplicate: Bool = false, allowsImport: Bool = false) {
         self.directoryURL = directory ?? FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
         self.allowsDuplicate = allowsDuplicate
+        self.allowsImport = allowsImport
         super.init(style: .insetGrouped)
     }
 
     required init?(coder: NSCoder) {
         self.directoryURL = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
         self.allowsDuplicate = false
+        self.allowsImport = false
         super.init(coder: coder)
     }
 
@@ -100,7 +108,13 @@ final class FileManagementViewController: UITableViewController {
         title = "Manage Files"
         navigationItem.rightBarButtonItem = UIBarButtonItem(
             barButtonSystemItem: .close, target: self, action: #selector(doneTapped))
-        navigationItem.leftBarButtonItem = editButtonItem
+        if allowsImport {
+            let importButton = UIBarButtonItem(
+                title: "Import", style: .plain, target: self, action: #selector(importTapped))
+            navigationItem.leftBarButtonItems = [editButtonItem, importButton]
+        } else {
+            navigationItem.leftBarButtonItem = editButtonItem
+        }
         tableView.allowsMultipleSelectionDuringEditing = true
     }
 
@@ -294,6 +308,50 @@ final class FileManagementViewController: UITableViewController {
         present(activity, animated: true)
     }
 
+    // MARK: - Import (debug)
+
+    /// Opens the system document browser so the player can pick a save/replay that
+    /// was shared with them (e.g. via AirDrop / Files) and copy it into this engine's
+    /// directory, where the title menu can then load it.
+    @objc private func importTapped() {
+        // Custom extensions (.broguesave/.broguerec) aren't declared as UTTypes, so
+        // the picker can't filter on them — allow any file and validate after pick.
+        let picker = UIDocumentPickerViewController(forOpeningContentTypes: [.item], asCopy: true)
+        picker.delegate = self
+        picker.allowsMultipleSelection = true
+        present(picker, animated: true)
+    }
+
+    /// Copies a picked file into `directoryURL`, refusing extensions the engine can't
+    /// load and avoiding name collisions.
+    private func importFile(at source: URL) -> String? {
+        let ext = source.pathExtension.lowercased()
+        guard Section.allCases.contains(where: { $0.fileExtension == ext }) else {
+            return "“\(source.lastPathComponent)” isn’t a Brogue save or recording."
+        }
+        let destination = nonCollidingURL(forName: source.deletingPathExtension().lastPathComponent,
+                                          extension: ext)
+        do {
+            try FileManager.default.copyItem(at: source, to: destination)
+        } catch {
+            return error.localizedDescription
+        }
+        return nil
+    }
+
+    /// Like `uniqueDuplicateURL`, but keeps the original name when free and only
+    /// appends " (2)", " (3)", … on collision.
+    private func nonCollidingURL(forName base: String, extension ext: String) -> URL {
+        for suffix in 1... {
+            let name = suffix == 1 ? base : "\(base) (\(suffix))"
+            let candidate = directoryURL.appendingPathComponent(name).appendingPathExtension(ext)
+            if !FileManager.default.fileExists(atPath: candidate.path) {
+                return candidate
+            }
+        }
+        return directoryURL.appendingPathComponent(base).appendingPathExtension(ext)
+    }
+
     // MARK: - Editing mode (multi-select batch delete)
 
     override func setEditing(_ editing: Bool, animated: Bool) {
@@ -385,5 +443,24 @@ final class FileManagementViewController: UITableViewController {
         }
         reloadFiles()
         updateToolbarButtonStates()
+    }
+}
+
+// MARK: - UIDocumentPickerDelegate (import)
+
+extension FileManagementViewController: UIDocumentPickerDelegate {
+    func documentPicker(_ controller: UIDocumentPickerViewController,
+                        didPickDocumentsAt urls: [URL]) {
+        // asCopy: true gives us temporary copies we own; no security-scoped access needed.
+        let errors = urls.compactMap { importFile(at: $0) }
+        reloadFiles()
+
+        guard !errors.isEmpty else { return }
+        let alert = UIAlertController(
+            title: "Import Issues",
+            message: errors.joined(separator: "\n"),
+            preferredStyle: .alert)
+        alert.addAction(UIAlertAction(title: "OK", style: .default))
+        present(alert, animated: true)
     }
 }
