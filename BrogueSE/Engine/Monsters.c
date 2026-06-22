@@ -2100,6 +2100,9 @@ void emitEnvironmentalNoise(pos source, short strength, item *sourceItem) {
 // One ripple from the player covers all directions, so a roomful of monsters is handled at once.
 void recordPlayerNoiseRippleIfNeeded(void) {
     short r;
+    if (rogue.hidePlayerNoiseRipple) {
+        return; // iOS port (Brogue SE): player opted out of their own sound-footprint animation (menu toggle); other noise animations are unaffected
+    }
     if (rogue.playerNoise <= NOISE_PLAYER_SILENT) {
         return; // silent this turn -- no footprint to show
     }

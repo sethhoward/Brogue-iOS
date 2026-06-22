@@ -221,7 +221,7 @@
 // Plus NOISE_DOOR_LISTEN_BONUS (probability) AND NOISE_DOOR_LISTEN_RANGE (ear-on-door extends the
 // audible radius through it) while the player stands next to a closed door. Together they restore --
 // but never exceed -- open-air hearing for a monster behind that door (the muffle is negated, not beaten).
-// All read-only/deterministic -> roll stays cosmetic. Visualize with the sound-map overlay (SOUND_MAP_KEY).
+// All read-only/deterministic -> roll stays cosmetic.
 #define NOISE_NEARFIELD_RADIUS          2 //1 - original value // ### <=this cost-distance = "right on top of you, unseen" (corner/
                                             // foliage/dark/blind): flat boost. Kept at 1 so an open-stone
                                             // approach's last tile doesn't auto-ping (stone stays stealthy).
@@ -275,10 +275,15 @@
 #define NOISE_ALTAR_GRIND               15  // reward-room machinery grinding/sealing shut (radius ~5) -- a real
                                             // counter-pressure for using altars, but well short of the alarm
                                             // trap's whole-level reach. Emitted via DFF_EMITS_NOISE. See Architect.c.
+#define NOISE_GUARDIAN_STEP             20  // a stone guardian's massive footfall when a glyph activates it
+                                            // (radius ~7) -- a booming counter-pressure on the guardian puzzle:
+                                            // shoving the totems around to free the key draws nearby wanderers.
+                                            // Emitted per guardian that actually changes cells. See activateMachine (Time.c).
 #define D_ALWAYS_DETECT_SOUND           0   // debug: force every off-screen monster move to be heard,
                                             // bypassing the perception roll (draws no RNG). 1 = full
                                             // detection. (Pre-ship: see pre-ship-debug-checklist.md.)
 #define NOISE_RIPPLE_RADIUS             3   // tiles a monster "heard something" box radiates out
+#define NOISE_AGGRAVATE_RIPPLE_RADIUS   16  // tiles the level-wide aggravate (alarm trap / aggravate scroll) box radiates -- much larger than any other ripple, so it reads as the loudest event on screen
 #define NOISE_RIPPLE_MAX_STRENGTH       60  // hilite strength of the innermost ring (fades outward)
 // Ripple TIMING + interruption now live in the cosmetic animation layer (IO.c: CE_RIPPLE_*, advanced on the
 // platform idle tick, uninterruptible). The old blocking-pause pre-roll / held-key suppression -- and the
@@ -1489,9 +1494,9 @@ enum tileFlags {
 
 // iOS port (Brogue SE): Lone Wolf solo-progression tuning (see playerCharacter.loneWolfXP).
 #define LONE_WOLF_MIN_DEPTH                 6    // accrue solo XPXP only at this depth or deeper
-#define LONE_WOLF_TIER1_XP                  1500 // solo XPXP for tier 1 (+1 effective strength; ~2 levels of solo exploration)
-#define LONE_WOLF_TIER2_XP                  3000 // solo XPXP for tier 2 (+2 total effective strength)
-#define LONE_WOLF_MAX_TIER                  2    // tier cap
+#define LONE_WOLF_XP_PER_TIER               1500 // solo XPXP per tier (~2 levels of solo exploration each); tier N reached at N * this
+#define LONE_WOLF_MAX_TIER                  5    // tier cap -- grants +1 effective strength per tier, so +5 at the cap
+                                                 // (compensation for solo play, which is much harder than running with allies)
 
 #define ROOM_MIN_WIDTH                      4
 #define ROOM_MAX_WIDTH                      20
@@ -1549,7 +1554,7 @@ enum tileFlags {
 #define SWAP_KEY            'w'
 #define TRUE_COLORS_KEY     '\\'
 #define STEALTH_RANGE_KEY   ']'
-#define SOUND_MAP_KEY       '[' // iOS port (Brogue SE): toggle the noise-system sound-map debug overlay
+#define PLAYER_NOISE_ANIM_KEY '[' // iOS port (Brogue SE): toggle the player's own sound-footprint ripple animation
 #define DROP_KEY            'd'
 #define CALL_KEY            'c'
 #define QUIT_KEY            'Q'
@@ -2979,7 +2984,7 @@ typedef struct playerCharacter {
     boolean trueColorMode;              // whether lighting effects are disabled
     boolean hideSeed;                   // whether seed is hidden when pressing SEED_KEY
     boolean displayStealthRangeMode;    // whether your stealth range is displayed
-    boolean displaySoundMapMode;        // iOS port (Brogue SE): noise-system sound-map debug overlay (non-recorded)
+    boolean hidePlayerNoiseRipple;      // iOS port (Brogue SE): suppress the player's own sound-footprint ripple animation (other noise animations unaffected); 0 = shown (on by default), non-recorded
     boolean quit;                       // to skip the typical end-game theatrics when the player quits
     uint64_t seed;                      // the master seed for generating the entire dungeon
     short RNG;                          // which RNG are we currently using?
@@ -3012,10 +3017,11 @@ typedef struct playerCharacter {
     short xpxpThisTurn;                 // how many squares the player explored this turn
     // iOS port (Brogue SE): "Lone Wolf" -- a solo-play fallback progression driven by the player's own
     // exploration XPXP. Accrues only while the player has zero living allies anywhere and is at depth >= 6.
-    // At tiers (LONE_WOLF_TIER1_XP, LONE_WOLF_TIER2_XP) it grants effective strength (a removable aura) and,
-    // on runs where the player has NEVER had an ally, a one-shot polarity reveal (compensating for the
-    // per-rescue tells in captiveReactToPack that a pure-solo player forgoes). Gaining any ally zeroes the
-    // track and strips the strength aura (re-grindable); hasEverHadAlly latches for the run (kills polarity).
+    // Each tier (every LONE_WOLF_XP_PER_TIER, up to LONE_WOLF_MAX_TIER = 5) grants +1 effective strength (a
+    // removable aura, so +5 at the cap) and, on runs where the player has NEVER had an ally, a one-shot
+    // polarity reveal (compensating for the per-rescue tells in captiveReactToPack that a pure-solo player
+    // forgoes). Gaining any ally zeroes the ENTIRE track and strips the strength aura (re-grindable from zero
+    // once that ally dies); hasEverHadAlly latches for the run (kills polarity).
     // All driven by deterministic exploration -> save-safe (saves replay inputs). See IOS_MODIFICATIONS.md.
     long loneWolfXP;                    // solo exploration XPXP accumulated toward the next Lone Wolf tier
     short loneWolfTier;                 // current Lone Wolf tier (0..LONE_WOLF_MAX_TIER)
@@ -3127,6 +3133,8 @@ typedef struct levelData {
     unsigned long awaySince;
     unsigned long restTurnsOnLevel; // iOS port (iBrogue): debug per-level rest tally (death-recap readout)
     unsigned long restRevealsOnLevel; // iOS port (iBrogue): debug per-level count of polarity reveals earned by resting
+    unsigned long passableCellsOnLevel; // iOS port (Brogue SE): debug -- non-T_PATHING_BLOCKER cells in the generated level (the full-exploration xpxp ceiling; counted once on first visit). See exploration-stats CSV.
+    unsigned long xpxpEarnedOnLevel; // iOS port (Brogue SE): debug -- xpxp (newly-discovered passable cells) actually accrued while on this level
 } levelData;
 
 enum machineFeatureFlags {
@@ -3640,6 +3648,7 @@ extern "C" {
     void cosmeticSpawnRippleMonster(pos loc);   // iOS port (Brogue SE): cosmetic layer -- monster "heard something" ripple
     void cosmeticSpawnRipplePlayer(short radius);// iOS port (Brogue SE): cosmetic layer -- player's sound-footprint ripple
     void cosmeticSpawnRippleImpact(pos source, short radius); // iOS port (Brogue SE): cosmetic layer -- environmental-sound impact ripple
+    void cosmeticSpawnRippleAggravate(pos source, short radius); // iOS port (Brogue SE): cosmetic layer -- level-wide aggravate ripple (alarm trap / aggravate scroll)
     void cosmeticRefreshInvestigateBlinks(void); // iOS port (Brogue SE): cosmetic layer -- per-turn '?' blink rebuild
     void advanceCosmeticAnimations(void);   // iOS port (Brogue SE): cosmetic layer -- one tick (from the platform idle loop)
     void clearCosmeticAnimations(void);     // iOS port (Brogue SE): cosmetic layer -- drop all (level/playback reset)

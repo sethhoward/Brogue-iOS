@@ -32,6 +32,160 @@ See `BrogueCE/Engine/IOS_MODIFICATIONS.md` (faithful CE) and
 
 ## Change log
 
+### 2026-06-22 — Noise system: the aggravate channel now ripples (alarm trap / aggravate scroll)
+
+**What.** `aggravateMonsters` — the alarm trap (`DFF_AGGRAVATES_MONSTERS`) and the scroll of aggravate
+monsters — was the one "sound" event with no visual tell: it woke the whole level but drew no ripple. It now
+spawns a new, distinct **aggravate ripple**: a hot-red Chebyshev box (through walls, befitting a sound that
+"echoes throughout the dungeon"), radius `NOISE_AGGRAVATE_RIPPLE_RADIUS = 16` — much larger than any other
+ripple, so it reads as the loudest thing on screen — plus the pronounced haptic. Fires regardless of line of
+sight (it's level-wide).
+
+**Why.** Closing the last gap in "every sound generates an animation." Audit found all localized emitters
+already ripple through `emitEnvironmentalNoise` → `cosmeticSpawnRippleImpact`; only the level-wide aggravate
+channel was silent visually.
+
+**Where.**
+- `IO.c` — new `CE_RIPPLE_AGGRAVATE` cosmetic kind + `cosmeticAggravateColor` (hot alarm red) +
+  `cosmeticSpawnRippleAggravate(source, radius)` (singleton, latest-wins). Render path groups it with the
+  monster ripple's hollow-box branch (no sound-map dependency, so no collision with the impact ripple's
+  shared `gImpactSoundMap`).
+- `Rogue.h` — `NOISE_AGGRAVATE_RIPPLE_RADIUS` constant; `cosmeticSpawnRippleAggravate` declaration.
+- `Items.c` — `aggravateMonsters` spawns the ripple + pronounced haptic at the source, after its existing
+  flash/alert work, gated `#if NOISE_SYSTEM_ENABLED`. It deliberately does NOT route through
+  `emitEnvironmentalNoise` (aggravateMonsters already did the far stronger level-wide wake itself); this only
+  adds the cosmetic tell.
+
+**Determinism / saves.** Cosmetic only (no RNG, no state); the spawn self-suppresses during
+automation/fast-forward replay, the haptic during playback. Determinism/recordings unaffected.
+
+### 2026-06-22 — Noise system: the vault portcullis seal now booms
+
+**What.** Tagged the `PORTCULLIS_CLOSED` dungeon-feature row with `DFF_EMITS_NOISE` (Globals.c). When a
+treasure/key vault seals itself — "with a heavy mechanical sound, an iron portcullis falls from the ceiling!"
+— it now actually emits an environmental noise (`NOISE_ALTAR_GRIND` strength, via the shared
+`spawnDungeonFeature` emit path), so the seal is heard like the altar cages and the rest of the vault
+machinery. Its own flavor text already promised a "heavy mechanical sound"; now there's a matching ripple +
+haptic + investigate.
+
+**Why.** The altar cage lowering over the un-chosen items (`DF_ITEM_CAGE_CLOSE` / `ALTAR_CAGE_CLOSED`) was
+already tagged (2026-06-21), but the portcullis that drops to trap you in the vault was silent — the one
+closing event in those rooms that wasn't wired into the noise system.
+
+**Where.** `Globals.c` `PORTCULLIS_CLOSED` DF row (added `DFF_EMITS_NOISE`); `Architect.c` comment on the
+`DFF_EMITS_NOISE` emit updated to list the portcullis. No new constant — reuses the existing grind loudness.
+Determinism unchanged (the emit draws no RNG; haptic self-suppresses in playback).
+
+### 2026-06-22 — Debug exploration-stats CSV (Lone Wolf / xpxp calibration)
+
+**What.** A second debug calibration CSV, modeled exactly on the rest-stats CSV: at the end of each finished
+live run, emit one row to `Documents/se/exploration-stats.csv` capturing, per dungeon level, the
+**full-exploration xpxp ceiling** (count of passable, non-`T_PATHING_BLOCKER` cells — the exact gate
+`discoverCell` uses to award xpxp) and the **xpxp the player actually accrued** there. Summary columns
+include `levels_visited`, `passable_total`, `xpxp_earned_total`, and `passable_mean_per_level` — the figure
+that calibrates `LONE_WOLF_XP_PER_TIER`. Per-level columns `p{d}` (ceiling) and `x{d}` (realized).
+
+**Why.** We bumped the Lone Wolf cap to 5 tiers (1500 xpxp each) off an *estimated* ~750–900 floor cells per
+level. This measures the real distribution across many seeds so the tier cost can be retuned against data
+instead of a guess.
+
+**Where (engine).**
+- `Rogue.h` — two `levelData` fields: `passableCellsOnLevel`, `xpxpEarnedOnLevel`.
+- `RogueMain.c` — zero both in the per-level reset loop (same stale-carry reason as the rest tallies); count
+  passable cells once on a level's first visit (after the 50-turn environment break-in, so flooding/gas has
+  settled); new `recordExplorationStatsRow()` built/emitted at the two run-end sites beside
+  `recordRestStatsRow()`; `extern void seRecordExplorationStats(...)`.
+- `Time.c` — accumulate realized xpxp per level in `handleXPXP` (before `xpxpThisTurn` is zeroed).
+- **Indexing gotcha:** the debug tallies use `levels[depthLevel]` (1-indexed; depth d → `levels[d]`), the
+  same convention as `restTurnsOnLevel` — NOT the 0-indexed `levels[depthLevel-1]` used by map storage and
+  the `visited` flag. The CSV reader uses `passableCellsOnLevel > 0` as the "explored this depth" test to
+  stay on the 1-indexed side and avoid crossing into the 0-indexed `visited`.
+
+**Where (host).** `SEBridge.mm` — refactored the rest-stats writer into a shared `seAppendCsvRow(fileName,
+header, row)`; `seRecordRestStats` and the new `seRecordExplorationStats` are thin wrappers. Both gated to
+Debug builds (`SE_DEBUG_BUILD`) — in Release they are no-ops, so **nothing is collected on shipping builds**.
+
+**Determinism / saves.** Output-only: no RNG, no game-state mutation. The per-level counting is deterministic
+(replays identically); skipped during playback. Pull the file via Xcode > Devices & Simulators > Download
+Container → `AppData/Documents/se/exploration-stats.csv`.
+
+### 2026-06-22 — Lone Wolf scales to 5 tiers (was 2)
+
+**What.** Raised the Lone Wolf solo-progression cap from 2 tiers to 5. Each tier still costs the same solo
+exploration XPXP (`LONE_WOLF_XP_PER_TIER = 1500`, so tier N at N×1500; tier 5 at 7500 ≈ ten levels of solo
+exploration) and grants +1 effective strength, so the aura now tops out at **+5** instead of +2.
+
+**Why.** Solo play (no allies) is much harder than running with a pack; Lone Wolf is the compensation, and
++2 wasn't enough at depth. The counter-pressure stays intact (design principle #3): the bonus accrues only
+while you have *zero* living allies anywhere, so it's a genuine trade — forgo allies (very strong) for raw
+strength — not a free upgrade.
+
+**Where (engine).**
+- `Rogue.h` — replaced the per-tier `LONE_WOLF_TIER1_XP`/`LONE_WOLF_TIER2_XP` defines with a single
+  `LONE_WOLF_XP_PER_TIER`; `LONE_WOLF_MAX_TIER` 2 → 5. Updated the `playerCharacter` field comment.
+- `Time.c` — `handleLoneWolf()` now derives the tier as `loneWolfXP / LONE_WOLF_XP_PER_TIER` (clamped to the
+  cap) instead of hard-coded tier-1/tier-2 thresholds, and pulls the tier-up flavor line from a small
+  `loneWolfTierMessages[]` table (I–V). Strength still set via `setLoneWolfStrengthBonus(tier)`.
+
+**Determinism / saves.** Unchanged from the original feature: the tier is recomputed from `loneWolfXP` every
+turn (which itself comes only from deterministic exploration counts), so it replays/reloads identically.
+Gaining any ally still zeroes the *entire* track and strips the aura (`loseLoneWolfBonusOnAlly`, fired from
+`becomeAllyWith`); re-grindable from zero once that ally dies. **Design note:** that full all-or-nothing
+reset — now wiping up to +5 earned over a long solo grind on a single ally pickup — is flagged as a possible
+balance flaw to revisit (see `KNOWN_CAVEATS.md`). All edits marked `// iOS port (Brogue SE):`.
+
+### 2026-06-22 — Noise system: stone guardians boom when a glyph steps them
+
+**What.** Each guardian that actually changes cells on a glyph activation now emits a loud environmental
+noise (`NOISE_GUARDIAN_STEP = 20`, radius ~7) from the cell it lands on, plus a pronounced iPhone haptic.
+The guardian-puzzle key room (guide the totems onto the trap to free the key) is now an audible event that
+draws nearby wanderers toward the commotion.
+
+**Why.** Shoving massive stone totems around to solve the puzzle should be heard — a design-principle-#3
+counter-pressure: the reward room becomes tenser (you may attract company), not free. It reuses the existing
+`emitEnvironmentalNoise` channel, so it also paints the standard impact ripple (a "boom" animation) and the
+guaranteed-investigate behavior, consistent with traps/altars.
+
+**Where (engine).**
+- `Rogue.h` — new `NOISE_GUARDIAN_STEP` constant (louder than `NOISE_ALTAR_GRIND`, since it's a booming
+  footfall; still under the whole-floor `MAX_RADIUS`).
+- `Time.c` — `activateMachine()` snapshots each activation-monster's `loc` before its `monstersTurn`, and on
+  any real move emits `emitEnvironmentalNoise(landingCell, NOISE_GUARDIAN_STEP, NULL)` + `environmentalNoiseHaptic(1)`.
+  No per-kind branch: `MONST_IMMOBILE` mirror totems never move, so only stone/winged guardians boom; the
+  climactic fatal step onto a trap still booms (the dying guardian isn't freed until `removeDeadMonsters`, so
+  its `loc` is valid).
+
+**Determinism / saves.** `emitEnvironmentalNoise` draws no RNG (guaranteed-investigate radius), and guardian
+activation is player-driven (stepping on a wired glyph), so replays are unaffected. The haptic self-suppresses
+during playback/automation. All edits marked `// iOS port (Brogue SE):` and gated by `#if NOISE_SYSTEM_ENABLED`.
+
+### 2026-06-22 — Noise system: menu toggle for the player's own sound ripple; drop the sound-map debug overlay
+
+**What.** Two paired menu changes in the in-game `\`-menu (under "Display stealth range"):
+- **Added** a "Player sound animation" toggle (`[X]` = on, **on by default**) that suppresses *only* the
+  player's own sound-footprint ripple. Every other noise animation — monster ripples, thrown-impact / trap /
+  altar ripples, the `?` investigate and `!` alert blinks — is unaffected.
+- **Removed** the developer "Display sound map" heat-overlay option entirely (button, key handler, the
+  per-cell render block in `IO.c`, the `displaySoundMapMode` field, and its playback save/restore).
+
+**Why.** The footprint ripple began as a feel/test aid but reads as noisy clutter to some players, so it
+now has an off switch while staying on by default. The sound-map overlay was a pure debug visualizer with no
+player value, so its menu entry was dropped rather than left permanently unreachable.
+
+**Where (engine).**
+- `Rogue.h` — `SOUND_MAP_KEY` renamed to `PLAYER_NOISE_ANIM_KEY` (still `'['`, the freed key); new
+  `rogue.hidePlayerNoiseRipple` field (replaces `displaySoundMapMode`; `0` = shown, so zero-init = on);
+  dropped the `SOUND_MAP_KEY` mention in the noise-falloff comment.
+- `IO.c` — menu button + `case` reworked to the new toggle (no `displayLevel()` repaint needed — the ripple
+  is an event animation, not a persistent overlay); deleted the `displaySoundMapMode` render overlay.
+- `Monsters.c` — `recordPlayerNoiseRippleIfNeeded()` early-returns when `hidePlayerNoiseRipple` is set.
+- `RogueMain.c` — `initializeRogue()` carries `hidePlayerNoiseRipple` across the struct memset, so the
+  choice is sticky within the app session (matching `trueColorMode` / `displayStealthRangeMode`).
+- `Recordings.c` — `resetPlayback()` preserves `hidePlayerNoiseRipple` instead of the removed `soundMap`.
+
+**Determinism / saves.** Purely cosmetic display preference; non-recorded (carried, not serialized). No RNG,
+no replay impact. All edits marked `// iOS port (Brogue SE):` and gated by `#if NOISE_SYSTEM_ENABLED`.
+
 ### 2026-06-21 — Noise system: traps click and altars grind (two new environmental emitters + iPhone haptics)
 
 **What.** Two new world-event sounds on the existing `emitEnvironmentalNoise` channel (guaranteed-investigate

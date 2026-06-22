@@ -327,13 +327,14 @@ static short actionMenu(short x, boolean playingBack) {
         takeActionOurselves[buttonCount] = true;
         buttonCount++;
 #if NOISE_SYSTEM_ENABLED
-        // iOS port (Brogue SE): toggle the noise-system sound-map debug overlay.
+        // iOS port (Brogue SE): toggle the player's own sound-footprint ripple animation (on by default;
+        // leaves every other noise animation untouched).
         if (KEYBOARD_LABELS) {
-            sprintf(buttons[buttonCount].text, "  %s[: %s[%s] Display sound map  ", yellowColorEscape, whiteColorEscape, rogue.displaySoundMapMode ? "X" : " ");
+            sprintf(buttons[buttonCount].text, "  %s[: %s[%s] Player sound animation  ", yellowColorEscape, whiteColorEscape, rogue.hidePlayerNoiseRipple ? " " : "X");
         } else {
-            sprintf(buttons[buttonCount].text, "  [%s] Show sound map  ",   rogue.displaySoundMapMode ? "X" : " ");
+            sprintf(buttons[buttonCount].text, "  [%s] Player sound animation  ",   rogue.hidePlayerNoiseRipple ? " " : "X");
         }
-        buttons[buttonCount].hotkey[0] = SOUND_MAP_KEY;
+        buttons[buttonCount].hotkey[0] = PLAYER_NOISE_ANIM_KEY;
         takeActionOurselves[buttonCount] = true;
         buttonCount++;
 #endif
@@ -1532,21 +1533,6 @@ void getCellAppearance(pos loc, enum displayGlyph *returnChar, color *returnFore
         }
     }
 
-#if NOISE_SYSTEM_ENABLED
-    // iOS port (Brogue SE): noise-system sound-map debug overlay -- a warm heat field that fades with
-    // the player's sound cost-distance, so you can see propagation flow down corridors, leak through
-    // doors, and route around (or be blocked by) walls. Drawn on all reachable cells, including
-    // unexplored ones, since visualizing propagation past what you've seen is the whole point.
-    if (rogue.displaySoundMapMode) {
-        const short d = soundDistanceAt(loc);
-        if (d < 30000) {
-            const short strength = clamp(85 - d * 5, 8, 85); // closer = hotter
-            applyColorAverage(&cellForeColor, &orange, strength);
-            applyColorAverage(&cellBackColor, &orange, strength);
-        }
-    }
-#endif
-
     if ((rogue.trueColorMode || rogue.displayStealthRangeMode)
         && playerCanSeeOrSense(loc.x, loc.y)) {
 
@@ -2211,6 +2197,7 @@ static const color cosmeticAlertColor = {100, 18, 18, 0, 0, 0, 0, false}; // red
 static const color cosmeticNoiseColor = {85, 85, 100, 0, 0, 0, 0, false}; // pale grey -- monster "heard something"
 static const color cosmeticPlayerColor = {35, 60, 100, 0, 0, 0, 0, false}; // cool blue -- the player's own noise
 static const color cosmeticImpactColor = {100, 85, 30, 0, 0, 0, 0, false}; // warm amber -- an environmental impact (thrown item)
+static const color cosmeticAggravateColor = {100, 25, 20, 0, 0, 0, 0, false}; // hot alarm red -- a level-wide aggravate (alarm trap / aggravate scroll)
 
 // Identity (channel) of the SINGLETON player- and impact-ripple effects: address is the dedupe key (latest-wins).
 static const char gCosmeticPlayerRippleChannel = 0;
@@ -2218,7 +2205,7 @@ static const char gCosmeticImpactRippleChannel = 0;
 
 // Effect kinds hosted by the layer. RIPPLE_* paint via hiliteCell (color overlay); ALERT/BLINK via a
 // glyph (plotCharWithColor). (File-local; promote to Rogue.h if a spawner ever needs a kind parameter.)
-enum cosmeticEffectKind { CE_ALERT_GLYPH, CE_RIPPLE_MONSTER, CE_RIPPLE_PLAYER, CE_RIPPLE_IMPACT, CE_INVESTIGATE_BLINK, CE_ALERT_BLINK };
+enum cosmeticEffectKind { CE_ALERT_GLYPH, CE_RIPPLE_MONSTER, CE_RIPPLE_PLAYER, CE_RIPPLE_IMPACT, CE_RIPPLE_AGGRAVATE, CE_INVESTIGATE_BLINK, CE_ALERT_BLINK };
 
 typedef struct {
     boolean active;
@@ -2358,6 +2345,39 @@ void cosmeticSpawnRippleImpact(pos source, short radius) {
     gCosmeticEffects[i].tint = &cosmeticImpactColor;
     gCosmeticEffects[i].maxRadius = radius;
     gCosmeticEffects[i].channel = &gCosmeticImpactRippleChannel;
+    gCosmeticEffects[i].frameAge = 0;
+    gCosmeticEffects[i].frameLife = radius * CE_RIPPLE_EXPAND_FRAMES;
+}
+
+// iOS port (Brogue SE): the level-wide aggravate ripple -- a hot-red box wavefront expanding from `source`
+// out to `radius`. A loud, dramatic, through-walls pulse (Chebyshev box like the monster ripple, NOT the
+// wall-routed sound map) -- the "a piercing shriek echoes throughout the dungeon" of the alarm trap and the
+// aggravate-monster scroll. Bigger radius + distinct tint than the amber impact ripple, so it reads as the
+// loudest thing on screen. SINGLETON (latest-wins). Cosmetic; see docs/design/environmental-sounds.md.
+void cosmeticSpawnRippleAggravate(pos source, short radius) {
+    if (radius < 1 || rogue.automationActive || rogue.autoPlayingLevel || rogue.playbackFastForward) {
+        return;
+    }
+    short i = -1;
+    for (short j = 0; j < MAX_COSMETIC_EFFECTS; j++) {
+        if (gCosmeticEffects[j].active && gCosmeticEffects[j].kind == CE_RIPPLE_AGGRAVATE) {
+            i = j; // reuse (replace) the in-flight aggravate ripple
+            break;
+        }
+    }
+    if (i < 0) {
+        i = cosmeticFreeSlot();
+    }
+    if (i < 0) {
+        return;
+    }
+    gCosmeticEffects[i].active = true;
+    gCosmeticEffects[i].kind = CE_RIPPLE_AGGRAVATE;
+    gCosmeticEffects[i].origin = source;
+    gCosmeticEffects[i].glyph = 0;
+    gCosmeticEffects[i].tint = &cosmeticAggravateColor;
+    gCosmeticEffects[i].maxRadius = radius;
+    gCosmeticEffects[i].channel = NULL; // box ripple -- channel unused (see render)
     gCosmeticEffects[i].frameAge = 0;
     gCosmeticEffects[i].frameLife = radius * CE_RIPPLE_EXPAND_FRAMES;
 }
@@ -2563,13 +2583,13 @@ void advanceCosmeticAnimations(void) {
     for (i = 0; i < MAX_COSMETIC_EFFECTS; i++) {
         cosmeticEffect *e = &gCosmeticEffects[i];
         if (!e->active
-            || (e->kind != CE_RIPPLE_MONSTER && e->kind != CE_RIPPLE_PLAYER && e->kind != CE_RIPPLE_IMPACT)
+            || (e->kind != CE_RIPPLE_MONSTER && e->kind != CE_RIPPLE_PLAYER && e->kind != CE_RIPPLE_IMPACT && e->kind != CE_RIPPLE_AGGRAVATE)
             || e->maxRadius < 1) {
             continue;
         }
         const short waveR = e->frameAge / CE_RIPPLE_EXPAND_FRAMES + 1; // current wavefront radius
         const short strength = NOISE_RIPPLE_MAX_STRENGTH * (e->maxRadius - waveR + 1) / e->maxRadius;
-        if (e->kind == CE_RIPPLE_MONSTER) {
+        if (e->kind == CE_RIPPLE_MONSTER || e->kind == CE_RIPPLE_AGGRAVATE) { // hollow Chebyshev box (through walls)
             short dx, dy; // hollow Chebyshev wavefront at radius waveR around the monster's cell
             for (dx = -waveR; dx <= waveR; dx++) {
                 for (dy = -waveR; dy <= waveR; dy++) {
@@ -3223,14 +3243,14 @@ void executeKeystroke(signed long keystroke, boolean controlKey, boolean shiftKe
             }
             break;
 #if NOISE_SYSTEM_ENABLED
-        case SOUND_MAP_KEY:
-            // iOS port (Brogue SE): toggle the noise-system sound-map debug overlay.
-            rogue.displaySoundMapMode = !rogue.displaySoundMapMode;
-            displayLevel();
-            refreshSideBar(-1, -1, false);
-            messageWithColor(rogue.displaySoundMapMode
-                             ? (KEYBOARD_LABELS ? "Sound map displayed. Press '[' again to hide." : "Sound map displayed.")
-                             : (KEYBOARD_LABELS ? "Sound map hidden. Press '[' again to display." : "Sound map hidden."),
+        case PLAYER_NOISE_ANIM_KEY:
+            // iOS port (Brogue SE): toggle the player's own sound-footprint ripple animation. Every other
+            // noise animation (monster ripples, thrown-impact/trap/altar ripples, the '?'/'!' blinks) is
+            // unaffected -- this gates only recordPlayerNoiseRippleIfNeeded().
+            rogue.hidePlayerNoiseRipple = !rogue.hidePlayerNoiseRipple;
+            messageWithColor(rogue.hidePlayerNoiseRipple
+                             ? (KEYBOARD_LABELS ? "Player sound animation off. Press '[' again to enable." : "Player sound animation off.")
+                             : (KEYBOARD_LABELS ? "Player sound animation on. Press '[' again to disable." : "Player sound animation on."),
                              &teal, 0);
             break;
 #endif

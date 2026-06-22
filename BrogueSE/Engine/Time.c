@@ -1172,26 +1172,29 @@ static void handleLoneWolf() {
         return; // too shallow to count (avoids grant-then-yank confusion in the early game)
     }
 
+    // One tier-up flavor line per tier (index by tier, 1..LONE_WOLF_MAX_TIER); each ends with its Roman numeral.
+    static const char *loneWolfTierMessages[LONE_WOLF_MAX_TIER + 1] = {
+        "",
+        "alone in the dark, your senses sharpen and your body hardens. (Lone Wolf I)",
+        "solitude tempers you further. (Lone Wolf II)",
+        "the silence forges resolve into raw might. (Lone Wolf III)",
+        "self-reliance has become your second nature. (Lone Wolf IV)",
+        "you have mastered the solitary path; none stand with you, and none need to. (Lone Wolf V)",
+    };
+
     rogue.loneWolfXP += rogue.xpxpThisTurn;
 
-    short newTier = rogue.loneWolfTier;
-    if (rogue.loneWolfXP >= LONE_WOLF_TIER2_XP) {
-        newTier = 2;
-    } else if (rogue.loneWolfXP >= LONE_WOLF_TIER1_XP) {
-        newTier = 1;
-    }
+    // Linear track: tier N at N * LONE_WOLF_XP_PER_TIER, capped at LONE_WOLF_MAX_TIER. Recomputed every turn,
+    // so it re-derives (and replays) from loneWolfXP alone -- a single threshold check generalizes to any cap.
+    short newTier = (short)(rogue.loneWolfXP / LONE_WOLF_XP_PER_TIER);
     if (newTier > LONE_WOLF_MAX_TIER) {
         newTier = LONE_WOLF_MAX_TIER;
     }
 
     while (rogue.loneWolfTier < newTier) {
         rogue.loneWolfTier++;
-        setLoneWolfStrengthBonus(rogue.loneWolfTier); // +1 at tier 1, +2 at tier 2
-        if (rogue.loneWolfTier == 1) {
-            messageWithColor("alone in the dark, your senses sharpen and your body hardens. (Lone Wolf I)", &advancementMessageColor, 0);
-        } else {
-            messageWithColor("solitude tempers you further. (Lone Wolf II)", &advancementMessageColor, 0);
-        }
+        setLoneWolfStrengthBonus(rogue.loneWolfTier); // +1 effective strength per tier (so +5 at the cap)
+        messageWithColor(loneWolfTierMessages[rogue.loneWolfTier], &advancementMessageColor, 0);
         // Polarity tell only on a pure-solo run -- compensates for the captiveReactToPack tells forgone.
         if (!rogue.hasEverHadAlly) {
             loneWolfRevealPolarity();
@@ -1229,6 +1232,7 @@ static void handleXPXP() {
         }
     }
     handleLoneWolf(); // iOS port (Brogue SE): solo-play progression; reads xpxpThisTurn before it is zeroed
+    levels[rogue.depthLevel].xpxpEarnedOnLevel += rogue.xpxpThisTurn; // iOS port (Brogue SE): debug exploration-stats -- realized per-level xpxp (output-only). Indexed levels[depthLevel] to match the other debug tallies (restTurnsOnLevel), NOT the 0-indexed levels[depthLevel-1] map storage.
     rogue.xpxpThisTurn = 0;
 }
 
@@ -1333,7 +1337,23 @@ void activateMachine(short machineNumber) {
     }
     for (i=0; i<monsterCount; i++) {
         if (!(activatedMonsterList[i]->bookkeepingFlags & MB_IS_DYING)) {
+#if NOISE_SYSTEM_ENABLED
+            // iOS port (Brogue SE): a guardian's footfall booms. Snapshot its cell, take its activation turn,
+            // and if it actually moved, emit a loud environmental noise from where it landed -- shoving the
+            // stone totems around to free the key is a noisy business that draws nearby wanderers (design
+            // principle #3 counter-pressure). Immobile activation-monsters (mirror totems) never move, so they
+            // stay silent; this naturally covers stone and winged guardians without a per-kind branch.
+            const pos beforeLoc = activatedMonsterList[i]->loc;
+#endif
             monstersTurn(activatedMonsterList[i]);
+#if NOISE_SYSTEM_ENABLED
+            // Boom on any real step -- including the climactic footfall onto a trap that destroys the guardian
+            // (it's marked MB_IS_DYING but not freed until removeDeadMonsters, so its loc is still valid here).
+            if (!posEq(activatedMonsterList[i]->loc, beforeLoc)) {
+                emitEnvironmentalNoise(activatedMonsterList[i]->loc, NOISE_GUARDIAN_STEP, NULL);
+                environmentalNoiseHaptic(1); // pronounced: a heavy stone footfall (player-driven, glyph underfoot)
+            }
+#endif
         }
     }
 

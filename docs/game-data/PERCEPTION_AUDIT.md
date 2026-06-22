@@ -494,7 +494,15 @@ point, not a guarantee.)
 - **"Heard something" ripple** — the §3.3 grey box-ripple for an unseen monster's move.
 - **Player sound-footprint ripple** — when you make noise and a visible, not-yet-hunting enemy is at/near
   your audible radius, a blue ripple radiates from you along the sound map, so you can *see* how far your
-  noise carries. Shown until that monster starts hunting.
+  noise carries. Shown until that monster starts hunting. **On by default**, but can be turned off from the
+  in-game `\`-menu ("Player sound animation" toggle → `rogue.hidePlayerNoiseRipple`); the toggle gates only
+  this ripple, leaving every other noise animation intact.
+- **Impact ripple** — amber wavefront from any `emitEnvironmentalNoise` source (thrown-item impact, trap
+  click, altar grind / cage close / portcullis seal, guardian step), flooding along the impact sound map.
+- **Aggravate ripple** — a hot-red, oversized box-ripple (radius `NOISE_AGGRAVATE_RIPPLE_RADIUS`, through
+  walls) for the level-wide aggravate channel (alarm trap, scroll of aggravate monsters) — the loudest tell,
+  so it reads as "heard everywhere." Spawned directly by `aggravateMonsters` (not via `emitEnvironmentalNoise`,
+  which the level-wide wake bypasses).
 
 The `?`/`!`/ripple tells are drawn on the **cosmetic animation layer** — see
 [../guides/cosmetic-animation-layer.md](../guides/cosmetic-animation-layer.md). The haptics cross to the
@@ -557,6 +565,7 @@ that player-facing flavor + the off-screen `?` cover it; flip to 1 for dev traci
 | **Environmental emitters (non-item `emitEnvironmentalNoise`)** | | |
 | `NOISE_TRAP_CLICK` | 6 | sprung pressure plate's soft click (radius ~3); skips the alarm trap, which already aggravates the level (`Time.c`) |
 | `NOISE_ALTAR_GRIND` | 15 | reward-room machinery grinding shut (radius ~5); fired by `DFF_EMITS_NOISE` in `spawnDungeonFeature` (`Architect.c`/`Globals.c`) |
+| `NOISE_GUARDIAN_STEP` | 20 | a stone/winged guardian's booming footfall when a glyph activates it (radius ~7); emitted per guardian that actually changes cells in `activateMachine` (`Time.c`) -- a counter-pressure on the guardian-key puzzle |
 | `NOISE_INVESTIGATE_BLINK_FRAMES` | 30 | `?` / `!` blink cadence (shared) |
 | `NOISE_ALERT_BLINK_TURNS` | 2 | player-turns the visible `!` rides a locked-on monster before fading |
 | `D_NOISE_DEBUG` | 0 | raw per-event dev log (flip to 1 to trace detection) |

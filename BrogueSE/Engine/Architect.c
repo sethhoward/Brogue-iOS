@@ -3596,11 +3596,12 @@ boolean spawnDungeonFeature(short x, short y, dungeonFeature *feat, boolean refr
             aggravateMonsters(feat->effectRadius, x, y, &gray);
         }
 #if NOISE_SYSTEM_ENABLED
-        // iOS port (Brogue SE): reward-room machinery (an altar grinding/sealing shut) emits an environmental
-        // noise at the origin -- nearby unaware monsters investigate, so triggering an altar carries a real
-        // counter-pressure. Loudness decoupled from effectRadius (which several of these DFs set for their
-        // light flash). Tagged catalog entries: DF_ALTAR_COMMUTE/RESURRECT/SACRIFICE_COMPLETE/ITEM_CAGE_CLOSE/
-        // ALTAR_RETRACT and SE's DF_ALTAR_INSIGHT_INERT/DF_ALTAR_TRANSFER_INERT. See Globals.c.
+        // iOS port (Brogue SE): reward-room machinery (an altar grinding/sealing shut, a portcullis crashing
+        // down) emits an environmental noise at the origin -- nearby unaware monsters investigate, so
+        // triggering a vault carries a real counter-pressure. Loudness decoupled from effectRadius (which
+        // several of these DFs set for their light flash). Tagged catalog entries: DF_ALTAR_COMMUTE/RESURRECT/
+        // SACRIFICE_COMPLETE/ITEM_CAGE_CLOSE/ALTAR_RETRACT, the PORTCULLIS_CLOSED seal, and SE's
+        // DF_ALTAR_INSIGHT_INERT/DF_ALTAR_TRANSFER_INERT. See Globals.c.
         if (feat->flags & DFF_EMITS_NOISE) {
             emitEnvironmentalNoise((pos){ x, y }, NOISE_ALTAR_GRIND, NULL);
             environmentalNoiseHaptic(1); // pronounced: heavy grind (player-driven, player-adjacent event)

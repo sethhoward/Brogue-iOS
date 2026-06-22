@@ -604,13 +604,12 @@ void notifyEvent(short eventId, int data1, int data2, const char *str1, const ch
     }
 }
 
-// iOS port (Brogue SE): debug rest-insight calibration. The engine (recordRestStatsRow in
-// RogueMain.c) emits one CSV row per finished live run; we append it to Documents/se/rest-stats.csv,
-// writing the header — prefixed with our own wall-clock "time" column — only when the file is first
-// created. Pull the file off-device via Xcode > Window > Devices & Simulators > (app) > Download
-// Container, then look under AppData/Documents/se/rest-stats.csv. Output-only. Gated to Debug builds
-// (SE_DEBUG_BUILD): in Release this is a no-op, so the CSV is never written on shipping devices.
-void seRecordRestStats(const char *header, const char *row) {
+// iOS port (Brogue SE): shared CSV appender for the debug calibration logs. Appends one timestamped row to
+// Documents/se/<fileName>, writing the header — prefixed with our own wall-clock "time" column — only when
+// the file is first created. Pull the file off-device via Xcode > Window > Devices & Simulators > (app) >
+// Download Container, then look under AppData/Documents/se/<fileName>. Output-only. Gated to Debug builds
+// (SE_DEBUG_BUILD): in Release this is a no-op, so nothing is written on shipping devices.
+static void seAppendCsvRow(NSString *fileName, const char *header, const char *row) {
 #if SE_DEBUG_BUILD
     if (!header || !row) {
         return;
@@ -618,7 +617,7 @@ void seRecordRestStats(const char *header, const char *row) {
     @autoreleasepool {
         NSString *documents = [NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES) firstObject];
         NSString *seDir = [documents stringByAppendingPathComponent:@"se"];
-        NSString *csvPath = [seDir stringByAppendingPathComponent:@"rest-stats.csv"];
+        NSString *csvPath = [seDir stringByAppendingPathComponent:fileName];
         NSFileManager *manager = [NSFileManager defaultManager];
 
         if (![manager fileExistsAtPath:seDir]) {
@@ -644,9 +643,23 @@ void seRecordRestStats(const char *header, const char *row) {
         }
     }
 #else
+    (void)fileName;
     (void)header;
-    (void)row; // Release: the rest-stats CSV is a debug-only calibration tool; never collect on shipping builds
+    (void)row; // Release: these CSVs are debug-only calibration tools; never collect on shipping builds
 #endif
+}
+
+// iOS port (Brogue SE): debug rest-insight calibration. The engine (recordRestStatsRow in RogueMain.c)
+// emits one CSV row per finished live run → Documents/se/rest-stats.csv.
+void seRecordRestStats(const char *header, const char *row) {
+    seAppendCsvRow(@"rest-stats.csv", header, row);
+}
+
+// iOS port (Brogue SE): debug exploration / Lone-Wolf calibration. The engine (recordExplorationStatsRow in
+// RogueMain.c) emits one CSV row per finished live run → Documents/se/exploration-stats.csv: per-level
+// passable-cell ceiling and xpxp actually accrued, for tuning LONE_WOLF_XP_PER_TIER against real levels.
+void seRecordExplorationStats(const char *header, const char *row) {
+    seAppendCsvRow(@"exploration-stats.csv", header, row);
 }
 
 boolean takeScreenshot(void) {

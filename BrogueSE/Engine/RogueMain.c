@@ -199,6 +199,7 @@ void initializeRogue(uint64_t seed) {
     item *theItem;
     boolean playingback, playbackFF, playbackPaused, displayStealthRangeMode;
     boolean trueColorMode;
+    boolean hidePlayerNoiseRipple; // iOS port (Brogue SE): carry the player-ripple display pref across new games (sticky within the app session, like trueColorMode/displayStealthRangeMode)
     boolean hideSeed;
     short oldRNG;
     char currentGamePath[BROGUE_FILENAME_MAX];
@@ -211,6 +212,7 @@ void initializeRogue(uint64_t seed) {
     hideSeed = rogue.hideSeed;
     displayStealthRangeMode = rogue.displayStealthRangeMode;
     trueColorMode = rogue.trueColorMode;
+    hidePlayerNoiseRipple = rogue.hidePlayerNoiseRipple;
 
     strcpy(currentGamePath, rogue.currentGamePath);
 
@@ -226,6 +228,7 @@ void initializeRogue(uint64_t seed) {
     rogue.hideSeed = hideSeed;
     rogue.displayStealthRangeMode = displayStealthRangeMode;
     rogue.trueColorMode = trueColorMode;
+    rogue.hidePlayerNoiseRipple = hidePlayerNoiseRipple;
 
     rogue.gameHasEnded = false;
     rogue.gameInProgress = true;
@@ -288,6 +291,8 @@ void initializeRogue(uint64_t seed) {
         // restRevealsOnLevel into its escalating threshold, slowing reveals on the 2nd+ game played.
         levels[i].restTurnsOnLevel = 0;
         levels[i].restRevealsOnLevel = 0;
+        levels[i].passableCellsOnLevel = 0; // iOS port (Brogue SE): exploration-stats CSV (debug); same stale-carry reasoning as the rest tallies above
+        levels[i].xpxpEarnedOnLevel = 0;
         levels[i].playerExitedVia = (pos){ .x = 0, .y = 0 };
         do {
             levels[i].downStairsLoc.x = rand_range(1, DCOLS - 2);
@@ -945,6 +950,21 @@ void startLevel(short oldLevelNumber, short stairDirection) {
 
     if (!levels[rogue.depthLevel-1].visited) {
         levels[rogue.depthLevel-1].visited = true;
+        // iOS port (Brogue SE): debug exploration-stats -- record this level's full-exploration xpxp ceiling
+        // (every walkable, non-hazard cell, using the exact gate discoverCell uses to award xpxp). Counted
+        // once, after the 50-turn environment break-in above, so flooding/gas has settled. Deterministic and
+        // output-only; the data only leaves the device via the Debug-gated host hook (recordExplorationStatsRow).
+        {
+            unsigned long passable = 0;
+            for (short ci = 0; ci < DCOLS; ci++) {
+                for (short cj = 0; cj < DROWS; cj++) {
+                    if (!cellHasTerrainFlag((pos){ ci, cj }, T_PATHING_BLOCKER)) {
+                        passable++;
+                    }
+                }
+            }
+            levels[rogue.depthLevel].passableCellsOnLevel = passable; // levels[depthLevel] (1-indexed) to match restTurnsOnLevel and the CSV reader, NOT the 0-indexed levels[depthLevel-1] map storage / visited flag
+        }
         if (rogue.depthLevel == gameConst->amuletLevel) {
             messageWithColor(levelFeelings[0].message, levelFeelings[0].color, 0);
         } else if (rogue.depthLevel == gameConst->deepestLevel) {
@@ -1187,6 +1207,12 @@ void freeEverything() {
 // appends it to Documents/se/rest-stats.csv and owns the leading wall-clock "time" column. The hook
 // is output-only — it draws no RNG and mutates no game state, so recordings/determinism are unaffected.
 extern void seRecordRestStats(const char *header, const char *row);
+// iOS port (Brogue SE): debug exploration calibration. At the end of a live run we emit one CSV row of the
+// per-level explorable-floor ceiling (passable cells) and the xpxp actually accrued, so LONE_WOLF_XP_PER_TIER
+// can be tuned against real generated levels. The host (SEBridge.mm) appends it to Documents/se/exploration-
+// stats.csv (Debug builds only) and owns the leading wall-clock "time" column. Output-only: no RNG, no game
+// state mutated, so recordings/determinism are unaffected.
+extern void seRecordExplorationStats(const char *header, const char *row);
 
 // Copy src into dst, neutralising characters that would corrupt a CSV cell (commas, quotes, newlines).
 static void sanitizeCsvCell(const char *src, char *dst, size_t dstSize) {
@@ -1237,6 +1263,51 @@ static void recordRestStatsRow(const char *outcome, const char *killedBy) {
     }
 
     seRecordRestStats(header, row);
+}
+
+// iOS port (Brogue SE): build and emit the exploration-stats CSV row for a finished run. Per-level columns:
+// p{d} = the level's full-exploration xpxp ceiling (passable cells, counted at first visit), x{d} = xpxp the
+// player actually accrued there. Summary columns include the totals and the mean ceiling per visited level --
+// the figure that calibrates LONE_WOLF_XP_PER_TIER. Header/row kept in lock-step; skipped during playback.
+static void recordExplorationStatsRow(const char *outcome, const char *killedBy) {
+    if (rogue.playbackMode) {
+        return; // never log while replaying a recording
+    }
+
+    char header[2048], row[2048], buf[64], cause[128];
+    unsigned long passableTotal = 0, xpxpEarnedTotal = 0;
+    short d, levelsVisited = 0;
+
+    for (d = 1; d <= gameConst->deepestLevel; d++) {
+        // passableCellsOnLevel is set (nonzero) only on a level's first visit, and at this same levels[depth]
+        // slot the rest tallies use -- so it doubles as the "explored this depth" test without crossing into
+        // the 0-indexed `visited` flag (which lives at levels[depth-1]).
+        if (levels[d].passableCellsOnLevel > 0) {
+            levelsVisited++;
+            passableTotal   += levels[d].passableCellsOnLevel;
+            xpxpEarnedTotal += levels[d].xpxpEarnedOnLevel;
+        }
+    }
+
+    sanitizeCsvCell(killedBy ? killedBy : "-", cause, sizeof(cause));
+
+    strcpy(header, "seed,mode,outcome,cause,depth,deepest,levels_visited,passable_total,xpxp_earned_total,passable_mean_per_level");
+    sprintf(row, "%llu,%i,%s,%s,%i,%i,%i,%lu,%lu,%lu",
+            (unsigned long long)rogue.seed, (int)rogue.mode, outcome, cause,
+            rogue.depthLevel, rogue.deepestLevel, levelsVisited,
+            passableTotal, xpxpEarnedTotal,
+            levelsVisited ? (passableTotal / levelsVisited) : 0UL);
+
+    for (d = 1; d <= gameConst->deepestLevel; d++) {           // per-level passable-cell ceiling
+        sprintf(buf, ",p%i", d);                                strcat(header, buf);
+        sprintf(buf, ",%lu", levels[d].passableCellsOnLevel);   strcat(row, buf);
+    }
+    for (d = 1; d <= gameConst->deepestLevel; d++) {           // per-level xpxp actually accrued
+        sprintf(buf, ",x%i", d);                                strcat(header, buf);
+        sprintf(buf, ",%lu", levels[d].xpxpEarnedOnLevel);      strcat(row, buf);
+    }
+
+    seRecordExplorationStats(header, row);
 }
 
 void gameOver(char *killedBy, boolean useCustomPhrasing) {
@@ -1422,6 +1493,7 @@ void gameOver(char *killedBy, boolean useCustomPhrasing) {
     }
 
     recordRestStatsRow(rogue.quit ? "Quit" : "Died", rogue.quit ? "-" : killedBy); // iOS port (Brogue SE): rest-insight calibration log
+    recordExplorationStatsRow(rogue.quit ? "Quit" : "Died", rogue.quit ? "-" : killedBy); // iOS port (Brogue SE): exploration/Lone-Wolf calibration log
 
     rogue.gameHasEnded = true;
     rogue.gameExitStatusCode = EXIT_STATUS_SUCCESS;
@@ -1590,6 +1662,7 @@ void victory(boolean superVictory) {
     }
 
     recordRestStatsRow(superVictory ? "Mastered" : "Escaped", "-"); // iOS port (Brogue SE): rest-insight calibration log
+    recordExplorationStatsRow(superVictory ? "Mastered" : "Escaped", "-"); // iOS port (Brogue SE): exploration/Lone-Wolf calibration log
 
     rogue.gameHasEnded = true;
     rogue.gameExitStatusCode = EXIT_STATUS_SUCCESS;

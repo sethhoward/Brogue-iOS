@@ -3685,6 +3685,16 @@ void aggravateMonsters(short distance, short x, short y, const color *flashColor
         }
     }
 
+#if NOISE_SYSTEM_ENABLED
+    // iOS port (Brogue SE): the loudest noise in the game -- the alarm trap / aggravate scroll wakes the whole
+    // level. Paint the largest, hottest ripple so it visibly reads as "this was heard everywhere," and fire the
+    // pronounced haptic. Fires regardless of line of sight (it's a level-wide sound, not a seen event). Unlike
+    // the other emitters this does NOT route through emitEnvironmentalNoise -- aggravateMonsters already did the
+    // (much stronger, level-wide) substantive wake/alert above, so here we only add the cosmetic tell.
+    cosmeticSpawnRippleAggravate((pos){ x, y }, NOISE_AGGRAVATE_RIPPLE_RADIUS);
+    environmentalNoiseHaptic(1); // pronounced: a loud, dungeon-wide shriek
+#endif
+
     freeGrid(grid);
 }
 
