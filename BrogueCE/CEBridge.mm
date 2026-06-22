@@ -66,6 +66,21 @@ static id<BrogueCEHost> gHost = nil;
 // Defined with C linkage so the vendored engine (MainMenu.c) can extern it.
 extern "C" { volatile boolean brogueCETerminationRequested = false; }
 
+// iOS port (iBrogue): background suspend/resume. Set by the host (ce_requestBackgroundSave) when
+// the app backgrounds; read by the engine thread, which snapshots exact state at its next poll
+// point and records a one-shot resume marker so a cold launch after an OS kill resumes straight
+// into the game. See docs/design/background-suspend-resume.md.
+static volatile bool gCEBackgroundSaveRequested = false;
+static NSString *const kCEResumePathKey = @"ce resume path";
+
+// Engine globals (defined in the vendored engine; this file declares them locally near each use,
+// e.g. line ~558). Declared here too so the background-snapshot helper below can read them. C
+// linkage to match the engine's C definitions (and the other declarations in this file).
+extern "C" {
+extern playerCharacter rogue;
+extern char currentFilePath[BROGUE_FILENAME_MAX];
+}
+
 // CE's commitDraws() only re-plots cells that changed vs its previouslyPlottedCells
 // cache. That cache survives a teardown/reboot, but the shared RogueScene was
 // changed by the other engine in the meantime — so cells CE thinks are current
@@ -340,6 +355,36 @@ extern "C" __attribute__((visibility("default"))) void ce_requestTermination(voi
     brogueCETerminationRequested = true;
 }
 
+// iOS port (iBrogue): engine-thread only. If a background snapshot was requested, flush the live
+// recording so currentFilePath holds every input so far (exact state, even mid-animation — replay
+// regenerates it) and mark that file for cold-launch auto-load. No-op unless a live game is being
+// recorded (skips title and playback). The Swift host clears the marker on a surviving foreground,
+// so the snapshot only resumes us after an actual OS kill.
+static void ceTakeBackgroundSnapshotIfRequested(void) {
+    if (!gCEBackgroundSaveRequested) {
+        return;
+    }
+    gCEBackgroundSaveRequested = false;
+    if (rogue.playbackMode || currentFilePath[0] == '\0') {
+        return;
+    }
+    flushBufferToFile();
+    [[NSUserDefaults standardUserDefaults] setObject:[NSString stringWithUTF8String:currentFilePath]
+                                              forKey:kCEResumePathKey];
+}
+
+// iOS port (iBrogue): host hook (UI thread) — request a snapshot on app background.
+extern "C" __attribute__((visibility("default"))) void ce_requestBackgroundSave(void) {
+    gCEBackgroundSaveRequested = true;
+}
+
+// iOS port (iBrogue): host hook (UI thread) — drop a stale resume marker when the app survived a
+// background and is returning to a live in-memory game. Also cancels any still-pending request.
+extern "C" __attribute__((visibility("default"))) void ce_clearResumeMarker(void) {
+    gCEBackgroundSaveRequested = false;
+    [[NSUserDefaults standardUserDefaults] removeObjectForKey:kCEResumePathKey];
+}
+
 // iOS port (iBrogue): drive the engine's runtime KEYBOARD_LABELS flag (see Rogue.h /
 // GlobalsBase.c). The host calls this on GCKeyboard connect/disconnect so in-game hotkey
 // labels appear only with a hardware keyboard, matching the Classic engine.
@@ -401,6 +446,7 @@ boolean pauseForMilliseconds(short milliseconds, PauseBehavior behavior) {
     reportAtTitleIfChanged();
 
     [NSThread sleepForTimeInterval:milliseconds / 1000.];
+    ceTakeBackgroundSnapshotIfRequested(); // iOS port (iBrogue): snapshot mid-animation (e.g. resting)
     if (brogueCETerminationRequested) {
         return true; // wake the title loop so it can observe the request
     }
@@ -421,6 +467,7 @@ void nextKeyOrMouseEvent(rogueEvent *returnEvent, boolean textInput, boolean col
 
         reportUIModeIfChanged();
         reportAtTitleIfChanged();
+        ceTakeBackgroundSnapshotIfRequested(); // iOS port (iBrogue): snapshot between turns
 
         // Engine-switch requested: unblock with a benign keystroke so the title
         // loop iterates and its termination hook returns NG_QUIT.
@@ -955,6 +1002,18 @@ fileEntry *listFiles(short *fileCount, char **dynamicMemoryBuffer) {
 
 void initializeLaunchArguments(enum NGCommands *command, char *path, uint64_t *seed) {
     if (command) *command = NG_NOTHING;
+    // iOS port (iBrogue): cold-launch auto-resume. A one-shot marker set on the last background
+    // points at the snapshot; load it straight into the game (no title screen) and consume the
+    // marker. If the file is gone, openFile() in mainBrogueJunction returns false and the engine
+    // falls through to the title — so no pre-check.
+    NSUserDefaults *d = [NSUserDefaults standardUserDefaults];
+    NSString *resumePath = [d stringForKey:kCEResumePathKey];
+    if (resumePath.length && command && path) {
+        [d removeObjectForKey:kCEResumePathKey];
+        *command = NG_OPEN_GAME;
+        strncpy(path, resumePath.UTF8String, BROGUE_FILENAME_MAX - 1);
+        path[BROGUE_FILENAME_MAX - 1] = '\0';
+    }
 }
 
 // NOTE: fileExists / chooseFile / openFile are defined by the CE engine itself

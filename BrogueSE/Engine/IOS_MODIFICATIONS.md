@@ -104,6 +104,15 @@ how every ring effect applies pre-ID; not special-cased.
 all already deterministic/replayed; no struct changes. Reconstructs identically on replay; diverges replays
 from pre-change recordings like any gameplay change. SE-only.
 
+**Ring descriptions refreshed (`Globals.c` `ringTable`).** Both rings' inspect text had drifted from their SE
+behavior, so it was rewritten to match:
+- **Wisdom** previously named only staff recharge. It now also describes the SE effects it gained: faster
+  auto-ID of worn armor & rings (this change), faster polarity insight while resting, and a deeper potion of
+  detect magic — all scaling with the ring, all dulled by a cursed one.
+- **Awareness** already covered search (traps/secret doors/levers), the "chamber of significance" sense, and
+  the floor item-aura radar, but omitted its role in the noise/perception system. Added a clause: it sharpens
+  your hearing of unseen creatures' movements (extends earshot, scaling with enchant; cursed dulls it).
+
 ### 2026-06-21 — Thrown scrolls are the quietest throw (paper impact tier)
 
 **What.** A thrown scroll now lands much more quietly than other light items. It was lumped into
@@ -193,6 +202,38 @@ themselves), so both only apply to monster-vs-monster / monster-vs-ally combat. 
 
 **Determinism.** `cosmeticSpawnRippleMonster` is purely cosmetic (no substantive RNG) and self-suppresses
 during automation / autoplay / playback fast-forward. Saves/replays are unaffected.
+
+### 2026-06-21 — Cosmetic noise layer not reset between games (stale '?' / ripple carry-over)
+
+**What.** The cosmetic-effect layer (`gCosmeticEffects[]` pool, the dirty-cell ping-pong buffers, the
+`gCosmeticBlinkTick` phase clock, and `gCosmeticCur`) is process-static in `IO.c`, not part of the `rogue`
+struct. Nothing was clearing it when a run ended, so a *new game or a loaded game started in the same app
+session inherited the previous run's cosmetic state*: an in-flight `'?'` alert glyph or a persistent
+`CE_INVESTIGATE_BLINK` (keyed to a now-freed monster pointer that a fresh monster can reuse) would surface
+for no in-game reason, and the never-reset `gCosmeticBlinkTick` made the `'?'` blink resume mid-phase on
+reload. Symptom got worse the more new games you started in one session, as stale slots accumulated.
+
+**Fix.** `clearCosmeticAnimations()` (which already existed but was *never called*) now also zeroes
+`gCosmeticCur` and `gCosmeticBlinkTick`, and `initializeRogue()` calls it. `initializeRogue()` is the single
+chokepoint both the new-game (`MainMenu.c`) and load-game (`Recordings.c`) paths run through, and it runs
+before any level is built, so every run now starts with an empty cosmetic layer. The `memset` of `rogue`
+in `initializeRogue` never touched these buffers because they live outside the struct.
+
+**Where.** `IO.c` — `clearCosmeticAnimations()` resets the phase clock + ping-pong index in addition to the
+effect pool. `RogueMain.c` — `initializeRogue()` calls `clearCosmeticAnimations()` alongside the other
+SE per-run resets. Marked `// iOS port (Brogue SE):`.
+
+**Determinism.** The cosmetic layer carries no substantive RNG and is not saved/replayed, so this is a
+pure display-correctness fix; saves and the seeded/weekly leaderboard are unaffected.
+
+**Follow-up if a stray `'?'` still appears (within a single game).** This reset closes the *cross-game*
+carry-over. A second, narrower vector remains theoretically open: `cosmeticRefreshInvestigateBlinks()`
+binds each `CE_INVESTIGATE_BLINK` to its monster by raw pointer (`(const void *)m == e->channel`). If a
+monster dies and the allocator hands its address to a *new* monster mid-run, a stale blink could re-bind to
+the wrong creature. The clean hardening is identity, not address: stamp each blink with the monster's
+`monsterID` (or `bookkeepingFlags`/spawn serial) and match on that, and/or expire any blink whose monster
+is no longer on `monsters`/`dormantMonsters`. Only do this if the symptom recurs *within one game* — the
+cross-game path (the actual report) is already fixed above.
 
 ### 2026-06-18 — Darts removed as a potion-identification channel
 
@@ -2832,6 +2873,40 @@ implemented in the bridge (not the engine C, but listed here for orientation):
   online leaderboard/achievements on top.
 
 Still stubbed: `takeScreenshot`.
+
+---
+
+### 2026-06-21 — Background suspend & resume (save exact state, auto-resume on cold launch)
+
+**What.** Backgrounding the app now snapshots the exact game state to disk, and if iOS later evicts
+the suspended process, the next launch resumes straight into the game (no title screen). The common
+case — backgrounding and returning before the OS kills the app — is untouched: iOS un-suspends the
+in-memory game with no reload. Full rationale and the decision tree in
+[docs/design/background-suspend-resume.md](../../docs/design/background-suspend-resume.md).
+
+**Engine side.** None — no vendored engine `.c` changes. This rides entirely on existing engine
+machinery: `flushBufferToFile()` to make the working recording exact, `initializeLaunchArguments()`
+(platform-defined; the engine calls it at the top of `mainBrogueJunction`) to inject
+`NG_OPEN_GAME` + a resume path, and `switchToPlaying()`'s existing copy-to-fresh-`LastGame` +
+`DELETE_SAVE_FILE_AFTER_LOADING` source-delete for file hygiene. No new save files; resume is the
+normal record-and-replay path, so it stays deterministic/save-safe.
+
+**Bridge side.** New host hooks `se_requestBackgroundSave()` / `se_clearResumeMarker()` (SEBridge.mm,
+BrogueSEHost.h). On background the host sets a flag; the engine thread, at its next poll point in
+`nextKeyOrMouseEvent` **and** `pauseForMilliseconds` (so a backgrounded rest/travel is also caught),
+flushes the recording and writes a one-shot resume marker (`"se resume path"` in NSUserDefaults).
+`initializeLaunchArguments` consumes that marker on the next cold launch. Fire-and-forget — the
+snapshot finishes inside iOS's grace window; no `beginBackgroundTask`.
+
+**Where.** SEBridge.mm (`gSEBackgroundSaveRequested`, `seTakeBackgroundSnapshotIfRequested`,
+`se_requestBackgroundSave`, `se_clearResumeMarker`, `initializeLaunchArguments`), BrogueSEHost.h.
+Platform lifecycle (`appDidEnterBackground` / `appDidBecomeActive`, the cold-vs-warm
+`didBackgroundThisProcess` guard) lives in BrogueViewController.swift. Applies to all three engines
+(mirrored in CEBridge.mm / RogueDriver.mm).
+
+**Notes.** Mid-play crash *without* backgrounding is intentionally not covered (matches prior
+behavior — in-progress recordings were already orphaned). Resume after an eviction on a deep run
+shows Brogue's normal `[ Loading… ]` replay bar, which is intrinsic to the save-as-recording format.
 
 ---
 

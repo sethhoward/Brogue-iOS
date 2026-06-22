@@ -233,6 +233,7 @@ void initializeRogue(uint64_t seed) {
     rogue.cautiousMode = false;
     rogue.milliseconds = 0;
     rogue.emptyBottleSpawnChance = 0; // iOS port (Brogue SE): reset the additive empty-bottle meter for the new run
+    clearCosmeticAnimations(); // iOS port (Brogue SE): drop stale noise/'?' cosmetic effects from a prior run in this app session (these live in process-static buffers, not the rogue struct, so the memset above doesn't touch them)
 
     rogue.meteredItems = calloc(gameConst->numberMeteredItems, sizeof(meteredItem));
     rogue.featRecord = calloc(gameConst->numberFeats, sizeof(boolean));

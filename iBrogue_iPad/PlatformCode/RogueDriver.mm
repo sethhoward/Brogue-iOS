@@ -53,6 +53,44 @@ extern "C" void setClassicTerminationRequested(BOOL requested) {
     classicTerminationRequested = requested ? true : false;
 }
 
+// iOS port (iBrogue): background suspend/resume. Set by the host
+// (setClassicBackgroundSaveRequested) when the app backgrounds; read by the engine
+// thread, which snapshots exact state at its next poll point and records a one-shot
+// resume marker so a cold launch after an OS kill resumes straight into the game.
+// See docs/design/background-suspend-resume.md.
+static volatile bool classicBackgroundSaveRequested = false;
+static NSString *const kClassicResumePathKey = @"classic resume path";
+
+// Engine-thread only. If a background snapshot was requested, flush the live recording
+// so currentFilePath holds every input so far (exact state, even mid-animation — replay
+// regenerates it) and mark that file for cold-launch auto-load. No-op unless a live game
+// is being recorded (skips title — Swift won't request it there — and playback).
+static void classicTakeBackgroundSnapshotIfRequested(void) {
+    if (!classicBackgroundSaveRequested) {
+        return;
+    }
+    classicBackgroundSaveRequested = false;
+    if (rogue.playbackMode || currentFilePath[0] == '\0') {
+        return;
+    }
+    flushBufferToFile();
+    [[NSUserDefaults standardUserDefaults] setObject:[NSString stringWithUTF8String:currentFilePath]
+                                              forKey:kClassicResumePathKey];
+}
+
+// iOS port (iBrogue): host hook (UI thread) — request a snapshot on app background.
+extern "C" void setClassicBackgroundSaveRequested(BOOL requested) {
+    classicBackgroundSaveRequested = requested ? true : false;
+}
+
+// iOS port (iBrogue): host hook (UI thread) — drop a stale resume marker when the app
+// survived a background and is returning to a live in-memory game. Also cancels any
+// still-pending request.
+extern "C" void clearClassicResumeMarker(void) {
+    classicBackgroundSaveRequested = false;
+    [[NSUserDefaults standardUserDefaults] removeObjectForKey:kClassicResumePathKey];
+}
+
 @implementation RogueDriver 
 
 + (id)sharedInstanceWithViewPort:(SKViewPort *)viewPort viewController:(BrogueViewController *)viewController {
@@ -131,6 +169,8 @@ boolean pauseForMilliseconds(short milliseconds) {
 
     [NSThread sleepForTimeInterval:milliseconds/1000.];
 
+    classicTakeBackgroundSnapshotIfRequested(); // iOS port (iBrogue): snapshot mid-animation (e.g. resting)
+
     if (classicTerminationRequested) {
         return true; // wake the title loop so it can observe the request
     }
@@ -154,6 +194,8 @@ void nextKeyOrMouseEvent(rogueEvent *returnEvent, boolean textInput, boolean col
         // we should be ok to block here. We don't seem to call pauseForMilli and this at the same time
         // 60Hz
         [NSThread sleepForTimeInterval:0.016667];
+
+        classicTakeBackgroundSnapshotIfRequested(); // iOS port (iBrogue): snapshot between turns
 
         // Engine-switch requested: unblock with a benign keystroke so the title
         // loop iterates and its termination hook returns NG_QUIT.
@@ -504,6 +546,18 @@ void initializeLaunchArguments(enum NGCommands *command, char *path, unsigned lo
     *command = NG_NOTHING;
 	path[0] = '\0';
 	*seed = 0;
+    // iOS port (iBrogue): cold-launch auto-resume. A one-shot marker set on the last background
+    // points at the snapshot; load it straight into the game (no title screen) and consume the
+    // marker. If the file is gone, openFile() in mainBrogueJunction returns false and the engine
+    // falls through to the title — so no pre-check.
+    NSUserDefaults *d = [NSUserDefaults standardUserDefaults];
+    NSString *resumePath = [d stringForKey:kClassicResumePathKey];
+    if (resumePath.length) {
+        [d removeObjectForKey:kClassicResumePathKey];
+        *command = NG_OPEN_GAME;
+        strncpy(path, resumePath.UTF8String, BROGUE_FILENAME_MAX - 1);
+        path[BROGUE_FILENAME_MAX - 1] = '\0';
+    }
 }
 
 void migrateFilesFromLegacyStorageLocation() {

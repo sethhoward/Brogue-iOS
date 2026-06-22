@@ -173,7 +173,7 @@
 // The RANGE gate: a hard audible radius (cost-tiles) decides whether an off-screen step is heard at all.
 // The ring extends it (bigger ears, not a louder world); standing at a door extends it through that door.
 // See the two-stage model comment above and the E/P tables in docs/game-data/PERCEPTION_AUDIT.md.
-#define NOISE_AUDIBLE_RADIUS_BASE       6   // ringless audible radius (cost-tiles); controls accumulation
+#define NOISE_AUDIBLE_RADIUS_BASE       8 //bumping   // ringless audible radius (cost-tiles); controls accumulation
 #define NOISE_AWARENESS_RANGE_PER_ENCHANT 5 // audible-radius tiles added per net ring enchant (+6 ~ half map)
 #define NOISE_AUDIBLE_FLOOR             1   // Minimum per-step % for a NORMAL-loudness step anywhere inside
                                             // the audible radius. Applied to the ambient (listener +
@@ -206,8 +206,8 @@
 //   NOISE_AWARENESS_MAX_ENCHANT -- net ring enchant is capped here for BOTH range and the per-step bump, so
 //                             detection stops growing past +6 (already a superpower; +6 is the design cap).
 // ##########
-#define NOISE_PERCEPTION_SCALE          100
-#define NOISE_RING_RANGE_SCALE          100
+#define NOISE_PERCEPTION_SCALE          110
+#define NOISE_RING_RANGE_SCALE          110
 #define NOISE_AWARENESS_MAX_ENCHANT     6
 // ##########
 
@@ -222,7 +222,7 @@
 // audible radius through it) while the player stands next to a closed door. Together they restore --
 // but never exceed -- open-air hearing for a monster behind that door (the muffle is negated, not beaten).
 // All read-only/deterministic -> roll stays cosmetic. Visualize with the sound-map overlay (SOUND_MAP_KEY).
-#define NOISE_NEARFIELD_RADIUS          1//2// ### <=this cost-distance = "right on top of you, unseen" (corner/
+#define NOISE_NEARFIELD_RADIUS          2 //1 - original value // ### <=this cost-distance = "right on top of you, unseen" (corner/
                                             // foliage/dark/blind): flat boost. Kept at 1 so an open-stone
                                             // approach's last tile doesn't auto-ping (stone stays stealthy).
 #define NOISE_NEARFIELD_BONUS           10  // the near-field detection boost

@@ -2513,12 +2513,17 @@ static boolean cosmeticMarkCell(pos p, short nowIdx) {
     return true;
 }
 
-// iOS port (Brogue SE): drop all effects + restore tracking (level change / playback reset).
+// iOS port (Brogue SE): drop all effects + restore tracking (level change / playback reset / new game).
+// Must zero the phase clock and ping-pong index too: those are process-static, so a fresh game would
+// otherwise inherit the previous run's '?' blink phase (stale animation on reload) and a half-filled
+// dirty-cell buffer. Called from initializeRogue() so both new-game and load-game paths reset cleanly.
 void clearCosmeticAnimations(void) {
     for (short i = 0; i < MAX_COSMETIC_EFFECTS; i++) {
         gCosmeticEffects[i].active = false;
     }
     gCosmeticCellCount[0] = gCosmeticCellCount[1] = 0;
+    gCosmeticCur = 0;
+    gCosmeticBlinkTick = 0;
 }
 
 // iOS port (Brogue SE): one tick of the cosmetic layer -- age/expire effects, then DIRTY-CELL recomposite:

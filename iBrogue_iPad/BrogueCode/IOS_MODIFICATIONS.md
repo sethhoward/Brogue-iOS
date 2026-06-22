@@ -227,6 +227,20 @@ death, playback, etc.) to the Swift layer via `setBrogueGameEvent(...)`, called 
 controls. Rendering and input are bridged in `PlatformCode/RogueDriver.mm`
 (`plotChar`, the touch→mouse-event path).
 
+### Background suspend & resume (`setClassicBackgroundSaveRequested` / `clearClassicResumeMarker`)
+Backgrounding the app snapshots exact game state to disk; if iOS evicts the suspended process, the
+next launch resumes straight into the game (no title screen). Returning before an eviction is
+untouched. No vendored engine `.c` changes — it rides on existing machinery: `flushBufferToFile()`,
+`initializeLaunchArguments()` (defined in `RogueDriver.mm`; the engine calls it at the top of
+`mainBrogueJunction` in `MainMenu.c`) injecting `NG_OPEN_GAME` + a resume path, and
+`switchToPlaying()`'s copy-to-fresh-`LastGame` + `DELETE_SAVE_FILE_AFTER_LOADING`. On background the
+Swift host sets a flag; the engine thread, at its next poll in `nextKeyOrMouseEvent` and
+`pauseForMilliseconds` (RogueDriver.mm), flushes and writes a one-shot resume marker
+(`"classic resume path"` in NSUserDefaults), consumed by `initializeLaunchArguments` on cold launch.
+Platform lifecycle (`appDidEnterBackground`/`appDidBecomeActive`, the cold-vs-warm guard) lives in
+`BrogueViewController.swift`; applies to all three engines. Full rationale:
+[docs/design/background-suspend-resume.md](../../docs/design/background-suspend-resume.md).
+
 ---
 
 ## Adding a new iPhone-only engine tweak

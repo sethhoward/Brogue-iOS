@@ -42,6 +42,13 @@ void se_setKeyboardLabelsEnabled(int enabled);
 // Gates SE's "Press <?> for help" welcome hint. Called on GCKeyboard connect/disconnect.
 void se_setHardwareKeyboardConnected(int connected);
 
+// iOS port (Brogue SE): background suspend/resume. se_requestBackgroundSave() is called when the
+// app backgrounds; the engine thread snapshots exact state and marks it for cold-launch resume.
+// se_clearResumeMarker() drops that marker when the app survived the background (the in-memory
+// game is authoritative). See docs/design/background-suspend-resume.md.
+void se_requestBackgroundSave(void);
+void se_clearResumeMarker(void);
+
 #ifdef __cplusplus
 }
 #endif

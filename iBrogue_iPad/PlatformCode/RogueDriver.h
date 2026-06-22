@@ -62,6 +62,12 @@ typedef NS_ENUM(NSInteger, BrogueGameEvent) {
 extern "C" {
 #endif
 void setClassicTerminationRequested(BOOL requested);
+// iOS port (iBrogue): background suspend/resume. setClassicBackgroundSaveRequested() is called
+// when the app backgrounds; the engine thread snapshots exact state and marks it for cold-launch
+// resume. clearClassicResumeMarker() drops that marker when the app survived the background.
+// See docs/design/background-suspend-resume.md.
+void setClassicBackgroundSaveRequested(BOOL requested);
+void clearClassicResumeMarker(void);
 #ifdef __cplusplus
 }
 #endif

@@ -130,6 +130,13 @@ void ce_setKeyboardLabelsEnabled(int enabled);
 // Gates CE's "Press <?> for help" welcome hint. Called on GCKeyboard connect/disconnect.
 void ce_setHardwareKeyboardConnected(int connected);
 
+// iOS port (iBrogue): background suspend/resume. ce_requestBackgroundSave() is called when the
+// app backgrounds; the engine thread snapshots exact state and marks it for cold-launch resume.
+// ce_clearResumeMarker() drops that marker when the app survived the background.
+// See docs/design/background-suspend-resume.md.
+void ce_requestBackgroundSave(void);
+void ce_clearResumeMarker(void);
+
 #ifdef __cplusplus
 }
 #endif
