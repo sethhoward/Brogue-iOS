@@ -1882,7 +1882,30 @@ final class BrogueViewController: UIViewController {
     private static func seInfoBlocks() -> [InfoBlock] {
         return [
             .link("Support", "https://github.com/sethhoward/Brogue-iPad"),
-            .note("Brogue SE — An experimental fork of BrogueCE with original items, monsters, and mechanics with release 1 (\"Alphabet-a Soup\") and an upcoming release (\"Alphabeast\") that will bring new monsters and minibosses. Here's what's new:"),
+            .note("Brogue SE — an experimental fork of BrogueCE with original items, monsters, and mechanics. Release 0.10.0, \"A Is For AAaAH!\", is all about sound: the dungeon can finally hear you — and you can hear it. Here's what's new:"),
+            .heading("🔊 The Dungeon Can Hear You"),
+            .bullets([
+                "Make noise, get noticed — Footsteps, fighting, and the terrain you cross all send sound rippling through the dungeon. It bends around corners and muffles through closed doors, so unseen monsters can now hear you coming and slip away to investigate the racket.",
+                "Every weapon has a voice — A dagger is nearly silent; a war hammer is a clamor. Light armor and wading keep you quiet, while heavy armor and crunching over rubble give you away.",
+                "Hear what you can't see — When something stirs off-screen, a ripple shows roughly where it was, and a \"?\" marks a creature that heard you and is closing in. Stay still and it may pass; bolt and you'll draw a crowd.",
+                "A louder world — Traps click, reward-room cages slam and machinery grinds, stone guardians boom with every step, and an alarm trap's shriek now echoes across the entire floor.",
+                "Throw to distract — Hurl an item to lure investigating monsters to where it lands. The catch: the distraction is consumed when they arrive, so every diversion costs you the item.",
+                "The Ring of Awareness now hears, too — Once just a sense for traps, secret doors, and hidden levers, it now also sharpens your ears: you catch unseen creatures stirring nearby, and the more powerful the ring, the farther off — and more reliably — you hear them. (Cursed rings dull your hearing instead.)",
+            ]),
+            .heading("🐺 Lone Wolf"),
+            .bullets([
+                "Go it alone — Adventuring with no allies builds Lone Wolf tiers (up to five), each hardening you with extra effective strength. Take on a single companion and the bond breaks, resetting the track — the dungeon rewards the truly solitary.",
+            ]),
+            .heading("🎮 Quality of Life"),
+            .bullets([
+                "Re-zap your last staff — Press \"A\" (modern keyboard layout) or set it to a quick action button to re-apply the staff you used last, mirroring re-throw.",
+                "Quiet, please — A new menu toggle hides your own sound-ripple animation while leaving every other noise effect intact.",
+                "OS-proof saves — If iOS kills the app while it's in the background, your run reloads right where you left off.",
+                "iPhone haptics — Feel a pulse when something hears you, and a heavier thump when a loud event goes off.",
+                "Refined identification — Detect magic and resting now surface the items you still haven't figured out first before fully identifying ones you already know polarity, and a worn Ring of Wisdom learns your armor and rings faster.",
+            ]),
+            .heading("📦 Previous Release — 0.9.0 \"Alphabet-a Soup\""),
+            .note("The first Brogue SE release, which introduced original items, monsters, and mechanics:"),
             .heading("🧪 New Items"),
             .bullets([
                 "The Empty Bottle — Carry it and the world fills it: step into a gas or pool to bottle it, drift over lava or a chasm while levitating to skim it, or set it down and zap it with a bolt. Each capture becomes a real, identified potion.",

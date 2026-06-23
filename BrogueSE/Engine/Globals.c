@@ -766,7 +766,7 @@ dungeonFeature dungeonFeatureCatalog[NUMBER_DUNGEON_FEATURES] = {
     {GUARDIAN_GLOW,             SURFACE,    0,      0,      0,  "the mirrored totem flashes, reflecting the red glow of the glyph beneath you."},
     {MACHINE_GLYPH,             DUNGEON,    200,    95,     DFF_BLOCKED_BY_OTHER_LAYERS},
     {WALL_LEVER,                DUNGEON,    0,      0,      0,  "you notice a lever hidden behind a loose stone in the wall.", GENERIC_FLASH_LIGHT},
-    {WALL_LEVER_PULLED,         DUNGEON,    0,      0,      0},
+    {WALL_LEVER_PULLED,         DUNGEON,    0,      0,      DFF_EMITS_NOISE}, // iOS port (Brogue SE): pulling a lever clunks (heavy vault machinery) -- heard like cages/portcullis
     {WALL_LEVER_HIDDEN,         DUNGEON,    0,      0,      0},
 
     {BRIDGE_FALLING,            LIQUID,     200,    100,    0, "", 0, 0, 0, BRIDGE},

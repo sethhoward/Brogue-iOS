@@ -59,22 +59,25 @@ channel was silent visually.
 **Determinism / saves.** Cosmetic only (no RNG, no state); the spawn self-suppresses during
 automation/fast-forward replay, the haptic during playback. Determinism/recordings unaffected.
 
-### 2026-06-22 — Noise system: the vault portcullis seal now booms
+### 2026-06-22 — Noise system: the vault portcullis seal + lever pulls now sound
 
-**What.** Tagged the `PORTCULLIS_CLOSED` dungeon-feature row with `DFF_EMITS_NOISE` (Globals.c). When a
-treasure/key vault seals itself — "with a heavy mechanical sound, an iron portcullis falls from the ceiling!"
-— it now actually emits an environmental noise (`NOISE_ALTAR_GRIND` strength, via the shared
-`spawnDungeonFeature` emit path), so the seal is heard like the altar cages and the rest of the vault
-machinery. Its own flavor text already promised a "heavy mechanical sound"; now there's a matching ripple +
-haptic + investigate.
+**What.** Tagged two more vault-machinery DF rows with `DFF_EMITS_NOISE` (Globals.c):
+- `PORTCULLIS_CLOSED` — a treasure/key vault sealing itself ("with a heavy mechanical sound, an iron
+  portcullis falls from the ceiling!") now actually emits, so the seal is heard like the altar cages.
+- `DF_PULL_LEVER` (`WALL_LEVER_PULLED`) — pulling a lever now clunks (heavy machinery), heard like the rest
+  of the vault. Previously silent.
+
+Both route through the shared `spawnDungeonFeature` emit path (`NOISE_ALTAR_GRIND` strength → ripple +
+pronounced haptic + nearby monsters investigate).
 
 **Why.** The altar cage lowering over the un-chosen items (`DF_ITEM_CAGE_CLOSE` / `ALTAR_CAGE_CLOSED`) was
-already tagged (2026-06-21), but the portcullis that drops to trap you in the vault was silent — the one
-closing event in those rooms that wasn't wired into the noise system.
+already tagged (2026-06-21), but the portcullis seal and the lever pull — the other two mechanical events in
+those rooms — were silent. Now operating any vault machinery is audible.
 
-**Where.** `Globals.c` `PORTCULLIS_CLOSED` DF row (added `DFF_EMITS_NOISE`); `Architect.c` comment on the
-`DFF_EMITS_NOISE` emit updated to list the portcullis. No new constant — reuses the existing grind loudness.
-Determinism unchanged (the emit draws no RNG; haptic self-suppresses in playback).
+**Where.** `Globals.c` `PORTCULLIS_CLOSED` and `WALL_LEVER_PULLED` (DF_PULL_LEVER) rows (added
+`DFF_EMITS_NOISE`); `Architect.c` comment on the `DFF_EMITS_NOISE` emit updated to list both. No new
+constant — reuses the existing grind loudness. Determinism unchanged (no RNG; haptic self-suppresses in
+playback).
 
 ### 2026-06-22 — Debug exploration-stats CSV (Lone Wolf / xpxp calibration)
 
