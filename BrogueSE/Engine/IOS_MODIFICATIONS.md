@@ -32,6 +32,69 @@ See `BrogueCE/Engine/IOS_MODIFICATIONS.md` (faithful CE) and
 
 ## Change log
 
+### 2026-06-23 — Noise system: wake tells & player ripple survive multi-step travel / auto-explore
+
+**What.** Multi-step travel (`travelMap`/`travelRoute` — the click/tap-to-path move) and auto-explore
+(`explore`) run with `rogue.automationActive` set for the whole sequence. The cosmetic animator
+(`advanceCosmeticAnimations`) only ticks in the bridge idle loop, so the **entire cosmetic layer is dormant
+for the duration of an automated move** — every noise tell that would fire mid-sequence was dropped. You could
+fast-travel/auto-explore past sleepers, wake them, and get **zero feedback**; only single-step (keyboard)
+moves, which return to the idle loop after each step, showed tells. The tells are now re-emitted **once at the
+automation-end seam** (the first moment the animator wakes):
+- **Player footprint ripple** — recompute the step's loudness at the final cell and fire
+  `recordPlayerNoiseRippleIfNeeded()` one time.
+- **`?` investigate blinks** — rebuild from the *current* set of visible `MB_INVESTIGATING` monsters
+  (state-driven, so a faithful snapshot, not a replay), so a still-searching creature shows its `?` the instant
+  travel stops instead of one action later.
+- **Event-edge `!` / off-screen `?`** — these fire at the *moment* a monster hears you, so there's no live
+  state to rebuild from at the end. They're captured per-monster via a new flag `MB_HEARD_DURING_AUTOMATION`
+  (`Fl(29)`) at the `checkPlayerHeard` edge sites, then drained once by `flushAutomationHeardTells()`,
+  re-emitted **by current state**: visible + hunting → `!`, off-screen → `?` (visible + investigating is left
+  to the `?` rebuild above). **One condensed haptic** for the whole sequence (the per-event haptics were
+  suppressed; N buzzes would feel broken). The "Something nearby stirs" **message is deliberately NOT
+  re-emitted** — it isn't gated by `automationActive`, so it already fired live (its `disturbed=true` also
+  halts travel) and self-coalesces to "(×N)".
+
+**Two latent bugs surfaced and fixed alongside:**
+1. **`travelMap` left `automationActive` stuck `true` on its no-path early return** (the flag was set *before*
+   the `distanceMap[player] < 0 || == 30000` guard, whose negative half can slip past `travel()`'s `< 30000`
+   gate). Harmless upstream/CE (the flag only trims redraws there), but **SE gates the whole cosmetic layer on
+   it**, so a stuck flag silently killed *all* noise/ripple/blink feedback until the next successful automation
+   reset it. Fixed by setting the flag only **after** the guard.
+2. **The player footprint ripple replayed late after combat.** The ripple is a single-turn footprint, but
+   `recordPlayerNoiseRippleIfNeeded()` only ever *spawned* it — never retired it — so one spawned just before a
+   burst of input (walk up to an unaware monster via travel, then hammer melee clicks) froze mid-expansion
+   (animator starved by the input queue), outlived the fight, and finished animating seconds later — after the
+   target was dead, looking like noise from nowhere. New `cosmeticClearPlayerRipple()` retires it on any turn
+   that doesn't itself warrant one; called from `recordPlayerNoiseRippleIfNeeded`'s non-spawn paths (silent
+   turn, opted-out, or "made noise but no visible unaware enemy in earshot"), which run every `playerTurnEnded`
+   — so the kill turn itself clears the stale ripple.
+
+**Why.** Closing the "fast movement hides the noise feedback" gap: the noise system's whole point is the
+unseen-detection counter-pressure, and a player who travels everywhere never learned what they woke. The
+end-of-seam re-emission is the *correct* hook, not a compromise — it's the first moment the cosmetic animator
+runs again. (The simpler "animate per-step during travel" alternative was rejected: steps are 25–500 ms while a
+ripple needs many frames, so it would strobe and slow travel.)
+
+**Where (engine).**
+- `Rogue.h` — `MB_HEARD_DURING_AUTOMATION = Fl(29)` (bits 0–28 were in use); prototypes for
+  `flushAutomationHeardTells` and `cosmeticClearPlayerRipple`.
+- `Movement.c` — `showTravelEndNoiseFeedback()` helper (ripple recompute + `?` rebuild + `flushAutomationHeardTells`)
+  called at the end of `travelRoute`, `travelMap`, and `explore`; the `travelMap` stuck-flag hoist.
+- `Monsters.c` — `flushAutomationHeardTells()`; `MB_HEARD_DURING_AUTOMATION` capture at the three
+  `checkPlayerHeard` edge sites (gated on `automationActive` only, so AI autoplay/playback don't capture);
+  `cosmeticClearPlayerRipple()` calls in `recordPlayerNoiseRippleIfNeeded`'s non-spawn paths.
+- `IO.c` — `cosmeticClearPlayerRipple()` (deactivates the `CE_RIPPLE_PLAYER` singleton slot).
+- `Time.c` — safety-net `flushAutomationHeardTells()` in `playerTurnEnded`, guarded to live turns
+  (`!automationActive`) so a flag stranded by any uncovered automation path flushes on the next manual turn
+  rather than never.
+
+**Determinism / saves.** Cosmetic only — the capture flag is set deterministically from the substantive noise
+processing, nothing is recorded, no RNG is drawn, and all spawns/haptics self-suppress for autoplay
+(`autoPlayingLevel`) and playback fast-forward. Saves/replays and the seeded/weekly leaderboard are unaffected.
+All edits marked `// iOS port (Brogue SE):` and gated by `#if NOISE_SYSTEM_ENABLED`. See
+`docs/game-data/PERCEPTION_AUDIT.md` (the cosmetic-animator-dormant-during-automation note).
+
 ### 2026-06-22 — Noise system: the aggravate channel now ripples (alarm trap / aggravate scroll)
 
 **What.** `aggravateMonsters` — the alarm trap (`DFF_AGGRAVATES_MONSTERS`) and the scroll of aggravate

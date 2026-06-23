@@ -508,6 +508,23 @@ The `?`/`!`/ripple tells are drawn on the **cosmetic animation layer** — see
 [../guides/cosmetic-animation-layer.md](../guides/cosmetic-animation-layer.md). The haptics cross to the
 platform via the `playDetectionHaptic:` host hook (`BrogueCEHost` → `SEBridge.mm` → `BrogueViewController`).
 
+**Tells during automated movement (travel / auto-explore).** All of the above are drawn on the cosmetic
+layer, whose animator (`advanceCosmeticAnimations`) ticks **only in the bridge idle loop** — so it is dormant
+for the whole duration of a multi-step travel (`travelMap`/`travelRoute`) or auto-explore (`explore`), which
+hold `rogue.automationActive` until they finish. Tells that would fire mid-sequence are therefore dropped at
+the moment they'd occur (single-step keyboard moves are unaffected — each returns to the idle loop). To keep
+fast movement from hiding what you woke, the tells are **re-emitted once at the automation-end seam** (the
+first moment the animator wakes), in `showTravelEndNoiseFeedback()`: the player ripple is recomputed for the
+final cell; the `?` investigate blinks are rebuilt from the current visible `MB_INVESTIGATING` set; and the
+event-edge `!` / off-screen `?` — which fire at the *instant* of hearing, with no live state to rebuild — are
+captured per-monster via `MB_HEARD_DURING_AUTOMATION` (`Fl(29)`) at the `checkPlayerHeard` sites and drained
+by `flushAutomationHeardTells()`, re-emitted by current state (visible+hunting → `!`, off-screen → `?`) with a
+single condensed haptic. The "Something nearby stirs" message isn't re-emitted (it isn't gated, so it already
+fired live and self-coalesces). Note the **player footprint ripple is a single-turn effect**:
+`recordPlayerNoiseRippleIfNeeded()` retires any stale one (`cosmeticClearPlayerRipple()`) on every turn that
+doesn't itself warrant a ripple, so one spawned just before a burst of input (e.g. walking up to a monster via
+travel, then click-meleeing it) can't freeze and replay seconds later, after the fight.
+
 `D_NOISE_DEBUG` ([Rogue.h](../../BrogueSE/Engine/Rogue.h), **default 0**) prints a raw developer log line per
 detection channel ("a monster hears something" / "has heard you" / "has spotted you"). Off by default now
 that player-facing flavor + the off-screen `?` cover it; flip to 1 for dev tracing.
