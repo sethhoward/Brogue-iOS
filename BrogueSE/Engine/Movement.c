@@ -1612,6 +1612,33 @@ static void displayRoute(short **distanceMap, boolean removeRoute) {
     } while (advanced);
 }
 
+#if NOISE_SYSTEM_ENABLED
+// iOS port (Brogue SE): noise system -- multi-step travel runs with rogue.automationActive set, and
+// the cosmetic animator (advanceCosmeticAnimations) only ticks in the input-idle loop, so the whole
+// cosmetic layer is dormant for the duration of a travel. We re-emit the noise tells once here, at
+// the travel-end seam -- the first moment control returns toward that idle loop and the animator wakes:
+//   (1) Player sound-footprint ripple: recompute this turn's step loudness for the final cell and fire
+//       it once. recordPlayerNoiseRippleIfNeeded() still self-gates on a visible, still-unaware enemy
+//       within earshot, so it only shows when meaningful.
+//   (2) '?' investigate blinks: rebuild from the CURRENT set of visible MB_INVESTIGATING monsters, so a
+//       creature still searching for you shows its '?' the instant travel stops instead of one action
+//       later. State-driven (reads MB_INVESTIGATING), so this is a faithful snapshot, not a replay.
+// Cosmetic only -- nothing is recorded and no RNG is drawn; monster awareness already consumed every
+// step's noise. (The event-edge '!' / off-screen '?' tells, which fire mid-travel while the animator is
+// asleep, are restored separately via a capture flag -- they can't be reconstructed from current state.)
+static void showTravelEndNoiseFeedback(void) {
+    playerEmitNoise(0);
+    recordPlayerNoiseRippleIfNeeded();
+    rogue.playerNoise = NOISE_PLAYER_SILENT;
+    cosmeticRefreshInvestigateBlinks();
+    //   (3) Event-edge wake tells ('!' / off-screen '?') captured per-monster during the suppressed steps,
+    //       re-emitted once by current state, with a single condensed haptic.
+    flushAutomationHeardTells();
+}
+#else
+static void showTravelEndNoiseFeedback(void) {}
+#endif
+
 void travelRoute(pos path[1000], short steps) {
     short i, j;
     short dir;
@@ -1654,6 +1681,7 @@ void travelRoute(pos path[1000], short steps) {
     }
     rogue.disturbed = true;
     rogue.automationActive = false;
+    showTravelEndNoiseFeedback();
     updateFlavorText();
 }
 
@@ -1662,11 +1690,16 @@ static void travelMap(short **distanceMap) {
     boolean advanced;
 
     rogue.disturbed = false;
-    rogue.automationActive = true;
 
     if (distanceMap[player.loc.x][player.loc.y] < 0 || distanceMap[player.loc.x][player.loc.y] == 30000) {
         return;
     }
+    // iOS port (Brogue SE): set automationActive only AFTER the no-path guard. The original set sat
+    // before the early return, so a negative player-cell distance (which slips past travel()'s
+    // `< 30000` gate) left the flag stuck true on bail. Harmless upstream, but SE gates the whole
+    // cosmetic layer (noise/impact ripples, ?/! blinks) on this flag, so a stuck-true silently
+    // killed all of it until the next successful travel reset it. No path == no steps run anyway.
+    rogue.automationActive = true;
     do {
         advanced = false;
         for (dir = 7; dir >= 0; dir--) {
@@ -1692,6 +1725,7 @@ static void travelMap(short **distanceMap) {
     } while (advanced && !rogue.disturbed);
     rogue.disturbed = true;
     rogue.automationActive = false;
+    showTravelEndNoiseFeedback();
     updateFlavorText();
 }
 
@@ -2082,6 +2116,9 @@ boolean explore(short frameDelay) {
     } while (!rogue.disturbed);
     //clearCursorPath();
     rogue.automationActive = false;
+    // iOS port (Brogue SE): auto-explore suppresses the noise tells the same way travel does (animator dormant),
+    // so re-emit them at this seam too. Self-gates for AI autoplay (autoPlayingLevel) via the cosmetic guards.
+    showTravelEndNoiseFeedback();
     refreshSideBar(-1, -1, false);
     freeGrid(distanceMap);
     return madeProgress;

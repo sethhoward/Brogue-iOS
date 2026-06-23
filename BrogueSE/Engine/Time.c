@@ -2999,6 +2999,13 @@ void playerTurnEnded() {
     cosmeticRefreshInvestigateBlinks();
     // (4) advance the '!' alert-blinks: follow each to its monster's new cell and count down its turn life.
     cosmeticTickAlertBlinks();
+    // (5) safety net for the automation wake-tell capture (MB_HEARD_DURING_AUTOMATION): travel/auto-explore
+    // drain it at their own end seams, but if any automation path leaves a flag stranded, flush it on the next
+    // live turn so a captured tell shows one action late rather than never. Guarded to live turns only -- during
+    // an automation step automationActive is true and the flags set THIS step must survive to the end-seam drain.
+    if (!rogue.automationActive) {
+        flushAutomationHeardTells();
+    }
 #endif
     updateFlavorText();
 

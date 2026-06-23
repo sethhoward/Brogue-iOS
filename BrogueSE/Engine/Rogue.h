@@ -2594,9 +2594,13 @@ enum monsterBookkeepingFlags {
     MB_DOES_NOT_RESURRECT       = Fl(26),   // resurrection altars don't revive monsters summoned by allies
     MB_INVESTIGATING            = Fl(27),   // iOS port (Brogue SE): noise system -- heading to a heard-noise
                                             // cell (monst->investigateLoc) to look, NOT hunting; see noise-system.md
-    MB_RETURNING_HOME           = Fl(28)    // iOS port (Brogue SE): noise system -- a sleeper roused by noise that
+    MB_RETURNING_HOME           = Fl(28),   // iOS port (Brogue SE): noise system -- a sleeper roused by noise that
                                             // investigated and found nothing is trudging back to its bed
                                             // (monst->slumberLoc) to doze off again; see PERCEPTION_AUDIT.md
+    MB_HEARD_DURING_AUTOMATION  = Fl(29)    // iOS port (Brogue SE): noise system -- this monster's '!'/'?' wake tell
+                                            // was suppressed because it fired mid-travel/auto-explore (the cosmetic
+                                            // animator is dormant during automation); re-emitted once at the
+                                            // automation-end seam by flushAutomationHeardTells(). See PERCEPTION_AUDIT.md
 };
 
 // Defines all creatures, which include monsters and the player:
@@ -3665,6 +3669,8 @@ extern "C" {
     void advanceCosmeticAnimations(void);   // iOS port (Brogue SE): cosmetic layer -- one tick (from the platform idle loop)
     void clearCosmeticAnimations(void);     // iOS port (Brogue SE): cosmetic layer -- drop all (level/playback reset)
     void recordPlayerNoiseRippleIfNeeded(void); // iOS port (Brogue SE): spawn the player ripple iff a visible unaware enemy is near earshot
+    void flushAutomationHeardTells(void); // iOS port (Brogue SE): re-emit '!'/'?' wake tells captured (MB_HEARD_DURING_AUTOMATION) during travel/auto-explore
+    void cosmeticClearPlayerRipple(void); // iOS port (Brogue SE): retire a stale single-turn player-footprint ripple so it can't replay late
     void printString(const char *theString, short x, short y, const color *foreColor, const color* backColor, screenDisplayBuffer *dbuf);
     short wrapText(char *to, const char *sourceText, short width);
     short printStringWithWrapping(const char *theString, short x, short y, short width, const color *foreColor,

@@ -2318,6 +2318,21 @@ void cosmeticSpawnRipplePlayer(short radius) {
     gCosmeticEffects[i].frameLife = radius * CE_RIPPLE_EXPAND_FRAMES;
 }
 
+// iOS port (Brogue SE): retire any in-flight player sound-footprint ripple. The ripple is a single-turn
+// footprint, but recordPlayerNoiseRippleIfNeeded only ever spawns one -- so a ripple lives out its frame
+// life. The cosmetic animator ticks only in the idle loop, so a ripple spawned right before a burst of
+// input (e.g. walking up to an unaware monster, then hammering clicks to melee it) freezes mid-expansion,
+// survives the whole fight, and only finishes animating once input stops -- surfacing seconds late, after
+// the monster is already dead, looking like noise from nowhere. Calling this on any turn that doesn't
+// itself warrant a ripple keeps the footprint tied to its turn. Cosmetic only; no RNG, nothing recorded.
+void cosmeticClearPlayerRipple(void) {
+    for (short j = 0; j < MAX_COSMETIC_EFFECTS; j++) {
+        if (gCosmeticEffects[j].active && gCosmeticEffects[j].kind == CE_RIPPLE_PLAYER) {
+            gCosmeticEffects[j].active = false;
+        }
+    }
+}
+
 // iOS port (Brogue SE): the environmental-sound impact ripple -- an amber wavefront expanding from `source`
 // along the impact sound map out to `radius`. SINGLETON (latest impact wins): a fresh throw supersedes a
 // stale ripple. Cosmetic; see docs/design/environmental-sounds.md.

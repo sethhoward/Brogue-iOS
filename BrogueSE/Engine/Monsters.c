@@ -1990,8 +1990,16 @@ static enum monsterHearing checkPlayerHeard(creature *monst) {
         const boolean newlyAlerted = (monst->creatureState != MONSTER_TRACKING_SCENT);
         wakeUp(monst); // full hunt + alert nearby horde-mates (alertMonster + ticks, like being spotted)
         if (canSeeMonster(monst)) {
-            cosmeticSpawnAlertBlink(monst); // '!' rides the visible monster for NOISE_ALERT_BLINK_TURNS turns
+            cosmeticSpawnAlertBlink(monst); // '!' rides the visible monster for NOISE_ALERT_BLINK_TURNS turns (no-ops mid-automation)
+            // iOS port (Brogue SE): mid-travel/auto-explore the animator is dormant so the '!' was dropped --
+            // flag the monster so flushAutomationHeardTells() re-emits the tell once travel ends. See PERCEPTION_AUDIT.md.
+            if (rogue.automationActive) {
+                monst->bookkeepingFlags |= MB_HEARD_DURING_AUTOMATION;
+            }
         } else if (newlyAlerted) {
+            if (rogue.automationActive) {
+                monst->bookkeepingFlags |= MB_HEARD_DURING_AUTOMATION; // off-screen loud reaction, deferred to travel-end
+            }
             // iOS port (Brogue SE): off-screen tell. You can't see what you alerted, only that something
             // around a corner (out of FOV) reacted to your noise -- compensating feedback for the fact that
             // monsters hear you without line of sight. A '?' at its cell: you don't know if it's merely
@@ -2042,6 +2050,11 @@ static enum monsterHearing checkPlayerHeard(creature *monst) {
             cosmeticSpawnAlertGlyph(monst->loc, (enum displayGlyph)'?');
             message("Something nearby stirs at the noise.", 0); // flavor: an unseen creature has heard you
             noiseDetectionHaptic(0);                             // iPhone: one short, sharp tap
+            // iOS port (Brogue SE): mid-automation the glyph + haptic were dropped (animator dormant); the
+            // message fired live (it isn't gated). Flag for the condensed travel-end re-emit. See PERCEPTION_AUDIT.md.
+            if (rogue.automationActive) {
+                monst->bookkeepingFlags |= MB_HEARD_DURING_AUTOMATION;
+            }
         }
     }
     return heard;
@@ -2101,10 +2114,12 @@ void emitEnvironmentalNoise(pos source, short strength, item *sourceItem) {
 void recordPlayerNoiseRippleIfNeeded(void) {
     short r;
     if (rogue.hidePlayerNoiseRipple) {
+        cosmeticClearPlayerRipple(); // opted out: make sure none is left in flight
         return; // iOS port (Brogue SE): player opted out of their own sound-footprint animation (menu toggle); other noise animations are unaffected
     }
     if (rogue.playerNoise <= NOISE_PLAYER_SILENT) {
-        return; // silent this turn -- no footprint to show
+        cosmeticClearPlayerRipple(); // silent this turn -- no footprint; retire any stale ripple so it can't replay later
+        return;
     }
     // The audible radius: the cost-distance at which hearChance is still > 0 for this loudness (mirror of
     // monsterHearsNoise), capped by the earshot gate and a sane animation bound.
@@ -2123,9 +2138,49 @@ void recordPlayerNoiseRippleIfNeeded(void) {
             return;
         }
     }
+    // Made noise, but no visible unaware enemy is in earshot -- no footprint this turn. Retire any ripple
+    // left over from a previous turn so a starved-animator ripple can't surface late (e.g. after a melee).
+    cosmeticClearPlayerRipple();
 }
 #else
 void recordPlayerNoiseRippleIfNeeded(void) {}
+#endif
+
+#if NOISE_SYSTEM_ENABLED
+// iOS port (Brogue SE): drain the wake tells captured during an automated move sequence (travel /
+// auto-explore). Those '!'/'?' glyphs and the detection haptic fire from checkPlayerHeard at the moment a
+// monster hears you -- but mid-automation the cosmetic animator is dormant (see showTravelEndNoiseFeedback),
+// so they were dropped and the monster was flagged MB_HEARD_DURING_AUTOMATION instead. Called once at the
+// automation-end seam (animator awake again), we re-emit each by CURRENT state: a visible hunter gets its
+// '!'; an off-screen reactor gets a '?' at its cell. Visible investigators are NOT flagged here -- their '?'
+// comes from the cosmeticRefreshInvestigateBlinks rebuild. One condensed haptic for the whole sequence (the
+// per-event haptics were suppressed; N buzzes would feel broken). The "Something nearby stirs" message is
+// deliberately NOT re-emitted: it isn't gated, so it already fired live and self-coalesces. Cosmetic only --
+// nothing recorded, no RNG. Self-gates for AI autoplay/playback via the cosmeticSpawn* / haptic guards.
+void flushAutomationHeardTells(void) {
+    boolean anyWoke = false;
+    for (creatureIterator it = iterateCreatures(monsters); hasNextCreature(it);) {
+        creature *monst = nextCreature(&it);
+        if (!(monst->bookkeepingFlags & MB_HEARD_DURING_AUTOMATION)) {
+            continue;
+        }
+        monst->bookkeepingFlags &= ~MB_HEARD_DURING_AUTOMATION;
+        anyWoke = true;
+        if (canSeeMonster(monst)) {
+            if (monst->creatureState == MONSTER_TRACKING_SCENT) {
+                cosmeticSpawnAlertBlink(monst); // '!' -- you can now see it, and it's hunting you
+            }
+            // visible + investigating: covered by the '?' investigate-blink rebuild, not here.
+        } else {
+            cosmeticSpawnAlertGlyph(monst->loc, (enum displayGlyph)'?'); // unseen reactor: "something over there stirred"
+        }
+    }
+    if (anyWoke) {
+        noiseDetectionHaptic(0); // one buzz for the whole travel, not one per woken monster
+    }
+}
+#else
+void flushAutomationHeardTells(void) {}
 #endif
 
 // iOS port (iBrogue): base % chance to sense a pursuer giving up the chase; the ring of awareness

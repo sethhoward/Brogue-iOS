@@ -670,6 +670,15 @@ final class BrogueViewController: UIViewController {
     private weak var zoomPan: UIPanGestureRecognizer?
     /// Two-finger double-tap "zoom out / back" toggle, kept for enable/disable.
     private weak var zoomToggle: UITapGestureRecognizer?
+    /// iOS port (iBrogue): hover-to-examine for an attached trackpad/mouse. Free pointer
+    /// movement (no button) is delivered as hover, not touches, so the only way to reach the
+    /// engine's examine path (MOUSE_ENTERED_CELL) used to be a click-drag — whose release is a
+    /// MOUSE_UP that commits a move. This recognizer restores the desktop behavior: hover
+    /// examines (and moves the targeting reticle) without committing; a click still moves.
+    private weak var hoverGesture: UIHoverGestureRecognizer?
+    /// Last map/sidebar cell a hover emitted, to mimic sdl2-platform.c: only feed a new
+    /// MOUSE_ENTERED_CELL when the pointer crosses into a different cell. (-1,-1) = none yet.
+    private var lastHoverCell = CGPoint(x: -1, y: -1)
     /// The zoom (scale + origin) to return to when a two-finger double-tap toggles
     /// back in. Captured at the moment of toggling out; restoring the origin directly
     /// means the restore doesn't depend on a live auto-follow cell (which can be nil).
@@ -810,6 +819,7 @@ final class BrogueViewController: UIViewController {
         dContainerView.alpha = 0.3
 
         setupZoomGestures()
+        setupHoverGesture()
 
         // Storyboard positions these for iPad. On iPhone (much less screen
         // real estate, landscape-only) push the esc button tighter into the
@@ -2329,6 +2339,49 @@ extension BrogueViewController: UIGestureRecognizerDelegate {
         zoomToggle = toggle
     }
 
+    /// iOS port (iBrogue): installs the hover-to-examine recognizer. Inert without a hardware
+    /// pointer (a finger never produces hover callbacks), so it's safe on every idiom — including
+    /// Mac Catalyst, where GCKeyboard reports the Mac keyboard and the screen is already in
+    /// "desktop mode" (d-pad/ESC hidden, magnifier suppressed). Attached to the root view so its
+    /// locations share the touch coordinate space (location(in: view)).
+    private func setupHoverGesture() {
+        let hover = UIHoverGestureRecognizer(target: self, action: #selector(handleHover(_:)))
+        hover.name = "examineHover"
+        view.addGestureRecognizer(hover)
+        hoverGesture = hover
+    }
+
+    /// Translates pointer hover into the engine's non-committal examine event. Pure platform
+    /// layer: enqueues a synthetic `.moved` touch, which every bridge already maps to
+    /// MOUSE_ENTERED_CELL — so no engine/bridge/protocol change, and all three engines benefit.
+    /// Hover never enters the recording stream (only committed clicks/keystrokes are recorded),
+    /// so there is no determinism or replay impact.
+    @objc private func handleHover(_ g: UIHoverGestureRecognizer) {
+        // Pointer left the view: forget the last cell so re-entry re-emits.
+        guard g.state == .began || g.state == .changed else {
+            lastHoverCell = CGPoint(x: -1, y: -1)
+            return
+        }
+        // Examine is meaningful only while the map cursor is live: normal play (sidebar +
+        // map describe) and targeting (reticle follows the pointer). Never in menus.
+        guard gameplayControlsActive || isTargeting else { return }
+        // Don't examine through an in-progress pinch/pan, the on-screen d-pad, or the bottom
+        // band. These chrome guards are no-ops once a keyboard hides the controls (the common
+        // case) and still protect the rare keyboardless-mouse case.
+        guard !multiTouchGestureActive else { return }
+        let location = g.location(in: view)
+        if isBandTouch(location) { return }
+        if dContainerView.hitTest(g.location(in: dContainerView), with: nil) != nil { return }
+
+        // Mimic sdl2-platform.c: only emit when the pointer crosses into a new cell. getCellCoords
+        // applies the pinch-zoom inverse for the comparison; the event itself carries the raw
+        // location, leaving the bridge's unzoomedPoint transform to resolve the cell (as for touches).
+        let cell = getCellCoords(at: location, viewport: skViewPort)
+        if cell == lastHoverCell { return }
+        lastHoverCell = cell
+        addHoverEvent(event: UIBrogueTouchEvent(phase: .moved, location: location))
+    }
+
     // Pinch + two-finger pan + the two-finger double-tap toggle must run together,
     // but not alongside unrelated recognizers (e.g. the dpad's drag).
     func gestureRecognizer(_ g: UIGestureRecognizer,
@@ -2970,6 +3023,20 @@ extension BrogueViewController {
                 _ = touchEvents.removeLast()
             }
 
+            touchEvents.append(event)
+        }
+    }
+
+    /// iOS port (iBrogue): enqueue a hover-derived examine event. Identical to addTouchEvent's
+    /// dedup+append, but deliberately does NOT write `lastTouchLocation` — that field is the
+    /// commit coordinate for a tap's synthesized MOUSE_UP, and hover must never influence where a
+    /// click commits (desktop keeps hover and click fully independent). Keeping the write out makes
+    /// that independence hold by construction rather than relying on touchesBegan event ordering.
+    private func addHoverEvent(event: UIBrogueTouchEvent) {
+        synchronized {
+            if let lastEvent = touchEvents.last, lastEvent.phase == .moved, !touchEvents.isEmpty {
+                _ = touchEvents.removeLast()
+            }
             touchEvents.append(event)
         }
     }
