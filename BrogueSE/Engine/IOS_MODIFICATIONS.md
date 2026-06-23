@@ -846,17 +846,36 @@ which carries `T_IS_FIRE | T_CAUSES_EXPLOSIVE_DAMAGE`) and applied to the player
 one of the five turns. Monsters were unaffected because `decrementMonsterStatus` already runs before
 `updateEnvironment`; the player's decrement sitting after it was the anomaly.
 
-**Fix.** Decrement `STATUS_EXPLOSION_IMMUNITY` *before* `updateEnvironment` (and removed it from
-`decrementPlayerStatus`), aligning the player with the monster ordering. An explosion granted during
-`updateEnvironment` now survives the full turn, giving a consistent 5-turn gap. Surgical: only this one
-status moved — every other player status keeps its existing timing relative to the environment update.
-Both `updateEnvironment` and `decrementPlayerStatus` have a single call site, so the decrement still
-runs exactly once per environment tick.
+**Fix (two parts — the second added 2026-06-19 after empirical testing).**
 
-**Notes.** Upstream Brogue bug (CE's ordering is identical); fix is **SE-only**.
+1. *Ordering.* Decrement `STATUS_EXPLOSION_IMMUNITY` *before* `updateEnvironment` (and removed it from
+   `decrementPlayerStatus`), aligning the player with the monster ordering so a value granted during
+   `updateEnvironment` survives the full turn. This alone took the player from 3 → 4 fully-immune turns.
 
-**Where.** `playerTurnEnded` (decrement relocated before `updateEnvironment`) and `decrementPlayerStatus`
-(decrement removed), both `Time.c`. Marked `#816`.
+2. *Grant value 5 → 6.* The status is decremented once per turn and explosive damage only fires while it
+   is 0, so a grant of N protects N−1 turns. A grant of `5` therefore gave only **4** clear turns — which
+   is what the reporter still observed after part 1 ("still only 4 turns of immunity"). Confirmed with the
+   `D_TEST_EXPLOSION` harness: hits landed on turns 1, 6, 11, 16 (gap 5 = 4 immune turns). Bumping the grant
+   to `6` yields the intended **five** clear turns (gap 6). Applies to the player and monsters alike (shared
+   set site in `applyInstantTileEffectsToCreature`).
+
+**Notes.** Upstream Brogue bug (CE's ordering and grant value are identical); fix is **SE-canonical**
+(also backported to CE for testing — see CE's log).
+
+**Where.** `playerTurnEnded` (decrement relocated before `updateEnvironment`), `decrementPlayerStatus`
+(decrement removed), and the grant `STATUS_EXPLOSION_IMMUNITY = 6` in `applyInstantTileEffectsToCreature`,
+all `Time.c`. Marked `#816`.
+
+**Test harness (2026-06-19, debug; both decrements now gated).** Two `Rogue.h` toggles (default 0, ship
+off) verify this empirically since a version-locked save can't replay across builds:
+- `D_TEST_EXPLOSION` — each environment tick refuels a `DF_METHANE_GAS_ARMAGEDDON` + `DF_PLAIN_FIRE`
+  inferno on the player's tile (`refreshCell=false`, so the hit lands on the normal
+  `updateEnvironment`/`applyInstantTileEffectsToCreature` path) and heals them to full. Every fresh
+  explosive hit logs `"[#816] explosive hit on turn N"` and zeroes the damage, so the gap between
+  consecutive logged turns IS the immunity duration.
+- `D_LEGACY_EXPLOSION_TIMING` — reverts to the pre-fix ordering (decrement back in
+  `decrementPlayerStatus`, after `updateEnvironment`) for a single-binary A/B: off → gap 5 (fixed),
+  on → gap 4 (the reported bug). The two decrement sites are now gated on this flag rather than hard-coded.
 
 ### 2026-06-15 — Fix: a submerged player saw submerged monsters across separate water bodies (#831)
 

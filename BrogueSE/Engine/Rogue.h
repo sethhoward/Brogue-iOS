@@ -366,6 +366,18 @@
 // '!' is bounded: it follows the monster for this many player-turns, then fades. Adjustable; baseline 2.
 #define NOISE_ALERT_BLINK_TURNS         2   // player-turns the visible '!' "I see you" tell rides the monster
 
+// iOS port (Brogue SE): #816 explosion-immunity test harness (standalone, works in a normal game).
+// When 1, every environment tick refuels a methane inferno on the player's tile and heals them to full,
+// so explosions recur indefinitely; each explosive hit logs the player turn number (see Time.c
+// applyInstantTileEffectsToCreature). The gap between consecutive logged turns IS the immunity duration.
+// Start a fresh game with this on and just wait. Flip to 0 to ship.
+#define D_TEST_EXPLOSION                0
+
+// iOS port (Brogue SE): #816 A/B control. When 1, reverts STATUS_EXPLOSION_IMMUNITY to the old (buggy)
+// decrement ordering -- decremented in decrementPlayerStatus *after* updateEnvironment instead of before.
+// Lets a single binary compare the fix (gap of 5, default) against the bug (gap of 4). Flip to 0 to ship.
+#define D_LEGACY_EXPLOSION_TIMING       0
+
 // If enabled, runs a benchmark for the performance of repeatedly updating the screen at the start of the game.
 // #define SCREEN_UPDATE_BENCHMARK
 

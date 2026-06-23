@@ -1097,8 +1097,12 @@ final class BrogueViewController: UIViewController {
             }
             let saveDir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
                 .appendingPathComponent(subfolder)
+            // iOS port (iBrogue): debug "Import" lets us pull in a shared CE/SE save
+            // (e.g. a bug report's exact game) into the engine's directory to load it.
             let nav = UINavigationController(rootViewController:
-                FileManagementViewController(directory: saveDir, allowsDuplicate: allowsDuplicate))
+                FileManagementViewController(directory: saveDir,
+                                             allowsDuplicate: allowsDuplicate,
+                                             allowsImport: true))
             self.present(nav, animated: true)
         }
     }

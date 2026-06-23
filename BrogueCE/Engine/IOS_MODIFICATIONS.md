@@ -28,6 +28,16 @@ covers the separate Classic engine that ships in the app target).
 
 ## Change log
 
+### 2026-06-19 — File management: debug "Import" button (CE/SE)
+
+**What.** The Manage Files screen gains an "Import" button (left bar, beside Edit) that opens the
+document browser and copies a picked `.broguesave`/`.broguerec` into the current engine's save
+directory, so a save shared from elsewhere (e.g. a bug report) can be loaded from the title menu.
+
+**Where.** `FileManagementViewController.swift` (`allowsImport` flag, `UIDocumentPickerDelegate`);
+enabled for the CE/SE screen in `BrogueViewController.presentFileManagementScreenForCE()`. Pure
+platform/Swift — no engine C change. Debug aid (currently always on for CE/SE).
+
 ### 2026-06-15 — Keyboard labels disabled; hardware-keyboard presence drives UI instead
 
 **What.** The in-game hotkey labels are turned off (they reflect the Classic key layout and would
