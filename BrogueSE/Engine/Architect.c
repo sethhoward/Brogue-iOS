@@ -1992,6 +1992,25 @@ static void runAutogenerators(boolean buildAreaMachines) {
                             }
                         }
                     }
+
+                    // iOS port (Brogue SE): lay optional thematic companion terrain NEAR the spawn site -- a
+                    // fire trap ringed with dry grass, a caustic trap amid bones. We spread it from a cell
+                    // OFFSET off the foundation (the trap cell is blocked as a spawn origin) so the patch reads
+                    // as ambient terrain in the room, not a marker on the trap; whether the spread reaches the
+                    // trap cell is left to chance, like any natural patch. Chance-gated, so the association
+                    // stays a soft "maybe search here," never a reliable tell. Substantive RNG (replays from
+                    // the seed). The "no foliage on a trap" rule (BrogueCE #832) doesn't touch grass/bones --
+                    // they don't obstruct vision, so they neither hide the trap nor get stripped.
+                    if (gen->companionDF && rand_percent(gen->companionChance)) {
+                        pos companionLoc;
+                        zeroOutGrid(grid);
+                        grid[foundationLoc.x][foundationLoc.y] = true; // forbid the trap cell as the patch origin
+                        if (getQualifyingLocNear(&companionLoc, foundationLoc, true, grid,
+                                                 (T_OBSTRUCTS_PASSABILITY | T_PATHING_BLOCKER),
+                                                 (HAS_STAIRS | HAS_ITEM | IS_IN_MACHINE), true, false)) {
+                            spawnDungeonFeature(companionLoc.x, companionLoc.y, &(dungeonFeatureCatalog[gen->companionDF]), false, true);
+                        }
+                    }
                 }
 
                 // Attempt to build the machine if requested.

@@ -32,6 +32,40 @@ See `BrogueCE/Engine/IOS_MODIFICATIONS.md` (faithful CE) and
 
 ## Change log
 
+### 2026-06-23 — Trap-anchored thematic terrain: dry grass at fire traps, bones at caustic traps (new content)
+
+**What.** A fire trap (`FLAMETHROWER` / `FLAMETHROWER_HIDDEN`) now has a ~40% chance to be ringed by a patch
+of dry grass; a caustic gas trap (`GAS_TRAP_POISON` / `_HIDDEN`) the same chance to sit amid a patch of bones.
+Light flavor that gives a soft, room-level "maybe search here" cue — *not* a reliable tell, because the patch
+is offset (never a marker on the trap cell), the chance is partial, and bones/dry grass already occur naturally
+across the dungeon. The fire case is also a real escalation: dry grass is `T_IS_FLAMMABLE`, so a triggered fire
+trap ignites the patch into a spreading blaze (a deliberate, vanilla-consistent danger — accepted, unlike the
+[firebolt scroll-burn rejection](../../KNOWN_CAVEATS.md), because this is environmental, not a player tool).
+
+**How (data-driven, reusable).**
+- `Rogue.h` — `autoGenerator` gains two trailing fields: `companionDF` (a `DF_*`) + `companionChance` (percent).
+  `0`/absent = none, so every other generator row is untouched (and save-safe — static catalog data).
+- `GlobalsBrogue.c` — the two fire-trap rows set `companionDF = DF_TRAP_DRY_GRASS`; the two caustic-trap rows
+  set `companionDF = DF_BONES`; all four `companionChance = 40`. Applied to both the revealed and hidden
+  variants (uniform — so "patch ⇒ hidden trap" stays *less* inferable, not more).
+- `Globals.c` / `Rogue.h` — one new DF, `DF_TRAP_DRY_GRASS` (`DEAD_GRASS`, contained `75/25` vs open-field
+  `DF_DEAD_GRASS`'s `75/5` sprawl, and crucially chains *no* dead foliage). Caustic reuses the stock `DF_BONES`.
+- `Architect.c` — `runAutogenerators`, after placing the trap, rolls `companionChance` and spreads `companionDF`
+  from a cell found by `getQualifyingLocNear` with the foundation cell **blocked as the origin** (forcing an
+  offset) and liquids/machines/stairs/items forbidden. No special-casing of the trap cell — the spread covers
+  it or not by chance, like any natural patch.
+
+**Reusability.** `companionDF` is the trap/autogenerator-side analogue of `hordeType.spawnDF`: the rest of the
+"world feel alive" backlog (scorch marks, blood trails, mineral deposits, …) is now config on an autogenerator
+row, not new code.
+
+**#832 interaction.** None — `DEAD_GRASS`/`BONES` aren't `T_OBSTRUCTS_VISION`, so the fillSpawnMap trap guard
+leaves them alone and they don't hide the trap (the trap's lower `drawPriority` also draws it over them).
+
+**Determinism / saves.** Chance roll + offset pick + spread all run on substantive RNG during generation, so
+they replay from the seed. New struct/DF fields are static catalog data — save/replay-safe. Shifts generation
+for existing seeds (expected for new content; SE is Game Center–silent). Marked `// iOS port (Brogue SE):`.
+
 ### 2026-06-23 — Noise system: a pack's rallying cry (ripple + message when a creature rouses its companions)
 
 **What.** When a creature actually rouses dormant packmates — `wakeUp()` flips ≥1 teammate from

@@ -235,6 +235,14 @@ fills a spawn map radially from `startProbability` down by `probabilityDecrement
   `GRASS` in draw priority, so the apron fills *around* the core without erasing it. A horde drops this at
   its spawn site via the `hordeType.spawnDF` catalog field (the jackal pack is the only consumer; see
   [MONSTERS_AUDIT.md §7.2](MONSTERS_AUDIT.md)). The core+apron is pure catalog data — no bespoke helper.
+- **SE — trap companion terrain:** an `autoGenerator` row may carry `companionDF` + `companionChance`
+  ([GlobalsBrogue.c](../../BrogueSE/Engine/GlobalsBrogue.c)). `runAutogenerators` rolls the chance and spreads
+  the DF from a cell *offset* off the foundation (the foundation is blocked as the origin), so it's never a
+  pinpoint marker. Consumers: fire traps → `DF_TRAP_DRY_GRASS` (a contained `DEAD_GRASS` patch, `75/25`, no
+  dead-foliage chain — flammable, so a triggered fire trap can ignite it); caustic traps → stock `DF_BONES`.
+  ~40% on both revealed and hidden variants; a soft search cue, not a tell (it doesn't touch the trap cell and
+  blends with naturally-occurring patches). Grass/bones aren't vision-blocking, so the §6.1 trap guard ignores
+  them and they don't hide the trap.
 
 ### 6.1 SE — foliage never paves a trap (BrogueCE [#832](https://github.com/tmewett/BrogueCE/issues/832))
 

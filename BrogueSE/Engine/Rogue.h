@@ -2210,6 +2210,10 @@ enum dungeonFeatureTypes {
     DF_JACKAL_DEN_FOLIAGE,
     DF_JACKAL_DEN_GRASS,
 
+    // iOS port (Brogue SE): a contained patch of dry (flammable) grass laid near a fire trap as a
+    // companion DF -- tighter than open-field DF_DEAD_GRASS and, unlike it, chains no dead foliage.
+    DF_TRAP_DRY_GRASS,
+
     NUMBER_DUNGEON_FEATURES,
 };
 
@@ -3371,6 +3375,12 @@ typedef struct autoGenerator {
     short minNumberIntercept; // actually intercept * 100
     short minNumberSlope; // actually slope * 100
     short maxNumber;
+
+    // iOS port (Brogue SE): optional thematic "companion" terrain laid NEAR (not on) the spawn site --
+    // e.g. a fire trap ringed with dry grass, a caustic trap amid bones. companionChance% of the time, a
+    // patch of companionDF spreads from a cell offset off the foundation. 0 = none (every other row).
+    enum dungeonFeatureTypes companionDF;
+    short companionChance;
 } autoGenerator;
 
 #define FEAT_NAME_LENGTH 15

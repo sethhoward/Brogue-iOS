@@ -995,6 +995,10 @@ dungeonFeature dungeonFeatureCatalog[NUMBER_DUNGEON_FEATURES] = {
     // FOLIAGE outranks GRASS in draw priority, so the apron fills around the core without erasing it.
     {FOLIAGE,                   SURFACE,    100,    40,     (DFF_BLOCKED_BY_OTHER_LAYERS),  "", 0,  0,  0,      0,          DF_JACKAL_DEN_GRASS},
     {GRASS,                     SURFACE,    75,     20,     (DFF_BLOCKED_BY_OTHER_LAYERS)},
+
+    // iOS port (Brogue SE): companion dry grass for a fire trap. Contained (75/25, vs open DF_DEAD_GRASS's
+    // 75/5 sprawl) and chains no dead foliage -- just flammable grass that the trap's flame can ignite.
+    {DEAD_GRASS,                SURFACE,    75,     25,     (DFF_BLOCKED_BY_OTHER_LAYERS)},
 };
 
 const dungeonProfile dungeonProfileCatalog[NUMBER_DUNGEON_PROFILES] = {
