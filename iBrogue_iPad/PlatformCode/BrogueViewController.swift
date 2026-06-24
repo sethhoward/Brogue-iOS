@@ -649,6 +649,16 @@ final class BrogueViewController: UIViewController {
     /// so the first finger of a pinch/pan can't leak a tap/travel that would
     /// snap the view via auto-follow.
     private var multiTouchGestureActive = false
+    /// iOS port (iBrogue): the screen zone where the current single-finger gesture
+    /// began, latched on touch-down and used to route the WHOLE gesture (see
+    /// `gestureOriginZone`). A gesture commits only when it lifts in the same zone it
+    /// started in — so a swipe up from the bottom band (or the home-indicator strip)
+    /// can't leak into a play-field travel/move as the finger crosses into the grid.
+    private enum GestureOriginZone { case playArea, band, sidebar, other }
+    /// The latched origin zone for the active single-finger gesture, or nil when idle.
+    /// Set at the top of `touchesBegan` for a fresh primary touch (so a second finger /
+    /// pinch never overwrites it); cleared once all fingers lift.
+    private var gestureOriginZone: GestureOriginZone?
     /// True once the player two-finger-drags to look around; cleared on the next
     /// real player move, which re-centers (auto-follow).
     private var manualPanActive = false
@@ -2858,6 +2868,10 @@ extension BrogueViewController {
         // then hide it.
         if (event?.allTouches?.count ?? touches.count) <= 1 {
             multiTouchGestureActive = false
+            // Latch where this gesture began so the whole gesture routes by its origin
+            // zone (see `gestureOriginZone`). Captured here, before the pinch/band
+            // early-returns, and only for the primary finger so a pinch can't clobber it.
+            gestureOriginZone = originZone(for: touches.first!.location(in: view))
         }
 
         // iPhone (zoom on): a second finger means a pinch / two-finger pan is
@@ -2872,8 +2886,9 @@ extension BrogueViewController {
         }
         // Bottom tap-band: handled on release; swallow the down (before the dpad
         // guard, so the dpad container can't eat band taps) so it never becomes a
-        // map-move or pops the magnifier.
-        if isBandTouch(touches.first!.location(in: view)) {
+        // map-move or pops the magnifier. Keyed on the latched origin zone so a swipe
+        // that starts in the band stays swallowed even after it crosses into the grid.
+        if gestureOriginZone == .band {
             hideMagnifier()
             return
         }
@@ -2906,7 +2921,21 @@ extension BrogueViewController {
             hideMagnifier()
             return
         }
-        if isBandTouch(touches.first!.location(in: view)) {
+        // Band-origin gesture: swallow for its whole life (it can only ever fire a
+        // button, on release, and only if it lifts back in the band).
+        if gestureOriginZone == .band {
+            hideMagnifier()
+            return
+        }
+        // Off-grid feed clamp (active play only): a play-area / other-origin drag must
+        // not feed an off-grid coordinate (the finger wandered into the band or
+        // sidebar) — drop it so lastTouchLocation (the commit cell) stays at the last
+        // in-grid cell. A sidebar-origin gesture is exempt: its in-sidebar moves are
+        // examine hovers. Gated on gameplayControlsActive so it never touches menu /
+        // inventory interaction, where item rows sit above the play area (rows <= 3)
+        // and must stay selectable by tap or drag.
+        if gameplayControlsActive, gestureOriginZone != .sidebar,
+           !pointIsInPlayArea(point: touches.first!.location(in: view)) {
             hideMagnifier()
             return
         }
@@ -2925,20 +2954,27 @@ extension BrogueViewController {
     override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
         super.touchesEnded(touches, with: event)
 
+        // Release the latched origin zone once every finger has lifted, on every path.
+        let allFingersUp = activeTouchCount(event) == 0
+        defer { if allFingersUp { gestureOriginZone = nil } }
+
         // A multi-touch gesture (pinch / two-finger pan) was in progress: never
         // commit a tap on release — that's what produced the view "snap." Reset
         // once every finger has lifted.
         if multiTouchGestureActive {
             clearTouchEvents()
             hideMagnifier()
-            if activeTouchCount(event) == 0 { multiTouchGestureActive = false }
+            if allFingersUp { multiTouchGestureActive = false }
             return
         }
 
-        // Bottom tap-band takes priority over the dpad container and normal
-        // routing, so a tap at the very bottom always fires a button.
-        if let loc = touches.first?.location(in: view), isBandTouch(loc) {
-            handleBandTap(loc)
+        // Band-origin gesture: fire the nearest bottom button ONLY if it also lifts in
+        // the band. A band-origin swipe that lifts in the grid/sidebar (the home-
+        // indicator swipe-up) commits nothing — it never leaks a play-field move.
+        if gestureOriginZone == .band {
+            if let loc = touches.first?.location(in: view), isBandTouch(loc) {
+                handleBandTap(loc)
+            }
             hideMagnifier()
             return
         }
@@ -2959,7 +2995,12 @@ extension BrogueViewController {
             // and never the MOUSE_UP that activates a button — so the first tap did
             // nothing and the player had to tap again. Treat sidebar-column taps as
             // ordinary clicks whenever we're not in active play.
-            if pointIsInSideBar(point: location) && gameplayControlsActive {
+            if gestureOriginZone == .sidebar && gameplayControlsActive && !pointIsInSideBar(point: location) {
+                // Sidebar-origin gesture that lifted outside the sidebar (dragged into
+                // the grid / band): commit nothing — just disarm the pending examine.
+                examineArmDebounce?.cancel()
+                examineArmed = false
+            } else if gestureOriginZone == .sidebar && gameplayControlsActive {
                 // side bar
                 if touch.tapCount >= 2 {
                     // Double-tap acts on the entity (attack / run toward) — not an examine.
@@ -3001,7 +3042,10 @@ extension BrogueViewController {
         super.touchesCancelled(touches, with: event)
         clearTouchEvents()
         hideMagnifier()
-        if activeTouchCount(event) == 0 { multiTouchGestureActive = false }
+        if activeTouchCount(event) == 0 {
+            multiTouchGestureActive = false
+            gestureOriginZone = nil
+        }
     }
 
     /// Touches still down (not ended/cancelled) in this event.
@@ -3025,6 +3069,18 @@ extension BrogueViewController {
         }
 
         return false
+    }
+
+    /// iOS port (iBrogue): classify a touch-down location into the zone that owns the
+    /// gesture. `isBandTouch` is checked first because it already carries the
+    /// `gameplayControlsActive` guard — so `.band` is only ever latched during active
+    /// play; outside play the bottom area falls through to `.playArea`/`.other` and
+    /// keeps its existing routing.
+    private func originZone(for point: CGPoint) -> GestureOriginZone {
+        if isBandTouch(point) { return .band }
+        if pointIsInSideBar(point: point) { return .sidebar }
+        if pointIsInPlayArea(point: point) { return .playArea }
+        return .other
     }
     
     private func addTouchEvent(event: UIBrogueTouchEvent) {
