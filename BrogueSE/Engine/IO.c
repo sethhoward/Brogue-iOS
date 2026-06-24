@@ -2192,10 +2192,11 @@ void colorFlash(const color *theColor, unsigned long reqTerrainFlags,
 #define CE_ALERT_FLICKER_FRAMES     6     // idle ticks per on/off half of the '!' flicker (~0.1s at 60Hz)
 #define CE_ALERT_LIFE_FRAMES        (4 * CE_ALERT_FLICKER_FRAMES) // two on/off cycles, then expire
 #define CE_RIPPLE_EXPAND_FRAMES     5     // idle ticks a ripple wavefront holds before expanding one tile (~0.08s)
+#define CE_RIPPLE_IMPACT_EXPAND_FRAMES 9  // iOS port (Brogue SE): impact ripples expand slower so each ring lingers -- the animator only ticks while input-idle, so a slower wavefront is far likelier to land a visible ring in the brief gap before your next step (and reads through a tile flare). Per-kind; other ripples keep the default rate.
 
 static const color cosmeticAlertColor = {100, 18, 18, 0, 0, 0, 0, false}; // reddish '!' -- "there you are!"
 static const color cosmeticNoiseColor = {85, 85, 100, 0, 0, 0, 0, false}; // pale grey -- monster "heard something"
-static const color cosmeticPlayerColor = {35, 60, 100, 0, 0, 0, 0, false}; // cool blue -- the player's own noise
+static const color cosmeticPlayerColor = {12, 38, 67, 0, 0, 0, 0, false}; // cool blue -- the player's own noise (dimmed ~28% so it reads as a subtle footprint, not a beacon)
 static const color cosmeticImpactColor = {100, 85, 30, 0, 0, 0, 0, false}; // warm amber -- an environmental impact (thrown item)
 static const color cosmeticAggravateColor = {100, 25, 20, 0, 0, 0, 0, false}; // hot alarm red -- a level-wide aggravate (alarm trap / aggravate scroll)
 
@@ -2335,7 +2336,10 @@ void cosmeticClearPlayerRipple(void) {
 
 // iOS port (Brogue SE): the environmental-sound impact ripple -- an amber wavefront expanding from `source`
 // along the impact sound map out to `radius`. SINGLETON (latest impact wins): a fresh throw supersedes a
-// stale ripple. Cosmetic; see docs/design/environmental-sounds.md.
+// stale ripple. Rendered brighter (NOISE_IMPACT_RIPPLE_STRENGTH) and slower/longer-lived
+// (CE_RIPPLE_IMPACT_EXPAND_FRAMES) than other ripples so it reads THROUGH a simultaneous tile flare without
+// any start-delay (the animator only ticks while input-idle, so a delayed ripple gets starved by the next
+// step). Cosmetic; see docs/design/environmental-sounds.md.
 void cosmeticSpawnRippleImpact(pos source, short radius) {
     if (radius < 1 || rogue.automationActive || rogue.autoPlayingLevel || rogue.playbackFastForward) {
         return;
@@ -2361,7 +2365,7 @@ void cosmeticSpawnRippleImpact(pos source, short radius) {
     gCosmeticEffects[i].maxRadius = radius;
     gCosmeticEffects[i].channel = &gCosmeticImpactRippleChannel;
     gCosmeticEffects[i].frameAge = 0;
-    gCosmeticEffects[i].frameLife = radius * CE_RIPPLE_EXPAND_FRAMES;
+    gCosmeticEffects[i].frameLife = radius * CE_RIPPLE_IMPACT_EXPAND_FRAMES; // slower expand rate => longer on-screen life
 }
 
 // iOS port (Brogue SE): the level-wide aggravate ripple -- a hot-red box wavefront expanding from `source`
@@ -2602,8 +2606,13 @@ void advanceCosmeticAnimations(void) {
             || e->maxRadius < 1) {
             continue;
         }
-        const short waveR = e->frameAge / CE_RIPPLE_EXPAND_FRAMES + 1; // current wavefront radius
-        const short strength = NOISE_RIPPLE_MAX_STRENGTH * (e->maxRadius - waveR + 1) / e->maxRadius;
+        // iOS port (Brogue SE): impact ripples expand slower and hit brighter than other kinds, so they read
+        // through a simultaneous tile flare in the few frames the input-idle animator gives them.
+        const boolean isImpact = (e->kind == CE_RIPPLE_IMPACT);
+        const short expandFrames = isImpact ? CE_RIPPLE_IMPACT_EXPAND_FRAMES : CE_RIPPLE_EXPAND_FRAMES;
+        const short maxStrength = isImpact ? NOISE_IMPACT_RIPPLE_STRENGTH : NOISE_RIPPLE_MAX_STRENGTH;
+        const short waveR = e->frameAge / expandFrames + 1; // current wavefront radius
+        const short strength = maxStrength * (e->maxRadius - waveR + 1) / e->maxRadius;
         if (e->kind == CE_RIPPLE_MONSTER || e->kind == CE_RIPPLE_AGGRAVATE) { // hollow Chebyshev box (through walls)
             short dx, dy; // hollow Chebyshev wavefront at radius waveR around the monster's cell
             for (dx = -waveR; dx <= waveR; dx++) {

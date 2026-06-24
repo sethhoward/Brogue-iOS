@@ -252,6 +252,13 @@
 #define NOISE_IMPACT_SCALE              4   // effective loudness per +1 tile of radius
 #define NOISE_IMPACT_MIN_RADIUS         1
 #define NOISE_IMPACT_MAX_RADIUS         10  // kept under full earshot (stealthRange*2): draws a room, not the floor
+// iOS port (Brogue SE): a multi-cell wired machine (a cage-room's altars, a portcullis vault) promotes many
+// cells in one turn, each firing an impact noise + a GENERIC_FLASH_LIGHT flare. The per-cell ripples fight
+// over the latest-wins singleton (so a random one survives), so we COALESCE them into ONE ripple at the
+// activation origin (the altar you took from / the cell that powered the machine). See activateMachine. The
+// flare wash is handled by making impact ripples brighter + longer-lived (NOISE_IMPACT_RIPPLE_STRENGTH +
+// CE_RIPPLE_IMPACT_EXPAND_FRAMES), NOT a start-delay -- the animator only ticks while input-idle, so a step
+// followed by another step starves a delayed ripple before it ever appears. Cosmetic (no RNG, nothing saved).
 // Item impact loudness (mass of the thrown thing)
 #define NOISE_IMPACT_PAPER              0   // scroll -- a fluttering sheet of parchment, the quietest throw
 #define NOISE_IMPACT_LIGHT              4   // dart, incendiary dart, food
@@ -285,6 +292,7 @@
 #define NOISE_RIPPLE_RADIUS             3   // tiles a monster "heard something" box radiates out
 #define NOISE_AGGRAVATE_RIPPLE_RADIUS   16  // tiles the level-wide aggravate (alarm trap / aggravate scroll) box radiates -- much larger than any other ripple, so it reads as the loudest event on screen
 #define NOISE_RIPPLE_MAX_STRENGTH       60  // hilite strength of the innermost ring (fades outward)
+#define NOISE_IMPACT_RIPPLE_STRENGTH    82  // iOS port (Brogue SE): impact ripples (trap/altar/machine) hit harder than the default so the amber reads THROUGH a simultaneous tile flare -- the cosmetic animator only ticks while input-idle, so an impact ripple often gets only a few frames before the next step; it has to land bright and fast. Per-kind (see IO.c render) so it doesn't touch the dimmed player ripple.
 // Ripple TIMING + interruption now live in the cosmetic animation layer (IO.c: CE_RIPPLE_*, advanced on the
 // platform idle tick, uninterruptible). The old blocking-pause pre-roll / held-key suppression -- and the
 // platform key-repeat-timing contract it required -- are gone. See docs/guides/cosmetic-animation-layer.md.
@@ -3663,7 +3671,9 @@ extern "C" {
     void cosmeticTickAlertBlinks(void);         // iOS port (Brogue SE): cosmetic layer -- per-turn '!' follow + countdown/expire
     void cosmeticSpawnRippleMonster(pos loc);   // iOS port (Brogue SE): cosmetic layer -- monster "heard something" ripple
     void cosmeticSpawnRipplePlayer(short radius);// iOS port (Brogue SE): cosmetic layer -- player's sound-footprint ripple
-    void cosmeticSpawnRippleImpact(pos source, short radius); // iOS port (Brogue SE): cosmetic layer -- environmental-sound impact ripple
+    void cosmeticSpawnRippleImpact(pos source, short radius); // iOS port (Brogue SE): cosmetic layer -- environmental-sound impact ripple (brighter + longer-lived so it reads through a tile flare)
+    void beginCoalescedImpactRipples(void); // iOS port (Brogue SE): suppress per-cell impact ripples during a multi-cell machine activation
+    void endCoalescedImpactRipples(pos origin); // iOS port (Brogue SE): emit ONE coalesced, flare-delayed impact ripple if any were suppressed
     void cosmeticSpawnRippleAggravate(pos source, short radius); // iOS port (Brogue SE): cosmetic layer -- level-wide aggravate ripple (alarm trap / aggravate scroll)
     void cosmeticRefreshInvestigateBlinks(void); // iOS port (Brogue SE): cosmetic layer -- per-turn '?' blink rebuild
     void advanceCosmeticAnimations(void);   // iOS port (Brogue SE): cosmetic layer -- one tick (from the platform idle loop)
@@ -4095,7 +4105,7 @@ extern "C" {
     boolean revealPolarityOnFieryDestruction(item *theItem); // iOS port (iBrogue): scroll fire-erasure polarity tell
     void captiveReactToPack(creature *freed); // iOS port (iBrogue): freed captive senses a pack item's polarity
     void loneWolfRevealPolarity(void); // iOS port (Brogue SE): Lone Wolf tier-up polarity tell (pure-solo runs only)
-    void activateMachine(short machineNumber);
+    void activateMachine(short machineNumber, pos activationOrigin); // iOS port (Brogue SE): activationOrigin anchors the coalesced impact ripple (the cell that powered the machine)
     boolean circuitBreakersPreventActivation(short machineNumber);
     void promoteTile(short x, short y, enum dungeonLayers layer, boolean useFireDF);
     void autoPlayLevel(boolean fastForward);

@@ -1305,13 +1305,20 @@ static void playerFalls() {
 
 
 
-void activateMachine(short machineNumber) {
+void activateMachine(short machineNumber, pos activationOrigin) {
     short i, j, x, y, layer, sRows[DROWS], sCols[DCOLS], monsterCount, maxMonsters;
 
     fillSequentialList(sCols, DCOLS);
     shuffleList(sCols, DCOLS);
     fillSequentialList(sRows, DROWS);
     shuffleList(sRows, DROWS);
+
+#if NOISE_SYSTEM_ENABLED
+    // iOS port (Brogue SE): the wired-promotion loop below can fire many environmental noises in one turn
+    // (one per cage/portcullis cell), each also flaring. Coalesce their ripples into a single, flare-delayed
+    // one anchored at the activation origin so a random survivor doesn't get washed out by the room-wide flash.
+    beginCoalescedImpactRipples();
+#endif
 
     for (i=0; i<DCOLS; i++) {
         for (j=0; j<DROWS; j++) {
@@ -1331,6 +1338,13 @@ void activateMachine(short machineNumber) {
             }
         }
     }
+
+#if NOISE_SYSTEM_ENABLED
+    // Wired promotions done: emit the one coalesced ripple at the origin, BEFORE the guardian loop so any
+    // per-step guardian footfall ripple below naturally supersedes it (the footfalls are the salient event
+    // in a guardian vault; in a cage room there are no guardians, so this grind ripple is the survivor).
+    endCoalescedImpactRipples(activationOrigin);
+#endif
 
     monsterCount = maxMonsters = 0;
     creature **activatedMonsterList = NULL;
@@ -1420,7 +1434,7 @@ void promoteTile(short x, short y, enum dungeonLayers layer, boolean useFireDF) 
         // and on any such cell, promote each terrain layer that is T_IS_WIRED.
         // Note that machines need not be contiguous.
         pmap[x][y].flags |= IS_POWERED;
-        activateMachine(pmap[x][y].machineNumber); // It lives!!!
+        activateMachine(pmap[x][y].machineNumber, (pos){ x, y }); // It lives!!!  (origin = the cell that powered it)
 
         // Power fades from the map immediately after we finish.
         for (i=0; i<DCOLS; i++) {

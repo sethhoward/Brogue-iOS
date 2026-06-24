@@ -2060,6 +2060,36 @@ static enum monsterHearing checkPlayerHeard(creature *monst) {
     return heard;
 }
 
+// iOS port (Brogue SE): the cost-radius an environmental sound of `strength` reaches (shared by the
+// substantive investigate gate below and the cosmetic ripple's extent).
+static short impactRippleRadius(short strength) {
+    return clamp(NOISE_IMPACT_BASE_RADIUS + strength / NOISE_IMPACT_SCALE,
+                 NOISE_IMPACT_MIN_RADIUS, NOISE_IMPACT_MAX_RADIUS);
+}
+
+// iOS port (Brogue SE): coalescing state for a multi-cell wired machine activation. While `gSuppressImpactRipple`
+// is set (see beginCoalescedImpactRipples), emitEnvironmentalNoise still wakes/diverts monsters per cell but
+// skips the per-cell cosmetic ripple, recording that at least one fired in `gCoalescedImpactRippleFired`.
+// endCoalescedImpactRipples then emits ONE flare-delayed ripple at the activation origin. Cosmetic bookkeeping
+// only; never touches game state or RNG.
+static boolean gSuppressImpactRipple = false;
+static boolean gCoalescedImpactRippleFired = false;
+
+void beginCoalescedImpactRipples(void) {
+    gSuppressImpactRipple = true;
+    gCoalescedImpactRippleFired = false;
+}
+
+void endCoalescedImpactRipples(pos origin) {
+    gSuppressImpactRipple = false;
+    if (gCoalescedImpactRippleFired) {
+        // One clean ripple anchored at the cell that powered the machine (the per-cell ones were suppressed).
+        // It reads through the room-wide flare via the impact ripple's brighter/slower render, not a delay.
+        recomputeImpactSoundMap(origin);
+        cosmeticSpawnRippleImpact(origin, impactRippleRadius(NOISE_ALTAR_GRIND));
+    }
+}
+
 // iOS port (Brogue SE): emit an environmental sound of `strength` at `source` (a thrown item's impact, a
 // sprung trap, ...). GUARANTEED -- every eligible non-hunting enemy within the strength-derived cost-radius
 // investigates the source cell, NO hear roll, so a distraction reliably draws monsters (the skill is in
@@ -2067,8 +2097,7 @@ static enum monsterHearing checkPlayerHeard(creature *monst) {
 // investigator off a loud impact; hunters aren't diverted (design principle #3). Spawns the singleton
 // impact ripple. SUBSTANTIVE (changes monster state). See docs/design/environmental-sounds.md.
 void emitEnvironmentalNoise(pos source, short strength, item *sourceItem) {
-    const short radius = clamp(NOISE_IMPACT_BASE_RADIUS + strength / NOISE_IMPACT_SCALE,
-                               NOISE_IMPACT_MIN_RADIUS, NOISE_IMPACT_MAX_RADIUS);
+    const short radius = impactRippleRadius(strength);
     (void)sourceItem; // consume-on-arrival keys on the item's ITEM_THROWN_DISTRACTION tag (set by the thrower)
     recomputeImpactSoundMap(source);
     for (creatureIterator it = iterateCreatures(monsters); hasNextCreature(it);) {
@@ -2103,7 +2132,11 @@ void emitEnvironmentalNoise(pos source, short strength, item *sourceItem) {
             noiseDetectionHaptic(0);
         }
     }
-    cosmeticSpawnRippleImpact(source, radius);
+    if (gSuppressImpactRipple) {
+        gCoalescedImpactRippleFired = true; // a real noise fired during a machine activation; one ripple is emitted at the end
+    } else {
+        cosmeticSpawnRippleImpact(source, radius); // a trap click, a thrown impact, or a single-cell promotion
+    }
 }
 
 // iOS port (Brogue SE): Phase 2 feel/test aid -- if the player made noise this turn and a VISIBLE,

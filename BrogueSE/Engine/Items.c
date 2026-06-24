@@ -1370,7 +1370,7 @@ void updateFloorItems() {
             if (!circuitBreakersPreventActivation(pmap[x][y].machineNumber)
                 && swapItemEnchants(pmap[x][y].machineNumber)) {
 
-                activateMachine(pmap[x][y].machineNumber);
+                activateMachine(pmap[x][y].machineNumber, (pos){ x, y });
             }
         }
 
@@ -1389,7 +1389,7 @@ void updateFloorItems() {
             if (!circuitBreakersPreventActivation(pmap[x][y].machineNumber)
                 && performInsightSacrifice(pmap[x][y].machineNumber)) {
 
-                activateMachine(pmap[x][y].machineNumber);
+                activateMachine(pmap[x][y].machineNumber, (pos){ x, y });
             }
         }
 
@@ -1408,7 +1408,7 @@ void updateFloorItems() {
             if (!circuitBreakersPreventActivation(pmap[x][y].machineNumber)
                 && performEnchantTransfer(pmap[x][y].machineNumber)) {
 
-                activateMachine(pmap[x][y].machineNumber);
+                activateMachine(pmap[x][y].machineNumber, (pos){ x, y });
             }
         }
     }

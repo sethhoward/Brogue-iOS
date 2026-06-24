@@ -32,6 +32,47 @@ See `BrogueCE/Engine/IOS_MODIFICATIONS.md` (faithful CE) and
 
 ## Change log
 
+### 2026-06-23 — Noise system: coalesce a multi-cell machine's impact ripples into one (flare-delayed)
+
+**Symptom.** Taking an item from a cage/commutation room ("the cages lower to cover the altars.") showed the
+room flash but **no impact ripple** — even though the noise was emitted and nearby monsters were diverted.
+
+**Root cause.** A cage room is a **wired machine**: removing the item runs `checkForMissingKeys` →
+`promoteTile` → `activateMachine`, which promotes every linked altar **in shuffled order** (`Time.c`), each
+calling `emitEnvironmentalNoise` → `cosmeticSpawnRippleImpact`. That ripple is a **latest-wins singleton**, so
+the N per-altar spawns collapse to one survivor at a *random* altar (never the one you took from), and every
+altar's simultaneous `GENERIC_FLASH_LIGHT` flare **washes the lone faint pulse out**. A sprung trap "worked"
+only because it's a single emit at the player's own cell with one local flare. There was **never an earshot
+gate** on environmental ripples — the spawn is unconditional — so this was a collapse/masking bug, not a gate.
+
+**Fix (coalesce + de-mask).**
+- `Monsters.c` — `beginCoalescedImpactRipples()` / `endCoalescedImpactRipples(origin)` bracket. While active,
+  `emitEnvironmentalNoise` still wakes/diverts monsters per cell (substantive, untouched) but **suppresses the
+  per-cell cosmetic ripple**, recording that one fired. `end…` emits **one** ripple at the activation origin.
+  Extracted `impactRippleRadius(strength)` (shared by the investigate gate and the ripple).
+- `Time.c` — `activateMachine` gains a `pos activationOrigin` param; it brackets only the **wired-promotion
+  loop** (guardian-step ripples after it keep their per-step booms — the coalesced ripple is emitted *before*
+  the guardian loop so a footfall naturally supersedes it). Callers (`Items.c` ×3 commutation/insight/transfer,
+  `Time.c` ×1) pass the cell that powered the machine — i.e. **the altar you took the item from**.
+- `IO.c` — impact ripples (`CE_RIPPLE_IMPACT`) render **brighter** (`NOISE_IMPACT_RIPPLE_STRENGTH = 82` vs the
+  default 60) and **slower / longer-lived** (`CE_RIPPLE_IMPACT_EXPAND_FRAMES = 9` vs 5) than other ripple kinds,
+  so the amber reads **through** a simultaneous tile flare. Per-kind in the render, so it doesn't touch the
+  (dimmed) player ripple or re-brighten via the shared `NOISE_RIPPLE_MAX_STRENGTH` lever.
+
+**Why brighter/slower and not a start-delay.** A first cut held the coalesced ripple ~0.2s to wait out the
+flare's bright phase. That worked when stationary (item pickup) but **failed on walk-off**: the cosmetic
+animator only ticks while the engine is parked in the input-idle loop (`SEBridge.mm` — `advanceCosmeticAnimations`
+beside `shuffleTerrainColors`), so a step followed by another step gives the ripple only a few frames and the
+delay ate the whole visible window — you saw a brief flash or nothing. The fix instead makes the ripple land
+bright and linger, so it registers in the handful of idle frames you get between steps. No delay anywhere.
+
+**Scope.** Coalesce fixes the whole class of multi-cell wired noise-machines (cage/commutation/insight/transfer
+altars, `PORTCULLIS_CLOSED` vaults, future `DFF_EMITS_NOISE` machines); the brighter/slower render applies to
+**all** impact ripples (traps, throws, machines) — a modest, intentional bump.
+
+**Determinism / saves.** Cosmetic only — deterministic origin, fixed-constant delay, no RNG, nothing recorded;
+zero save/replay impact. All edits marked `// iOS port (Brogue SE):`, machine brackets `#if NOISE_SYSTEM_ENABLED`.
+
 ### 2026-06-23 — Noise system: wake tells & player ripple survive multi-step travel / auto-explore
 
 **What.** Multi-step travel (`travelMap`/`travelRoute` — the click/tap-to-path move) and auto-explore
