@@ -1184,6 +1184,42 @@ void processStaggerHit(creature *attacker, creature *defender) {
     }
 }
 
+// iOS port (Brogue SE): noise system -- how loud a PLAYER melee swing is. A per-weapon mass/finesse
+// tier (the spike passed to playerEmitNoise, stacked on playerNoiseLevel()'s armor/terrain/ring base)
+// plus a miss penalty: a clean connect is a muffled thud, a whiff rings out ("accuracy = stealth",
+// mirroring itemImpactLoudness's BODY-vs-WALL surface tiers for throws). Pure function of weapon KIND
+// (enchant/runic irrelevant) -> RNG-silent and save-safe. Tier values + the miss penalty are the
+// tuning levers in Rogue.h (NOISE_MELEE_*). See docs/design/noise-system.md "Phase 2".
+static short weaponMeleeLoudness(const item *weapon, boolean connected) {
+    short loudness;
+    if (weapon == NULL) {
+        loudness = NOISE_MELEE_LIGHT;            // bare fists/claws -- quiet
+    } else {
+        switch (weapon->kind) {
+            case DAGGER:
+            case RAPIER:
+            case WHIP:
+                loudness = NOISE_MELEE_LIGHT;     // finesse / light blades -- the assassin's tier
+                break;
+            case SWORD:
+            case AXE:
+            case SPEAR:
+                loudness = NOISE_MELEE_NORMAL;    // ordinary one-handers
+                break;
+            case HAMMER:
+                loudness = NOISE_MELEE_BOOMING;   // war hammer -- wakes the floor
+                break;
+            default:
+                loudness = NOISE_MELEE_HEAVY;     // broadsword/flail/mace/war axe/war pike -- two-handed heft
+                break;
+        }
+    }
+    if (!connected) {
+        loudness += NOISE_MELEE_MISS_PENALTY;     // a whiff/clang betrays you
+    }
+    return loudness;
+}
+
 // returns whether the attack hit
 boolean attack(creature *attacker, creature *defender, boolean lungeAttack) {
     short damage, specialDamage, poisonDamage;
@@ -1264,7 +1300,28 @@ boolean attack(creature *attacker, creature *defender, boolean lungeAttack) {
         return false;
     }
 
-    if (sneakAttack || defenderWasAsleep || defenderWasParalyzed || lungeAttack || attackHit(attacker, defender)) {
+    if (sightUnseen) {
+        // iOS port (Brogue SE): noise system -- off-screen combat the player can only "hear" (the
+        // "you hear combat in the distance" / "...die in combat" messages) gets a cosmetic sound ripple
+        // so the player can locate the fight. Fires on EVERY off-screen exchange (hit, miss, or kill),
+        // unlike the once-per-turn message throttle, and radiates from the MONSTER -- not the ally/player
+        // landing the blow (the ally is the listener's "side"; the enemy is what we're locating). Cosmetic
+        // and RNG-silent; same-cell merge keeps repeated swings from stacking. See docs/design/noise-system.md.
+        creature *noiseSource = (attacker == &player || attacker->creatureState == MONSTER_ALLY) ? defender : attacker;
+        cosmeticSpawnRippleMonster(noiseSource->loc);
+    }
+
+    boolean attackLanded = (sneakAttack || defenderWasAsleep || defenderWasParalyzed || lungeAttack || attackHit(attacker, defender));
+
+    if (attacker == &player) {
+        // iOS port (Brogue SE): noise system -- emit the player's melee loudness AFTER the hit/miss roll
+        // (not at the top of the function as before), so a clean connect is a muffled per-weapon thud
+        // while a whiff adds NOISE_MELEE_MISS_PENALTY and rings out. Auto-hits (sneak/asleep/paralyzed/
+        // lunge) count as connected -> stay quiet, rewarding the assassin path. See weaponMeleeLoudness().
+        playerEmitNoise(weaponMeleeLoudness(rogue.weapon, attackLanded));
+    }
+
+    if (attackLanded) {
         // If the attack hit:
         damage = (defender->info.flags & (MONST_IMMUNE_TO_WEAPONS | MONST_INVULNERABLE)
                   ? 0 : randClump(attacker->info.damage) * monsterDamageAdjustmentAmount(attacker) / FP_FACTOR);
@@ -1365,16 +1422,23 @@ boolean attack(creature *attacker, creature *defender, boolean lungeAttack) {
                 rogue.featRecord[FEAT_DRAGONSLAYER] = true;
             }
         } else { // if the defender survived
-            if (!rogue.blockCombatText && (canSeeMonster(attacker) || canSeeMonster(defender))) {
-                attackVerb(verb, attacker, max(damage - (attacker->info.damage.lowerBound * monsterDamageAdjustmentAmount(attacker) / FP_FACTOR), 0) * 100
-                           / max(1, (attacker->info.damage.upperBound - attacker->info.damage.lowerBound) * monsterDamageAdjustmentAmount(attacker) / FP_FACTOR));
-                sprintf(buf, "%s %s %s%s", attackerName, verb, defenderName, explicationClause);
+            // iOS port (Brogue SE): noise system -- the survive-hit "you hear combat in the distance" tell
+            // was upstream dead code. Its `if (sightUnseen)` sat inside an outer
+            // `(canSeeMonster(attacker) || canSeeMonster(defender))` guard -- the logical negation of
+            // `sightUnseen` -- so an off-screen NON-FATAL hit produced no message at all (only misses and
+            // kills were audible). Branch on `sightUnseen` first, as the miss/kill sites already do, so an
+            // unseen landed blow is heard; the visible verb message keeps its own visibility guard (where it
+            // belongs). See docs/design/noise-system.md.
+            if (!rogue.blockCombatText) {
                 if (sightUnseen) {
                     if (!rogue.heardCombatThisTurn) {
                         rogue.heardCombatThisTurn = true;
                         combatMessage("you hear combat in the distance", 0);
                     }
-                } else {
+                } else if (canSeeMonster(attacker) || canSeeMonster(defender)) {
+                    attackVerb(verb, attacker, max(damage - (attacker->info.damage.lowerBound * monsterDamageAdjustmentAmount(attacker) / FP_FACTOR), 0) * 100
+                               / max(1, (attacker->info.damage.upperBound - attacker->info.damage.lowerBound) * monsterDamageAdjustmentAmount(attacker) / FP_FACTOR));
+                    sprintf(buf, "%s %s %s%s", attackerName, verb, defenderName, explicationClause);
                     combatMessage(buf, messageColorFromVictim(defender));
                 }
             }

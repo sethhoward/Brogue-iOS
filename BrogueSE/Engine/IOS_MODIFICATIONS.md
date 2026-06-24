@@ -32,6 +32,443 @@ See `BrogueCE/Engine/IOS_MODIFICATIONS.md` (faithful CE) and
 
 ## Change log
 
+### 2026-06-22 — Noise system: the aggravate channel now ripples (alarm trap / aggravate scroll)
+
+**What.** `aggravateMonsters` — the alarm trap (`DFF_AGGRAVATES_MONSTERS`) and the scroll of aggravate
+monsters — was the one "sound" event with no visual tell: it woke the whole level but drew no ripple. It now
+spawns a new, distinct **aggravate ripple**: a hot-red Chebyshev box (through walls, befitting a sound that
+"echoes throughout the dungeon"), radius `NOISE_AGGRAVATE_RIPPLE_RADIUS = 16` — much larger than any other
+ripple, so it reads as the loudest thing on screen — plus the pronounced haptic. Fires regardless of line of
+sight (it's level-wide).
+
+**Why.** Closing the last gap in "every sound generates an animation." Audit found all localized emitters
+already ripple through `emitEnvironmentalNoise` → `cosmeticSpawnRippleImpact`; only the level-wide aggravate
+channel was silent visually.
+
+**Where.**
+- `IO.c` — new `CE_RIPPLE_AGGRAVATE` cosmetic kind + `cosmeticAggravateColor` (hot alarm red) +
+  `cosmeticSpawnRippleAggravate(source, radius)` (singleton, latest-wins). Render path groups it with the
+  monster ripple's hollow-box branch (no sound-map dependency, so no collision with the impact ripple's
+  shared `gImpactSoundMap`).
+- `Rogue.h` — `NOISE_AGGRAVATE_RIPPLE_RADIUS` constant; `cosmeticSpawnRippleAggravate` declaration.
+- `Items.c` — `aggravateMonsters` spawns the ripple + pronounced haptic at the source, after its existing
+  flash/alert work, gated `#if NOISE_SYSTEM_ENABLED`. It deliberately does NOT route through
+  `emitEnvironmentalNoise` (aggravateMonsters already did the far stronger level-wide wake itself); this only
+  adds the cosmetic tell.
+
+**Determinism / saves.** Cosmetic only (no RNG, no state); the spawn self-suppresses during
+automation/fast-forward replay, the haptic during playback. Determinism/recordings unaffected.
+
+### 2026-06-22 — Noise system: the vault portcullis seal + lever pulls now sound
+
+**What.** Tagged two more vault-machinery DF rows with `DFF_EMITS_NOISE` (Globals.c):
+- `PORTCULLIS_CLOSED` — a treasure/key vault sealing itself ("with a heavy mechanical sound, an iron
+  portcullis falls from the ceiling!") now actually emits, so the seal is heard like the altar cages.
+- `DF_PULL_LEVER` (`WALL_LEVER_PULLED`) — pulling a lever now clunks (heavy machinery), heard like the rest
+  of the vault. Previously silent.
+
+Both route through the shared `spawnDungeonFeature` emit path (`NOISE_ALTAR_GRIND` strength → ripple +
+pronounced haptic + nearby monsters investigate).
+
+**Why.** The altar cage lowering over the un-chosen items (`DF_ITEM_CAGE_CLOSE` / `ALTAR_CAGE_CLOSED`) was
+already tagged (2026-06-21), but the portcullis seal and the lever pull — the other two mechanical events in
+those rooms — were silent. Now operating any vault machinery is audible.
+
+**Where.** `Globals.c` `PORTCULLIS_CLOSED` and `WALL_LEVER_PULLED` (DF_PULL_LEVER) rows (added
+`DFF_EMITS_NOISE`); `Architect.c` comment on the `DFF_EMITS_NOISE` emit updated to list both. No new
+constant — reuses the existing grind loudness. Determinism unchanged (no RNG; haptic self-suppresses in
+playback).
+
+### 2026-06-22 — Debug exploration-stats CSV (Lone Wolf / xpxp calibration)
+
+**What.** A second debug calibration CSV, modeled exactly on the rest-stats CSV: at the end of each finished
+live run, emit one row to `Documents/se/exploration-stats.csv` capturing, per dungeon level, the
+**full-exploration xpxp ceiling** (count of passable, non-`T_PATHING_BLOCKER` cells — the exact gate
+`discoverCell` uses to award xpxp) and the **xpxp the player actually accrued** there. Summary columns
+include `levels_visited`, `passable_total`, `xpxp_earned_total`, and `passable_mean_per_level` — the figure
+that calibrates `LONE_WOLF_XP_PER_TIER`. Per-level columns `p{d}` (ceiling) and `x{d}` (realized).
+
+**Why.** We bumped the Lone Wolf cap to 5 tiers (1500 xpxp each) off an *estimated* ~750–900 floor cells per
+level. This measures the real distribution across many seeds so the tier cost can be retuned against data
+instead of a guess.
+
+**Where (engine).**
+- `Rogue.h` — two `levelData` fields: `passableCellsOnLevel`, `xpxpEarnedOnLevel`.
+- `RogueMain.c` — zero both in the per-level reset loop (same stale-carry reason as the rest tallies); count
+  passable cells once on a level's first visit (after the 50-turn environment break-in, so flooding/gas has
+  settled); new `recordExplorationStatsRow()` built/emitted at the two run-end sites beside
+  `recordRestStatsRow()`; `extern void seRecordExplorationStats(...)`.
+- `Time.c` — accumulate realized xpxp per level in `handleXPXP` (before `xpxpThisTurn` is zeroed).
+- **Indexing gotcha:** the debug tallies use `levels[depthLevel]` (1-indexed; depth d → `levels[d]`), the
+  same convention as `restTurnsOnLevel` — NOT the 0-indexed `levels[depthLevel-1]` used by map storage and
+  the `visited` flag. The CSV reader uses `passableCellsOnLevel > 0` as the "explored this depth" test to
+  stay on the 1-indexed side and avoid crossing into the 0-indexed `visited`.
+
+**Where (host).** `SEBridge.mm` — refactored the rest-stats writer into a shared `seAppendCsvRow(fileName,
+header, row)`; `seRecordRestStats` and the new `seRecordExplorationStats` are thin wrappers. Both gated to
+Debug builds (`SE_DEBUG_BUILD`) — in Release they are no-ops, so **nothing is collected on shipping builds**.
+
+**Determinism / saves.** Output-only: no RNG, no game-state mutation. The per-level counting is deterministic
+(replays identically); skipped during playback. Pull the file via Xcode > Devices & Simulators > Download
+Container → `AppData/Documents/se/exploration-stats.csv`.
+
+### 2026-06-22 — Lone Wolf scales to 5 tiers (was 2)
+
+**What.** Raised the Lone Wolf solo-progression cap from 2 tiers to 5. Each tier still costs the same solo
+exploration XPXP (`LONE_WOLF_XP_PER_TIER = 1500`, so tier N at N×1500; tier 5 at 7500 ≈ ten levels of solo
+exploration) and grants +1 effective strength, so the aura now tops out at **+5** instead of +2.
+
+**Why.** Solo play (no allies) is much harder than running with a pack; Lone Wolf is the compensation, and
++2 wasn't enough at depth. The counter-pressure stays intact (design principle #3): the bonus accrues only
+while you have *zero* living allies anywhere, so it's a genuine trade — forgo allies (very strong) for raw
+strength — not a free upgrade.
+
+**Where (engine).**
+- `Rogue.h` — replaced the per-tier `LONE_WOLF_TIER1_XP`/`LONE_WOLF_TIER2_XP` defines with a single
+  `LONE_WOLF_XP_PER_TIER`; `LONE_WOLF_MAX_TIER` 2 → 5. Updated the `playerCharacter` field comment.
+- `Time.c` — `handleLoneWolf()` now derives the tier as `loneWolfXP / LONE_WOLF_XP_PER_TIER` (clamped to the
+  cap) instead of hard-coded tier-1/tier-2 thresholds, and pulls the tier-up flavor line from a small
+  `loneWolfTierMessages[]` table (I–V). Strength still set via `setLoneWolfStrengthBonus(tier)`.
+
+**Determinism / saves.** Unchanged from the original feature: the tier is recomputed from `loneWolfXP` every
+turn (which itself comes only from deterministic exploration counts), so it replays/reloads identically.
+Gaining any ally still zeroes the *entire* track and strips the aura (`loseLoneWolfBonusOnAlly`, fired from
+`becomeAllyWith`); re-grindable from zero once that ally dies. **Design note:** that full all-or-nothing
+reset — now wiping up to +5 earned over a long solo grind on a single ally pickup — is flagged as a possible
+balance flaw to revisit (see `KNOWN_CAVEATS.md`). All edits marked `// iOS port (Brogue SE):`.
+
+### 2026-06-22 — Noise system: stone guardians boom when a glyph steps them
+
+**What.** Each guardian that actually changes cells on a glyph activation now emits a loud environmental
+noise (`NOISE_GUARDIAN_STEP = 20`, radius ~7) from the cell it lands on, plus a pronounced iPhone haptic.
+The guardian-puzzle key room (guide the totems onto the trap to free the key) is now an audible event that
+draws nearby wanderers toward the commotion.
+
+**Why.** Shoving massive stone totems around to solve the puzzle should be heard — a design-principle-#3
+counter-pressure: the reward room becomes tenser (you may attract company), not free. It reuses the existing
+`emitEnvironmentalNoise` channel, so it also paints the standard impact ripple (a "boom" animation) and the
+guaranteed-investigate behavior, consistent with traps/altars.
+
+**Where (engine).**
+- `Rogue.h` — new `NOISE_GUARDIAN_STEP` constant (louder than `NOISE_ALTAR_GRIND`, since it's a booming
+  footfall; still under the whole-floor `MAX_RADIUS`).
+- `Time.c` — `activateMachine()` snapshots each activation-monster's `loc` before its `monstersTurn`, and on
+  any real move emits `emitEnvironmentalNoise(landingCell, NOISE_GUARDIAN_STEP, NULL)` + `environmentalNoiseHaptic(1)`.
+  No per-kind branch: `MONST_IMMOBILE` mirror totems never move, so only stone/winged guardians boom; the
+  climactic fatal step onto a trap still booms (the dying guardian isn't freed until `removeDeadMonsters`, so
+  its `loc` is valid).
+
+**Determinism / saves.** `emitEnvironmentalNoise` draws no RNG (guaranteed-investigate radius), and guardian
+activation is player-driven (stepping on a wired glyph), so replays are unaffected. The haptic self-suppresses
+during playback/automation. All edits marked `// iOS port (Brogue SE):` and gated by `#if NOISE_SYSTEM_ENABLED`.
+
+### 2026-06-22 — Noise system: menu toggle for the player's own sound ripple; drop the sound-map debug overlay
+
+**What.** Two paired menu changes in the in-game `\`-menu (under "Display stealth range"):
+- **Added** a "Player sound animation" toggle (`[X]` = on, **on by default**) that suppresses *only* the
+  player's own sound-footprint ripple. Every other noise animation — monster ripples, thrown-impact / trap /
+  altar ripples, the `?` investigate and `!` alert blinks — is unaffected.
+- **Removed** the developer "Display sound map" heat-overlay option entirely (button, key handler, the
+  per-cell render block in `IO.c`, the `displaySoundMapMode` field, and its playback save/restore).
+
+**Why.** The footprint ripple began as a feel/test aid but reads as noisy clutter to some players, so it
+now has an off switch while staying on by default. The sound-map overlay was a pure debug visualizer with no
+player value, so its menu entry was dropped rather than left permanently unreachable.
+
+**Where (engine).**
+- `Rogue.h` — `SOUND_MAP_KEY` renamed to `PLAYER_NOISE_ANIM_KEY` (still `'['`, the freed key); new
+  `rogue.hidePlayerNoiseRipple` field (replaces `displaySoundMapMode`; `0` = shown, so zero-init = on);
+  dropped the `SOUND_MAP_KEY` mention in the noise-falloff comment.
+- `IO.c` — menu button + `case` reworked to the new toggle (no `displayLevel()` repaint needed — the ripple
+  is an event animation, not a persistent overlay); deleted the `displaySoundMapMode` render overlay.
+- `Monsters.c` — `recordPlayerNoiseRippleIfNeeded()` early-returns when `hidePlayerNoiseRipple` is set.
+- `RogueMain.c` — `initializeRogue()` carries `hidePlayerNoiseRipple` across the struct memset, so the
+  choice is sticky within the app session (matching `trueColorMode` / `displayStealthRangeMode`).
+- `Recordings.c` — `resetPlayback()` preserves `hidePlayerNoiseRipple` instead of the removed `soundMap`.
+
+**Determinism / saves.** Purely cosmetic display preference; non-recorded (carried, not serialized). No RNG,
+no replay impact. All edits marked `// iOS port (Brogue SE):` and gated by `#if NOISE_SYSTEM_ENABLED`.
+
+### 2026-06-21 — Noise system: traps click and altars grind (two new environmental emitters + iPhone haptics)
+
+**What.** Two new world-event sounds on the existing `emitEnvironmentalNoise` channel (guaranteed-investigate
+radius, no hear roll), each with an iPhone haptic:
+- **Trap click** — a sprung pressure plate emits a soft noise (`NOISE_TRAP_CLICK = 6`, radius ~3) so nearby
+  unaware enemies investigate the trap tile. The **alarm trap is skipped** (its `fireType` is
+  `DF_AGGRAVATE_TRAP`, which already broadcasts a level-wide aggravate — a soft local click on top is
+  redundant). A **gentle** haptic fires only when the **player** personally springs the trap.
+- **Altar grind** — reward-room machinery sealing shut emits a louder noise (`NOISE_ALTAR_GRIND = 15`,
+  radius ~5), drawing wanderers toward the altar. A **pronounced** haptic (heavy thud + a short second tap)
+  fires on every grind.
+
+**Why.** Principle #3 counter-pressure: setting off a trap or triggering an altar now *costs* you by pulling
+nearby monsters to the spot, rather than being silent/free. Reuses the existing primitive (principle #2)
+rather than bespoke code. The trap click is deliberately quieter than a thrown dart so it can't become a free
+monster-luring tool. The haptics are a distinct channel from the detection haptic ("something heard *you*").
+
+**Where (engine).**
+- `Rogue.h` — new levers `NOISE_TRAP_CLICK` / `NOISE_ALTAR_GRIND` (in the `NOISE_*` block); new
+  `DFF_EMITS_NOISE = Fl(11)` dungeon-feature flag; declaration of `environmentalNoiseHaptic()`.
+- `Time.c` (`handleCreatureTerrainInteraction`, pressure-plate block) — emits `NOISE_TRAP_CLICK` for all
+  traps except the alarm trap (detected by `fireType == DF_AGGRAVATE_TRAP` *before* the promotion loop
+  mutates the tile); gentle haptic gated to `monst == &player`.
+- `Architect.c` (`spawnDungeonFeature`, `if (succeeded)` block) — mirrors the `DFF_AGGRAVATES_MONSTERS`
+  handler: when a DF has `DFF_EMITS_NOISE`, emit `NOISE_ALTAR_GRIND` at the origin + the pronounced haptic.
+- `Globals.c` (`dungeonFeatureCatalog`) — tagged the 7 close-and-seal DF rows with `DFF_EMITS_NOISE`:
+  `DF_ITEM_CAGE_CLOSE`, `DF_ALTAR_RETRACT`, `DF_ALTAR_COMMUTE`, `DF_ALTAR_RESURRECT`, `DF_SACRIFICE_COMPLETE`,
+  and SE's `DF_ALTAR_INSIGHT_INERT` / `DF_ALTAR_TRANSFER_INERT`.
+- `Monsters.c` — `environmentalNoiseHaptic()` wrapper (extern `cePlayEnvironmentalNoiseHaptic`), same
+  playback/automation suppression as `noiseDetectionHaptic`. All marked `// iOS port (Brogue SE):` and gated
+  by `#if NOISE_SYSTEM_ENABLED` (matching `emitEnvironmentalNoise`'s own guard).
+
+**Where (bridge/platform).** New host hook `cePlayEnvironmentalNoiseHaptic(int kind)` in `SEBridge.mm` →
+`playEnvironmentalNoiseHaptic:` on `BrogueCEHost` (`BrogueCE/BrogueCEHost.h`, SE-only, like the detection
+haptic) → `CEHost.swift` → `environmentalNoiseHaptic(_:)` in `BrogueViewController.swift` (dedicated
+`.light`/`.heavy` generators + `Haptics` constants; iPhone-only; respects the haptics setting; warmed in
+`prepareDamageHaptics`).
+
+**Determinism.** `emitEnvironmentalNoise` draws no RNG (a deterministic radius gate sets `MB_INVESTIGATING`);
+the haptics/ripples are cosmetic and self-suppress during playback/automation. Saves/replays unaffected. See
+`docs/game-data/PERCEPTION_AUDIT.md` §7.
+
+### 2026-06-21 — Noise system: per-weapon melee loudness (replaces the flat melee spike)
+
+**What.** Player melee noise was a single flat spike (`NOISE_PLAYER_MELEE` = 30, always aggro-tier).
+It is now a **per-weapon tier** returned by a new `weaponMeleeLoudness(weapon, connected)` lookup
+(`Combat.c`, a `switch (weapon->kind)` mirroring the existing thrown-item `itemImpactLoudness()`):
+
+| Tier | Spike | Weapons |
+|---|---|---|
+| `NOISE_MELEE_LIGHT` | 12 | dagger, rapier, whip, **unarmed** (`weapon == NULL`) |
+| `NOISE_MELEE_NORMAL` | 22 | sword, axe, spear |
+| `NOISE_MELEE_HEAVY` | 32 | broadsword, flail, mace, war axe, war pike |
+| `NOISE_MELEE_BOOMING` | 45 | war hammer |
+
+Only **LIGHT (12)** sits below the aggro threshold (`NOISE_HEAR_AGGRO_LOUDNESS` = 20), so a clean
+LIGHT-weapon hit reaches unseen *bystanders* only as a *faint* "investigate" ping, not full aggro —
+the dagger/rapier/whip/unarmed become a genuine stealth-kill tool. A **miss** adds
+`NOISE_MELEE_MISS_PENALTY` (+10), so a LIGHT whiff (22) crosses back to aggro — *accuracy = stealth*,
+the same philosophy as `itemImpactLoudness`'s BODY-vs-WALL surface tiers. Auto-hits
+(sneak/asleep/paralyzed/lunge) count as connected → stay quiet, rewarding the assassin path; this is the
+design-principle-3 counter-pressure on the quiet-dagger build. Noise is a pure function of weapon
+**kind** (enchant/runic irrelevant). The base loudness (`playerNoiseLevel()`: armor clatter, terrain,
+levitation, ring of stealth) still rides underneath, so heavy armor can push even a LIGHT weapon over the
+aggro line on a hit (*you can't stealth-dagger in plate* — intended).
+
+**Where.** `Rogue.h` — removed `NOISE_PLAYER_MELEE`; added `NOISE_MELEE_LIGHT/NORMAL/HEAVY/BOOMING` +
+`NOISE_MELEE_MISS_PENALTY` (the five tuning levers). `Combat.c` — new `weaponMeleeLoudness()`; in
+`attack()` the `playerEmitNoise(...)` call **moved from the top of the function to just after the
+hit/miss roll** (so it can branch on connect vs. whiff) and the roll is captured once into `attackLanded`
+to avoid double-rolling `attackHit()`. `Monsters.c` — comment on `playerEmitNoise` updated.
+
+**Determinism.** Pure function of weapon kind + the pre-existing substantive `attackHit` roll — no new
+RNG, save/replay-safe. SE-only gameplay; gated by `NOISE_SYSTEM_ENABLED`. Marked in-code with
+`// iOS port (Brogue SE):`. Docs: `PERCEPTION_AUDIT.md` §3.2.1/§3.2.3/§7, `ITEMS_AUDIT.md` §1 (Noise
+column), `docs/design/noise-system.md` Phase 2.
+
+### 2026-06-21 — Re-apply last staff (`A` in the Modern scheme; apply-side mirror of rethrow)
+
+**What.** A new command re-applies the **last staff zapped** — the apply-side mirror of `T`
+rethrow. It is bound to a dedicated canonical key `REAPPLY_KEY` (`128+20`, private range beside
+`UNKNOWN_KEY`). Under the **Modern** keyboard scheme, physical `A` remaps to it (displacing
+autopilot, which becomes keyless in Modern); under **Classic**, `A` stays `AUTOPLAY_KEY`. It also
+appears as a bindable iOS shortcut button ("Re-apply staff", SE-only). It tracks **staves only**
+(never wands/charms) and **never auto-targets** — it routes through `apply()` → `useStaffOrWand()`,
+which always shows the interactive "Direction?" aim prompt, so target choice stays the player's.
+
+**Why.** Re-zapping a staff every turn in a fight is a common rhythm (staves recharge), and the only
+prior `A` binding — autopilot — is low-value on a touch device. Wands are excluded by design (finite
+charges, no recharge: a re-zap hotkey would just burn a scarce resource). A *dedicated* key rather
+than reusing `'A'` keeps the iOS button scheme-independent (the button sends `REAPPLY_KEY` raw,
+bypassing `applyKeyboardScheme`, so it means re-apply in every scheme) and keeps recordings
+scheme-independent (the canonical `REAPPLY_KEY` is recorded, never `'A'` — see
+`docs/design/keyboard-schemes.md`).
+
+**Edge cases (mirroring rethrow).** If the remembered staff was never set, was dropped, or was
+stolen (`!itemIsCarried`), `A` falls through to the normal `apply(NULL)` prompt instead of no-opping.
+An empty-but-carried remembered staff is left to `useStaffOrWand()`'s existing "no charges" message.
+
+**Determinism.** `rogue.lastStaffZapped` is set inside `useStaffOrWand()` on the confirmed-zap path
+(`STAFF`-guarded, so zapping a wand never overwrites it), including a fizzle (an unidentified 0-charge
+staff still reaches that point). It is set on the same input path every replay, so saves/recordings
+stay in sync.
+
+**Where.**
+- `Rogue.h` — `REAPPLY_KEY` `#define`; `item *lastStaffZapped` on the `rogue` struct.
+- `Items.c` — `useStaffOrWand()` records `rogue.lastStaffZapped` after `confirmedTarget`.
+- `IO.c` — `applyKeyboardScheme()` Modern maps `A → REAPPLY_KEY`; `executeKeystroke()` gains a
+  `REAPPLY_KEY` case; `actionMenu()`'s `A` entry is scheme-conditional (Re-apply staff vs Autopilot);
+  `printHelpScreen()`'s `modernHelp` `A` line now reads re-apply.
+- `iBrogue_iPad/PlatformCode/BrogueViewController.swift` — `Command.seOnly` flag + filter; catalog
+  entry + `wand.and.rays` symbol for the re-apply key.
+
+### 2026-06-21 — Ring of wisdom speeds up auto-identification of worn armor & rings
+
+**What.** A worn **ring of wisdom** now makes worn **armor** and **rings** auto-identify-by-use faster — ~10%
+faster per net enchant level, capped at +50% (2× speed). A *cursed* wisdom ring slows it instead, down to
+−100% (2× slower), mirroring how cursed wisdom already slows rest-insight and staff recharge. **Weapons are
+out of scope** (their auto-ID is the per-kill timer, left at vanilla 20 kills).
+
+**Why.** Ring of wisdom is the staff/identification amplifier ring; speeding gear familiarization is a natural
+extension of its "arcane insight" identity and pairs with the existing wisdom levers (rest-insight threshold,
+detect-magic count, staff recharge). The cap keeps a deep ring from making ID instant.
+
+**Mechanism (banked accelerated countdown — the threshold is never lowered).** The base requirement is
+unchanged: `item->charges` still seeds from `gameConst->armorDelayToAutoID` (1000) / `ringDelayToAutoID`
+(1500) and auto-IDs at `≤ 0`. Only the per-turn decrement changes. In `processIncrementalAutoID()` the worn
+armor/ring countdown subtracts `wisdomAutoIDChargeStep()` instead of a flat 1. That step is a **Bresenham tick
+on the turn clock** (`rogue.absoluteTurnNumber`): it averages exactly `100/(100 − reductionPct)` charges per
+turn but only ever subtracts an integer **0, 1, or 2** — so no fractional charges, **no new save field**, and
+the consumed familiarity is permanent (banked: removing the ring just reverts the step to 1). The progress
+bar (`charges/threshold`) and generation are untouched.
+
+**Display.** The inventory inspector's "reveal its secrets if worn for N turns" line shows the
+wisdom-adjusted estimate (`ceil(charges × (100 − reductionPct)/100)`) for armor and rings, so the countdown
+stays honest now that it isn't a flat 1/turn. The weapon "defeat N enemies" line is unchanged.
+
+**Where.** `Items.c` — `wisdomAutoIDReductionPct()` / `wisdomAutoIDChargeStep()` / `wisdomAutoIDDisplayTurns()`
+(near `effectiveRingEnchant`), plus the two inspector blocks (armor + ring). `Time.c` —
+`processIncrementalAutoID()` decrement. `Rogue.h` — `wisdomAutoIDChargeStep` prototype. Lever constants
+`WISDOM_AUTOID_PCT_PER_LEVEL` (10) / `WISDOM_AUTOID_MAX_FASTER_PCT` (50) / `WISDOM_AUTOID_MAX_SLOWER_PCT`
+(100) are tunable. A worn-but-unidentified wisdom ring already contributes a partial `wisdomBonus`
+(`effectiveRingEnchant`), so it speeds its own/other gear's ID before you know it's wisdom — consistent with
+how every ring effect applies pre-ID; not special-cased.
+
+**Determinism / saves.** Step derives only from `rogue.absoluteTurnNumber` + `rogue.wisdomBonus` + `charges`,
+all already deterministic/replayed; no struct changes. Reconstructs identically on replay; diverges replays
+from pre-change recordings like any gameplay change. SE-only.
+
+**Ring descriptions refreshed (`Globals.c` `ringTable`).** Both rings' inspect text had drifted from their SE
+behavior, so it was rewritten to match:
+- **Wisdom** previously named only staff recharge. It now also describes the SE effects it gained: faster
+  auto-ID of worn armor & rings (this change), faster polarity insight while resting, and a deeper potion of
+  detect magic — all scaling with the ring, all dulled by a cursed one.
+- **Awareness** already covered search (traps/secret doors/levers), the "chamber of significance" sense, and
+  the floor item-aura radar, but omitted its role in the noise/perception system. Added a clause: it sharpens
+  your hearing of unseen creatures' movements (extends earshot, scaling with enchant; cursed dulls it).
+
+### 2026-06-21 — Thrown scrolls are the quietest throw (paper impact tier)
+
+**What.** A thrown scroll now lands much more quietly than other light items. It was lumped into
+`NOISE_IMPACT_LIGHT` (4 — shared with darts, incendiary darts, food), giving a ~3-tile audible impact radius
+on hard floor. It now has its own `NOISE_IMPACT_PAPER` tier (0), so a scroll's landing draws a ~2-tile radius
+on stone and clamps to 1 on soft ground / carpet (effectively silent).
+
+**Why.** A sheet of parchment fluttering to the floor shouldn't clatter like a hurled dart. As a distraction
+tool a scroll is now a poor lure (it barely carries) — appropriate, and no downside since scrolls aren't
+thrown for effect. Scoped to scrolls only; food / wands / charms / rings stay at `NOISE_IMPACT_LIGHT`.
+
+**Where.** `Rogue.h` — new `NOISE_IMPACT_PAPER` define. `Items.c` — `itemImpactLoudness()` gains a
+`category & SCROLL` branch returning it (ahead of the catch-all `NOISE_IMPACT_LIGHT`). The tier feeds the
+existing radius formula, so the change flows uniformly to the aim-time noise-preview wash, the impact sound
+map (what monsters hear), and the cosmetic impact ripple. `docs/design/environmental-sounds.md` item-loudness
+table updated.
+
+**Determinism / saves.** Pure tunable constant + a category test; no RNG, no new fields. Diverges replays
+from pre-change recordings like any gameplay change. SE-only; gated by `NOISE_SYSTEM_ENABLED`.
+
+### 2026-06-21 — Ring of light: emboldened allies hold a standoff behind you (out of spear reach)
+
+**What.** Refines the ring-of-light ally behavior (see the 2026-06-12 cornerstone entry). While a ring of
+light is worn (`STATUS_EMBOLDENED` + a positive `rogue.lightRingBonus`), an emboldened ally now keeps a
+**standoff position ~2 tiles behind the player** instead of tucking directly behind you, in two situations:
+- *Retreating* — the low-HP rally cell (formerly `allyRallyShieldCell`, the tile **directly** behind you).
+- *Backline* — at full HP, when **you** are the one in melee (an enemy adjacent to you) and the ally can't
+  land a blow this turn, it holds the standoff rather than pressing up into the front rank. It still charges
+  in whenever it can actually reach an enemy, so it isn't a passive turret. **Scoped to fragile skirmishers**
+  (`allyHoldsBackline()` — currently monkey + common goblin); bruiser/tank allies (ogre, troll, golem, goblin
+  chieftain, …) keep the vanilla engage-anything behavior so they venture ahead and soak hits.
+
+**Why.** The old "tuck **directly** behind the player as a body-shield" cell sat squarely in a spear's line:
+a `MA_ATTACKS_PENETRATE` enemy ("attacks up to two opponents in a line") adjacent to the player also hits the
+cell directly behind, so the ally tucked there got skewered through the player — especially in 1-wide
+corridors where it can't flank and just stacks up behind you. Holding ≥ 2 tiles back puts the ally beyond the
+spear's two-tile reach (≥ 3 from an adjacent attacker) while still inside the light aura, so it keeps the
+embolden + regen. Gives the ring a clean **frontline-player / backline-ally** identity. Scoped entirely to the
+ring: with no positive `lightRingBonus`, allies behave exactly as before.
+
+**Where.** `Monsters.c` — `allyRallyShieldCell()` generalized/renamed to `allyStandoffCell()`: it now scans
+a tight band `ALLY_STANDOFF_MIN_DIST`(2)..`ALLY_STANDOFF_MAX_DIST`(3) tiles around the player, rejects cells
+within a spear's reach of the threat (`distanceBetween(c, threat) < 3`), and scores nearest-standoff-first
+then far-side-from-threat (which resolves to directly behind you). Used by the existing retreat path in
+`moveAlly()` and by a new ring-gated backline block (after the spellcast check, before the leash/engagement
+logic). Both reachability checks fall through to prior behavior if no standoff tile is reachable.
+
+**Determinism / saves.** `allyStandoffCell()` is pure state-derived (fixed scan order, strict-better tiebreak,
+no RNG) and moves via the existing deterministic `moveMonsterPassivelyTowards`; no new persistent fields.
+Reconstructs identically on replay; diverges replays from pre-change recordings like any gameplay change.
+SE-only. `ALLY_STANDOFF_*` distances are tunable.
+
+### 2026-06-21 — Off-screen combat emits a sound ripple from the monster
+
+**What.** When two creatures fight outside the player's view (the "you hear combat in the distance" /
+"you hear something die in combat" messages), the fight now also paints a cosmetic grey sound ripple — the
+same "you heard something" box-ripple the noise system already uses — so the player can *locate* the
+distant combat, not just read about it. The ripple radiates from the **monster**, not the ally/player who
+landed the blow: the listener's own side isn't what we're trying to point at; the enemy is.
+
+**Why.** The text alone gives no direction. The ripple is the existing visual vocabulary for "a sound came
+from over there," so reusing it for combat noise is consistent with the rest of the perception system. It
+fires on **every** off-screen exchange — hit, miss, *or* kill — rather than the once-per-turn cadence of the
+message itself (`rogue.heardCombatThisTurn`); a flurry of swings should keep pinging.
+
+**Companion text fix (upstream dead code).** While here we also repaired the off-screen **non-fatal hit**,
+which upstream renders silently in *all three* engines (CE + Classic too). In the defender-survived branch,
+the "you hear combat in the distance" line sat inside an outer `(canSeeMonster(attacker) ||
+canSeeMonster(defender))` guard — the exact logical negation of `sightUnseen` — so its `if (sightUnseen)`
+sub-branch was unreachable: an out-of-sight blow that *landed but didn't kill* produced no message at all
+(only misses and kills were audible). The miss and kill sites branch on `sightUnseen` directly and were
+always correct; the survive site now matches them. **SE-only** — left unfixed in faithful CE/Classic; a
+candidate to push upstream separately.
+
+**Where.** `Combat.c`, in `attack()`:
+- *Ripple* — just before the hit/miss resolution (`attackHit`) and after the seize/levitate early-returns, a
+  single `if (sightUnseen)` block spawns `cosmeticSpawnRippleMonster()` from
+  `(attacker == &player || attacker->creatureState == MONSTER_ALLY) ? defender->loc : attacker->loc`. Placed
+  ahead of the branch so it covers hit, miss, and kill uniformly and is independent of the message throttle.
+- *Text fix* — the defender-survived branch was restructured to test `!rogue.blockCombatText` then
+  `sightUnseen` first (emit the distance tell), `else if (canSeeMonster(...))` for the visible verb message,
+  dropping the redundant outer visibility guard.
+
+`sightUnseen` already excludes any attack involving the player (the player is always "visible" to
+themselves), so both only apply to monster-vs-monster / monster-vs-ally combat. Marked
+`// iOS port (Brogue SE):`. See `docs/design/noise-system.md`.
+
+**Determinism.** `cosmeticSpawnRippleMonster` is purely cosmetic (no substantive RNG) and self-suppresses
+during automation / autoplay / playback fast-forward. Saves/replays are unaffected.
+
+### 2026-06-21 — Cosmetic noise layer not reset between games (stale '?' / ripple carry-over)
+
+**What.** The cosmetic-effect layer (`gCosmeticEffects[]` pool, the dirty-cell ping-pong buffers, the
+`gCosmeticBlinkTick` phase clock, and `gCosmeticCur`) is process-static in `IO.c`, not part of the `rogue`
+struct. Nothing was clearing it when a run ended, so a *new game or a loaded game started in the same app
+session inherited the previous run's cosmetic state*: an in-flight `'?'` alert glyph or a persistent
+`CE_INVESTIGATE_BLINK` (keyed to a now-freed monster pointer that a fresh monster can reuse) would surface
+for no in-game reason, and the never-reset `gCosmeticBlinkTick` made the `'?'` blink resume mid-phase on
+reload. Symptom got worse the more new games you started in one session, as stale slots accumulated.
+
+**Fix.** `clearCosmeticAnimations()` (which already existed but was *never called*) now also zeroes
+`gCosmeticCur` and `gCosmeticBlinkTick`, and `initializeRogue()` calls it. `initializeRogue()` is the single
+chokepoint both the new-game (`MainMenu.c`) and load-game (`Recordings.c`) paths run through, and it runs
+before any level is built, so every run now starts with an empty cosmetic layer. The `memset` of `rogue`
+in `initializeRogue` never touched these buffers because they live outside the struct.
+
+**Where.** `IO.c` — `clearCosmeticAnimations()` resets the phase clock + ping-pong index in addition to the
+effect pool. `RogueMain.c` — `initializeRogue()` calls `clearCosmeticAnimations()` alongside the other
+SE per-run resets. Marked `// iOS port (Brogue SE):`.
+
+**Determinism.** The cosmetic layer carries no substantive RNG and is not saved/replayed, so this is a
+pure display-correctness fix; saves and the seeded/weekly leaderboard are unaffected.
+
+**Follow-up if a stray `'?'` still appears (within a single game).** This reset closes the *cross-game*
+carry-over. A second, narrower vector remains theoretically open: `cosmeticRefreshInvestigateBlinks()`
+binds each `CE_INVESTIGATE_BLINK` to its monster by raw pointer (`(const void *)m == e->channel`). If a
+monster dies and the allocator hands its address to a *new* monster mid-run, a stale blink could re-bind to
+the wrong creature. The clean hardening is identity, not address: stamp each blink with the monster's
+`monsterID` (or `bookkeepingFlags`/spawn serial) and match on that, and/or expire any blink whose monster
+is no longer on `monsters`/`dormantMonsters`. Only do this if the symptom recurs *within one game* — the
+cross-game path (the actual report) is already fixed above.
+
 ### 2026-06-18 — Darts removed as a potion-identification channel
 
 **What.** A thrown dart or javelin landing on a dropped potion **no longer detonates it** — it simply drops
@@ -1278,14 +1715,18 @@ adds, keyed off a new `rogue.lightRingBonus` (net enchant of worn rings of light
   - **Accuracy** small flat `EMBOLDEN_ACCURACY_BONUS` (8) — applied in `monsterAccuracyAdjusted()`.
     **No damage bonus, deliberately** — damage compounds with `empowerMonster` leveling into an
     unbeatable squad; the buff is survivability + presence only.
-  - **Courage / rally** — `moveAlly()` extends the attack leash to the aura radius (an emboldened ally
-    engages anything in your light). And when it *would* flee at low HP, it doesn't scatter to the generic
-    safety map (which would lead it *out* of the light, abandoning the defense/regen keeping it alive);
-    instead `allyRallyShieldCell()` sends it to a tile **behind you** -- shielded by your body, in the
-    light, where it heals and waits to re-engage. It falls back to a normal flee if no sheltered tile is
-    reachable. (Earlier drafts made emboldened allies simply *never* flee; that was rejected because our
-    own regen is tuned not to out-heal combat damage, so "never retreat" would have gotten allies killed --
-    the rally preserves self-preservation while keeping them in the buff aura.)
+  - **Courage / rally / backline** — `moveAlly()` extends the attack leash to the aura radius (an
+    emboldened ally engages anything in your light). When it *would* flee at low HP, it doesn't scatter to
+    the generic safety map (which would lead it *out* of the light, abandoning the defense/regen keeping it
+    alive); instead `allyStandoffCell()` sends it to a tile **~2 steps behind you** -- in the light, where it
+    heals and waits to re-engage. And even at full HP, a fragile **skirmisher** ally (`allyHoldsBackline()` --
+    monkey + common goblin; not tanks like ogres) holds that same standoff cell when *you* are in melee and it
+    can't strike this turn, rather than crowding the front rank (the **backline**, see the 2026-06-21
+    follow-up). Both fall back to normal behavior if no standoff tile is reachable. The standoff is
+    ~2 tiles back (not directly behind) specifically so a spear-style `MA_ATTACKS_PENETRATE` enemy adjacent to
+    you can't skewer the ally through you. (Earlier drafts made emboldened allies simply *never* flee; that
+    was rejected because our own regen is tuned not to out-heal combat damage, so "never retreat" would have
+    gotten allies killed -- the rally preserves self-preservation while keeping them in the buff aura.)
   - **Regeneration** — extra, capped `regenStep` in `decrementMonsterStatus()` (cap
     `EMBOLDEN_REGEN_PERCENT_CAP` 300%). Always-on but recovery-paced: tops off an ally between fights,
     never out-heals focused damage mid-fight (no combat-gating — the engine has no clean combat flag and
@@ -2685,6 +3126,40 @@ implemented in the bridge (not the engine C, but listed here for orientation):
   online leaderboard/achievements on top.
 
 Still stubbed: `takeScreenshot`.
+
+---
+
+### 2026-06-21 — Background suspend & resume (save exact state, auto-resume on cold launch)
+
+**What.** Backgrounding the app now snapshots the exact game state to disk, and if iOS later evicts
+the suspended process, the next launch resumes straight into the game (no title screen). The common
+case — backgrounding and returning before the OS kills the app — is untouched: iOS un-suspends the
+in-memory game with no reload. Full rationale and the decision tree in
+[docs/design/background-suspend-resume.md](../../docs/design/background-suspend-resume.md).
+
+**Engine side.** None — no vendored engine `.c` changes. This rides entirely on existing engine
+machinery: `flushBufferToFile()` to make the working recording exact, `initializeLaunchArguments()`
+(platform-defined; the engine calls it at the top of `mainBrogueJunction`) to inject
+`NG_OPEN_GAME` + a resume path, and `switchToPlaying()`'s existing copy-to-fresh-`LastGame` +
+`DELETE_SAVE_FILE_AFTER_LOADING` source-delete for file hygiene. No new save files; resume is the
+normal record-and-replay path, so it stays deterministic/save-safe.
+
+**Bridge side.** New host hooks `se_requestBackgroundSave()` / `se_clearResumeMarker()` (SEBridge.mm,
+BrogueSEHost.h). On background the host sets a flag; the engine thread, at its next poll point in
+`nextKeyOrMouseEvent` **and** `pauseForMilliseconds` (so a backgrounded rest/travel is also caught),
+flushes the recording and writes a one-shot resume marker (`"se resume path"` in NSUserDefaults).
+`initializeLaunchArguments` consumes that marker on the next cold launch. Fire-and-forget — the
+snapshot finishes inside iOS's grace window; no `beginBackgroundTask`.
+
+**Where.** SEBridge.mm (`gSEBackgroundSaveRequested`, `seTakeBackgroundSnapshotIfRequested`,
+`se_requestBackgroundSave`, `se_clearResumeMarker`, `initializeLaunchArguments`), BrogueSEHost.h.
+Platform lifecycle (`appDidEnterBackground` / `appDidBecomeActive`, the cold-vs-warm
+`didBackgroundThisProcess` guard) lives in BrogueViewController.swift. Applies to all three engines
+(mirrored in CEBridge.mm / RogueDriver.mm).
+
+**Notes.** Mid-play crash *without* backgrounding is intentionally not covered (matches prior
+behavior — in-progress recordings were already orphaned). Resume after an eviction on a deep run
+shows Brogue's normal `[ Loading… ]` replay bar, which is intrinsic to the save-as-recording format.
 
 ---
 

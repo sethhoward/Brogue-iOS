@@ -1041,7 +1041,7 @@ const char *mainMenuTitle_Brogue =
 // off the menu's right edge. This is DISPLAY ONLY: save/recording compatibility is governed by
 // BROGUE_RECORDING_VERSION_STRING / BROGUE_PATCH_VERSION_PATTERN below (still "SE <major>.<minor>.<patch>"),
 // so SE and CE saves can never alias regardless of what the title shows.
-#define BROGUE_VERSION_STRING "Alphabet-a Soup 0.9.0 "
+#define BROGUE_VERSION_STRING "A Is For AAaAH! 0.10.0 "
 
 // Recording version. Saved into recordings and save files made by this version.
 // Cannot be longer than 16 chars

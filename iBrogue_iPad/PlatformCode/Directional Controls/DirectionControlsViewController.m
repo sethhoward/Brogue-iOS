@@ -81,6 +81,11 @@ static NSInteger const kDragHintMaxShows = 3;
     self.directionalButton = (UIButton *)sender;
     self.buttonDown = YES;
     
+    // iOS port (iBrogue): initial auto-repeat delay before a held d-pad press starts stepping. Set purely
+    // to prevent a tap from registering as a double-step (a tap is released well within 0.4s). It used to be
+    // dropped to 0.1s to fit the noise system's old blocking-ripple pre-roll window, but the cosmetic
+    // animation layer made ripples uninterruptible and that coupling is gone -- so this is back to 0.4s,
+    // serving only its anti-double-step purpose (matching the keyboard's analogous delay).
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.4 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         if (self.buttonDown) {
             [self.repeatTimer invalidate];

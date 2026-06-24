@@ -667,11 +667,12 @@ static void printPlaybackHelpScreen() {
 }
 
 static void resetPlayback() {
-    boolean omniscient, stealth, trueColors;
+    boolean omniscient, stealth, trueColors, hideNoiseRipple;
 
     omniscient = rogue.playbackOmniscience;
     stealth = rogue.displayStealthRangeMode;
     trueColors = rogue.trueColorMode;
+    hideNoiseRipple = rogue.hidePlayerNoiseRipple; // iOS port (Brogue SE): player-ripple display pref is non-recorded
 
     freeEverything();
     randomNumbersGenerated = 0;
@@ -681,6 +682,7 @@ static void resetPlayback() {
     rogue.playbackOmniscience = omniscient;
     rogue.displayStealthRangeMode = stealth;
     rogue.trueColorMode = trueColors;
+    rogue.hidePlayerNoiseRipple = hideNoiseRipple;
 
     rogue.playbackFastForward = false;
     blackOutScreen();

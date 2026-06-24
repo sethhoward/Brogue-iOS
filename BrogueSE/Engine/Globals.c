@@ -755,9 +755,9 @@ dungeonFeature dungeonFeatureCatalog[NUMBER_DUNGEON_FEATURES] = {
     {DOOR,                      DUNGEON,    0,      0,      0},
     {OPEN_IRON_DOOR_INERT,      DUNGEON,    0,      0,      0,  "", GENERIC_FLASH_LIGHT},
     {ALTAR_CAGE_OPEN,           DUNGEON,    0,      0,      0,  "the cages lift off of the altars as you approach.", GENERIC_FLASH_LIGHT},
-    {ALTAR_CAGE_CLOSED,         DUNGEON,    0,      0,      (DFF_EVACUATE_CREATURES_FIRST), "the cages lower to cover the altars.", GENERIC_FLASH_LIGHT},
+    {ALTAR_CAGE_CLOSED,         DUNGEON,    0,      0,      (DFF_EVACUATE_CREATURES_FIRST | DFF_EMITS_NOISE), "the cages lower to cover the altars.", GENERIC_FLASH_LIGHT},
     {ALTAR_INERT,               DUNGEON,    0,      0,      0},
-    {FLOOR_FLOODABLE,           DUNGEON,    0,      0,      0,  "the altar retracts into the ground with a grinding sound.", GENERIC_FLASH_LIGHT},
+    {FLOOR_FLOODABLE,           DUNGEON,    0,      0,      DFF_EMITS_NOISE,  "the altar retracts into the ground with a grinding sound.", GENERIC_FLASH_LIGHT},
     {PORTAL_LIGHT,              SURFACE,    0,      0,      (DFF_EVACUATE_CREATURES_FIRST | DFF_ACTIVATE_DORMANT_MONSTER), "the archway flashes, and you catch a glimpse of another world!"},
     {MACHINE_GLYPH_INACTIVE,    DUNGEON,    0,      0,      0},
     {MACHINE_GLYPH,             DUNGEON,    0,      0,      0},
@@ -766,7 +766,7 @@ dungeonFeature dungeonFeatureCatalog[NUMBER_DUNGEON_FEATURES] = {
     {GUARDIAN_GLOW,             SURFACE,    0,      0,      0,  "the mirrored totem flashes, reflecting the red glow of the glyph beneath you."},
     {MACHINE_GLYPH,             DUNGEON,    200,    95,     DFF_BLOCKED_BY_OTHER_LAYERS},
     {WALL_LEVER,                DUNGEON,    0,      0,      0,  "you notice a lever hidden behind a loose stone in the wall.", GENERIC_FLASH_LIGHT},
-    {WALL_LEVER_PULLED,         DUNGEON,    0,      0,      0},
+    {WALL_LEVER_PULLED,         DUNGEON,    0,      0,      DFF_EMITS_NOISE}, // iOS port (Brogue SE): pulling a lever clunks (heavy vault machinery) -- heard like cages/portcullis
     {WALL_LEVER_HIDDEN,         DUNGEON,    0,      0,      0},
 
     {BRIDGE_FALLING,            LIQUID,     200,    100,    0, "", 0, 0, 0, BRIDGE},
@@ -834,17 +834,17 @@ dungeonFeature dungeonFeatureCatalog[NUMBER_DUNGEON_FEATURES] = {
     // machine components
 
     // commutation altars
-    {COMMUTATION_ALTAR_INERT,   DUNGEON,    0,      0,      0,  "the items on the two altars flash with a brilliant light!", SCROLL_ENCHANTMENT_LIGHT},
+    {COMMUTATION_ALTAR_INERT,   DUNGEON,    0,      0,      DFF_EMITS_NOISE,  "the items on the two altars flash with a brilliant light!", SCROLL_ENCHANTMENT_LIGHT},
     {PIPE_GLOWING,              SURFACE,    90,     60,     0},
     {PIPE_INERT,                SURFACE,    0,      0,      0,  "", SCROLL_ENCHANTMENT_LIGHT},
 
     // resurrection altars
-    {RESURRECTION_ALTAR_INERT,  DUNGEON,    0,      0,      DFF_RESURRECT_ALLY, "An old friend emerges from a bloom of sacred light!", EMPOWERMENT_LIGHT},
+    {RESURRECTION_ALTAR_INERT,  DUNGEON,    0,      0,      (DFF_RESURRECT_ALLY | DFF_EMITS_NOISE), "An old friend emerges from a bloom of sacred light!", EMPOWERMENT_LIGHT},
     {MACHINE_TRIGGER_FLOOR_REPEATING, LIQUID, 300,  100,    DFF_SUPERPRIORITY, "", 0, 0, 0, CARPET},
 
     // sacrifice altars
     {SACRIFICE_ALTAR,           DUNGEON,    0,      0,      0,  "a demonic presence whispers its demand: \"Bring to me the marked sacrifice!\""},
-    {SACRIFICE_LAVA,            DUNGEON,    0,      0,      0,  "demonic cackling echoes through the room as the altar plunges downward!"},
+    {SACRIFICE_LAVA,            DUNGEON,    0,      0,      DFF_EMITS_NOISE,  "demonic cackling echoes through the room as the altar plunges downward!"},
     {ALTAR_CAGE_RETRACTABLE,    DUNGEON,    0,      0,      0},
 
     // coffin bursts open to reveal vampire:
@@ -894,7 +894,7 @@ dungeonFeature dungeonFeatureCatalog[NUMBER_DUNGEON_FEATURES] = {
     // hidden poison vent machine:
     {MACHINE_POISON_GAS_VENT_DORMANT,DUNGEON,0,     0,      0,  "you notice an inactive gas vent hidden in a crevice of the floor.", GENERIC_FLASH_LIGHT},
     {MACHINE_POISON_GAS_VENT,   DUNGEON,    0,      0,      0,  "deadly purple gas starts wafting out of hidden vents in the floor!"},
-    {PORTCULLIS_CLOSED,         DUNGEON,    0,      0,      DFF_EVACUATE_CREATURES_FIRST,   "with a heavy mechanical sound, an iron portcullis falls from the ceiling!", GENERIC_FLASH_LIGHT},
+    {PORTCULLIS_CLOSED,         DUNGEON,    0,      0,      (DFF_EVACUATE_CREATURES_FIRST | DFF_EMITS_NOISE),   "with a heavy mechanical sound, an iron portcullis falls from the ceiling!", GENERIC_FLASH_LIGHT},
     {PORTCULLIS_DORMANT,        DUNGEON,    0,      0,      0,  "the portcullis slowly rises from the ground into a slot in the ceiling.", GENERIC_FLASH_LIGHT},
     {POISON_GAS,                GAS,        25,     0,      0},
 
@@ -979,11 +979,11 @@ dungeonFeature dungeonFeatureCatalog[NUMBER_DUNGEON_FEATURES] = {
 
     // iOS port (iBrogue): an insight altar promotes to its inert form after a sacrifice (visual flash;
     // the reveal message is emitted by performInsightSacrifice so it appears once, not once per altar)
-    {INSIGHT_ALTAR_INERT,       DUNGEON,    0,      0,      0,  "", SCROLL_ENCHANTMENT_LIGHT},
+    {INSIGHT_ALTAR_INERT,       DUNGEON,    0,      0,      DFF_EMITS_NOISE,  "", SCROLL_ENCHANTMENT_LIGHT},
 
     // iOS port (iBrogue): a transference altar promotes to its inert form after a transfer (visual flash;
     // the message is emitted by performEnchantTransfer so it appears once, not once per altar)
-    {TRANSFER_ALTAR_INERT,      DUNGEON,    0,      0,      0,  "", SCROLL_ENCHANTMENT_LIGHT},
+    {TRANSFER_ALTAR_INERT,      DUNGEON,    0,      0,      DFF_EMITS_NOISE,  "", SCROLL_ENCHANTMENT_LIGHT},
 
     // iOS port (iBrogue): empty-bottle v2 potion of ice -- a freezing cloud (gas-layer volume, like the
     // other potion gas clouds). effectRadius/flashColor give the cyan burst on shatter.
@@ -1811,8 +1811,8 @@ itemTable ringTable[NUMBER_RING_KINDS] = {
     {"regeneration",    itemGems[2], "",    1,  750,    0, 0, {1,3,1}, false, false, 1, false, "This ring of sacred life will allow you to recover lost health at an accelerated rate. Cursed rings will decrease or even halt your natural regeneration."},
     {"transference",    itemGems[3], "",    1,  750,    0, 0, {1,3,1}, false, false, 1, false, "This ring of blood magic will heal you in proportion to the damage you inflict on others. Cursed rings will cause you to lose health when inflicting damage."},
     {"light",           itemGems[4], "",    1,  600,    0, 0, {1,3,1}, false, false, 1, false, "This ring of preternatural vision will allow you to see farther in the dimming light of the deeper dungeon levels, and it will not make you more noticeable to enemies. Allies who stand within your light are emboldened -- better defended, unflinching, slowly mending their wounds -- and no invisible creature can hide within its glow. A cursed ring of light will dim your sight and unsettle your companions, who will lose heart and falter at your side."},
-    {"awareness",       itemGems[5], "",    1,  700,    0, 0, {1,3,1}, false, false, 1, false, "This ring of effortless vigilance will enable you to notice traps, secret doors and hidden levers more often and from a greater distance. On arriving at a new depth, it may also give you the feeling that the level conceals a chamber of significance, and you may sense the benevolent or malevolent aura of magic items lying anywhere on the floor -- even in rooms you have yet to discover. The more powerful the ring, the more reliably it senses, and the most powerful rings reveal several auras at once. Cursed rings of awareness will dull your senses, making it harder to notice secrets without actively searching for them."},
-    {"wisdom",          itemGems[6], "",    1,  700,    0, 0, {1,3,1}, false, false, 1, false, "This ring of arcane power will cause your staffs to recharge at an accelerated rate. Cursed rings of wisdom will cause your staffs to recharge more slowly."},
+    {"awareness",       itemGems[5], "",    1,  700,    0, 0, {1,3,1}, false, false, 1, false, "This ring of effortless vigilance will enable you to notice traps, secret doors and hidden levers more often and from a greater distance, and your sharpened hearing catches unseen creatures stirring ever farther off as the ring grows in power. On arriving at a new depth it may sense a nearby chamber of significance, and reveal the benevolent or malevolent aura of magic items lying anywhere on the floor -- even in undiscovered rooms, several at once for the most powerful rings. Cursed rings dull all of this."},
+    {"wisdom",          itemGems[6], "",    1,  700,    0, 0, {1,3,1}, false, false, 1, false, "This ring of arcane insight sharpens your command of magic. Your staffs recharge at an accelerated rate; you grow familiar with worn armor and rings more quickly, identifying them sooner; quiet rest more readily reveals whether an unknown item in your pack is benevolent or malevolent; and a potion of detect magic, drunk or hurled, lays bare more of your surroundings. The more powerful the ring, the keener these insights. A cursed ring of wisdom dulls them all -- staffs recharge sluggishly and understanding comes slowly."},
     {"reaping",         itemGems[7], "",    1,  700,    0, 0, {1,3,1}, false, false, 1, false, "This ring of blood magic will recharge your staffs and charms every time you hit an enemy. Cursed rings of reaping will drain your staffs and charms with every hit."},
 };
 

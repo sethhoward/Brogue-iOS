@@ -268,12 +268,23 @@ static short actionMenu(short x, boolean playingBack) {
             buttons[buttonCount].hotkey[0] = AUTO_REST_KEY;
             buttonCount++;
 
-            if (KEYBOARD_LABELS) {
-                sprintf(buttons[buttonCount].text, "  %sA: %sAutopilot  ",              yellowColorEscape, whiteColorEscape);
+            // iOS port (Brogue SE): 'A' is re-apply-last-staff under the modern scheme (autopilot is
+            // keyless there) and autopilot under classic, so this menu entry tracks the active scheme.
+            if (rogueKeyboardScheme == KEYBOARD_SCHEME_MODERN) {
+                if (KEYBOARD_LABELS) {
+                    sprintf(buttons[buttonCount].text, "  %sA: %sRe-apply staff  ",          yellowColorEscape, whiteColorEscape);
+                } else {
+                    strcpy(buttons[buttonCount].text, "  Re-apply staff  ");
+                }
+                buttons[buttonCount].hotkey[0] = REAPPLY_KEY;
             } else {
-                strcpy(buttons[buttonCount].text, "  Autopilot  ");
+                if (KEYBOARD_LABELS) {
+                    sprintf(buttons[buttonCount].text, "  %sA: %sAutopilot  ",              yellowColorEscape, whiteColorEscape);
+                } else {
+                    strcpy(buttons[buttonCount].text, "  Autopilot  ");
+                }
+                buttons[buttonCount].hotkey[0] = AUTOPLAY_KEY;
             }
-            buttons[buttonCount].hotkey[0] = AUTOPLAY_KEY;
             buttonCount++;
 
             if (KEYBOARD_LABELS) {
@@ -315,6 +326,18 @@ static short actionMenu(short x, boolean playingBack) {
         buttons[buttonCount].hotkey[0] = STEALTH_RANGE_KEY;
         takeActionOurselves[buttonCount] = true;
         buttonCount++;
+#if NOISE_SYSTEM_ENABLED
+        // iOS port (Brogue SE): toggle the player's own sound-footprint ripple animation (on by default;
+        // leaves every other noise animation untouched).
+        if (KEYBOARD_LABELS) {
+            sprintf(buttons[buttonCount].text, "  %s[: %s[%s] Player sound animation  ", yellowColorEscape, whiteColorEscape, rogue.hidePlayerNoiseRipple ? " " : "X");
+        } else {
+            sprintf(buttons[buttonCount].text, "  [%s] Player sound animation  ",   rogue.hidePlayerNoiseRipple ? " " : "X");
+        }
+        buttons[buttonCount].hotkey[0] = PLAYER_NOISE_ANIM_KEY;
+        takeActionOurselves[buttonCount] = true;
+        buttonCount++;
+#endif
 
         if (hasGraphics) {
             if (KEYBOARD_LABELS) {
@@ -593,6 +616,11 @@ void mainInputLoop() {
         clearCursorPath();
 
         const pos originLoc = player.loc;
+
+        // iOS port (Brogue SE): noise ripples and other cosmetic effects are now driven by the cosmetic
+        // animation layer (advanceCosmeticAnimations), pumped from the platform bridge's idle loop beside
+        // shuffleTerrainColors -- no per-turn flush here. The layer is dirty-cell scoped (never the
+        // button-bar row), so the old button-overlay save/restore dance is no longer needed.
 
         if (playingBack && rogue.cursorMode) {
             temporaryMessage("Examine what? (<hjklyubn>, mouse, or <tab>)", 0);
@@ -1022,6 +1050,8 @@ void shuffleTerrainColors(short percentOfCells, boolean refreshCells) {
                 }
         }
     }
+    // (The '?' investigate-blink rides the cosmetic animation layer now -- see advanceCosmeticAnimations,
+    // pumped on this same idle clock from the platform bridge -- not a hook here.)
     restoreRNG;
 }
 
@@ -1279,6 +1309,8 @@ void getCellAppearance(pos loc, enum displayGlyph *returnChar, color *returnFore
             } else {
                 cellChar = monst->info.displayChar;
                 cellForeColor = *(monst->info.foreColor);
+                // (The '?' investigate-blink is drawn by the cosmetic animation layer as an overlay now,
+                // not swapped into the base glyph here. See advanceCosmeticAnimations / CE_INVESTIGATE_BLINK.)
                 if (monst->status[STATUS_INVISIBLE] || (monst->bookkeepingFlags & MB_SUBMERGED)) {
                     // Invisible allies show up on the screen with a transparency effect.
                     //cellForeColor = cellBackColor;
@@ -2147,6 +2179,486 @@ void colorFlash(const color *theColor, unsigned long reqTerrainFlags,
     }
 }
 
+
+// iOS port (Brogue SE): THE COSMETIC ANIMATION LAYER. A small registry of RNG_COSMETIC, non-blocking
+// effects, advanced on the idle shimmer tick (advanceCosmeticAnimations, from the platform bridge beside
+// shuffleTerrainColors) and drawn as a DIRTY-CELL OVERLAY on top of getCellAppearance -- so it composites
+// over water/lava/hallucination shimmer without touching them. Effects play their full frame-life
+// regardless of input: never blocking, never fast-forward-erased. Never saved, never gates logic (same
+// seed+inputs => identical game regardless of what animated). Part 1 hosts the '!' alert glyph; the
+// ripples and the '?' investigate-blink migrate here in Part 2. See docs/guides/cosmetic-animation-layer.md.
+#define MAX_COSMETIC_EFFECTS        64
+#define MAX_COSMETIC_PAINTED_CELLS  1024  // cells painted in one frame (a ripple wavefront can be wide)
+#define CE_ALERT_FLICKER_FRAMES     6     // idle ticks per on/off half of the '!' flicker (~0.1s at 60Hz)
+#define CE_ALERT_LIFE_FRAMES        (4 * CE_ALERT_FLICKER_FRAMES) // two on/off cycles, then expire
+#define CE_RIPPLE_EXPAND_FRAMES     5     // idle ticks a ripple wavefront holds before expanding one tile (~0.08s)
+
+static const color cosmeticAlertColor = {100, 18, 18, 0, 0, 0, 0, false}; // reddish '!' -- "there you are!"
+static const color cosmeticNoiseColor = {85, 85, 100, 0, 0, 0, 0, false}; // pale grey -- monster "heard something"
+static const color cosmeticPlayerColor = {35, 60, 100, 0, 0, 0, 0, false}; // cool blue -- the player's own noise
+static const color cosmeticImpactColor = {100, 85, 30, 0, 0, 0, 0, false}; // warm amber -- an environmental impact (thrown item)
+static const color cosmeticAggravateColor = {100, 25, 20, 0, 0, 0, 0, false}; // hot alarm red -- a level-wide aggravate (alarm trap / aggravate scroll)
+
+// Identity (channel) of the SINGLETON player- and impact-ripple effects: address is the dedupe key (latest-wins).
+static const char gCosmeticPlayerRippleChannel = 0;
+static const char gCosmeticImpactRippleChannel = 0;
+
+// Effect kinds hosted by the layer. RIPPLE_* paint via hiliteCell (color overlay); ALERT/BLINK via a
+// glyph (plotCharWithColor). (File-local; promote to Rogue.h if a spawner ever needs a kind parameter.)
+enum cosmeticEffectKind { CE_ALERT_GLYPH, CE_RIPPLE_MONSTER, CE_RIPPLE_PLAYER, CE_RIPPLE_IMPACT, CE_RIPPLE_AGGRAVATE, CE_INVESTIGATE_BLINK, CE_ALERT_BLINK };
+
+typedef struct {
+    boolean active;
+    enum cosmeticEffectKind kind;
+    pos origin;
+    enum displayGlyph glyph;   // glyph kinds only
+    const color *tint;         // NULL on a glyph kind => use the cell's own foreColor
+    short maxRadius;           // ripple kinds: the wavefront expands 1..maxRadius
+    const void *channel;       // SINGLETON identity (NULL = ACCUMULATE); blink = creature*, player ripple = sentinel
+    short frameAge;            // idle ticks since spawn (drives flicker / ripple expansion)
+    short frameLife;           // ticks to live then expire; 0 = persistent (managed externally, e.g. the blink)
+    short turnsLeft;           // CE_ALERT_BLINK: player-turns remaining before the '!' fades (managed per-turn)
+} cosmeticEffect;
+
+static cosmeticEffect gCosmeticEffects[MAX_COSMETIC_EFFECTS];
+static boolean gCosmeticPaintedNow[DCOLS][DROWS];               // cells painted THIS frame (membership)
+static pos gCosmeticCells[2][MAX_COSMETIC_PAINTED_CELLS];       // ping-pong: last/this frame's painted cells
+static short gCosmeticCellCount[2] = {0, 0};
+static short gCosmeticCur = 0;                                  // index of the LAST-frame buffer
+static short gCosmeticBlinkTick = 0;                            // global '?' investigate-blink phase clock
+
+static short cosmeticFreeSlot(void) {
+    for (short i = 0; i < MAX_COSMETIC_EFFECTS; i++) {
+        if (!gCosmeticEffects[i].active) {
+            return i;
+        }
+    }
+    return -1; // pool full -- drop (a missed cosmetic flash is harmless)
+}
+
+// iOS port (Brogue SE): spawn a one-shot glyph flicker (the off-screen '?' tell) over a cell. Cosmetic;
+// suppressed during automation / playback fast-forward (matches the old drain-without-animating behavior).
+// (The visible '!' is the turn-bounded, monster-riding cosmeticSpawnAlertBlink instead.)
+void cosmeticSpawnAlertGlyph(pos loc, enum displayGlyph glyph) {
+    if (!coordinatesAreInMap(loc.x, loc.y)
+        || rogue.automationActive || rogue.autoPlayingLevel || rogue.playbackFastForward) {
+        return;
+    }
+    const short i = cosmeticFreeSlot();
+    if (i < 0) {
+        return;
+    }
+    gCosmeticEffects[i].active = true;
+    gCosmeticEffects[i].kind = CE_ALERT_GLYPH;
+    gCosmeticEffects[i].origin = loc;
+    gCosmeticEffects[i].glyph = glyph;
+    gCosmeticEffects[i].tint = &cosmeticAlertColor;
+    gCosmeticEffects[i].maxRadius = 0;
+    gCosmeticEffects[i].channel = NULL;
+    gCosmeticEffects[i].frameAge = 0;
+    gCosmeticEffects[i].frameLife = CE_ALERT_LIFE_FRAMES;
+}
+
+// iOS port (Brogue SE): a monster's "you heard something" ripple -- a grey box expanding from `loc`.
+// ACCUMULATE with same-cell merge: several can coexist, but two from the same cell don't stack.
+void cosmeticSpawnRippleMonster(pos loc) {
+    if (!coordinatesAreInMap(loc.x, loc.y)
+        || rogue.automationActive || rogue.autoPlayingLevel || rogue.playbackFastForward) {
+        return;
+    }
+    for (short j = 0; j < MAX_COSMETIC_EFFECTS; j++) {
+        if (gCosmeticEffects[j].active && gCosmeticEffects[j].kind == CE_RIPPLE_MONSTER
+            && posEq(gCosmeticEffects[j].origin, loc)) {
+            return; // same-cell merge
+        }
+    }
+    const short i = cosmeticFreeSlot();
+    if (i < 0) {
+        return;
+    }
+    gCosmeticEffects[i].active = true;
+    gCosmeticEffects[i].kind = CE_RIPPLE_MONSTER;
+    gCosmeticEffects[i].origin = loc;
+    gCosmeticEffects[i].glyph = 0;
+    gCosmeticEffects[i].tint = &cosmeticNoiseColor;
+    gCosmeticEffects[i].maxRadius = NOISE_RIPPLE_RADIUS;
+    gCosmeticEffects[i].channel = NULL;
+    gCosmeticEffects[i].frameAge = 0;
+    gCosmeticEffects[i].frameLife = NOISE_RIPPLE_RADIUS * CE_RIPPLE_EXPAND_FRAMES;
+}
+
+// iOS port (Brogue SE): the player's own sound-footprint ripple -- a blue wavefront following the sound map
+// out to `radius`. SINGLETON (latest-wins): a new one replaces the in-flight one (it fires every step in
+// earshot, so we never stack them).
+void cosmeticSpawnRipplePlayer(short radius) {
+    if (radius < 1 || rogue.automationActive || rogue.autoPlayingLevel || rogue.playbackFastForward) {
+        return;
+    }
+    short i = -1;
+    for (short j = 0; j < MAX_COSMETIC_EFFECTS; j++) {
+        if (gCosmeticEffects[j].active && gCosmeticEffects[j].kind == CE_RIPPLE_PLAYER) {
+            i = j; // reuse (replace) the existing player ripple
+            break;
+        }
+    }
+    if (i < 0) {
+        i = cosmeticFreeSlot();
+    }
+    if (i < 0) {
+        return;
+    }
+    gCosmeticEffects[i].active = true;
+    gCosmeticEffects[i].kind = CE_RIPPLE_PLAYER;
+    gCosmeticEffects[i].origin = player.loc;
+    gCosmeticEffects[i].glyph = 0;
+    gCosmeticEffects[i].tint = &cosmeticPlayerColor;
+    gCosmeticEffects[i].maxRadius = radius;
+    gCosmeticEffects[i].channel = &gCosmeticPlayerRippleChannel;
+    gCosmeticEffects[i].frameAge = 0;
+    gCosmeticEffects[i].frameLife = radius * CE_RIPPLE_EXPAND_FRAMES;
+}
+
+// iOS port (Brogue SE): the environmental-sound impact ripple -- an amber wavefront expanding from `source`
+// along the impact sound map out to `radius`. SINGLETON (latest impact wins): a fresh throw supersedes a
+// stale ripple. Cosmetic; see docs/design/environmental-sounds.md.
+void cosmeticSpawnRippleImpact(pos source, short radius) {
+    if (radius < 1 || rogue.automationActive || rogue.autoPlayingLevel || rogue.playbackFastForward) {
+        return;
+    }
+    short i = -1;
+    for (short j = 0; j < MAX_COSMETIC_EFFECTS; j++) {
+        if (gCosmeticEffects[j].active && gCosmeticEffects[j].kind == CE_RIPPLE_IMPACT) {
+            i = j; // reuse (replace) the in-flight impact ripple
+            break;
+        }
+    }
+    if (i < 0) {
+        i = cosmeticFreeSlot();
+    }
+    if (i < 0) {
+        return;
+    }
+    gCosmeticEffects[i].active = true;
+    gCosmeticEffects[i].kind = CE_RIPPLE_IMPACT;
+    gCosmeticEffects[i].origin = source;
+    gCosmeticEffects[i].glyph = 0;
+    gCosmeticEffects[i].tint = &cosmeticImpactColor;
+    gCosmeticEffects[i].maxRadius = radius;
+    gCosmeticEffects[i].channel = &gCosmeticImpactRippleChannel;
+    gCosmeticEffects[i].frameAge = 0;
+    gCosmeticEffects[i].frameLife = radius * CE_RIPPLE_EXPAND_FRAMES;
+}
+
+// iOS port (Brogue SE): the level-wide aggravate ripple -- a hot-red box wavefront expanding from `source`
+// out to `radius`. A loud, dramatic, through-walls pulse (Chebyshev box like the monster ripple, NOT the
+// wall-routed sound map) -- the "a piercing shriek echoes throughout the dungeon" of the alarm trap and the
+// aggravate-monster scroll. Bigger radius + distinct tint than the amber impact ripple, so it reads as the
+// loudest thing on screen. SINGLETON (latest-wins). Cosmetic; see docs/design/environmental-sounds.md.
+void cosmeticSpawnRippleAggravate(pos source, short radius) {
+    if (radius < 1 || rogue.automationActive || rogue.autoPlayingLevel || rogue.playbackFastForward) {
+        return;
+    }
+    short i = -1;
+    for (short j = 0; j < MAX_COSMETIC_EFFECTS; j++) {
+        if (gCosmeticEffects[j].active && gCosmeticEffects[j].kind == CE_RIPPLE_AGGRAVATE) {
+            i = j; // reuse (replace) the in-flight aggravate ripple
+            break;
+        }
+    }
+    if (i < 0) {
+        i = cosmeticFreeSlot();
+    }
+    if (i < 0) {
+        return;
+    }
+    gCosmeticEffects[i].active = true;
+    gCosmeticEffects[i].kind = CE_RIPPLE_AGGRAVATE;
+    gCosmeticEffects[i].origin = source;
+    gCosmeticEffects[i].glyph = 0;
+    gCosmeticEffects[i].tint = &cosmeticAggravateColor;
+    gCosmeticEffects[i].maxRadius = radius;
+    gCosmeticEffects[i].channel = NULL; // box ripple -- channel unused (see render)
+    gCosmeticEffects[i].frameAge = 0;
+    gCosmeticEffects[i].frameLife = radius * CE_RIPPLE_EXPAND_FRAMES;
+}
+
+// iOS port (Brogue SE): rebuild the persistent '?' investigate-blink effects to match the current set of
+// VISIBLE investigating monsters (one per monster, keyed by creature pointer). Called once per turn. The
+// on/off phase is a global clock (advanceCosmeticAnimations), so the blinks pulse in unison and continuously
+// while a monster searches. Suppressed during automation. (Pointer is only compared, never dereferenced
+// outside this live-monster iteration, so a freed monster can't dangle -- its blink is dropped here.)
+void cosmeticRefreshInvestigateBlinks(void) {
+    short i;
+    if (rogue.automationActive || rogue.autoPlayingLevel || rogue.playbackFastForward) {
+        for (i = 0; i < MAX_COSMETIC_EFFECTS; i++) {
+            if (gCosmeticEffects[i].active && gCosmeticEffects[i].kind == CE_INVESTIGATE_BLINK) {
+                gCosmeticEffects[i].active = false;
+            }
+        }
+        return;
+    }
+    // Despawn blinks whose monster is no longer a visible investigator; follow the rest to their new cell.
+    for (i = 0; i < MAX_COSMETIC_EFFECTS; i++) {
+        cosmeticEffect *e = &gCosmeticEffects[i];
+        if (!e->active || e->kind != CE_INVESTIGATE_BLINK) {
+            continue;
+        }
+        boolean stillValid = false;
+        for (creatureIterator it = iterateCreatures(monsters); hasNextCreature(it);) {
+            creature *m = nextCreature(&it);
+            if ((const void *)m == e->channel
+                && (m->bookkeepingFlags & MB_INVESTIGATING) && canSeeMonster(m)) {
+                e->origin = m->loc;
+                stillValid = true;
+                break;
+            }
+        }
+        if (!stillValid) {
+            e->active = false;
+        }
+    }
+    // Spawn for visible investigators that don't have a blink yet.
+    for (creatureIterator it = iterateCreatures(monsters); hasNextCreature(it);) {
+        creature *m = nextCreature(&it);
+        if (!(m->bookkeepingFlags & MB_INVESTIGATING) || !canSeeMonster(m)) {
+            continue;
+        }
+        boolean has = false;
+        for (i = 0; i < MAX_COSMETIC_EFFECTS; i++) {
+            if (gCosmeticEffects[i].active && gCosmeticEffects[i].kind == CE_INVESTIGATE_BLINK
+                && gCosmeticEffects[i].channel == (const void *)m) {
+                has = true;
+                break;
+            }
+        }
+        if (has) {
+            continue;
+        }
+        i = cosmeticFreeSlot();
+        if (i < 0) {
+            break;
+        }
+        gCosmeticEffects[i].active = true;
+        gCosmeticEffects[i].kind = CE_INVESTIGATE_BLINK;
+        gCosmeticEffects[i].origin = m->loc;
+        gCosmeticEffects[i].glyph = (enum displayGlyph)'?';
+        gCosmeticEffects[i].tint = NULL; // use the creature's own foreColor
+        gCosmeticEffects[i].maxRadius = 0;
+        gCosmeticEffects[i].channel = (const void *)m;
+        gCosmeticEffects[i].frameAge = 0;
+        gCosmeticEffects[i].frameLife = 0; // persistent; this rebuild manages its lifetime
+        gCosmeticEffects[i].turnsLeft = 0; // unused for the investigate blink
+    }
+}
+
+// iOS port (Brogue SE): spawn (or refresh) the persistent '!' alert-blink for a VISIBLE monster that has just
+// locked onto the player (heard you loud / spotted you) -- the alert counterpart to the '?' investigate-blink.
+// Creature-keyed and follows the monster the same way (cosmeticTickAlertBlinks), but instead of living as long
+// as a flag it counts down NOISE_ALERT_BLINK_TURNS player-turns, then fades. Re-triggering refreshes that
+// countdown rather than stacking a second '!'. Suppressed during automation / playback fast-forward. (Pointer
+// is only compared, never dereferenced here -- the live-monster follow in the tick keeps it from dangling.)
+void cosmeticSpawnAlertBlink(creature *monst) {
+    short i;
+    if (monst == NULL || !coordinatesAreInMap(monst->loc.x, monst->loc.y)
+        || rogue.automationActive || rogue.autoPlayingLevel || rogue.playbackFastForward) {
+        return;
+    }
+    for (i = 0; i < MAX_COSMETIC_EFFECTS; i++) {
+        if (gCosmeticEffects[i].active && gCosmeticEffects[i].kind == CE_ALERT_BLINK
+            && gCosmeticEffects[i].channel == (const void *)monst) {
+            gCosmeticEffects[i].origin = monst->loc;
+            gCosmeticEffects[i].turnsLeft = NOISE_ALERT_BLINK_TURNS; // refresh the countdown, don't stack
+            return;
+        }
+    }
+    i = cosmeticFreeSlot();
+    if (i < 0) {
+        return; // pool full -- a missed cosmetic tell is harmless
+    }
+    gCosmeticEffects[i].active = true;
+    gCosmeticEffects[i].kind = CE_ALERT_BLINK;
+    gCosmeticEffects[i].origin = monst->loc;
+    gCosmeticEffects[i].glyph = (enum displayGlyph)'!';
+    gCosmeticEffects[i].tint = &cosmeticAlertColor; // reddish "there you are!"
+    gCosmeticEffects[i].maxRadius = 0;
+    gCosmeticEffects[i].channel = (const void *)monst;
+    gCosmeticEffects[i].frameAge = 0;
+    gCosmeticEffects[i].frameLife = 0; // persistent re: frame-aging; turnsLeft governs its life
+    gCosmeticEffects[i].turnsLeft = NOISE_ALERT_BLINK_TURNS;
+}
+
+// iOS port (Brogue SE): per-turn lifecycle for the '!' alert-blinks (sibling to cosmeticRefreshInvestigateBlinks,
+// called once per player-turn). Follow each blink's monster to its new cell; drop it if the monster is gone or
+// no longer visible; otherwise count down NOISE_ALERT_BLINK_TURNS -- at zero the '!' fades. Suppressed during
+// automation / playback. (Pointer only compared against live monsters, never dereferenced for a freed creature.)
+void cosmeticTickAlertBlinks(void) {
+    short i;
+    if (rogue.automationActive || rogue.autoPlayingLevel || rogue.playbackFastForward) {
+        for (i = 0; i < MAX_COSMETIC_EFFECTS; i++) {
+            if (gCosmeticEffects[i].active && gCosmeticEffects[i].kind == CE_ALERT_BLINK) {
+                gCosmeticEffects[i].active = false;
+            }
+        }
+        return;
+    }
+    for (i = 0; i < MAX_COSMETIC_EFFECTS; i++) {
+        cosmeticEffect *e = &gCosmeticEffects[i];
+        if (!e->active || e->kind != CE_ALERT_BLINK) {
+            continue;
+        }
+        boolean stillValid = false;
+        for (creatureIterator it = iterateCreatures(monsters); hasNextCreature(it);) {
+            creature *m = nextCreature(&it);
+            if ((const void *)m == e->channel && canSeeMonster(m)) {
+                e->origin = m->loc; // follow the monster to its new cell
+                stillValid = true;
+                break;
+            }
+        }
+        if (!stillValid || --e->turnsLeft <= 0) {
+            e->active = false; // monster gone/out of sight, or the countdown ran out
+        }
+    }
+}
+
+// Mark a cell as painted this frame (dedupe + track for restore). Returns true if newly marked.
+static boolean cosmeticMarkCell(pos p, short nowIdx) {
+    if (!coordinatesAreInMap(p.x, p.y) || gCosmeticPaintedNow[p.x][p.y]) {
+        return false;
+    }
+    gCosmeticPaintedNow[p.x][p.y] = true;
+    if (gCosmeticCellCount[nowIdx] < MAX_COSMETIC_PAINTED_CELLS) {
+        gCosmeticCells[nowIdx][gCosmeticCellCount[nowIdx]++] = p;
+    }
+    return true;
+}
+
+// iOS port (Brogue SE): drop all effects + restore tracking (level change / playback reset / new game).
+// Must zero the phase clock and ping-pong index too: those are process-static, so a fresh game would
+// otherwise inherit the previous run's '?' blink phase (stale animation on reload) and a half-filled
+// dirty-cell buffer. Called from initializeRogue() so both new-game and load-game paths reset cleanly.
+void clearCosmeticAnimations(void) {
+    for (short i = 0; i < MAX_COSMETIC_EFFECTS; i++) {
+        gCosmeticEffects[i].active = false;
+    }
+    gCosmeticCellCount[0] = gCosmeticCellCount[1] = 0;
+    gCosmeticCur = 0;
+    gCosmeticBlinkTick = 0;
+}
+
+// iOS port (Brogue SE): one tick of the cosmetic layer -- age/expire effects, then DIRTY-CELL recomposite:
+// paint this frame's active-effect cells over the base, and restore any cell painted last frame but not
+// this one. Scoped strictly to effect cells (never the button-bar row), so the commitDraws diff is
+// respected and clean cells are never touched. The caller commits. RNG_COSMETIC throughout.
+void advanceCosmeticAnimations(void) {
+    short i, c, nowIdx, oldRNG;
+    boolean anyActive = false, blinkOn;
+
+    for (i = 0; i < MAX_COSMETIC_EFFECTS; i++) {
+        if (gCosmeticEffects[i].active) { anyActive = true; break; }
+    }
+    if (!anyActive && gCosmeticCellCount[gCosmeticCur] == 0) {
+        return; // nothing to paint and nothing to restore
+    }
+
+    oldRNG = rogue.RNG;
+    rogue.RNG = RNG_COSMETIC;
+
+    gCosmeticBlinkTick++;
+    blinkOn = ((gCosmeticBlinkTick / NOISE_INVESTIGATE_BLINK_FRAMES) & 1) != 0;
+
+    // 1. age + expire (frameLife == 0 means persistent -- never age-expires; managed externally)
+    for (i = 0; i < MAX_COSMETIC_EFFECTS; i++) {
+        cosmeticEffect *e = &gCosmeticEffects[i];
+        if (e->active && e->frameLife > 0 && ++e->frameAge >= e->frameLife) {
+            e->active = false;
+        }
+    }
+
+    memset(gCosmeticPaintedNow, 0, sizeof(gCosmeticPaintedNow));
+    nowIdx = 1 - gCosmeticCur;
+    gCosmeticCellCount[nowIdx] = 0;
+
+    // 2a. ripples first (color-hilite), so glyph kinds below can override on any shared cell
+    for (i = 0; i < MAX_COSMETIC_EFFECTS; i++) {
+        cosmeticEffect *e = &gCosmeticEffects[i];
+        if (!e->active
+            || (e->kind != CE_RIPPLE_MONSTER && e->kind != CE_RIPPLE_PLAYER && e->kind != CE_RIPPLE_IMPACT && e->kind != CE_RIPPLE_AGGRAVATE)
+            || e->maxRadius < 1) {
+            continue;
+        }
+        const short waveR = e->frameAge / CE_RIPPLE_EXPAND_FRAMES + 1; // current wavefront radius
+        const short strength = NOISE_RIPPLE_MAX_STRENGTH * (e->maxRadius - waveR + 1) / e->maxRadius;
+        if (e->kind == CE_RIPPLE_MONSTER || e->kind == CE_RIPPLE_AGGRAVATE) { // hollow Chebyshev box (through walls)
+            short dx, dy; // hollow Chebyshev wavefront at radius waveR around the monster's cell
+            for (dx = -waveR; dx <= waveR; dx++) {
+                for (dy = -waveR; dy <= waveR; dy++) {
+                    if (max(abs(dx), abs(dy)) != waveR) {
+                        continue;
+                    }
+                    const pos p = (pos){ e->origin.x + dx, e->origin.y + dy };
+                    if (cosmeticMarkCell(p, nowIdx)) {
+                        hiliteCell(p.x, p.y, e->tint, strength, false);
+                    }
+                }
+            }
+        } else { // CE_RIPPLE_PLAYER / CE_RIPPLE_IMPACT -- the sound-map wavefront at cost-distance waveR from the source
+            short ix, iy;
+            for (iy = e->origin.y - waveR; iy <= e->origin.y + waveR; iy++) {
+                for (ix = e->origin.x - waveR; ix <= e->origin.x + waveR; ix++) {
+                    if (!coordinatesAreInMap(ix, iy)) {
+                        continue; // bounds FIRST -- the sound-map lookups below index the grid directly
+                    }
+                    const short d = (e->kind == CE_RIPPLE_IMPACT)
+                                  ? impactSoundDistanceAt((pos){ ix, iy })
+                                  : soundDistanceAt((pos){ ix, iy });
+                    if (d != waveR) {
+                        continue;
+                    }
+                    const pos p = (pos){ ix, iy };
+                    if (cosmeticMarkCell(p, nowIdx)) {
+                        hiliteCell(ix, iy, e->tint, strength, false);
+                    }
+                }
+            }
+        }
+    }
+
+    // 2b. glyph kinds second (plotChar; override any hilite on the same cell)
+    for (i = 0; i < MAX_COSMETIC_EFFECTS; i++) {
+        cosmeticEffect *e = &gCosmeticEffects[i];
+        if (!e->active) {
+            continue;
+        }
+        boolean show = false;
+        if (e->kind == CE_ALERT_GLYPH) {
+            show = ((e->frameAge / CE_ALERT_FLICKER_FRAMES) & 1) == 0; // flicker on/off
+        } else if (e->kind == CE_INVESTIGATE_BLINK || e->kind == CE_ALERT_BLINK) {
+            show = blinkOn; // global unison phase ('?' investigate / '!' alert)
+        }
+        if (show && coordinatesAreInMap(e->origin.x, e->origin.y)) {
+            enum displayGlyph dchar; color fc, bc;
+            cosmeticMarkCell(e->origin, nowIdx); // ensure tracked (idempotent if a ripple already marked it)
+            getCellAppearance(e->origin, &dchar, &fc, &bc);
+            bakeColor(&fc);
+            bakeColor(&bc);
+            plotCharWithColor(e->glyph, mapToWindow(e->origin), e->tint ? e->tint : &fc, &bc);
+        }
+    }
+
+    // 3. restore cells painted last frame but not this frame
+    for (c = 0; c < gCosmeticCellCount[gCosmeticCur]; c++) {
+        const pos p = gCosmeticCells[gCosmeticCur][c];
+        if (!gCosmeticPaintedNow[p.x][p.y]) {
+            refreshDungeonCell(p);
+        }
+    }
+
+    // 4. this frame becomes last frame
+    gCosmeticCur = nowIdx;
+    rogue.RNG = oldRNG;
+}
+
 #define bCurve(x)   (((x) * (x) + 11) / (10 * ((x) * (x) + 1)) - 0.1)
 
 // x and y are global coordinates, not within the playing square
@@ -2485,6 +2997,7 @@ signed long applyKeyboardScheme(signed long keystroke, boolean *controlKey, bool
                 case 'p': return MESSAGE_ARCHIVE_KEY; // messages move off 'M' (now run-down-left)
                 case 'P': return ASCEND_KEY;       // Shift+P = ascend stairs (shift-gated for safety)
                 case ':': return DESCEND_KEY;      // Shift+; = descend stairs
+                case 'A': return REAPPLY_KEY;      // Shift+A = re-apply last staff (displaces autopilot, which is keyless in modern; the iOS button sends REAPPLY_KEY directly so it works in every scheme)
                 // vi-key left-hand movement is removed in modern: h/y/b/n (and their run forms) never
                 // move the player -- the right-hand grid is the only mover. y/n stay usable for yes/no
                 // and as item letters: those prompts read via buttonInputLoop with textInput == true,
@@ -2529,6 +3042,9 @@ void nextBrogueEvent(rogueEvent *returnEvent, boolean textInput, boolean colorsD
         if (rogue.creaturesWillFlashThisTurn) {
             displayMonsterFlashes(true);
         }
+        // iOS port (Brogue SE): cosmetic-layer effects (the '!' alert glyph, etc.) are pumped by
+        // advanceCosmeticAnimations() in the platform bridge's idle loop (beside shuffleTerrainColors),
+        // which nextKeyOrMouseEvent enters below -- no per-turn flush needed here.
         do {
             nextKeyOrMouseEvent(returnEvent, textInput, colorsDance); // No mouse clicks outside of the window will register.
         } while (returnEvent->eventType == MOUSE_UP && !locIsInWindow((windowpos){ returnEvent->param1, returnEvent->param2 }));
@@ -2684,6 +3200,18 @@ void executeKeystroke(signed long keystroke, boolean controlKey, boolean shiftKe
                 throwCommand(NULL, false);
             }
             break;
+        case REAPPLY_KEY:
+            // iOS port (Brogue SE): re-apply the last staff zapped (apply-side mirror of RETHROW_KEY).
+            // Staves only; never auto-targets -- apply() routes to useStaffOrWand(), which always
+            // prompts for a direction. If the remembered staff is gone (never set, dropped, or
+            // stolen), fall through to the normal apply prompt instead of no-opping. An empty
+            // remembered staff that is still carried is handled inside useStaffOrWand() ("no charges").
+            if (rogue.lastStaffZapped != NULL && itemIsCarried(rogue.lastStaffZapped)) {
+                apply(rogue.lastStaffZapped);
+            } else {
+                apply(NULL);
+            }
+            break;
         case RELABEL_KEY:
             relabel(NULL);
             break;
@@ -2714,6 +3242,18 @@ void executeKeystroke(signed long keystroke, boolean controlKey, boolean shiftKe
                                  &teal, 0);
             }
             break;
+#if NOISE_SYSTEM_ENABLED
+        case PLAYER_NOISE_ANIM_KEY:
+            // iOS port (Brogue SE): toggle the player's own sound-footprint ripple animation. Every other
+            // noise animation (monster ripples, thrown-impact/trap/altar ripples, the '?'/'!' blinks) is
+            // unaffected -- this gates only recordPlayerNoiseRippleIfNeeded().
+            rogue.hidePlayerNoiseRipple = !rogue.hidePlayerNoiseRipple;
+            messageWithColor(rogue.hidePlayerNoiseRipple
+                             ? (KEYBOARD_LABELS ? "Player sound animation off. Press '[' again to enable." : "Player sound animation off.")
+                             : (KEYBOARD_LABELS ? "Player sound animation on. Press '[' again to disable." : "Player sound animation on."),
+                             &teal, 0);
+            break;
+#endif
         case CALL_KEY:
             call(NULL);
             break;
@@ -4274,7 +4814,7 @@ void printHelpScreen() {
         "              s  ****search for secrets (control-s: long search)",
         "shift-P / shift-:  ****travel up / down stairs",
         "              x  ****auto-explore (control-x: fast forward)",
-        "              A  ****autopilot (control-A: fast forward)",
+        "              A  ****re-apply the last staff zapped",
         "              p  ****display old messages",
         "              G  ****toggle graphical tiles (when available)",
         "              S  ****save and exit",
@@ -4961,7 +5501,13 @@ short printMonsterInfo(creature *monst, short y, boolean dim, boolean highlight)
             } else if (monst->creatureState == MONSTER_FLEEING) {
                 printString("     (Fleeing)      ", 0, y++, (dim ? &darkGray : &gray), &black, 0);
             } else if (monst->creatureState == MONSTER_WANDERING) {
-                if ((monst->bookkeepingFlags & MB_FOLLOWER) && monst->leader && (monst->leader->info.flags & MONST_IMMOBILE)) {
+#if NOISE_SYSTEM_ENABLED
+                if (monst->bookkeepingFlags & MB_INVESTIGATING) {
+                    // iOS port (Brogue SE): noise system -- heading to a heard-noise cell to look (not hunting).
+                    printString("  (Investigating)   ", 0, y++, (dim ? &darkGray : &gray), &black, 0);
+                } else
+#endif
+                if (monsterIsWorshiper(monst)) {
                     // follower of an immobile leader -- i.e. a totem
                     printString("    (Worshiping)    ", 0, y++, (dim ? &darkGray : &gray), &black, 0);
                 } else if ((monst->bookkeepingFlags & MB_FOLLOWER) && monst->leader && (monst->leader->bookkeepingFlags & MB_CAPTIVE)) {

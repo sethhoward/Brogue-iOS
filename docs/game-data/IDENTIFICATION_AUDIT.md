@@ -126,6 +126,16 @@ creation ([Items.c:286,296,364](../../BrogueSE/Engine/Items.c)) and counted down
 | **Armor** | `armorDelayToAutoID` turns worn | `autoIDItems()` [Time.c:1882–1913](../../BrogueSE/Engine/Time.c) (per turn) | sets `ITEM_IDENTIFIED` — reveals it *has* a runic, not which ([Time.c:1901](../../BrogueSE/Engine/Time.c)) |
 | **Ring** | `ringDelayToAutoID` turns worn | `autoIDItems()` [Time.c:1882–1913](../../BrogueSE/Engine/Time.c) (per turn) | full `identify()` ([Time.c:1903](../../BrogueSE/Engine/Time.c)) |
 
+**Ring of wisdom accelerates the worn-gear timers [iOS port].** For **armor and rings** (not weapons), the
+per-turn countdown in `processIncrementalAutoID()` subtracts `wisdomAutoIDChargeStep()` instead of a flat 1
+([Items.c](../../BrogueSE/Engine/Items.c), [Time.c](../../BrogueSE/Engine/Time.c)). The base requirement
+(`charges`) is never lowered; the countdown just ticks faster — ~10% per net wisdom enchant, capped at +50%
+(2× speed), and a *cursed* wisdom ring slows it to −100% (2× slower), matching the other wisdom levers
+(rest-insight, recharge). It's a Bresenham step on `rogue.absoluteTurnNumber` (averages `100/(100−reductionPct)`
+charges/turn as an integer 0/1/2 — banked, deterministic, no new field). The inspector's "worn for N turns"
+line shows the wisdom-adjusted estimate. Levers: `WISDOM_AUTOID_PCT_PER_LEVEL` / `WISDOM_AUTOID_MAX_FASTER_PCT`
+/ `WISDOM_AUTOID_MAX_SLOWER_PCT`.
+
 See the [tuning table](#8-tuning-reference) for the per-variant values. A non-positive ring also
 auto-IDs by elimination on equip (upstream issue #683; see
 [pr-notes-ring-equip-deduction issue 683.md](../notes/pr-notes-ring-equip-deduction%20issue%20683.md)).

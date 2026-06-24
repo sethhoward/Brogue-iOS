@@ -25,7 +25,7 @@
 #include "GlobalsBase.h"
 #include "Globals.h"
 
-#define FIRE_CONFUSION_DURATION 3   // iOS port (iBrogue): turns of confusion inflicted on catching fire
+#define FIRE_CONFUSION_DURATION 2   // iOS port (iBrogue): turns of confusion inflicted on catching fire
 
 void exposeCreatureToFire(creature *monst) {
     char buf[COLS], buf2[COLS];
@@ -246,6 +246,25 @@ void applyInstantTileEffectsToCreature(creature *monst) {
             // usually means an invisible monster
             message("a pressure plate clicks!", 0);
         }
+#if NOISE_SYSTEM_ENABLED
+        // iOS port (Brogue SE): the pressure plate's soft mechanical click is an environmental noise -- nearby
+        // unaware monsters investigate the trap tile. Skip the alarm trap (fireType DF_AGGRAVATE_TRAP), which
+        // already broadcasts a level-wide aggravate; a soft local click on top of that would be redundant.
+        // Detect BEFORE the promotion loop below (which mutates the tile out from under fireType).
+        boolean isAlarmTrap = false;
+        for (layer = 0; layer < NUMBER_TERRAIN_LAYERS; layer++) {
+            if ((tileCatalog[pmap[*x][*y].layers[layer]].flags & T_IS_DF_TRAP)
+                && tileCatalog[pmap[*x][*y].layers[layer]].fireType == DF_AGGRAVATE_TRAP) {
+                isAlarmTrap = true;
+            }
+        }
+        if (!isAlarmTrap) {
+            emitEnvironmentalNoise((pos){ *x, *y }, NOISE_TRAP_CLICK, NULL);
+            if (monst == &player) {
+                environmentalNoiseHaptic(0); // gentle: the click felt underfoot (only when YOU spring it)
+            }
+        }
+#endif
         for (layer = 0; layer < NUMBER_TERRAIN_LAYERS; layer++) {
             if (tileCatalog[pmap[*x][*y].layers[layer]].flags & T_IS_DF_TRAP) {
                 spawnDungeonFeature(*x, *y, &(dungeonFeatureCatalog[tileCatalog[pmap[*x][*y].layers[layer]].fireType]), true, false);
@@ -734,6 +753,83 @@ static void updateScent() {
     addScentToCell(player.loc.x, player.loc.y, scentPenalty);
 }
 
+// iOS port (Brogue SE): noise system -- the per-turn player "sound map". A cost-flood from the player
+// gives soundDistanceAt(cell) = the effective distance sound travels between that cell and the player:
+// floor costs 1, a vision-blocking-but-passable tile (closed door / dense foliage / thick smoke) costs
+// 1 + NOISE_DOOR_COST (muffled passage -- sound seeps through), walls are impassable (sound routes
+// around them, or is silenced if sealed off). Path distance is symmetric, so the player-sourced flood
+// gives the right value at the monster's cell. Read-only and deterministic -> never perturbs the
+// substantive RNG stream (the perception roll stays cosmetic). Recomputed once per turn after the
+// player's move, before monsters act. Visualize with the sound-map overlay. See docs/design/noise-system.md.
+#if NOISE_SYSTEM_ENABLED
+static short **gSoundMap = NULL;      // effective sound distance from the player (30000 = unreachable)
+static short **gSoundCostMap = NULL;  // per-cell traversal cost fed to dijkstraScan
+static short **gImpactSoundMap = NULL;// effective sound distance from a non-player source (thrown impact, trap, ...)
+
+// Build the per-cell traversal cost from current terrain (shared by the player map and any impact map):
+// floor 1, vision-blocking-but-passable (door/foliage/smoke) 1 + NOISE_DOOR_COST, walls impassable.
+static void buildSoundCostMap(void) {
+    for (short i = 0; i < DCOLS; i++) {
+        for (short j = 0; j < DROWS; j++) {
+            const pos loc = (pos){ i, j };
+            if (cellHasTerrainFlag(loc, T_OBSTRUCTS_PASSABILITY)) {
+                gSoundCostMap[i][j] = PDS_OBSTRUCTION;       // wall: sound routes around (or is sealed out)
+            } else if (cellHasTerrainFlag(loc, T_OBSTRUCTS_VISION)) {
+                gSoundCostMap[i][j] = 1 + NOISE_DOOR_COST;   // door/foliage/smoke: muffled passage
+            } else {
+                gSoundCostMap[i][j] = 1;
+            }
+        }
+    }
+}
+
+// Cost-flood from an arbitrary `source` into `outMap` (shared by the player map and any impact map).
+static void floodSoundFrom(pos source, short **outMap) {
+    buildSoundCostMap();
+    fillGrid(outMap, 30000);
+    outMap[source.x][source.y] = 0;
+    dijkstraScan(outMap, gSoundCostMap, true);
+}
+
+void recomputeSoundMap(void) {
+    if (!gSoundMap)     { gSoundMap = allocGrid(); }
+    if (!gSoundCostMap) { gSoundCostMap = allocGrid(); }
+    floodSoundFrom(player.loc, gSoundMap);
+}
+
+short soundDistanceAt(pos loc) {
+    return (gSoundMap && coordinatesAreInMap(loc.x, loc.y)) ? gSoundMap[loc.x][loc.y] : 30000;
+}
+
+// iOS port (Brogue SE): environmental-sound propagation -- the same cost-flood, but from an arbitrary
+// source cell (a thrown item's impact, a sprung trap, ...). See docs/design/environmental-sounds.md.
+void recomputeImpactSoundMap(pos source) {
+    if (!gImpactSoundMap) { gImpactSoundMap = allocGrid(); }
+    if (!gSoundCostMap)   { gSoundCostMap = allocGrid(); }
+    floodSoundFrom(source, gImpactSoundMap);
+}
+
+short impactSoundDistanceAt(pos loc) {
+    return (gImpactSoundMap && coordinatesAreInMap(loc.x, loc.y)) ? gImpactSoundMap[loc.x][loc.y] : 30000;
+}
+
+boolean playerAdjacentToClosedDoor(void) {
+    for (short dir = 0; dir < DIRECTION_COUNT; dir++) {
+        const pos n = posNeighborInDirection(player.loc, dir);
+        if (coordinatesAreInMap(n.x, n.y) && pmapAt(n)->layers[DUNGEON] == DOOR) {
+            return true;
+        }
+    }
+    return false;
+}
+#else
+void recomputeSoundMap(void) { }
+short soundDistanceAt(pos loc) { (void)loc; return 30000; }
+void recomputeImpactSoundMap(pos source) { (void)source; }
+short impactSoundDistanceAt(pos loc) { (void)loc; return 30000; }
+boolean playerAdjacentToClosedDoor(void) { return false; }
+#endif
+
 short armorStealthAdjustment(item *theArmor) {
     if (!theArmor
         || !(theArmor->category & ARMOR)) {
@@ -1090,26 +1186,29 @@ static void handleLoneWolf() {
         return; // too shallow to count (avoids grant-then-yank confusion in the early game)
     }
 
+    // One tier-up flavor line per tier (index by tier, 1..LONE_WOLF_MAX_TIER); each ends with its Roman numeral.
+    static const char *loneWolfTierMessages[LONE_WOLF_MAX_TIER + 1] = {
+        "",
+        "alone in the dark, your senses sharpen and your body hardens. (Lone Wolf I)",
+        "solitude tempers you further. (Lone Wolf II)",
+        "the silence forges resolve into raw might. (Lone Wolf III)",
+        "self-reliance has become your second nature. (Lone Wolf IV)",
+        "you have mastered the solitary path; none stand with you, and none need to. (Lone Wolf V)",
+    };
+
     rogue.loneWolfXP += rogue.xpxpThisTurn;
 
-    short newTier = rogue.loneWolfTier;
-    if (rogue.loneWolfXP >= LONE_WOLF_TIER2_XP) {
-        newTier = 2;
-    } else if (rogue.loneWolfXP >= LONE_WOLF_TIER1_XP) {
-        newTier = 1;
-    }
+    // Linear track: tier N at N * LONE_WOLF_XP_PER_TIER, capped at LONE_WOLF_MAX_TIER. Recomputed every turn,
+    // so it re-derives (and replays) from loneWolfXP alone -- a single threshold check generalizes to any cap.
+    short newTier = (short)(rogue.loneWolfXP / LONE_WOLF_XP_PER_TIER);
     if (newTier > LONE_WOLF_MAX_TIER) {
         newTier = LONE_WOLF_MAX_TIER;
     }
 
     while (rogue.loneWolfTier < newTier) {
         rogue.loneWolfTier++;
-        setLoneWolfStrengthBonus(rogue.loneWolfTier); // +1 at tier 1, +2 at tier 2
-        if (rogue.loneWolfTier == 1) {
-            messageWithColor("alone in the dark, your senses sharpen and your body hardens. (Lone Wolf I)", &advancementMessageColor, 0);
-        } else {
-            messageWithColor("solitude tempers you further. (Lone Wolf II)", &advancementMessageColor, 0);
-        }
+        setLoneWolfStrengthBonus(rogue.loneWolfTier); // +1 effective strength per tier (so +5 at the cap)
+        messageWithColor(loneWolfTierMessages[rogue.loneWolfTier], &advancementMessageColor, 0);
         // Polarity tell only on a pure-solo run -- compensates for the captiveReactToPack tells forgone.
         if (!rogue.hasEverHadAlly) {
             loneWolfRevealPolarity();
@@ -1147,6 +1246,7 @@ static void handleXPXP() {
         }
     }
     handleLoneWolf(); // iOS port (Brogue SE): solo-play progression; reads xpxpThisTurn before it is zeroed
+    levels[rogue.depthLevel].xpxpEarnedOnLevel += rogue.xpxpThisTurn; // iOS port (Brogue SE): debug exploration-stats -- realized per-level xpxp (output-only). Indexed levels[depthLevel] to match the other debug tallies (restTurnsOnLevel), NOT the 0-indexed levels[depthLevel-1] map storage.
     rogue.xpxpThisTurn = 0;
 }
 
@@ -1251,7 +1351,23 @@ void activateMachine(short machineNumber) {
     }
     for (i=0; i<monsterCount; i++) {
         if (!(activatedMonsterList[i]->bookkeepingFlags & MB_IS_DYING)) {
+#if NOISE_SYSTEM_ENABLED
+            // iOS port (Brogue SE): a guardian's footfall booms. Snapshot its cell, take its activation turn,
+            // and if it actually moved, emit a loud environmental noise from where it landed -- shoving the
+            // stone totems around to free the key is a noisy business that draws nearby wanderers (design
+            // principle #3 counter-pressure). Immobile activation-monsters (mirror totems) never move, so they
+            // stay silent; this naturally covers stone and winged guardians without a per-kind branch.
+            const pos beforeLoc = activatedMonsterList[i]->loc;
+#endif
             monstersTurn(activatedMonsterList[i]);
+#if NOISE_SYSTEM_ENABLED
+            // Boom on any real step -- including the climactic footfall onto a trap that destroys the guardian
+            // (it's marked MB_IS_DYING but not freed until removeDeadMonsters, so its loc is still valid here).
+            if (!posEq(activatedMonsterList[i]->loc, beforeLoc)) {
+                emitEnvironmentalNoise(activatedMonsterList[i]->loc, NOISE_GUARDIAN_STEP, NULL);
+                environmentalNoiseHaptic(1); // pronounced: a heavy stone footfall (player-driven, glyph underfoot)
+            }
+#endif
         }
     }
 
@@ -1983,7 +2099,8 @@ static void processIncrementalAutoID() {
             && theItem->charges > 0
             && (!(theItem->flags & ITEM_IDENTIFIED) || ((theItem->category & RING) && !ringTable[theItem->kind].identified))) {
 
-            theItem->charges--;
+            theItem->charges -= wisdomAutoIDChargeStep(); // iOS port (iBrogue): a worn ring of wisdom ticks
+                                                          // this countdown down faster (armor + rings)
             if (theItem->charges <= 0) {
                 itemName(theItem, theItemName, false, false, NULL);
                 sprintf(buf, "you are now familiar enough with your %s to identify it.", theItemName);
@@ -2584,6 +2701,8 @@ void playerTurnEnded() {
         }
 
         updateScent();
+        recomputeSoundMap(); // iOS port (Brogue SE): noise system -- rebuild the player sound-distance
+                             // map now (player has moved; monsters act below and read it via the roll).
         // iOS port (Brogue SE): #837 — recompute lighting and the player's stealth range *before*
         // monsters evaluate awareness this turn. The player has already moved (playerMoves updates
         // player.loc, then calls us with no intervening vision pass), so without this the monster
@@ -2754,6 +2873,10 @@ void playerTurnEnded() {
             displayLevel();
         }
 
+        // iOS port (Brogue SE): noise ripples (and the rest of the cosmetic layer) are now driven by
+        // advanceCosmeticAnimations from the platform bridge's idle loop -- no per-turn flush/drain here.
+        // Spawns are themselves suppressed during automation (see cosmeticSpawn*), so nothing piles up.
+
         for (creatureIterator it = iterateCreatures(monsters); hasNextCreature(it);) {
             creature *monst = nextCreature(&it);
             if (canSeeMonster(monst) && !(monst->bookkeepingFlags & (MB_WAS_VISIBLE | MB_ALREADY_SEEN))) {
@@ -2864,6 +2987,19 @@ void playerTurnEnded() {
 
     rogue.justRested = false;
     rogue.justSearched = false;
+#if NOISE_SYSTEM_ENABLED
+    // iOS port (Brogue SE): noise system Phase 2. Monsters have now acted on this turn's player noise, so:
+    // (1) queue the player's sound-footprint ripple if a visible, still-unaware enemy is near earshot (a
+    // feel/test aid -- read while playerNoise is still set); then (2) reset loudness to silent. Silence is
+    // the default; only an explicit noisy action (step/melee/throw) sets it. See noise-system.md "Phase 2".
+    recordPlayerNoiseRippleIfNeeded();
+    rogue.playerNoise = NOISE_PLAYER_SILENT;
+    // (3) rebuild the '?' investigate-blink effects to match this turn's visible investigators (the blink
+    // is a cosmetic-layer effect now; this is its per-turn lifecycle -- spawn/follow/despawn).
+    cosmeticRefreshInvestigateBlinks();
+    // (4) advance the '!' alert-blinks: follow each to its monster's new cell and count down its turn life.
+    cosmeticTickAlertBlinks();
+#endif
     updateFlavorText();
 
     if (!rogue.updatedMapToShoreThisTurn) {

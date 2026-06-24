@@ -317,6 +317,32 @@ Still stubbed: `takeScreenshot`.
 
 ---
 
+### 2026-06-21 — Background suspend & resume (save exact state, auto-resume on cold launch)
+
+**What.** Backgrounding the app snapshots exact game state to disk; if iOS evicts the suspended
+process, the next launch resumes straight into the game. Returning before an eviction is untouched
+(iOS un-suspends the in-memory game, no reload). Rationale in
+[docs/design/background-suspend-resume.md](../../docs/design/background-suspend-resume.md).
+
+**Engine side.** None — no vendored engine `.c` changes. Rides on existing machinery:
+`flushBufferToFile()`, `initializeLaunchArguments()` (platform-defined; called at the top of
+`mainBrogueJunction`) injecting `NG_OPEN_GAME` + a path, and `switchToPlaying()`'s copy-to-fresh-
+`LastGame` + `DELETE_SAVE_FILE_AFTER_LOADING`. No new save files; deterministic record-and-replay.
+
+**Bridge side.** New host hooks `ce_requestBackgroundSave()` / `ce_clearResumeMarker()` (CEBridge.mm,
+BrogueCEHost.h). On background the host sets a flag; the engine thread, at its next poll point in
+`nextKeyOrMouseEvent` and `pauseForMilliseconds`, flushes and writes a one-shot resume marker
+(`"ce resume path"` in NSUserDefaults), consumed by `initializeLaunchArguments` on cold launch.
+Fire-and-forget; no `beginBackgroundTask`.
+
+**Where.** CEBridge.mm, BrogueCEHost.h. Platform lifecycle in BrogueViewController.swift. Applies to
+all three engines (mirrored in SEBridge.mm / RogueDriver.mm).
+
+**Notes.** Mid-play crash without backgrounding is intentionally not covered. Resume on a deep run
+shows the normal `[ Loading… ]` replay bar (intrinsic to the save-as-recording format).
+
+---
+
 ## Adding a new CE engine tweak
 
 1. Prefer a host hook: declare `extern void ce<Thing>(...);` at the top of the engine

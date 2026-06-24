@@ -207,7 +207,16 @@ final class BrogueViewController: UIViewController {
     // delay, then at a steady interval. See keyRepeatInitialDelay/keyRepeatInterval and isRepeatable(...).
     fileprivate var keyRepeatTimer: Timer?
     fileprivate var repeatingKey: QueuedKeyEvent?
-    private let keyRepeatInitialDelay: TimeInterval = 0.4
+    // iOS port (Brogue SE): kept at a safe 0.3s as a tap-vs-hold guard. A physical key tap lasts ~100-150ms,
+    // so a shorter delay (we briefly tried 0.1s to match the d-pad) makes a normal tap auto-repeat into an
+    // accidental second step. Because 0.3s is ABOVE the noise system's pre-roll window
+    // (NOISE_RIPPLE_PREROLL_MS in Rogue.h, 160ms), the first step of a HELD keyboard direction can't be
+    // recognised as continuous movement and animates one "you heard something" tick before repeats begin --
+    // this is the documented graceful degradation (see KNOWN_CAVEATS.md "Noise system / movement key-repeat"),
+    // accepted in favour of correct tap behaviour. The d-pad (DirectionControlsViewController.m) uses 0.1s
+    // instead: a touch tap is shorter than a key tap, so it stays under the pre-roll and gets full
+    // first-step suppression without accidental steps.
+    private let keyRepeatInitialDelay: TimeInterval = 0.3
     private let keyRepeatInterval: TimeInterval = 0.1
 
     // ── Safe-area action buttons ─────────────────────────────────────────
@@ -225,7 +234,15 @@ final class BrogueViewController: UIViewController {
         /// CE-only commands (e.g. re-throw) are hidden from the rebind menus
         /// while the Classic engine is active, since 1.7.5 doesn't handle them.
         var ceOnly: Bool = false
+        /// SE-only commands (e.g. re-apply staff) are shown only while Brogue SE
+        /// is active, since neither Classic nor CE handles them.
+        var seOnly: Bool = false
     }
+
+    /// Canonical key code for the SE re-apply-last-staff command (REAPPLY_KEY in
+    /// Rogue.h, `128+20`). Sent directly (raw) so it bypasses keyboard-scheme
+    /// remapping and means re-apply in every scheme.
+    private static let reapplyKeyCode: UInt8 = 128 + 20
 
     /// Commands a side button may be bound to. Names mirror printHelpScreen().
     private static let commandCatalog: [Command] = [
@@ -241,6 +258,7 @@ final class BrogueViewController: UIViewController {
         Command(key: "e".ascii, name: "Equip",             category: "Item Actions"),
         Command(key: "r".ascii, name: "Remove",            category: "Item Actions"),
         Command(key: "a".ascii, name: "Apply / use",       category: "Item Actions"),
+        Command(key: reapplyKeyCode, name: "Re-apply staff", category: "Item Actions", seOnly: true),
         Command(key: "t".ascii, name: "Throw",             category: "Item Actions"),
         Command(key: "T".ascii, name: "Re-throw at last monster", category: "Item Actions", ceOnly: true),
         Command(key: "d".ascii, name: "Drop",              category: "Item Actions"),
@@ -264,6 +282,7 @@ final class BrogueViewController: UIViewController {
         "e".ascii: "shield.lefthalf.filled",
         "r".ascii: "xmark.shield",
         "a".ascii: "wand.and.stars",
+        reapplyKeyCode: "wand.and.rays",
         "t".ascii: "paperplane.fill",
         "T".ascii: "paperplane.circle.fill",
         "d".ascii: "arrow.down.circle",
@@ -371,6 +390,24 @@ final class BrogueViewController: UIViewController {
         // Damage severity levels passed up from the engine (see Combat.c).
         static let severityLowHealth = 1
         static let severityFatal = 2
+
+        // Noise-detection feedback (Brogue SE noise system, see Monsters.c). Sharp/crisp
+        // so it reads as an "alert," distinct from the softer damage thuds.
+        static let detectionStyle: UIImpactFeedbackGenerator.FeedbackStyle = .rigid
+        static let detectionIntensity: CGFloat = 0.7
+        static let detectionDoubleGap: TimeInterval = 0.09  // gap between the two "now hunting" taps
+        static let detectionStageHunting = 1                // stage >= this -> double tap
+
+        // Environmental-noise feedback (Brogue SE noise system, see Time.c / Architect.c): a noisy
+        // WORLD EVENT near the player, distinct from the detection "alert." kind 0 = a trap's soft
+        // click underfoot (gentle, single light tick); kind 1 = reward-room machinery grinding shut
+        // (pronounced, heavy thud + a short second tap to evoke the grind).
+        static let trapClickStyle: UIImpactFeedbackGenerator.FeedbackStyle = .light
+        static let trapClickIntensity: CGFloat = 0.5        // gentle (but >= the ~0.4 perceptible floor)
+        static let altarGrindStyle: UIImpactFeedbackGenerator.FeedbackStyle = .heavy
+        static let altarGrindIntensity: CGFloat = 1.0       // the heaviest noise haptic in the game
+        static let altarGrindDoubleGap: TimeInterval = 0.07 // gap before the grind's second tap
+        static let envNoiseKindAltar = 1                    // kind >= this -> pronounced (double-tap grind)
     }
 
     /// Tactile feedback when an action button is tapped.
@@ -398,6 +435,14 @@ final class BrogueViewController: UIViewController {
     private let strongDamageHaptics = UIImpactFeedbackGenerator(style: Haptics.strongDamageStyle)
     private let deathHaptics = UINotificationFeedbackGenerator()
 
+    /// Generator for noise-detection feedback (sharp taps when something hears you).
+    private let detectionHaptics = UIImpactFeedbackGenerator(style: Haptics.detectionStyle)
+
+    /// Generators for environmental-noise feedback: a gentle tick for a trap click and a
+    /// heavy thud for an altar grinding shut.
+    private let trapClickHaptics = UIImpactFeedbackGenerator(style: Haptics.trapClickStyle)
+    private let altarGrindHaptics = UIImpactFeedbackGenerator(style: Haptics.altarGrindStyle)
+
     /// Tactile feedback when the player takes damage, scaled by severity (computed
     /// by the engine): 0 = ordinary hit (very light), 1 = hit while under 40%
     /// health, the threshold of the engine's low-health flash (stronger), 2 =
@@ -421,12 +466,60 @@ final class BrogueViewController: UIViewController {
         }
     }
 
+    /// Tactile feedback when an unseen creature reacts to the player's noise (Brogue
+    /// SE noise system): stage 0 = something just began investigating you (one short,
+    /// sharp tap); stage 1 = an investigator locked onto you and is now hunting (two
+    /// quick taps). Respects the haptics setting and is iPhone-only. Called from the
+    /// SE bridge on the engine's background thread, so it hops to main.
+    @objc func noiseDetectionHaptic(_ stage: Int) {
+        guard hapticsEnabled, UIDevice.current.userInterfaceIdiom == .phone else { return }
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self else { return }
+            self.detectionHaptics.impactOccurred(intensity: Haptics.detectionIntensity)
+            self.detectionHaptics.prepare()
+            if stage >= Haptics.detectionStageHunting {   // it found you — a second quick tap
+                DispatchQueue.main.asyncAfter(deadline: .now() + Haptics.detectionDoubleGap) { [weak self] in
+                    guard let self = self else { return }
+                    self.detectionHaptics.impactOccurred(intensity: Haptics.detectionIntensity)
+                    self.detectionHaptics.prepare()
+                }
+            }
+        }
+    }
+
+    /// Tactile feedback when a noisy world event happens near the player (Brogue SE noise
+    /// system): kind 0 = a trap's soft click underfoot (one gentle light tick); kind 1 = an
+    /// altar / reward-room machinery grinding shut (a heavy thud followed by a short second
+    /// tap, evoking the grind). Respects the haptics setting and is iPhone-only. Called from
+    /// the SE bridge on the engine's background thread, so it hops to main.
+    @objc func environmentalNoiseHaptic(_ kind: Int) {
+        guard hapticsEnabled, UIDevice.current.userInterfaceIdiom == .phone else { return }
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self else { return }
+            if kind >= Haptics.envNoiseKindAltar {            // altar grind — heavy thud + a second tap
+                self.altarGrindHaptics.impactOccurred(intensity: Haptics.altarGrindIntensity)
+                self.altarGrindHaptics.prepare()
+                DispatchQueue.main.asyncAfter(deadline: .now() + Haptics.altarGrindDoubleGap) { [weak self] in
+                    guard let self = self else { return }
+                    self.altarGrindHaptics.impactOccurred(intensity: Haptics.altarGrindIntensity)
+                    self.altarGrindHaptics.prepare()
+                }
+            } else {                                          // trap click — one gentle tick
+                self.trapClickHaptics.impactOccurred(intensity: Haptics.trapClickIntensity)
+                self.trapClickHaptics.prepare()
+            }
+        }
+    }
+
     /// Warms the take-damage generators so the first hit isn't dropped by a cold
     /// Taptic Engine. Called when gameplay controls appear.
     private func prepareDamageHaptics() {
         lightDamageHaptics.prepare()
         strongDamageHaptics.prepare()
         deathHaptics.prepare()
+        detectionHaptics.prepare()
+        trapClickHaptics.prepare()
+        altarGrindHaptics.prepare()
     }
 
     /// iPhone "left-handed" magnifier mode: when on, the magnifier sits to the
@@ -443,6 +536,13 @@ final class BrogueViewController: UIViewController {
     /// When on (default), single-tapping a sidebar entity zooms out to 1× so its
     /// description box isn't clipped while zoomed. Toggleable in Options.
     private var examineZoomEnabled: Bool = RogueScene.isExamineZoomEnabledSetting
+
+    /// True once this process has gone to the background at least once. Distinguishes a warm
+    /// foreground (we backgrounded earlier and the process survived) from a cold launch (a fresh
+    /// process after an OS kill, where didBecomeActive also fires). The background suspend/resume
+    /// flow uses it to clear a stale resume marker only on a warm foreground — never on cold launch,
+    /// where the engine must consume the marker to resume. See docs/design/background-suspend-resume.md.
+    private var didBackgroundThisProcess = false
 
     /// Mirrors the directional pad's visibility: true while the player is
     /// actively moving around the dungeon, false on menus/dialogs/title.
@@ -725,6 +825,7 @@ final class BrogueViewController: UIViewController {
         GameCenter.shared.authenticate(from: self)
 
         setupHardwareKeyboardObserver()
+        setupAppLifecycleObserver()
         setupActionButtons()
         setupCenterShortcutButton()
         // File management and Game Center now live in the Classic title menu
@@ -1785,7 +1886,30 @@ final class BrogueViewController: UIViewController {
     private static func seInfoBlocks() -> [InfoBlock] {
         return [
             .link("Support", "https://github.com/sethhoward/Brogue-iPad"),
-            .note("Brogue SE — An experimental fork of BrogueCE with original items, monsters, and mechanics with release 1 (\"Alphabet-a Soup\") and an upcoming release (\"Alphabeast\") that will bring new monsters and minibosses. Here's what's new:"),
+            .note("Brogue SE — an experimental fork of BrogueCE with original items, monsters, and mechanics. Release 0.10.0, \"A Is For AAaAH!\", is all about sound: the dungeon can finally hear you — and you can hear it. Here's what's new:"),
+            .heading("🔊 The Dungeon Can Hear You"),
+            .bullets([
+                "Make noise, get noticed — Footsteps, fighting, and the terrain you cross all send sound rippling through the dungeon. It bends around corners and muffles through closed doors, so unseen monsters can now hear you coming and slip away to investigate the racket.",
+                "Every weapon has a voice — A dagger is nearly silent; a war hammer is a clamor. Light armor and wading keep you quiet, while heavy armor and crunching over rubble give you away.",
+                "Hear what you can't see — When something stirs off-screen, a ripple shows roughly where it was, and a \"?\" marks a creature that heard you and is closing in. Stay still and it may pass; bolt and you'll draw a crowd.",
+                "A louder world — Traps click, reward-room cages slam and machinery grinds, stone guardians boom with every step, and an alarm trap's shriek now echoes across the entire floor.",
+                "Throw to distract — Hurl an item to lure investigating monsters to where it lands. The catch: the distraction is consumed when they arrive, so every diversion costs you the item.",
+                "The Ring of Awareness now hears, too — Once just a sense for traps, secret doors, and hidden levers, it now also sharpens your ears: you catch unseen creatures stirring nearby, and the more powerful the ring, the farther off — and more reliably — you hear them. (Cursed rings dull your hearing instead.)",
+            ]),
+            .heading("🐺 Lone Wolf"),
+            .bullets([
+                "Go it alone — Adventuring with no allies builds Lone Wolf tiers (up to five), each hardening you with extra effective strength. Take on a single companion and the bond breaks, resetting the track — the dungeon rewards the truly solitary.",
+            ]),
+            .heading("🎮 Quality of Life"),
+            .bullets([
+                "Re-zap your last staff — Press \"A\" (modern keyboard layout) or set it to a quick action button to re-apply the staff you used last, mirroring re-throw.",
+                "Quiet, please — A new menu toggle hides your own sound-ripple animation while leaving every other noise effect intact.",
+                "OS-proof saves — If iOS kills the app while it's in the background, your run reloads right where you left off.",
+                "iPhone haptics — Feel a pulse when something hears you, and a heavier thump when a loud event goes off.",
+                "Refined identification — Detect magic and resting now surface the items you still haven't figured out first before fully identifying ones you already know polarity, and a worn Ring of Wisdom learns your armor and rings faster.",
+            ]),
+            .heading("📦 Previous Release — 0.9.0 \"Alphabet-a Soup\""),
+            .note("The first Brogue SE release, which introduced original items, monsters, and mechanics:"),
             .heading("🧪 New Items"),
             .bullets([
                 "The Empty Bottle — Carry it and the world fills it: step into a gas or pool to bottle it, drift over lava or a chasm while levitating to skim it, or set it down and zap it with a bolt. Each capture becomes a real, identified potion.",
@@ -1886,9 +2010,12 @@ extension BrogueViewController: UIContextMenuInteractionDelegate {
     /// Sectioned menu of bindable commands for one side-button slot. Each row
     /// shows the human-readable name and the key; the current binding is checked.
     /// Commands offered in the rebind menus for the active engine. CE-only
-    /// commands (e.g. re-throw) are dropped while Classic is running.
+    /// commands (e.g. re-throw) are dropped while Classic is running; SE-only
+    /// commands (e.g. re-apply staff) are shown only while Brogue SE is running.
     private func availableCommands() -> [Command] {
-        BrogueViewController.commandCatalog.filter { currentEngine.isCEFamily || !$0.ceOnly }
+        BrogueViewController.commandCatalog.filter {
+            (currentEngine.isCEFamily || !$0.ceOnly) && (currentEngine == .se || !$0.seOnly)
+        }
     }
 
     private func rebindMenu(forSlot slot: Int) -> UIMenu {
@@ -2889,6 +3016,9 @@ extension BrogueViewController {
         // Never while pinching / two-finger panning the map — the magnifier would
         // fight the gesture and lag behind the moving cells.
         guard !zoomGestureInProgress else { return false }
+        // Never while a hardware keyboard is attached — the player is driving by
+        // keyboard, not touch, so the touch loupe is just noise.
+        guard !hardwareKeyboardConnected else { return false }
         let engineAllowsMagnifier = currentEngine.isCEFamily
             ? (gameplayControlsActive || isTargeting)
             : lastBrogueGameEvent.canShowMagnifyingGlass
@@ -3099,6 +3229,48 @@ extension BrogueViewController: UITextFieldDelegate {
     }
 }
 
+// MARK: - App lifecycle (background suspend / resume)
+
+extension BrogueViewController {
+    /// Wires background/foreground notifications that drive save-on-background and
+    /// auto-resume-on-cold-launch. See docs/design/background-suspend-resume.md.
+    fileprivate func setupAppLifecycleObserver() {
+        let center = NotificationCenter.default
+        center.addObserver(self, selector: #selector(appDidEnterBackground),
+                           name: UIApplication.didEnterBackgroundNotification, object: nil)
+        center.addObserver(self, selector: #selector(appDidBecomeActive),
+                           name: UIApplication.didBecomeActiveNotification, object: nil)
+    }
+
+    /// On background: ask the active engine to snapshot exact state at its next poll point and mark
+    /// it for cold-launch resume. The engine guards against title/playback, but we also skip the
+    /// request at the title where there's no live game. Fire-and-forget — the snapshot completes
+    /// inside iOS's brief grace window before suspension (see the design note for why we don't
+    /// take a background-task assertion).
+    @objc private func appDidEnterBackground() {
+        didBackgroundThisProcess = true
+        guard !atTitle else { return }
+        switch currentEngine {
+        case .classic: setClassicBackgroundSaveRequested(true)
+        case .ce:      ce_requestBackgroundSave()
+        case .se:      se_requestBackgroundSave()
+        }
+    }
+
+    /// On foreground: cold launch fires this too, but `didBackgroundThisProcess` is only set after a
+    /// real background in THIS process — so on a fresh launch we do nothing and let the engine
+    /// consume the resume marker. On a warm foreground (the process survived) the in-memory game is
+    /// authoritative, so we drop the now-stale resume marker.
+    @objc private func appDidBecomeActive() {
+        guard didBackgroundThisProcess else { return }
+        switch currentEngine {
+        case .classic: clearClassicResumeMarker()
+        case .ce:      ce_clearResumeMarker()
+        case .se:      se_clearResumeMarker()
+        }
+    }
+}
+
 // MARK: - Hardware keyboard
 
 extension BrogueViewController {
@@ -3135,6 +3307,9 @@ extension BrogueViewController {
         DispatchQueue.main.async { [weak self] in
             self?.refreshDirectionPadVisibility()
             self?.refreshEscButtonVisibility()
+            // Drop any touch loupe still on screen when a keyboard is plugged in
+            // mid-play — canShowMagnifier now refuses to re-show it.
+            if connected { self?.hideMagnifier() }
         }
     }
 

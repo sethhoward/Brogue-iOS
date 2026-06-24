@@ -1252,6 +1252,9 @@ boolean playerMoves(short direction) {
             refreshDungeonCell((pos){ x, y });
             refreshDungeonCell(player.loc);
             playerMoved = true;
+            playerEmitNoise(0); // iOS port (Brogue SE): noise system -- a step's loudness (terrain of the
+                                // destination cell + armor/levitation). A melee/throw overrides this with
+                                // a louder spike; rest/wait leaves it silent. See noise-system.md Phase 2.
 
             checkForMissingKeys(x, y);
             if (monsterShouldFall(&player)) {

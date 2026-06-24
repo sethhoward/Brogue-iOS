@@ -1988,6 +1988,49 @@ static short effectiveRingEnchant(item *theItem) {
     }
 }
 
+// iOS port (iBrogue): ring of wisdom accelerates auto-identification-by-use for worn ARMOR and RINGS
+// (weapons are out of scope). The base requirement (item->charges, seeded from gameConst->armorDelayToAutoID
+// / ringDelayToAutoID) is NOT lowered; a worn wisdom ring just makes the countdown tick down faster, and the
+// consumed familiarity is permanent (banked -- removing the ring only stops further speedup). The lever is
+// reductionPct = WISDOM_AUTOID_PCT_PER_LEVEL * wisdomBonus, clamped: +50% (2x speed) at the cap, and cursed
+// wisdom slows it down to -100% (2x slower), mirroring the other wisdom levers (rest-insight, recharge).
+#define WISDOM_AUTOID_PCT_PER_LEVEL   10   // % faster per net wisdom-ring enchant
+#define WISDOM_AUTOID_MAX_FASTER_PCT  50   // cap: never quicker than 2x
+#define WISDOM_AUTOID_MAX_SLOWER_PCT  100  // floor: cursed wisdom never slower than 2x
+
+static short wisdomAutoIDReductionPct(void) {
+    long pct = (long)WISDOM_AUTOID_PCT_PER_LEVEL * rogue.wisdomBonus;
+    if (pct >  WISDOM_AUTOID_MAX_FASTER_PCT) pct =  WISDOM_AUTOID_MAX_FASTER_PCT;
+    if (pct < -WISDOM_AUTOID_MAX_SLOWER_PCT) pct = -WISDOM_AUTOID_MAX_SLOWER_PCT;
+    return (short)pct;
+}
+
+// Charges to consume this worn-turn for an armor/ring auto-ID countdown. A Bresenham step on the turn clock
+// realizes the wisdom rate exactly on average -- 100/(100-reductionPct) charges per turn -- as an integer
+// 0, 1, or 2 (no fractional charges, no new save field; derived from already-deterministic state, so it
+// reconstructs identically on replay). reductionPct 0 -> a flat 1/turn (vanilla).
+short wisdomAutoIDChargeStep(void) {
+    const short pct = wisdomAutoIDReductionPct();
+    if (pct == 0) {
+        return 1;
+    }
+    const long denom = 100 - pct;                   // [50, 200], never 0
+    const long t = (long)rogue.absoluteTurnNumber;
+    if (t < 1) {
+        return 1;
+    }
+    return (short)((t * 100) / denom - ((t - 1) * 100) / denom);
+}
+
+// The auto-ID wait as the player should see it, adjusted for the wisdom lever: fewer turns while a wisdom
+// ring is worn, more while it is cursed. (charges is now a familiarity counter that drains faster/slower
+// than 1/turn; this converts the remainder back into perceived turns.) Never below 1.
+static short wisdomAutoIDDisplayTurns(short charges) {
+    const short pct = wisdomAutoIDReductionPct();
+    const long turns = ((long)charges * (100 - pct) + 99) / 100; // ceil(charges * (100-pct)/100)
+    return (short)(turns < 1 ? 1 : turns);
+}
+
 static short apparentRingBonus(const enum ringKind kind) {
     item *rings[2] = {rogue.ringLeft, rogue.ringRight}, *ring;
     short retval = 0;
@@ -2218,10 +2261,11 @@ void itemDetails(char *buf, item *theItem) {
                             (theItem->charges == gameConst->weaponKillsToAutoID ? "" : " more"),
                             (theItem->charges == 1 ? "enemy" : "enemies"));
                 } else {
+                    const short shownTurns = wisdomAutoIDDisplayTurns(theItem->charges); // iOS port (iBrogue): ring of wisdom-adjusted
                     sprintf(buf2, "It will reveal its secrets if worn for %i%s turn%s. ",
-                            theItem->charges,
+                            shownTurns,
                             (theItem->charges == gameConst->armorDelayToAutoID ? "" : " more"),
-                            (theItem->charges == 1 ? "" : "s"));
+                            (shownTurns == 1 ? "" : "s"));
                 }
                 strcat(buf, buf2);
             }
@@ -2785,10 +2829,11 @@ void itemDetails(char *buf, item *theItem) {
                     }
                 }
             } else {
+                const short shownTurns = wisdomAutoIDDisplayTurns(theItem->charges); // iOS port (iBrogue): ring of wisdom-adjusted
                 sprintf(buf2, "\n\nIt will reveal its secrets if worn for %i%s turn%s",
-                        theItem->charges,
+                        shownTurns,
                         (theItem->charges == gameConst->ringDelayToAutoID ? "" : " more"),
-                        (theItem->charges == 1 ? "" : "s"));
+                        (shownTurns == 1 ? "" : "s"));
                 strcat(buf, buf2);
 
                 if (!(theItem->flags & ITEM_IDENTIFIED) && (theItem->charges < gameConst->ringDelayToAutoID || (theItem->flags & ITEM_MAGIC_DETECTED))) {
@@ -3639,6 +3684,16 @@ void aggravateMonsters(short distance, short x, short y, const color *flashColor
             message("You hear a piercing shriek; something must have triggered a nearby alarm.", 0);
         }
     }
+
+#if NOISE_SYSTEM_ENABLED
+    // iOS port (Brogue SE): the loudest noise in the game -- the alarm trap / aggravate scroll wakes the whole
+    // level. Paint the largest, hottest ripple so it visibly reads as "this was heard everywhere," and fire the
+    // pronounced haptic. Fires regardless of line of sight (it's a level-wide sound, not a seen event). Unlike
+    // the other emitters this does NOT route through emitEnvironmentalNoise -- aggravateMonsters already did the
+    // (much stronger, level-wide) substantive wake/alert above, so here we only add the cosmetic tell.
+    cosmeticSpawnRippleAggravate((pos){ x, y }, NOISE_AGGRAVATE_RIPPLE_RADIUS);
+    environmentalNoiseHaptic(1); // pronounced: a loud, dungeon-wide shriek
+#endif
 
     freeGrid(grid);
 }
@@ -6160,6 +6215,67 @@ static pos pullMouseClickDuringPlayback(void) {
 /// the player to the target (e.g. throwing an item or using a staff/wand). The best path to the target is determined
 /// and highlighted. If possible, an inital target is chosen automatically. The player can cycle through additional
 /// targets (if any) with the tab key. Alternatively, the player can manually choose a target.
+#if NOISE_SYSTEM_ENABLED
+// iOS port (Brogue SE): the throw NOISE PREVIEW -- a live, static "audible radius" wash drawn while aiming,
+// so you can see how loud a throw will be (and how far it carries, bending around walls) before committing.
+// Reflects the selected item + the projected impact surface + the cost-flood, never monster positions, so
+// it can't be a detection tool. See docs/design/environmental-sounds.md.
+static short itemImpactLoudness(const item *theItem);          // (defined below, near throwItem)
+static short impactSurfaceModifier(pos loc, boolean hitWall);  // (defined below, near throwItem)
+static const color throwNoisePreviewColor = {80, 65, 25, 0, 0, 0, 0, false}; // faint amber wash
+
+// Where a thrown item would stop along `coords`: first creature -> that cell; first wall -> the open cell
+// before it; else the last cell. Mirrors throwItem's landing logic.
+static pos previewThrowImpact(const pos coords[], short numCells, boolean *hitWall) {
+    *hitWall = false;
+    for (short i = 0; i < numCells; i++) {
+        const pos c = coords[i];
+        if (pmap[c.x][c.y].flags & (HAS_MONSTER | HAS_PLAYER)) {
+            return c; // would strike a creature
+        }
+        if (cellHasTerrainFlag(c, (T_OBSTRUCTS_PASSABILITY | T_OBSTRUCTS_VISION))) {
+            *hitWall = true;
+            return (i > 0) ? coords[i - 1] : coords[0]; // rests on the open cell before the obstruction
+        }
+    }
+    return (numCells > 0) ? coords[numCells - 1] : player.loc;
+}
+
+// Erase a previously-drawn preview wash by refreshing its bounding box (covers exactly what was painted).
+static void erasePreviewBox(pos center, short radius) {
+    if (!isPosInMap(center) || radius < 1) {
+        return;
+    }
+    for (short iy = center.y - radius; iy <= center.y + radius; iy++) {
+        for (short ix = center.x - radius; ix <= center.x + radius; ix++) {
+            if (coordinatesAreInMap(ix, iy)) {
+                refreshDungeonCell((pos){ ix, iy });
+            }
+        }
+    }
+}
+
+// Draw the audible-radius wash for the throw currently aimed along `coords`; returns the radius and reports
+// the impact cell via *outImpact (so the caller can erase the same region next frame). Flood-accurate.
+static short drawThrowNoisePreview(const item *theItem, const pos coords[], short numCells, pos *outImpact) {
+    boolean hitWall;
+    const pos impact = previewThrowImpact(coords, numCells, &hitWall);
+    const short strength = itemImpactLoudness(theItem) + impactSurfaceModifier(impact, hitWall);
+    const short radius = clamp(NOISE_IMPACT_BASE_RADIUS + strength / NOISE_IMPACT_SCALE,
+                               NOISE_IMPACT_MIN_RADIUS, NOISE_IMPACT_MAX_RADIUS);
+    recomputeImpactSoundMap(impact);
+    for (short iy = impact.y - radius; iy <= impact.y + radius; iy++) {
+        for (short ix = impact.x - radius; ix <= impact.x + radius; ix++) {
+            if (coordinatesAreInMap(ix, iy) && impactSoundDistanceAt((pos){ ix, iy }) <= radius) {
+                hiliteCell(ix, iy, &throwNoisePreviewColor, 25, true); // faint wash; trajectory draws on top
+            }
+        }
+    }
+    *outImpact = impact;
+    return radius;
+}
+#endif
+
 /// @param returnLoc The location of the chosen target, if any.
 /// @param maxDistance The maximum throwing/blinking distance. Used to provide a visual cue to the player.
 /// @param targetMode Determines how targets are chosen based on the action (e.g. throw, use staff/wand).
@@ -6178,6 +6294,11 @@ boolean chooseTarget(pos *returnLoc,
     boolean stopAtTarget = (targetMode == AUTOTARGET_MODE_THROW);
     color trajColor;
     bolt theBolt;
+#if NOISE_SYSTEM_ENABLED
+    const boolean showNoisePreview = (targetMode == AUTOTARGET_MODE_THROW && theItem != NULL); // throw noise tell
+    pos previewImpact = INVALID_POS;
+    short previewRadius = 0;
+#endif
 
     // choose the bolt and color to use for highlighting the path to the target
     if (theItem && (targetMode == AUTOTARGET_MODE_USE_STAFF_OR_WAND)
@@ -6249,6 +6370,11 @@ boolean chooseTarget(pos *returnLoc,
         if (canceled) {
             refreshDungeonCell(oldTargetLoc);
             hiliteTrajectory(coordinates, numCells, true, &theBolt, &trajColor);
+#if NOISE_SYSTEM_ENABLED
+            if (showNoisePreview) {
+                erasePreviewBox(previewImpact, previewRadius);
+            }
+#endif
             confirmMessages();
             rogue.cursorLoc = INVALID_POS;
             uiMode = oldUiMode;
@@ -6279,6 +6405,11 @@ boolean chooseTarget(pos *returnLoc,
 
         refreshDungeonCell(oldTargetLoc);
         hiliteTrajectory(coordinates, numCells, true, &theBolt, &trajColor);
+#if NOISE_SYSTEM_ENABLED
+        if (showNoisePreview) {
+            erasePreviewBox(previewImpact, previewRadius); // clear last frame's audible-radius wash
+        }
+#endif
 
         if (!targetConfirmed) {
             numCells = getLineCoordinates(coordinates, originLoc, targetLoc, &theBolt);
@@ -6289,6 +6420,11 @@ boolean chooseTarget(pos *returnLoc,
             if (stopAtTarget) {
                 numCells = min(numCells, distanceBetween(player.loc, targetLoc));
             }
+#if NOISE_SYSTEM_ENABLED
+            if (showNoisePreview) { // paint the audible radius UNDER the trajectory (drawn next), so the aim line stays on top
+                previewRadius = drawThrowNoisePreview(theItem, coordinates, numCells, &previewImpact);
+            }
+#endif
             distance = hiliteTrajectory(coordinates, numCells, false, &theBolt, &trajColor);
             cursorInTrajectory = false;
             for (i=0; i<distance; i++) {
@@ -6311,6 +6447,11 @@ boolean chooseTarget(pos *returnLoc,
     }
     hiliteTrajectory(coordinates, numCells, true, &theBolt, &trajColor);
     refreshDungeonCell(oldTargetLoc);
+#if NOISE_SYSTEM_ENABLED
+    if (showNoisePreview) {
+        erasePreviewBox(previewImpact, previewRadius);
+    }
+#endif
 
     uiMode = oldUiMode;
     ceSetTargeting(false); // iOS port (iBrogue): aiming finished
@@ -6968,6 +7109,66 @@ static boolean detonateFloorPotionAt(short x, short y, boolean fiery) {
 // a staff charge, a one-shot incendiary -- are bounded). Flip back to true to restore the consumed-dart probe.
 static const boolean dartsProbeAndConsumeOnPotions = false;
 
+#if NOISE_SYSTEM_ENABLED
+// iOS port (Brogue SE): how loud a thrown item is WHEN IT LANDS -- a mass tier. See environmental-sounds.md.
+static short itemImpactLoudness(const item *theItem) {
+    if (theItem->category & POTION) {
+        return NOISE_IMPACT_SHATTER;    // glass shatter (also delivers its effect)
+    }
+    if (theItem->category & SCROLL) {
+        return NOISE_IMPACT_PAPER;       // a sheet of parchment flutters down -- the quietest throw
+    }
+    if (theItem->category & ARMOR) {
+        return NOISE_IMPACT_HEAVY;       // a hurled cuirass clatters
+    }
+    if (theItem->category & WEAPON) {
+        switch (theItem->kind) {
+            case DART:
+            case INCENDIARY_DART:
+                return NOISE_IMPACT_LIGHT;
+            case DAGGER:
+                return NOISE_IMPACT_LIGHT_MEDIUM;
+            case JAVELIN:
+            case SPEAR:
+                return NOISE_IMPACT_MEDIUM;
+            default:
+                return NOISE_IMPACT_HEAVY; // maces/axes/hammers/swords -- you've hurled away real gear
+        }
+    }
+    return NOISE_IMPACT_LIGHT;            // food, wands, charms, etc. -- light/quiet
+}
+
+// iOS port (Brogue SE): the surface an item strikes shapes how loud the impact is -- a DEDICATED tier
+// (impacts on soft ground are MUFFLED, the inverse of footsteps, which crunch on grass). hitWall = it
+// clanged a solid obstruction. A struck creature is the quietest (the muffled thud behind "accuracy = stealth").
+static short impactSurfaceModifier(pos loc, boolean hitWall) {
+    if (hitWall) {
+        return NOISE_IMPACT_WALL;
+    }
+    if (pmap[loc.x][loc.y].flags & (HAS_MONSTER | HAS_PLAYER)) {
+        return NOISE_IMPACT_BODY;
+    }
+    boolean water = false, carpet = false, soft = false;
+    for (enum dungeonLayers layer = DUNGEON; layer < NUMBER_TERRAIN_LAYERS; layer++) {
+        switch (pmap[loc.x][loc.y].layers[layer]) {
+            case DEEP_WATER: case SHALLOW_WATER:
+                water = true; break;
+            case CARPET: case SPIDERWEB:
+                carpet = true; break;
+            case GRASS: case DEAD_GRASS: case GRAY_FUNGUS: case LUMINESCENT_FUNGUS: case HAY:
+            case FOLIAGE: case DEAD_FOLIAGE: case TRAMPLED_FOLIAGE:
+            case FUNGUS_FOREST: case TRAMPLED_FUNGUS_FOREST: case MUD:
+                soft = true; break;
+            default: break;
+        }
+    }
+    if (water)  return NOISE_IMPACT_WATER;
+    if (carpet) return NOISE_IMPACT_CARPET;
+    if (soft)   return NOISE_IMPACT_SOFT;
+    return NOISE_IMPACT_FLOOR;
+}
+#endif
+
 static void throwItem(item *theItem, creature *thrower, pos targetLoc, short maxDistance) {
     short i, numCells;
     creature *monst = NULL;
@@ -6988,6 +7189,11 @@ static void throwItem(item *theItem, creature *thrower, pos targetLoc, short max
     numCells = getLineCoordinates(listOfCoordinates, originLoc, targetLoc, &boltCatalog[BOLT_NONE]);
 
     thrower->ticksUntilTurn = thrower->attackSpeed;
+
+    // iOS port (Brogue SE): noise system -- the throw itself is SILENT at the player's hand (a rogue's
+    // craft). All the noise is at the IMPACT (the landing-noise hook after the trajectory loop), so a
+    // thrown distraction draws monsters to where it LANDS, never to where you stand. (Revisit a source
+    // term for heavy armor later -- see docs/design/environmental-sounds.md §7.)
 
     if (thrower != &player
         && (pmapAt(originLoc)->flags & IN_FIELD_OF_VIEW)) {
@@ -7079,6 +7285,21 @@ static void throwItem(item *theItem, creature *thrower, pos targetLoc, short max
             break;
         }
     }
+
+#if NOISE_SYSTEM_ENABLED
+    // iOS port (Brogue SE): the LANDING noise. A thrown item's impact is an environmental sound that draws
+    // monsters to the cell -- the distraction tool. Only player throws that DIDN'T strike a creature (a hit
+    // is combat; the victim is already alerted, and the throw itself is silent at the player's hand -- the
+    // rogue's craft). Non-potions that come to rest are tagged so the first investigator to arrive claims
+    // them (consume-on-arrival). See docs/design/environmental-sounds.md.
+    if (thrower == &player && !(pmap[x][y].flags & (HAS_MONSTER | HAS_PLAYER))) {
+        const short impactStrength = itemImpactLoudness(theItem) + impactSurfaceModifier((pos){ x, y }, hitSomethingSolid);
+        if (!(theItem->category & POTION)) {
+            theItem->flags |= ITEM_THROWN_DISTRACTION;
+        }
+        emitEnvironmentalNoise((pos){ x, y }, impactStrength, theItem);
+    }
+#endif
 
     // iOS port (iBrogue): a potion lobbed INTO deep water doesn't shatter -- it bobs on the surface and
     // rides the current to shore via the game's own item drift (the T_MOVES_ITEMS sweep in
@@ -7545,6 +7766,15 @@ static boolean useStaffOrWand(item *theItem) {
         confirmMessages();
 
         rogue.featRecord[FEAT_PURE_WARRIOR] = false;
+
+        // iOS port (Brogue SE): remember the last staff zapped for the re-apply (REAPPLY_KEY)
+        // command. Staves only -- zapping a wand never overwrites it. Recorded on any confirmed
+        // zap, including a fizzle (an unidentified 0-charge staff still reaches this point); an
+        // identified empty staff returns earlier and never gets here. Set on the same input path
+        // every replay, so it stays deterministic / save-safe.
+        if (theItem->category == STAFF) {
+            rogue.lastStaffZapped = theItem;
+        }
 
         if (theItem->charges > 0) {
 

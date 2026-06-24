@@ -83,6 +83,21 @@ static id<BrogueCEHost> gHost = nil;
 // Defined with C linkage so the vendored engine (MainMenu.c) can extern it.
 extern "C" { volatile boolean brogueSETerminationRequested = false; }
 
+// iOS port (Brogue SE): background suspend/resume. Set by the host (se_requestBackgroundSave)
+// when the app backgrounds; read by the engine thread, which snapshots exact state at its next
+// poll point and records a one-shot resume marker so a cold launch after an OS kill resumes
+// straight into the game. See docs/design/background-suspend-resume.md.
+static volatile bool gSEBackgroundSaveRequested = false;
+static NSString *const kSEResumePathKey = @"se resume path";
+
+// Engine globals (defined in the vendored engine; this file declares them locally near each use).
+// Declared here too so the background-snapshot helper below can read them. C linkage to match the
+// engine's C definitions (and the other declarations in this file).
+extern "C" {
+extern playerCharacter rogue;
+extern char currentFilePath[BROGUE_FILENAME_MAX];
+}
+
 // CE's commitDraws() only re-plots cells that changed vs its previouslyPlottedCells
 // cache. That cache survives a teardown/reboot, but the shared RogueScene was
 // changed by the other engine in the meantime — so cells CE thinks are current
@@ -357,6 +372,38 @@ extern "C" __attribute__((visibility("default"))) void se_requestTermination(voi
     brogueSETerminationRequested = true;
 }
 
+// iOS port (Brogue SE): engine-thread only. If a background snapshot was requested, flush the
+// live recording so currentFilePath holds every input so far (exact state, even mid-animation —
+// replay regenerates it) and mark that file for cold-launch auto-load. No-op unless a live game
+// is being recorded: at the title there is nothing to flush and Swift won't even request it; in
+// playback flushBufferToFile() is itself a no-op. The Swift host clears the marker on a surviving
+// foreground, so the snapshot only resumes us after an actual OS kill.
+static void seTakeBackgroundSnapshotIfRequested(void) {
+    if (!gSEBackgroundSaveRequested) {
+        return;
+    }
+    gSEBackgroundSaveRequested = false;
+    if (rogue.playbackMode || currentFilePath[0] == '\0') {
+        return;
+    }
+    flushBufferToFile();
+    [[NSUserDefaults standardUserDefaults] setObject:[NSString stringWithUTF8String:currentFilePath]
+                                              forKey:kSEResumePathKey];
+}
+
+// iOS port (Brogue SE): host hook (UI thread) — request a snapshot on app background.
+extern "C" __attribute__((visibility("default"))) void se_requestBackgroundSave(void) {
+    gSEBackgroundSaveRequested = true;
+}
+
+// iOS port (Brogue SE): host hook (UI thread) — drop a stale resume marker when the app survived
+// a background and is returning to a live in-memory game. Also cancels any still-pending request
+// so a late-waking engine thread can't re-mark after we've cleared.
+extern "C" __attribute__((visibility("default"))) void se_clearResumeMarker(void) {
+    gSEBackgroundSaveRequested = false;
+    [[NSUserDefaults standardUserDefaults] removeObjectForKey:kSEResumePathKey];
+}
+
 // iOS port (iBrogue): drive the engine's runtime KEYBOARD_LABELS flag (see Rogue.h /
 // GlobalsBase.c). The host calls this on GCKeyboard connect/disconnect so in-game hotkey
 // labels appear only with a hardware keyboard, matching the Classic engine.
@@ -418,6 +465,7 @@ boolean pauseForMilliseconds(short milliseconds, PauseBehavior behavior) {
     reportAtTitleIfChanged();
 
     [NSThread sleepForTimeInterval:milliseconds / 1000.];
+    seTakeBackgroundSnapshotIfRequested(); // iOS port (Brogue SE): snapshot mid-animation (e.g. resting)
     if (brogueSETerminationRequested) {
         return true; // wake the title loop so it can observe the request
     }
@@ -438,6 +486,7 @@ void nextKeyOrMouseEvent(rogueEvent *returnEvent, boolean textInput, boolean col
 
         reportUIModeIfChanged();
         reportAtTitleIfChanged();
+        seTakeBackgroundSnapshotIfRequested(); // iOS port (Brogue SE): snapshot between turns
 
         // Engine-switch requested: unblock with a benign keystroke so the title
         // loop iterates and its termination hook returns NG_QUIT.
@@ -452,6 +501,8 @@ void nextKeyOrMouseEvent(rogueEvent *returnEvent, boolean textInput, boolean col
 
         if (colorsDance) {
             shuffleTerrainColors(3, true);
+            advanceCosmeticAnimations(); // iOS port (Brogue SE): tick the cosmetic animation layer on the
+                                         // same idle clock as the terrain shimmer; commitDraws() pushes both.
             commitDraws();
         }
 
@@ -553,13 +604,12 @@ void notifyEvent(short eventId, int data1, int data2, const char *str1, const ch
     }
 }
 
-// iOS port (Brogue SE): debug rest-insight calibration. The engine (recordRestStatsRow in
-// RogueMain.c) emits one CSV row per finished live run; we append it to Documents/se/rest-stats.csv,
-// writing the header — prefixed with our own wall-clock "time" column — only when the file is first
-// created. Pull the file off-device via Xcode > Window > Devices & Simulators > (app) > Download
-// Container, then look under AppData/Documents/se/rest-stats.csv. Output-only. Gated to Debug builds
-// (SE_DEBUG_BUILD): in Release this is a no-op, so the CSV is never written on shipping devices.
-void seRecordRestStats(const char *header, const char *row) {
+// iOS port (Brogue SE): shared CSV appender for the debug calibration logs. Appends one timestamped row to
+// Documents/se/<fileName>, writing the header — prefixed with our own wall-clock "time" column — only when
+// the file is first created. Pull the file off-device via Xcode > Window > Devices & Simulators > (app) >
+// Download Container, then look under AppData/Documents/se/<fileName>. Output-only. Gated to Debug builds
+// (SE_DEBUG_BUILD): in Release this is a no-op, so nothing is written on shipping devices.
+static void seAppendCsvRow(NSString *fileName, const char *header, const char *row) {
 #if SE_DEBUG_BUILD
     if (!header || !row) {
         return;
@@ -567,7 +617,7 @@ void seRecordRestStats(const char *header, const char *row) {
     @autoreleasepool {
         NSString *documents = [NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES) firstObject];
         NSString *seDir = [documents stringByAppendingPathComponent:@"se"];
-        NSString *csvPath = [seDir stringByAppendingPathComponent:@"rest-stats.csv"];
+        NSString *csvPath = [seDir stringByAppendingPathComponent:fileName];
         NSFileManager *manager = [NSFileManager defaultManager];
 
         if (![manager fileExistsAtPath:seDir]) {
@@ -593,9 +643,23 @@ void seRecordRestStats(const char *header, const char *row) {
         }
     }
 #else
+    (void)fileName;
     (void)header;
-    (void)row; // Release: the rest-stats CSV is a debug-only calibration tool; never collect on shipping builds
+    (void)row; // Release: these CSVs are debug-only calibration tools; never collect on shipping builds
 #endif
+}
+
+// iOS port (Brogue SE): debug rest-insight calibration. The engine (recordRestStatsRow in RogueMain.c)
+// emits one CSV row per finished live run → Documents/se/rest-stats.csv.
+void seRecordRestStats(const char *header, const char *row) {
+    seAppendCsvRow(@"rest-stats.csv", header, row);
+}
+
+// iOS port (Brogue SE): debug exploration / Lone-Wolf calibration. The engine (recordExplorationStatsRow in
+// RogueMain.c) emits one CSV row per finished live run → Documents/se/exploration-stats.csv: per-level
+// passable-cell ceiling and xpxp actually accrued, for tuning LONE_WOLF_XP_PER_TIER against real levels.
+void seRecordExplorationStats(const char *header, const char *row) {
+    seAppendCsvRow(@"exploration-stats.csv", header, row);
 }
 
 boolean takeScreenshot(void) {
@@ -707,6 +771,18 @@ void ceShowGameCenter(void) {
 // iOS port (iBrogue): Combat.c calls this when the player takes damage.
 void cePlayerTookDamage(int severity) {
     if (gHost) [gHost playDamageHaptic:severity];
+}
+
+// iOS port (Brogue SE): Monsters.c (noise system) calls this when an unseen creature
+// reacts to the player's noise. stage 0 = began investigating (one tap), 1 = now hunting (two taps).
+void cePlayDetectionHaptic(int stage) {
+    if (gHost) [gHost playDetectionHaptic:stage];
+}
+
+// iOS port (Brogue SE): Time.c (trap click) and Architect.c (altar grind, via DFF_EMITS_NOISE)
+// call this when a noisy world event happens near the player. kind 0 = gentle trap click, 1 = pronounced altar grind.
+void cePlayEnvironmentalNoiseHaptic(int kind) {
+    if (gHost) [gHost playEnvironmentalNoiseHaptic:kind];
 }
 
 // iOS port (iBrogue): Items.c calls this around the throw/zap aiming loop.
@@ -990,6 +1066,18 @@ fileEntry *listFiles(short *fileCount, char **dynamicMemoryBuffer) {
 
 void initializeLaunchArguments(enum NGCommands *command, char *path, uint64_t *seed) {
     if (command) *command = NG_NOTHING;
+    // iOS port (Brogue SE): cold-launch auto-resume. A one-shot marker set on the last background
+    // points at the snapshot; load it straight into the game (no title screen) and consume the
+    // marker. If the file is gone (e.g. the run ended after the marker was set), openFile() in
+    // mainBrogueJunction returns false and the engine falls through to the title — so no pre-check.
+    NSUserDefaults *d = [NSUserDefaults standardUserDefaults];
+    NSString *resumePath = [d stringForKey:kSEResumePathKey];
+    if (resumePath.length && command && path) {
+        [d removeObjectForKey:kSEResumePathKey];
+        *command = NG_OPEN_GAME;
+        strncpy(path, resumePath.UTF8String, BROGUE_FILENAME_MAX - 1);
+        path[BROGUE_FILENAME_MAX - 1] = '\0';
+    }
 }
 
 // NOTE: fileExists / chooseFile / openFile are defined by the CE engine itself

@@ -80,6 +80,20 @@ NS_ASSUME_NONNULL_BEGIN
 // haptics setting and device support, so the engine can call it freely.
 - (void)playDamageHaptic:(NSInteger)severity;
 
+// iOS port (Brogue SE): fire a haptic when an unseen creature reacts to the player's
+// noise. stage 0 = something just began investigating you (one short, sharp tap);
+// stage 1 = an investigator locked onto you and is now hunting (two quick taps).
+// iPhone-only; the host gates on its own haptics setting and device support, so the
+// engine can call it freely. (Only the SE engine calls this; CE never does.)
+- (void)playDetectionHaptic:(NSInteger)stage;
+
+// iOS port (Brogue SE): fire a haptic when a noisy WORLD EVENT happens near the player --
+// a distinct channel from playDetectionHaptic ("something heard YOU"). kind 0 = a trap's
+// soft click underfoot (gentle); kind 1 = reward-room machinery grinding shut (pronounced).
+// iPhone-only; the host gates on its own haptics setting and device support, so the engine
+// can call it freely. (Only the SE engine calls this; CE never does.)
+- (void)playEnvironmentalNoiseHaptic:(NSInteger)kind;
+
 // True while the player is aiming a throw/zap (the engine's targeting loop), so
 // the host can move the escape button aside and enable the aiming magnifier.
 - (void)setTargeting:(BOOL)targeting;
@@ -122,6 +136,13 @@ void ce_setKeyboardLabelsEnabled(int enabled);
 // iOS port (iBrogue): reports hardware-keyboard presence (distinct from KEYBOARD_LABELS).
 // Gates CE's "Press <?> for help" welcome hint. Called on GCKeyboard connect/disconnect.
 void ce_setHardwareKeyboardConnected(int connected);
+
+// iOS port (iBrogue): background suspend/resume. ce_requestBackgroundSave() is called when the
+// app backgrounds; the engine thread snapshots exact state and marks it for cold-launch resume.
+// ce_clearResumeMarker() drops that marker when the app survived the background.
+// See docs/design/background-suspend-resume.md.
+void ce_requestBackgroundSave(void);
+void ce_clearResumeMarker(void);
 
 #ifdef __cplusplus
 }
