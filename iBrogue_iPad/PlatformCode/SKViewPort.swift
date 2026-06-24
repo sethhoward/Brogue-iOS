@@ -49,16 +49,24 @@ class SKViewPort: SKView {
 
     /// Height of the playable area in points, accounting for whether padding is currently
     /// applied. Used by touch→cell math in both Swift and Obj-C.
+    ///
+    /// iOS port (iBrogue): sized from the view's own `bounds`, NOT `UIScreen.main.bounds`. On
+    /// iOS the app is always full-screen so the two agreed, but under Mac Catalyst (and iPad
+    /// Split View / Stage Manager) the window is smaller than — and resizable independently of —
+    /// the display. Keying hit-testing off the screen while the content fills the window put the
+    /// examine cursor several tiles off (worse the more window and display diverged); the view
+    /// bounds are the rectangle the scene actually renders into, so point→cell now matches.
     @objc public var effectiveHeightPoints: CGFloat {
-        let h = UIScreen.main.bounds.size.height
+        let h = bounds.size.height
         return rogueScene.paddingEnabled ? h - SKViewPort.bottomReservePoints : h
     }
 
     /// Width of the playable area in points. Honors the iPhone notch /
     /// dynamic-island safe-area insets, but only when padding is enabled
     /// (i.e. during gameplay — title and menu screens fill the full width).
+    @MainActor
     @objc public var effectiveWidthPoints: CGFloat {
-        return UIScreen.main.bounds.size.width - leftInsetPoints - rightInsetPoints
+        return bounds.size.width - leftInsetPoints - rightInsetPoints
     }
 
     /// Leading inset in points. Returns 0 outside of gameplay so the title /

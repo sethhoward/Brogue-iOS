@@ -88,7 +88,7 @@ extension UIDevice {
     }
 }
 
-fileprivate func getCellCoords(at point: CGPoint, viewport: SKViewPort?) -> CGPoint {
+@MainActor fileprivate func getCellCoords(at point: CGPoint, viewport: SKViewPort?) -> CGPoint {
     let screenH = UIScreen.main.bounds.size.height
     let screenW = UIScreen.main.bounds.size.width
     // When the dungeon map is pinch-zoomed, invert the zoom transform so a
@@ -907,6 +907,18 @@ final class BrogueViewController: UIViewController {
         // Run after viewDidAppear so we definitely have it.
         applyNotchInsets()
         updateDpadNotchAvoidance()
+        applyMacWindowSizeRestrictionsIfNeeded()
+    }
+
+    /// iOS port (iBrogue): Mac Catalyst only — stop the window from being resized so small the
+    /// dungeon grid becomes illegible / the layout collapses. No-op on iOS/iPadOS (a touch device's
+    /// window isn't user-resizable, and `windowScene.sizeRestrictions` is nil there). Idempotent —
+    /// safe to re-run on every appearance. Default/last window size is left to scene state restoration.
+    private func applyMacWindowSizeRestrictionsIfNeeded() {
+        #if targetEnvironment(macCatalyst)
+        guard let restrictions = view.window?.windowScene?.sizeRestrictions else { return }
+        restrictions.minimumSize = CGSize(width: 1024, height: 640)
+        #endif
     }
 
     /// Best-available safe-area insets. SwiftUI's `.ignoresSafeArea()` zeroes
@@ -3367,16 +3379,26 @@ extension BrogueViewController {
     // its own image's hook (Classic's setHardwareKeyboardConnected(); CE/SE's
     // ce_/se_setHardwareKeyboardConnected()) so the setting is correct whichever engine is active.
     private func updateHardwareKeyboardState(_ connected: Bool) {
-        hardwareKeyboardConnected = connected
-        setHardwareKeyboardConnected(connected ? 1 : 0)
-        ce_setHardwareKeyboardConnected(connected ? 1 : 0)
-        se_setHardwareKeyboardConnected(connected ? 1 : 0)
+        // iOS port (iBrogue): a Mac always has a keyboard, and GameController's GCKeyboard discovery can
+        // lag app launch — long enough that the engine's one-time welcome() can print before the flag
+        // flips, dropping the "Press <?> for help" hint and briefly showing the d-pad on Mac. Force the
+        // flag true under Catalyst so desktop mode (hidden d-pad/ESC + the help hint) is correct from the
+        // first frame, independent of GCKeyboard timing. iOS/iPadOS keep the real connect/disconnect state.
+        #if targetEnvironment(macCatalyst)
+        let isConnected = true
+        #else
+        let isConnected = connected
+        #endif
+        hardwareKeyboardConnected = isConnected
+        setHardwareKeyboardConnected(isConnected ? 1 : 0)
+        ce_setHardwareKeyboardConnected(isConnected ? 1 : 0)
+        se_setHardwareKeyboardConnected(isConnected ? 1 : 0)
         DispatchQueue.main.async { [weak self] in
             self?.refreshDirectionPadVisibility()
             self?.refreshEscButtonVisibility()
             // Drop any touch loupe still on screen when a keyboard is plugged in
             // mid-play — canShowMagnifier now refuses to re-show it.
-            if connected { self?.hideMagnifier() }
+            if isConnected { self?.hideMagnifier() }
         }
     }
 
