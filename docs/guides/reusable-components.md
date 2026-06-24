@@ -118,6 +118,7 @@ spawn** remains entity-specific, the *next* extraction candidate — to be lifte
 | Theft preference: which pack item a thief snatches | ✅ **built** | `rateItemStealDesirability(thief, item)` reads `stealProfile` (`STEAL_ADDITIVE`/`STEAL_EXCLUSIVE` + weighted `stealRule[]` + tunable random hedge), via the catalog `steal` field |
 | Use a stolen item against the player (zap/throw/quaff) | candidate | not built — a separate turn-time behavior keyed off `carriedItem`; build with the first thief that needs it |
 | Once-per-run pinned spawn | candidate | `spawnUniqueNear(MK_*, anchor, depthRange, chance, &flag)` (now `spawnGoldGoblin`) |
+| Dress a horde's spawn site with terrain (a "lair") | ✅ **built** | catalog `hordeType.spawnDF` (a `DF_*`); `spawnHorde` lays it at the leader's cell **at level-gen only** (`!levels[…].visited`). Core+apron composes via the DF's own `subsequentDF` chain — no helper. Reference consumer: jackal pack → `DF_JACKAL_DEN_FOLIAGE` (`{MK_JACKAL,+members}` row). A second lair monster is one catalog value. |
 
 ---
 

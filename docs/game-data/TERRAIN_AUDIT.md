@@ -230,6 +230,26 @@ fills a spawn map radially from `startProbability` down by `probabilityDecrement
   (bog); `DF_BLOODFLOWER_POD_BURST` → `HEALING_CLOUD`.
 - **Surfaces:** the blood family (see §7), `DF_WEB_SMALL` / `DF_WEB_LARGE`, `DF_ANCIENT_SPIRIT_VINES`,
   `DF_TRAMPLED_FOLIAGE` / `DF_FOLIAGE_REGROW`, `DF_VOMIT` / `DF_URINE` / `DF_UNICORN_POOP`.
+- **SE — lair dressing:** `DF_JACKAL_DEN_FOLIAGE` (a tighter-than-open-field `FOLIAGE` core, `100/40`)
+  chains `subsequentDF` → `DF_JACKAL_DEN_GRASS` (a contained `GRASS` apron, `75/20`). `FOLIAGE` outranks
+  `GRASS` in draw priority, so the apron fills *around* the core without erasing it. A horde drops this at
+  its spawn site via the `hordeType.spawnDF` catalog field (the jackal pack is the only consumer; see
+  [MONSTERS_AUDIT.md §7.2](MONSTERS_AUDIT.md)). The core+apron is pure catalog data — no bespoke helper.
+
+### 6.1 SE — foliage never paves a trap (BrogueCE [#832](https://github.com/tmewett/BrogueCE/issues/832))
+
+A trap (`T_IS_DF_TRAP`, `DUNGEON` layer) and a vision-blocking surface tile could previously share a cell.
+The foliage then **hid the trap** (drawn over the trap glyph) and **stopped a thrown dart from settling on
+the trigger**, so the trap couldn't be sprung remotely. Two-part SE fix:
+
+- **Generation (primary):** `fillSpawnMap` (`Architect.c`) refuses to paint a `T_OBSTRUCTS_VISION` tile onto
+  a `T_IS_DF_TRAP` cell. Engine-wide — covers autogenerator foliage, the jackal den, and runtime regrowth.
+- **Projectile (net):** `throwItem` (`Items.c`) lands a thrown item *on* a passable vision-only obstruction
+  (foliage) instead of backing it up one cell, so an item reaching a trap under runtime-grown foliage still
+  triggers it. A solid wall (`T_OBSTRUCTS_PASSABILITY`) still stops the projectile short.
+
+Both are SE-only for now and flagged as a cherry-pick candidate for CE/Classic/upstream (see
+[`BrogueSE/Engine/IOS_MODIFICATIONS.md`](../../BrogueSE/Engine/IOS_MODIFICATIONS.md)).
 
 ---
 

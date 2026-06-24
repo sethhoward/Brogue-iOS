@@ -7249,6 +7249,12 @@ static void throwItem(item *theItem, creature *thrower, pos targetLoc, short max
                     message(tileCatalog[pmap[x][y].layers[layer]].flavorText, 0);
                     promoteTile(x, y, layer, false);
                 }
+            } else if (!cellHasTerrainFlag((pos){ x, y }, T_OBSTRUCTS_PASSABILITY)) {
+                // iOS port (Brogue SE): a passable but vision-blocking obstruction (dense foliage) should be
+                // HIT, not bounced off of -- the item lands ON this cell instead of backing up one, mirroring
+                // the incendiary-dart carve-out above. This lets a thrown item reach a trap hidden beneath the
+                // foliage so the trap still triggers. Fixes upstream BrogueCE #832 (x,y already point at this
+                // cell, so it simply comes to rest here -- no coordinate change). A solid wall still backs up.
             } else {
                 i--;
                 if (i >= 0) {

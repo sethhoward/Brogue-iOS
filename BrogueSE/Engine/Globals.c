@@ -988,6 +988,13 @@ dungeonFeature dungeonFeatureCatalog[NUMBER_DUNGEON_FEATURES] = {
     // iOS port (iBrogue): empty-bottle v2 potion of ice -- a freezing cloud (gas-layer volume, like the
     // other potion gas clouds). effectRadius/flashColor give the cyan burst on shatter.
     {FROST_GAS,                 GAS,        1000,   0,      0,  "", 0,  &lightBlue, 4},
+
+    // iOS port (Brogue SE): jackal-den dressing. The foliage core is tighter than open-field DF_FOLIAGE
+    // (a contained den, not a room-filling carpet) and chains a grass apron so the clearing fades into
+    // ordinary grass at its edge instead of ending in a hard green box. Both are BLOCKED_BY_OTHER_LAYERS;
+    // FOLIAGE outranks GRASS in draw priority, so the apron fills around the core without erasing it.
+    {FOLIAGE,                   SURFACE,    100,    40,     (DFF_BLOCKED_BY_OTHER_LAYERS),  "", 0,  0,  0,      0,          DF_JACKAL_DEN_GRASS},
+    {GRASS,                     SURFACE,    75,     20,     (DFF_BLOCKED_BY_OTHER_LAYERS)},
 };
 
 const dungeonProfile dungeonProfileCatalog[NUMBER_DUNGEON_PROFILES] = {

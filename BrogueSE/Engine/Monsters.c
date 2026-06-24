@@ -1077,6 +1077,16 @@ creature *spawnHorde(short hordeID, pos loc, unsigned long forbiddenFlags, unsig
 
     spawnMinions(hordeID, leader, false, true);
 
+    // iOS port (Brogue SE): a horde with a spawnDF dresses its den at level generation -- e.g. a jackal
+    // pack lays a core of dense foliage (vision-blocking cover, so the den is an ambush/stealth zone) with
+    // a grass apron. Gated to generation only (the level isn't "visited" until the player arrives), so a
+    // pack that *wanders in* mid-game doesn't make grass materialize in already-explored dungeon. The
+    // spread runs on the substantive RNG (spawnMapDF's rand_percent), so it replays deterministically from
+    // the seed. The "no foliage on a trap" rule lives in fillSpawnMap, so a den can't bury a trap (BrogueCE #832).
+    if (theHorde->spawnDF && !levels[rogue.depthLevel - 1].visited) {
+        spawnDungeonFeature(loc.x, loc.y, &dungeonFeatureCatalog[theHorde->spawnDF], false, true);
+    }
+
     return leader;
 }
 

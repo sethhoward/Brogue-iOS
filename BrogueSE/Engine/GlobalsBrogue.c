@@ -803,7 +803,7 @@ const hordeType hordeCatalog_Brogue[] = {
     {MK_RAT,            0,      {0},                                    {{0}},                          1,      5,      150},
     {MK_KOBOLD,         0,      {0},                                    {{0}},                          1,      6,      150},
     {MK_JACKAL,         0,      {0},                                    {{0}},                          1,      3,      100},
-    {MK_JACKAL,         1,      {MK_JACKAL},                            {{1, 3, 1}},                    3,      7,      50},
+    {MK_JACKAL,         1,      {MK_JACKAL},                            {{1, 3, 1}},                    3,      7,      50,     .spawnDF = DF_JACKAL_DEN_FOLIAGE}, // iOS port (Brogue SE): pack dens in dense foliage
     {MK_EEL,            0,      {0},                                    {{0}},                          2,      17,     100,        DEEP_WATER},
     {MK_MONKEY,         0,      {0},                                    {{0}},                          2,      9,      50},
     {MK_BLOAT,          0,      {0},                                    {{0}},                          2,      13,     30},

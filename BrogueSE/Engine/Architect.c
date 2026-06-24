@@ -3380,6 +3380,11 @@ boolean fillSpawnMap(enum dungeonLayers layer,
                 && (superpriority || tileCatalog[pmap[i][j].layers[layer]].drawPriority >= tileCatalog[surfaceTileType].drawPriority)
                     // and we won't be painting into the surface layer when that cell forbids it,
                 && !(layer == SURFACE && cellHasTerrainFlag((pos){ i, j }, T_OBSTRUCTS_SURFACE_EFFECTS))
+                    // iOS port (Brogue SE): and we won't bury a trap under vision-blocking terrain. Foliage on
+                    // a trap hides it from view and stops thrown items from settling on the trigger -- upstream
+                    // BrogueCE #832. Applies to every foliage source (autogenerators, the jackal den, regrowth).
+                && !((tileCatalog[surfaceTileType].flags & T_OBSTRUCTS_VISION)
+                     && cellHasTerrainFlag((pos){ i, j }, T_IS_DF_TRAP))
                     // and, if requested, the fill won't violate the priority of the most important terrain in this cell:
                 && (!blockedByOtherLayers || tileCatalog[pmap[i][j].layers[highestPriorityLayer(i, j, true)]].drawPriority >= tileCatalog[surfaceTileType].drawPriority)
                 ) {

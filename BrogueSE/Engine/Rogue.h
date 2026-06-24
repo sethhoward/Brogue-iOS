@@ -2204,6 +2204,11 @@ enum dungeonFeatureTypes {
     // iOS port (iBrogue): empty-bottle v2 potion of ice -- the freezing cloud (spawns FROST_GAS)
     DF_FREEZING_CLOUD_POTION,
 
+    // iOS port (Brogue SE): a jackal pack's den -- a core of dense foliage (the vision-blocking cover
+    // that makes the den an ambush/stealth zone) chained to a softer grass apron at its edge.
+    DF_JACKAL_DEN_FOLIAGE,
+    DF_JACKAL_DEN_GRASS,
+
     NUMBER_DUNGEON_FEATURES,
 };
 
@@ -2784,6 +2789,11 @@ typedef struct hordeType {
     short machine;
 
     enum hordeFlags flags;
+
+    // iOS port (Brogue SE): a horde may dress its spawn site with a dungeon feature at level
+    // generation -- a "lair." Set per catalog row; 0 = none. The jackal pack uses it for a den of
+    // dense foliage. Reusable: any future lair monster is a catalog value, not new code.
+    enum dungeonFeatureTypes spawnDF;
 } hordeType;
 
 typedef struct monsterClass {
