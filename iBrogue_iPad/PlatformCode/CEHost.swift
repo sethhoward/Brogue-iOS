@@ -36,7 +36,7 @@ final class CEHost: NSObject, BrogueCEHost {
 
     // MARK: Geometry
 
-    @MainActor func effectiveWidthPoints() -> CGFloat { viewPort?.effectiveWidthPoints ?? 0 }
+    func effectiveWidthPoints() -> CGFloat { viewPort?.effectiveWidthPoints ?? 0 }
     func effectiveHeightPoints() -> CGFloat { viewPort?.effectiveHeightPoints ?? 0 }
     func leftInsetPoints() -> CGFloat { viewPort?.leftInsetPoints ?? 0 }
     func unzoomedPoint(_ point: CGPoint) -> CGPoint { viewPort?.unzoomedPoint(point) ?? point }
