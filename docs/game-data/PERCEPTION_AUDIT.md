@@ -475,6 +475,14 @@ point, not a guarantee.)
 - **`(Investigating)`** appears in the monster's sidebar status while `MB_INVESTIGATING`.
 - **`?` blink** — an investigating monster's glyph ambient-blinks with `?` (slow, ~0.5s/half), riding
   the cosmetic animation layer's idle tick. It lives as long as the monster holds `MB_INVESTIGATING`.
+  **Design invariant — the `?` survives submersion.** A submerged-but-investigating creature (eel, bog
+  monster, kraken) still shows the `?` even though its body is rendered dimmed (`getCellAppearance`). We
+  deliberately silence a submerged creature's *audible/ripple* noise — the movement "heard something"
+  ripple (`monsterEmitMovementNoise`) and the rallying-cry (`announcePackRouse`) both hard-skip
+  `MB_SUBMERGED` — so the `?` blink is the player's **only** cue that a hidden hunter is on to them.
+  `cosmeticRefreshInvestigateBlinks` (IO.c) therefore gates the blink **only** on investigating + visible
+  and must **never** add an `MB_SUBMERGED` guard; the spawn site carries a `DESIGN INVARIANT` code comment
+  saying so. (Removing the `?` for submergers would make them an undetectable noise-suppression exploit.)
 - **`!` blink** — when a **visible** monster *locks onto* you (hears you loud / spots you), a reddish
   `!` rides its glyph the same way the `?` does, blinking in unison. Unlike the `?` it is **turn-bounded**:
   it follows the monster for `NOISE_ALERT_BLINK_TURNS` player-turns (baseline **2**, adjustable in

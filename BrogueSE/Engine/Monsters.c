@@ -1818,6 +1818,10 @@ void alertMonster(creature *monst) {
 // only -- the actual rousing already happened in wakeUp; no RNG, no state change, so save/replay-safe.
 static short impactRippleRadius(short strength); // defined beside emitEnvironmentalNoise, below
 static void announcePackRouse(creature *monst) {
+    if (monst->bookkeepingFlags & MB_SUBMERGED) {
+        return; // a submerged crier (eel/kraken) rouses its pack unseen and silent -- matches
+                // monsterEmitMovementNoise; the splash on emerge is the real tell, not a rallying cry
+    }
     const boolean seen = canSeeMonster(monst);
     const boolean heard = !seen
                           && soundDistanceAt(monst->loc) <= NOISE_PACK_ROUSE_EARSHOT; // < 30000 implied by the bound
@@ -2363,11 +2367,15 @@ void updateMonsterState(creature *monst) {
         // if tracking scent, but the scent is weaker than the scent detection threshold, begin wandering.
         // iOS port (iBrogue): when a pursuer gives up the chase, you get an awareness-scaled chance to
         // sense it -- no line of sight required. Chance is SENSE_LOST_TRAIL_BASE_CHANCE plus
-        // rogue.awarenessBonus (ring of awareness, +20/enchant), clamped to [0,100]. The base is set
-        // low so a submerging pursuer (an eel cycling this transition while you stand in water) doesn't
-        // spam the message; the ring is what makes a high-awareness character notice reliably. Rolled
-        // only here, at the hunting->wandering transition.
-        if (rand_percent(clamp(SENSE_LOST_TRAIL_BASE_CHANCE + rogue.awarenessBonus, 0, 100))) {
+        // rogue.awarenessBonus (ring of awareness, +20/enchant), clamped to [0,100]. Rolled only here,
+        // at the hunting->wandering transition.
+        // iOS port (Brogue SE): a submerged pursuer gives the player no sense-tell -- an eel cycling this
+        // transition while you stand in water would otherwise spam "has lost your trail" every time it
+        // submerges (matches the other submerged-silencing guards: monsterEmitMovementNoise,
+        // announcePackRouse). The rand_percent draw is SUBSTANTIVE, so it stays unconditional to keep the
+        // RNG stream identical (save/replay- and seed-safe); only the message is gated on !MB_SUBMERGED.
+        if (rand_percent(clamp(SENSE_LOST_TRAIL_BASE_CHANCE + rogue.awarenessBonus, 0, 100))
+            && !(monst->bookkeepingFlags & MB_SUBMERGED)) {
             char theMonsterName[COLS], senseBuf[COLS * 2];
             monsterName(theMonsterName, monst, true);
             sprintf(senseBuf, "you sense that %s has lost your trail.", theMonsterName);

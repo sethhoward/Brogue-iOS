@@ -1198,11 +1198,14 @@ static void handleLoneWolf() {
 
     rogue.loneWolfXP += rogue.xpxpThisTurn;
 
-    // Linear track: tier N at N * LONE_WOLF_XP_PER_TIER, capped at LONE_WOLF_MAX_TIER. Recomputed every turn,
-    // so it re-derives (and replays) from loneWolfXP alone -- a single threshold check generalizes to any cap.
-    short newTier = (short)(rogue.loneWolfXP / LONE_WOLF_XP_PER_TIER);
-    if (newTier > LONE_WOLF_MAX_TIER) {
-        newTier = LONE_WOLF_MAX_TIER;
+    // Front-loaded track: tier N reached at loneWolfTierThresholds[N] cumulative solo XPXP (see
+    // LONE_WOLF_TIER_THRESHOLDS in Rogue.h), capped at LONE_WOLF_MAX_TIER. Recomputed every turn, so it
+    // re-derives (and replays) from loneWolfXP alone. Walk the ascending table to find the highest tier whose
+    // threshold is met -- a plain table lookup generalizes to any (monotonic) curve without per-tier code.
+    static const long loneWolfTierThresholds[LONE_WOLF_MAX_TIER + 1] = LONE_WOLF_TIER_THRESHOLDS;
+    short newTier = 0;
+    while (newTier < LONE_WOLF_MAX_TIER && rogue.loneWolfXP >= loneWolfTierThresholds[newTier + 1]) {
+        newTier++;
     }
 
     while (rogue.loneWolfTier < newTier) {

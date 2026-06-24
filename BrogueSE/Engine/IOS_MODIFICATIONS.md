@@ -90,6 +90,11 @@ repeat cry. Fires across all rouse triggers (the chosen "any genuine pack rouse"
 (no acknowledgment pause, so no input-flow change); `rousedCount`/sight/earshot are deterministic reads. No
 substantive RNG, no new persisted state → save/replay-safe. All edits marked `// iOS port (Brogue SE):`.
 
+**Update 2026-06-24 — submerged criers are silent.** `announcePackRouse()` now early-returns when the crier
+carries `MB_SUBMERGED`, mirroring the guard in `monsterEmitMovementNoise()`: a submerged eel/kraken still
+rouses its pack (the substantive `wakeUp` loop is untouched), but emits no ripple or rallying-cry message —
+the splash on emerge is the real tell. Previously a submerged creature spammed the amber ripple + log.
+
 ### 2026-06-23 — Fix: foliage generated on a trap hides it & blocks darts (BrogueCE #832)
 
 **Cherry-pick candidate — not yet applied to BrogueCE / Classic.** This is an upstream correctness bug
@@ -831,8 +836,13 @@ tell**; gated so it can never coexist with allies.
   allies anywhere in the dungeon** (`playerHasLivingAllyAnywhere`, all-depths scan — an ally stranded
   upstairs still counts) **and** at depth `>= LONE_WOLF_MIN_DEPTH` (6; depths 1–5 rarely offer allies,
   and grant-then-yank confuses new players).
-- **Tiers (cap 2):** `LONE_WOLF_TIER1_XP` 1500 → +1 effective strength; `LONE_WOLF_TIER2_XP` 3000 →
-  +2 total. The strength is a **removable aura**, applied as a tracked delta on `rogue.strength`
+- **Tiers (cap 5):** crossing each cumulative-XPXP threshold in `LONE_WOLF_TIER_THRESHOLDS` grants +1
+  effective strength (so +5 at the cap). **Update 2026-06-24:** the curve was changed from a flat
+  `LONE_WOLF_XP_PER_TIER` (1500) divisor — which maxed a full-clear run at ~depth 15 — to a **front-loaded
+  threshold table** `{0, 800, 3000, 5600, 8400, 11700}`, calibrated against real exploration data
+  (`exploration-stats.csv`) so a full-clear paces ~one tier every 3–4 levels: I~D6, II~D9, III~D12-13,
+  IV~D16, V~D20. `handleLoneWolf` walks the ascending table each turn (re-derives from `loneWolfXP` alone).
+  The strength is a **removable aura**, applied as a tracked delta on `rogue.strength`
   (`setLoneWolfStrengthBonus`, via `rogue.loneWolfStrBonus`) so it flows through every combat/equip site
   and can be removed exactly. (`rogue.strength` therefore moves when the aura applies/removes — an
   accepted UX tradeoff for this release.)
@@ -860,10 +870,11 @@ polarity `rand_range` draws happen inside `handleLoneWolf` → `playerTurnEnded`
   `handleXPXP` before `xpxpThisTurn` is zeroed), and `loseLoneWolfBonusOnAlly`.
 - `Items.c`: `loneWolfRevealPolarity` (after `quaffDetectMagic`).
 - `Movement.c`: `becomeAllyWith` calls `loseLoneWolfBonusOnAlly` after promoting the ally.
-- `IO.c`: `printMonsterInfo` titles the player **"Lone Wolf"** in the sidebar (replacing "YOU") while a
-  tier is active — no separate line, no tier numeral. The `(lit)`/`(dark)` illumination tag is preserved
-  (both fit the 20-col `STAT_BAR_WIDTH`); only the longer `(invisible)` tag is suppressed on the rare
-  invisible turn so nothing overflows/clips.
+- `IO.c`: `printMonsterInfo` titles the player **"Lone Wolf &lt;N&gt;"** in the sidebar (replacing "YOU")
+  while a tier is active — the Roman tier numeral (I…V) is shown inline (**update 2026-06-24**; previously
+  bare "Lone Wolf" with no numeral, which made the current tier unreadable in-game). "Lone Wolf IV" is 12
+  cols; the `(lit)`/`(dark)` illumination tag still fits the 20-col `STAT_BAR_WIDTH`; only the longer
+  `(invisible)` tag is suppressed on the rare invisible turn so nothing overflows/clips.
 
 ### 2026-06-16 — Empty bottle: additive generation channel (out of the potion draw)
 
@@ -2062,6 +2073,14 @@ a monster actually loses the trail, keeping RNG-stream perturbation small; deter
 reproducible, but like any gameplay/RNG change it diverges replay from pre-change recordings. Minor
 caveat: it can name a monster the player never actually saw (it was hunting by scent off-screen);
 acceptable as "you sense" flavor, and hallucination still scrambles the name via `monsterName()`. CE-only.
+
+**Update 2026-06-24 — submerged pursuers silenced.** The low base wasn't enough: an eel cycling
+`TRACKING_SCENT -> WANDERING` while submerged still occasionally fired the message, reading as spam.
+The message is now gated on `!(monst->bookkeepingFlags & MB_SUBMERGED)`, matching the other
+submerged-silencing guards (`monsterEmitMovementNoise`, `announcePackRouse`). Crucially the
+**substantive** `rand_percent` roll stays unconditional (the `&& !submerged` is appended *after* it),
+so the RNG stream is byte-identical to before — this change is fully save/replay- and seed-safe, only
+the message output is suppressed.
 
 ### 2026-06-11 — Water washes away the player's scent trail (new content)
 

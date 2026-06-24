@@ -1515,8 +1515,13 @@ enum tileFlags {
 
 // iOS port (Brogue SE): Lone Wolf solo-progression tuning (see playerCharacter.loneWolfXP).
 #define LONE_WOLF_MIN_DEPTH                 6    // accrue solo XPXP only at this depth or deeper
-#define LONE_WOLF_XP_PER_TIER               1500 // solo XPXP per tier (~2 levels of solo exploration each); tier N reached at N * this
 #define LONE_WOLF_MAX_TIER                  5    // tier cap -- grants +1 effective strength per tier, so +5 at the cap
+// Cumulative solo XPXP required for tiers 0..LONE_WOLF_MAX_TIER. Front-loaded (cheap tier I, pricier tier V)
+// so a full-clear run paces ~one tier every 3-4 levels across the whole descent -- calibrated against real
+// exploration data (Documents/se/exploration-stats.csv) to land I~D6, II~D9, III~D12-13, IV~D16, V~D20.
+// Replaced the old flat LONE_WOLF_XP_PER_TIER (1500) divisor, which maxed a full-clear run at ~D15. Must be
+// monotonically increasing; index 0 is the tier-0 floor. Consumed by handleLoneWolf (Time.c).
+#define LONE_WOLF_TIER_THRESHOLDS           { 0, 800, 3000, 5600, 8400, 11700 }
                                                  // (compensation for solo play, which is much harder than running with allies)
 
 #define ROOM_MIN_WIDTH                      4
@@ -3056,8 +3061,8 @@ typedef struct playerCharacter {
     short xpxpThisTurn;                 // how many squares the player explored this turn
     // iOS port (Brogue SE): "Lone Wolf" -- a solo-play fallback progression driven by the player's own
     // exploration XPXP. Accrues only while the player has zero living allies anywhere and is at depth >= 6.
-    // Each tier (every LONE_WOLF_XP_PER_TIER, up to LONE_WOLF_MAX_TIER = 5) grants +1 effective strength (a
-    // removable aura, so +5 at the cap) and, on runs where the player has NEVER had an ally, a one-shot
+    // Each tier (thresholds in LONE_WOLF_TIER_THRESHOLDS, up to LONE_WOLF_MAX_TIER = 5) grants +1 effective
+    // strength (a removable aura, so +5 at the cap) and, on runs where the player has NEVER had an ally, a one-shot
     // polarity reveal (compensating for the per-rescue tells in captiveReactToPack that a pure-solo player
     // forgoes). Gaining any ally zeroes the ENTIRE track and strips the strength aura (re-grindable from zero
     // once that ally dies); hasEverHadAlly latches for the run (kills polarity).

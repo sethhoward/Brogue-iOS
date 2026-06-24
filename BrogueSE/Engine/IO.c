@@ -2446,6 +2446,12 @@ void cosmeticRefreshInvestigateBlinks(void) {
     // Spawn for visible investigators that don't have a blink yet.
     for (creatureIterator it = iterateCreatures(monsters); hasNextCreature(it);) {
         creature *m = nextCreature(&it);
+        // DESIGN INVARIANT -- DO NOT add an MB_SUBMERGED guard here. The '?' investigate-blink is the
+        // deliberate, intended tell for a submerged-but-investigating creature (eel/kraken): its body is
+        // dimmed (getCellAppearance ~L1321) yet the '?' still reveals that *something* is searching that
+        // cell. We silence a submerged creature's audible/ripple noise elsewhere (announcePackRouse,
+        // monsterEmitMovementNoise), but the visual '?' must survive -- it is the player's only cue that a
+        // hidden hunter is on to them. Gate only on investigating + visible, never on submersion.
         if (!(m->bookkeepingFlags & MB_INVESTIGATING) || !canSeeMonster(m)) {
             continue;
         }
@@ -5331,13 +5337,18 @@ short printMonsterInfo(creature *monst, short y, boolean dim, boolean highlight)
         upperCase(monstName);
 
         if (monst == &player) {
-            // iOS port (Brogue SE): while the Lone Wolf solo aura is active, title the player "Lone Wolf"
-            // in place of "YOU". The (lit)/(dark) illumination tag (with its leading space) is preserved
-            // -- both fit the 20-col sidebar; only the longer "(invisible)" tag is suppressed on the rare
+            // iOS port (Brogue SE): while the Lone Wolf solo aura is active, title the player "Lone Wolf <N>"
+            // (Roman tier, 1..LONE_WOLF_MAX_TIER) in place of "YOU", so the current tier is legible at a
+            // glance. "Lone Wolf IV" is 12 cols; the (lit)/(dark) illumination tag (with its leading space)
+            // still fits the 20-col sidebar -- only the longer "(invisible)" tag is suppressed on the rare
             // invisible turn so nothing is cut off.
             const boolean loneWolf = (rogue.loneWolfTier > 0);
             if (loneWolf) {
-                strcpy(monstName, "Lone Wolf");
+                static const char *loneWolfTierNumerals[LONE_WOLF_MAX_TIER + 1] = {
+                    "", "I", "II", "III", "IV", "V",
+                };
+                const short tier = clamp(rogue.loneWolfTier, 1, LONE_WOLF_MAX_TIER);
+                sprintf(monstName, "Lone Wolf %s", loneWolfTierNumerals[tier]);
             }
             strcat(monstName, " xxxx");
             encodeMessageColor(monstName, strlen(monstName) - 4, &monstForeColor);
