@@ -268,8 +268,8 @@ static short actionMenu(short x, boolean playingBack) {
             buttons[buttonCount].hotkey[0] = AUTO_REST_KEY;
             buttonCount++;
 
-            // iOS port (Brogue SE): 'A' is re-apply-last-staff under the modern scheme (autopilot is
-            // keyless there) and autopilot under classic, so this menu entry tracks the active scheme.
+            // iOS port (Brogue SE): under the modern scheme physical 'A' is re-apply-last-staff
+            // (REAPPLY_KEY), so it gets its own menu entry; under classic there is no such command.
             if (rogueKeyboardScheme == KEYBOARD_SCHEME_MODERN) {
                 if (KEYBOARD_LABELS) {
                     sprintf(buttons[buttonCount].text, "  %sA: %sRe-apply staff  ",          yellowColorEscape, whiteColorEscape);
@@ -277,14 +277,21 @@ static short actionMenu(short x, boolean playingBack) {
                     strcpy(buttons[buttonCount].text, "  Re-apply staff  ");
                 }
                 buttons[buttonCount].hotkey[0] = REAPPLY_KEY;
-            } else {
-                if (KEYBOARD_LABELS) {
-                    sprintf(buttons[buttonCount].text, "  %sA: %sAutopilot  ",              yellowColorEscape, whiteColorEscape);
-                } else {
-                    strcpy(buttons[buttonCount].text, "  Autopilot  ");
-                }
-                buttons[buttonCount].hotkey[0] = AUTOPLAY_KEY;
+                buttonCount++;
             }
+
+            // iOS port (Brogue SE): autopilot is always selectable from this menu. We only removed its
+            // *keystroke* under modern (where 'A' is re-apply), not the menu option. It advertises the
+            // 'A' hotkey only under classic (where 'A' == AUTOPLAY_KEY); under modern it is keyless but
+            // still fires on tap -- hotkey[0] stays AUTOPLAY_KEY so the tap returns it, and physical 'A'
+            // is remapped to REAPPLY_KEY before menu key-matching, so there is no collision (mirrors the
+            // keyless Quit button below).
+            if (KEYBOARD_LABELS && rogueKeyboardScheme != KEYBOARD_SCHEME_MODERN) {
+                sprintf(buttons[buttonCount].text, "  %sA: %sAutopilot  ",              yellowColorEscape, whiteColorEscape);
+            } else {
+                strcpy(buttons[buttonCount].text, "  Autopilot  ");
+            }
+            buttons[buttonCount].hotkey[0] = AUTOPLAY_KEY;
             buttonCount++;
 
             if (KEYBOARD_LABELS) {

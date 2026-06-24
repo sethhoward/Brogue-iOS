@@ -525,8 +525,13 @@ stay in sync.
 - `Rogue.h` — `REAPPLY_KEY` `#define`; `item *lastStaffZapped` on the `rogue` struct.
 - `Items.c` — `useStaffOrWand()` records `rogue.lastStaffZapped` after `confirmedTarget`.
 - `IO.c` — `applyKeyboardScheme()` Modern maps `A → REAPPLY_KEY`; `executeKeystroke()` gains a
-  `REAPPLY_KEY` case; `actionMenu()`'s `A` entry is scheme-conditional (Re-apply staff vs Autopilot);
+  `REAPPLY_KEY` case; `actionMenu()` shows a "Re-apply staff" entry (`REAPPLY_KEY`) only under Modern;
   `printHelpScreen()`'s `modernHelp` `A` line now reads re-apply.
+  *(Amended 2026-06-24:* only the *keystroke* was removed under Modern — **Autopilot stays a menu
+  option in both schemes.** `actionMenu()` always emits an Autopilot button with
+  `hotkey[0] = AUTOPLAY_KEY`; it advertises the `A:` label only under Classic, and is keyless but
+  still tap-selectable under Modern, exactly like the keyless Quit button. Physical `A` is remapped to
+  `REAPPLY_KEY` before menu key-matching, so the Re-apply and Autopilot entries never collide.)*
 - `iBrogue_iPad/PlatformCode/BrogueViewController.swift` — `Command.seOnly` flag + filter; catalog
   entry + `wand.and.rays` symbol for the re-apply key.
 
