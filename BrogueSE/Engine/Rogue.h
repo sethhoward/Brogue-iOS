@@ -293,6 +293,7 @@
 #define NOISE_AGGRAVATE_RIPPLE_RADIUS   16  // tiles the level-wide aggravate (alarm trap / aggravate scroll) box radiates -- much larger than any other ripple, so it reads as the loudest event on screen
 #define NOISE_RIPPLE_MAX_STRENGTH       60  // hilite strength of the innermost ring (fades outward)
 #define NOISE_IMPACT_RIPPLE_STRENGTH    82  // iOS port (Brogue SE): impact ripples (trap/altar/machine) hit harder than the default so the amber reads THROUGH a simultaneous tile flare -- the cosmetic animator only ticks while input-idle, so an impact ripple often gets only a few frames before the next step; it has to land bright and fast. Per-kind (see IO.c render) so it doesn't touch the dimmed player ripple.
+#define NOISE_PACK_ROUSE_EARSHOT        16  // iOS port (Brogue SE): when a creature rouses its packmates (wakeUp), the player gets a "you hear a rallying cry" tell if the crier is within this sound cost-distance (soundDistanceAt) but out of sight -- a loud howl carries ~2x a footstep's earshot. Visible criers get a named message instead; farther than this, silent.
 // Ripple TIMING + interruption now live in the cosmetic animation layer (IO.c: CE_RIPPLE_*, advanced on the
 // platform idle tick, uninterruptible). The old blocking-pause pre-roll / held-key suppression -- and the
 // platform key-repeat-timing contract it required -- are gone. See docs/guides/cosmetic-animation-layer.md.

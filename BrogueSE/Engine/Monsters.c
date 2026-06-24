@@ -1812,7 +1812,32 @@ void alertMonster(creature *monst) {
 #endif
 }
 
+// iOS port (Brogue SE): a creature that just roused dormant packmates lets out a rallying cry -- reuse the
+// (bright/slow) amber impact ripple from its cell, plus a one-line tell: named if you can see it, a generic
+// "you hear ..." if it's only within earshot (soundDistanceAt), nothing if out of both. Cosmetic + message
+// only -- the actual rousing already happened in wakeUp; no RNG, no state change, so save/replay-safe.
+static short impactRippleRadius(short strength); // defined beside emitEnvironmentalNoise, below
+static void announcePackRouse(creature *monst) {
+    const boolean seen = canSeeMonster(monst);
+    const boolean heard = !seen
+                          && soundDistanceAt(monst->loc) <= NOISE_PACK_ROUSE_EARSHOT; // < 30000 implied by the bound
+    if (!seen && !heard) {
+        return; // out of sight and earshot -- the player perceives nothing
+    }
+    recomputeImpactSoundMap(monst->loc); // the amber ripple bends around walls from the crier's cell
+    cosmeticSpawnRippleImpact(monst->loc, impactRippleRadius(NOISE_ALTAR_GRIND));
+    if (seen) {
+        char buf[DCOLS * 3], monstName[COLS];
+        monsterName(monstName, monst, true);
+        sprintf(buf, "%s rouses its companions!", monstName); // first letter auto-capitalized on display
+        messageWithColor(buf, &badMessageColor, 0);
+    } else {
+        messageWithColor("you hear a rallying cry echo through the dungeon.", &badMessageColor, 0);
+    }
+}
+
 void wakeUp(creature *monst) {
+    short rousedCount = 0; // iOS port (Brogue SE): dormant packmates this call actually flips to hunting
     if (monst->creatureState != MONSTER_ALLY) {
         alertMonster(monst);
     }
@@ -1820,17 +1845,32 @@ void wakeUp(creature *monst) {
     for (creatureIterator it = iterateCreatures(monsters); hasNextCreature(it);) {
         creature *teammate = nextCreature(&it);
         if (monst != teammate && monstersAreTeammates(monst, teammate) && teammate->creatureMode == MODE_NORMAL) {
-            if (teammate->creatureState == MONSTER_SLEEPING
-                || teammate->creatureState == MONSTER_WANDERING) {
+            const boolean wasDormant = (teammate->creatureState == MONSTER_SLEEPING
+                                        || teammate->creatureState == MONSTER_WANDERING);
+            if (wasDormant) {
                 teammate->ticksUntilTurn = max(100, teammate->ticksUntilTurn);
             }
             if (monst->creatureState != MONSTER_ALLY) {
                 teammate->creatureState =
                 (teammate->creatureMode == MODE_PERM_FLEEING ? MONSTER_FLEEING : MONSTER_TRACKING_SCENT);
                 updateMonsterState(teammate);
+                if (wasDormant) {
+                    rousedCount++; // genuinely roused (was asleep/wandering), not already hunting
+                }
             }
         }
     }
+#if NOISE_SYSTEM_ENABLED
+    // Telegraph a genuine pack-awakening: at least one dormant packmate just started hunting, and the crier
+    // is a live enemy (not an ally/captive whose "wakeUp" is the freeing/summon path). Deduplicates naturally
+    // -- a second loud noise that turn finds them already hunting (rousedCount == 0), so no repeat cry.
+    if (rousedCount > 0
+        && monst->creatureState != MONSTER_ALLY
+        && !(monst->bookkeepingFlags & MB_CAPTIVE)
+        && monstersAreEnemies(&player, monst)) {
+        announcePackRouse(monst);
+    }
+#endif
 }
 
 static boolean monsterCanShootWebs(creature *monst) {

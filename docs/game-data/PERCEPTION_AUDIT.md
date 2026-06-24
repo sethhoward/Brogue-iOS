@@ -157,7 +157,13 @@ Rolled with a **substantive `rand_percent`** (it changes monster behavior).
 [Monsters.c:1928](../../BrogueSE/Engine/Monsters.c). On a hit, *how* it's heard:
 
 - **LOUD** (`playerLoudness >= NOISE_HEAR_AGGRO_LOUDNESS(20)` **or** `soundDist <= 1`) → `wakeUp()`:
-  full hunt **and** rouses the nearby horde. Most melee is this tier — **except a clean hit with a
+  full hunt **and** rouses the nearby horde. When that broadcast actually flips ≥1 dormant packmate to
+  hunting, the crier emits a **rallying-cry tell** (`announcePackRouse`): the amber impact ripple from its
+  cell + a message — named if visible (`"the jackal rouses its companions!"`), generic `"you hear a rallying
+  cry …"` if only within earshot (`soundDistanceAt <= NOISE_PACK_ROUSE_EARSHOT(16)`), silent beyond. Fires
+  once per genuine pack-awakening (self-dedupes: an already-hunting pack rouses no one), across *every*
+  `wakeUp` trigger (sound, sight-while-sleeping, melee-on-a-sleeper), enemy criers only. Cosmetic + message;
+  no RNG/state. Most melee is this tier — **except a clean hit with a
   LIGHT-tier weapon** (dagger/rapier/whip/unarmed, spike 12), which falls below 20 and so reaches distant
   bystanders only as FAINT (§3.2.1). The monster you actually strike wakes from damage regardless; the
   tier governs the *bystanders*. A LIGHT-weapon **miss** (12 + 10 penalty = 22) crosses back to LOUD.

@@ -32,6 +32,30 @@ See `BrogueCE/Engine/IOS_MODIFICATIONS.md` (faithful CE) and
 
 ## Change log
 
+### 2026-06-23 — Noise system: a pack's rallying cry (ripple + message when a creature rouses its companions)
+
+**What.** When a creature actually rouses dormant packmates — `wakeUp()` flips ≥1 teammate from
+SLEEPING/WANDERING to hunting — it now emits a **rallying-cry tell**: the (bright/slow) amber impact ripple
+from its cell, plus a one-line message. Named if you can see the crier (`"the jackal rouses its
+companions!"`), a generic `"you hear a rallying cry echo through the dungeon."` if it's only within earshot
+(`soundDistanceAt <= NOISE_PACK_ROUSE_EARSHOT = 16`), silent if out of both. So a jackal hearing/seeing you
+and waking its pack now reads on screen instead of happening invisibly.
+
+**Where.** `Monsters.c` — `wakeUp()` counts genuinely-roused packmates (`rousedCount`, was-dormant only) and,
+under `#if NOISE_SYSTEM_ENABLED`, calls new static `announcePackRouse()` when `rousedCount > 0` **and** the
+crier is a live enemy (not ally/captive — excludes the captive-freeing / summon `wakeUp` paths). `Rogue.h` —
+`NOISE_PACK_ROUSE_EARSHOT`. Reuses `impactRippleRadius` / `cosmeticSpawnRippleImpact` (forward-declared) and
+`soundDistanceAt` (the same player-earshot metric `checkPlayerHeard` uses).
+
+**Why this choke point.** `wakeUp()` is the single horde-alert broadcast (called from heard-LOUD, spotted-
+while-sleeping, melee-on-a-sleeper, …); gating on `rousedCount > 0` means it fires once per genuine pack-
+awakening and **self-dedupes** — a second loud noise that turn finds them already hunting (count 0), so no
+repeat cry. Fires across all rouse triggers (the chosen "any genuine pack rouse" scope), not just sound/sight.
+
+**Determinism / saves.** Ripple is cosmetic (`RNG_COSMETIC`, self-suppresses off-idle); message uses flags 0
+(no acknowledgment pause, so no input-flow change); `rousedCount`/sight/earshot are deterministic reads. No
+substantive RNG, no new persisted state → save/replay-safe. All edits marked `// iOS port (Brogue SE):`.
+
 ### 2026-06-23 — Fix: foliage generated on a trap hides it & blocks darts (BrogueCE #832)
 
 **Cherry-pick candidate — not yet applied to BrogueCE / Classic.** This is an upstream correctness bug
