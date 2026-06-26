@@ -11,6 +11,7 @@ static int g_maxDepth = 0;
 
 void fs_buildBudgetTable(int maxDepth, int seeds) {
     if (maxDepth > FS_MAXD) maxDepth = FS_MAXD;
+    if (g_maxDepth >= maxDepth) return; // already built (idempotent: build once, reuse across sweeps)
     g_maxDepth = maxDepth;
     for (int d = 0; d <= maxDepth; d++) g_table[d] = (DepthBudget){0, 0, 0};
 

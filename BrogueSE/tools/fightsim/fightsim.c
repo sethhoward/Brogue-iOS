@@ -273,12 +273,13 @@ static void curveSweep(Archetype arch, int trials, int playerHP, int numMonsters
 
 // DEPTH-indexed flagship: budget AND strength AND HP all derived from the metered cadence by depth,
 // so the weapon's curve reflects strength accrual (not just enchants). all-in axe vs glow-up hybrid.
-static void depthSweep(Archetype arch, int trials, int staffGlow, int maxDepth, int tableSeeds) {
+static void depthSweep(Archetype arch, int trials, int staffGlow, int maxDepth, int tableSeeds, short staffKind) {
     fs_buildBudgetTable(maxDepth, tableSeeds);
     int n = (arch == ARCH_LONE_TANK) ? 1 : 4;
+    const char *staffName = (staffKind == STAFF_FIRE) ? "firebolt" : (staffKind == STAFF_POISON) ? "poison" : "lightning";
     printf("# DEPTH curve (resources derived from metered cadence, avg of %d seeds): all-in war axe\n", tableSeeds);
-    printf("#   vs glow-up hybrid (staff +%d, rest axe). archetype=%s, %d ogres.\n",
-           staffGlow, fs_archetypeName(arch), n);
+    printf("#   vs glow-up hybrid (staff-of-%s +%d, rest axe). archetype=%s, %d depth-monsters.\n",
+           staffName, staffGlow, fs_archetypeName(arch), n);
     printf("depth,strength,maxHP,budget,allin_hp,allin_win,hyb_axe,hyb_staff,hyb_hp,hyb_win,delta(hyb-allin)\n");
     for (int d = 3; d <= maxDepth; d += 2) {
         DepthBudget bud = fs_budgetAt(d);
@@ -287,8 +288,8 @@ static void depthSweep(Archetype arch, int trials, int staffGlow, int maxDepth, 
         int hp = 30 + 10 * (int)(bud.lifePotions + 0.5);
         int sE = (B < staffGlow) ? B : staffGlow;
         int wE = B - sE;
-        BuildSpec wpn = { "weapon", WAR_AXE, LEATHER_ARMOR, NONE,            NONE, (short)B,  0, 0,        0 };
-        BuildSpec hyb = { "hybrid", WAR_AXE, LEATHER_ARMOR, STAFF_LIGHTNING, NONE, (short)wE, 0, (short)sE,0 };
+        BuildSpec wpn = { "weapon", WAR_AXE, LEATHER_ARMOR, NONE,      NONE, (short)B,  0, 0,        0 };
+        BuildSpec hyb = { "hybrid", WAR_AXE, LEATHER_ARMOR, staffKind, NONE, (short)wE, 0, (short)sE,0 };
         Stat wHP={0}, wW={0}, hHP={0}, hW={0}, dHP={0};
         for (int t = 0; t < trials; t++) {
             uint64_t s = (uint64_t) t + 1;
@@ -354,12 +355,27 @@ int main(int argc, char **argv) {
         curveSweep((Archetype) arch, trials, 90 /*playerHP*/, n, maxB, glow);
         return 0;
     }
+    if (strcmp(mode, "--baseline") == 0) {
+        // Full situational baseline: every archetype, depth-scaled both sides, one staff. Table built once.
+        int maxDepth = (argc > 2) ? atoi(argv[2]) : 19;
+        int trials   = (argc > 3) ? atoi(argv[3]) : 25;
+        int sk       = (argc > 4) ? atoi(argv[4]) : 0;
+        short staffKind = (sk == 1) ? STAFF_FIRE : (sk == 2) ? STAFF_POISON : STAFF_LIGHTNING;
+        for (Archetype a = 0; a < ARCH_COUNT; a++) {
+            depthSweep(a, trials, 6 /*glow*/, maxDepth, 8 /*table seeds*/, staffKind);
+            printf("\n");
+        }
+        return 0;
+    }
     if (strcmp(mode, "--depth") == 0) {
         int arch     = (argc > 2) ? atoi(argv[2]) : ARCH_FRENZY_CLUSTER;
         int maxDepth = (argc > 3) ? atoi(argv[3]) : 20;
         int trials   = (argc > 4) ? atoi(argv[4]) : 25;
         int glow     = (argc > 5) ? atoi(argv[5]) : 6;
-        depthSweep((Archetype) arch, trials, glow, maxDepth, 8 /*table seeds*/);
+        // staff: 0=lightning (default), 1=firebolt, 2=poison
+        int sk = (argc > 6) ? atoi(argv[6]) : 0;
+        short staffKind = (sk == 1) ? STAFF_FIRE : (sk == 2) ? STAFF_POISON : STAFF_LIGHTNING;
+        depthSweep((Archetype) arch, trials, glow, maxDepth, 8 /*table seeds*/, staffKind);
         return 0;
     }
     return selftest();

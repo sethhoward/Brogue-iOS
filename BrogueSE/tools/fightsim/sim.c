@@ -274,7 +274,7 @@ EncounterResult fs_run(const BuildSpec *b, Archetype arch, int playerMaxHP,
             boolean zapWorthIt = staff && staff->charges > 0
                 && (nearby >= 3 || (nearby >= 1 && toughestNear >= 30));
             if (zapWorthIt) {
-                bolt bt = boltCatalog[BOLT_LIGHTNING];
+                bolt bt = boltCatalog[boltForItem(staff)]; // staff-agnostic: lightning, firebolt, etc.
                 bt.magnitude = staff->enchant1;
                 if (netEnchant(staff) >= 5 * FP_FACTOR) bt.empowerment = (short)(netEnchant(staff) / FP_FACTOR);
                 pos target = far ? far->loc : (pos){ ROOM_X1, PY };
