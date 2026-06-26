@@ -20,6 +20,11 @@
 
 balanceConfig gBalance = FIGHTSIM_SHIPPING_DEFAULTS;
 
+// The "heavy" weapons subject to the enchant cap: the high-win generalists. War hammer is included
+// (mildly capped) but its big base damage keeps it the 1v1 king; mace + broadsword are in so the cap
+// can't be dodged by swapping to them. Light/finesse weapons (dagger/sword/rapier/axe) stay free.
+#define FS_HEAVY_MASK ((1UL<<WAR_AXE)|(1UL<<HAMMER)|(1UL<<PIKE)|(1UL<<FLAIL)|(1UL<<MACE)|(1UL<<BROADSWORD))
+
 static int g_failures = 0;
 
 static void checkInt(const char *label, long got, long want) {
@@ -321,7 +326,7 @@ static void tuneThreeWay(int depth, int trials, int tunedCap) {
     const BuildSpec *builds[3] = { &axe, &lgt, &hyb };
     // "Heavy" weapons that get the enchant cap: war axe, war hammer, war pike, flail (NOT dagger/
     // sword/rapier/mace/broadsword). Edit this set to taste.
-    const unsigned long heavyMask = (1UL<<WAR_AXE) | (1UL<<HAMMER) | (1UL<<PIKE) | (1UL<<FLAIL);
+    const unsigned long heavyMask = FS_HEAVY_MASK;
 
     printf("# THREE-WAY tuning @ depth %d (str %d, HP %d, budget +%d): all-in war axe vs all-in\n", depth, strength, hp, B);
     printf("#   lightning vs glow-up hybrid (axe+%d/staff+%d). HP lost (win%%). heavy-weapon enchant cap.\n", wE, sE);
@@ -362,7 +367,7 @@ static void weaponRoster(int depth, int trials, int heavyCap) {
         {DAGGER,"dagger"}, {SWORD,"sword"}, {RAPIER,"rapier"}, {MACE,"mace"}, {AXE,"axe"},
         {BROADSWORD,"broadsword"}, {FLAIL,"flail"}, {PIKE,"war_pike"}, {WAR_AXE,"war_axe"}, {HAMMER,"war_hammer"},
     };
-    const unsigned long heavyMask = (1UL<<WAR_AXE) | (1UL<<HAMMER) | (1UL<<PIKE) | (1UL<<FLAIL);
+    const unsigned long heavyMask = FS_HEAVY_MASK;
     const int nW = (int)(sizeof roster / sizeof roster[0]);
 
     printf("# WEAPON ROSTER @ depth %d (str %d, HP %d, all-in +%d), mean over 5 scenarios, %d trials.\n",
