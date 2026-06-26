@@ -456,6 +456,59 @@ static void capSweep(int trials) {
     gBalance.heavyWeaponMask = 0;
 }
 
+// One weapon vs one archetype at a given depth/budget; mean win% (0..100).
+static double runWA(short kind, const char *name, Archetype a, int B, int hp, int strength, int depth, int trials) {
+    BuildSpec w = { name, kind, LEATHER_ARMOR, NONE, NONE, (short)B, 0, 0, 0 };
+    Stat wS = {0};
+    int n = (a == ARCH_LONE_TANK) ? 1 : 4;
+    for (int t = 0; t < trials; t++) {
+        EncounterResult r = fs_run(&w, a, hp, MK_OGRE, n, (uint64_t)t + 1, 0, -1, strength, depth);
+        statAdd(&wS, r.won);
+    }
+    return 100 * statMean(&wS);
+}
+
+// Per-archetype profile at d16 & d19, baseline + cap-10, for the four generalists + sword/rapier/war_hammer.
+// Answers what the aggregate win% hides: is a "91%" weapon dominant *everywhere*, or already situational
+// (strong in its geometry, weak elsewhere)? That decides whether the cap fix should be light or differentiated.
+static void archProfile(int trials) {
+    const int depths[] = {16, 19};
+    const unsigned long focusMask =
+        (1UL<<BROADSWORD) | (1UL<<PIKE) | (1UL<<WAR_AXE) | (1UL<<FLAIL);
+    struct { short kind; const char *name; } W[] = {
+        {SWORD,"sword"}, {RAPIER,"rapier"}, {HAMMER,"war_hammer"},
+        {BROADSWORD,"broadsword"}, {PIKE,"war_pike"}, {WAR_AXE,"war_axe"}, {FLAIL,"flail"},
+    };
+    const int nW = (int)(sizeof W / sizeof W[0]);
+    fs_buildBudgetTable(depths[(int)(sizeof depths/sizeof depths[0]) - 1], 8);
+    for (int di = 0; di < (int)(sizeof depths/sizeof depths[0]); di++) {
+        int depth = depths[di];
+        DepthBudget bud = fs_budgetAt(depth);
+        int B = (int)(bud.enchantScrolls + 0.5);
+        int strength = 12 + (int)(bud.strengthPotions + 0.5);
+        int hp = 30 + 10 * (int)(bud.lifePotions + 0.5);
+        for (int cfg = 0; cfg < 2; cfg++) {
+            gBalance.heavyWeaponMask = cfg ? focusMask : 0; // refs unaffected: their bit isn't in the mask
+            gBalance.heavyWeaponCap  = 10;
+            printf("# ARCH PROFILE @ depth %d, %s -- win%% per archetype (str %d, HP %d, +%d)\n",
+                   depth, cfg ? "CAP 10 on generalists" : "baseline", strength, hp, B);
+            printf("weapon,corridor,cluster,pack,lone_tank,ambush,mean\n");
+            for (int wi = 0; wi < nW; wi++) {
+                double sum = 0;
+                printf("%s", W[wi].name);
+                for (Archetype a = 0; a < ARCH_COUNT; a++) {
+                    double v = runWA(W[wi].kind, W[wi].name, a, B, hp, strength, depth, trials);
+                    sum += v; printf(",%.0f", v);
+                }
+                printf(",%.0f\n", sum / ARCH_COUNT);
+            }
+            printf("\n");
+            fflush(stdout);
+        }
+    }
+    gBalance.heavyWeaponMask = 0;
+}
+
 int main(int argc, char **argv) {
     gameVariant = VARIANT_BROGUE;
     initializeGameVariant();
@@ -504,6 +557,11 @@ int main(int argc, char **argv) {
         int glow   = (argc > 5) ? atoi(argv[5]) : 6;  // staff glow-up target (+5/6)
         int n = (arch == ARCH_LONE_TANK) ? 1 : 4;
         curveSweep((Archetype) arch, trials, 90 /*playerHP*/, n, maxB, glow);
+        return 0;
+    }
+    if (strcmp(mode, "--archprofile") == 0) {
+        int trials = (argc > 2) ? atoi(argv[2]) : 30;
+        archProfile(trials);
         return 0;
     }
     if (strcmp(mode, "--capsweep") == 0) {
