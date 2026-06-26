@@ -24,6 +24,9 @@
 #include "Rogue.h"
 #include "GlobalsBase.h"
 #include "Globals.h"
+#ifdef FIGHTSIM
+#include "balance.h" // fight-simulator tunables (sim-only build); no effect on shipping
+#endif
 
 // iOS port (iBrogue): host hook for a haptic when the player takes damage.
 // severity: 0 = ordinary hit, 1 = survived but now under 40% health, 2 = fatal.
@@ -64,11 +67,20 @@ extern void cePlayerTookDamage(int severity);
 
 fixpt strengthModifier(item *theItem) {
     int difference = (rogue.strength - player.weaknessAmount) - theItem->strengthRequired;
+#ifdef FIGHTSIM
+    // Fight-simulator tunable (sim-only build; gBalance defaults == the literals below).
+    if (difference > 0) {
+        return difference * FP_FACTOR * gBalance.strengthBonusNum / gBalance.strengthBonusDen;
+    } else {
+        return difference * FP_FACTOR * gBalance.strengthPenaltyNum / gBalance.strengthPenaltyDen;
+    }
+#else
     if (difference > 0) {
         return difference * FP_FACTOR / 4; // 0.25x
     } else {
         return difference * FP_FACTOR * 5/2; // 2.5x
     }
+#endif
 }
 
 fixpt netEnchant(item *theItem) {
@@ -77,7 +89,11 @@ fixpt netEnchant(item *theItem) {
         retval += strengthModifier(theItem);
     }
     // Clamp all net enchantment values to [-20, 50].
+#ifdef FIGHTSIM
+    return clamp(retval, gBalance.netEnchantClampLo * FP_FACTOR, gBalance.netEnchantClampHi * FP_FACTOR);
+#else
     return clamp(retval, -20 * FP_FACTOR, 50 * FP_FACTOR);
+#endif
 }
 
 fixpt monsterDamageAdjustmentAmount(const creature *monst) {

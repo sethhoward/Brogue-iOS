@@ -24,6 +24,9 @@
 #include "Rogue.h"
 #include "Globals.h"
 #include "GlobalsBase.h"
+#ifdef FIGHTSIM
+#include "balance.h" // fight-simulator tunables (sim-only build); no effect on shipping
+#endif
 
 #define LAST_INDEX(a) (sizeof(a) / sizeof(fixpt) - 1)
 
@@ -46,8 +49,13 @@ short wandDominate(creature *monst)                 {return (((monst)->currentHP
                                                      max(0, 100 * ((monst)->info.maxHP - (monst)->currentHP) / (monst)->info.maxHP));}
 
 // All "enchant" parameters must already be multiplied by FP_FACTOR:
+#ifdef FIGHTSIM
+short staffDamageLow(fixpt enchant)            {return ((int) ((2 + enchant / FP_FACTOR) * gBalance.staffDmgLowNum / gBalance.staffDmgLowDen));}
+short staffDamageHigh(fixpt enchant)           {return ((int) (gBalance.staffDmgHighBase + (gBalance.staffDmgHighSlopeNum * (enchant / FP_FACTOR) / gBalance.staffDmgHighSlopeDen)));}
+#else
 short staffDamageLow(fixpt enchant)            {return ((int) ((2 + enchant / FP_FACTOR) * 3 / 4));}
 short staffDamageHigh(fixpt enchant)           {return ((int) (4 + (5 * enchant / FP_FACTOR / 2)));}
+#endif
 short staffDamage(fixpt enchant)               {return ((int) randClumpedRange(staffDamageLow(enchant), staffDamageHigh(enchant), 1 + (enchant) / 3 / FP_FACTOR));}
 short staffBlinkDistance(fixpt enchant)        {return ((int) (2 + enchant * 2 / FP_FACTOR));}
 short staffHasteDuration(fixpt enchant)        {return ((int) (2 + enchant * 4 / FP_FACTOR));}
