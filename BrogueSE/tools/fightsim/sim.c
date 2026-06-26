@@ -308,6 +308,7 @@ EncounterResult fs_run(const BuildSpec *b, Archetype arch, int playerMaxHP,
             // lone weakling — melee that.
             boolean zapWorthIt = staff && staff->charges > 0 && fireSafe
                 && (nearby >= 3 || (nearby >= 1 && toughestNear >= 30));
+            short pcost = player.attackSpeed; // turn cost; zap/wait = normal, melee adjusts per weapon
             if (zapWorthIt) {
                 bolt bt = boltCatalog[boltForItem(staff)]; // staff-agnostic: lightning, firebolt, etc.
                 bt.magnitude = staff->enchant1;
@@ -316,7 +317,9 @@ EncounterResult fs_run(const BuildSpec *b, Archetype arch, int playerMaxHP,
                 zap(player.loc, target, &bt, false, false);
                 staff->charges--; r.chargesSpent++;
             } else if (adj) {
-                boolean cleave = rogue.weapon && (rogue.weapon->flags & ITEM_ATTACKS_ALL_ADJACENT);
+                boolean cleave  = rogue.weapon && (rogue.weapon->flags & ITEM_ATTACKS_ALL_ADJACENT);
+                boolean pierce  = rogue.weapon && (rogue.weapon->flags & ITEM_ATTACKS_PENETRATE);
+                pos adjLoc = adj->loc; // capture before attack() can free adj
                 attack(&player, adj, false);
                 if (cleave) {
                     // hit remaining adjacent enemies (snapshot first; attacks can free creatures)
@@ -326,9 +329,18 @@ EncounterResult fs_run(const BuildSpec *b, Archetype arch, int playerMaxHP,
                         if (m != adj && distanceBetween(player.loc, m->loc) == 1 && na < 8) adjs[na++] = m;
                     }
                     for (int i = 0; i < na; i++) attack(&player, adjs[i], false);
+                } else if (pierce) {
+                    // spear/pike: also strike the creature directly behind the target (same line).
+                    pos beyond = { adjLoc.x + (adjLoc.x - player.loc.x), adjLoc.y + (adjLoc.y - player.loc.y) };
+                    creature *b = monsterAtLoc(beyond);
+                    if (b && b != &player) attack(&player, b, false);
                 }
+                // Per-weapon attack recovery: rapier (QUICKLY) is 2x faster; mace/war hammer
+                // (STAGGER, "extra turn to recover") are 2x slower. Otherwise normal.
+                if (rogue.weapon && (rogue.weapon->flags & ITEM_ATTACKS_QUICKLY)) pcost /= 2;
+                if (rogue.weapon && (rogue.weapon->flags & ITEM_ATTACKS_STAGGER)) pcost *= 2;
             }
-            player.ticksUntilTurn = player.attackSpeed;
+            player.ticksUntilTurn = pcost;
         }
 
         // Monsters act.
