@@ -628,8 +628,8 @@ static void tunedConfig(int trials) {
     fs_buildBudgetTable(depths[(int)(sizeof depths/sizeof depths[0]) - 1], 8);
     balanceConfig saved = gBalance;
     gBalance = FIGHTSIM_TUNED_DEFAULTS;
-    printf("# TUNED CONFIG (FIGHTSIM_TUNED_DEFAULTS): soft knees broadsword 9/war_axe 10 @slope25, "
-           "war_pike 8 @slope10; flail pass50.\n");
+    printf("# TUNED CONFIG (FIGHTSIM_TUNED_DEFAULTS): soft knees broadsword 9/war_axe 10 @slope25; "
+           "war_pike 2x recovery (reach-modeled); flail pass50.\n");
     for (int di = 0; di < (int)(sizeof depths/sizeof depths[0]); di++) {
         int depth = depths[di];
         DepthBudget bud = fs_budgetAt(depth);

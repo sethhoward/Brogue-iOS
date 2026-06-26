@@ -62,9 +62,9 @@ typedef struct balanceConfig {
 }
 
 // The tuned balance config the simulator converged on (see docs/design/fight-simulator.md §"Tuning").
-// Late-game enchant-cap the three universal generalists at per-weapon values + trim flail's
-// pass-attack damage; everything else untouched. Applied via --tuned; NOT the shipping default
-// (shipping stays FIGHTSIM_SHIPPING_DEFAULTS, byte-identical).
+// Soft-knee the two raw-stat generalists (broadsword/war_axe), slow the pike (its power is throughput,
+// not enchant -- so 2x recovery, not an enchant cap), and trim flail's pass-attack damage. Everything
+// else untouched. Applied via --tuned; NOT the shipping default (shipping stays byte-identical).
 #define FIGHTSIM_TUNED_DEFAULTS (balanceConfig){ \
     .strengthBonusNum = 1,   .strengthBonusDen = 4,   \
     .strengthPenaltyNum = 5, .strengthPenaltyDen = 2, \
@@ -72,11 +72,11 @@ typedef struct balanceConfig {
     .staffDmgHighBase = 4, .staffDmgHighSlopeNum = 5, .staffDmgHighSlopeDen = 2, \
     .staffDmgLowNum = 3, .staffDmgLowDen = 4, \
     .seRampThreshold = 5, \
-    .heavyWeaponCap      = { [BROADSWORD] = 9,  [WAR_AXE] = 10, [PIKE] = 8 }, \
-    /* soft knee: raw-stat generalists keep a full 25% taper past the knee; pike re-inflates fast, so */ \
-    /* it gets a gentle 10% (still growth, no cliff) while staying out of universal-go-to territory.   */ \
-    .heavyWeaponSlopePct = { [BROADSWORD] = 25, [WAR_AXE] = 25, [PIKE] = 10 }, \
-    .weaponRecoveryPct = {0}, /* pike speed penalty TBD from --pikespeed sweep */ \
+    /* Soft knee: raw-stat generalists keep a full 25% taper past the knee (growth, no cliff). Pike */ \
+    /* is NOT enchant-capped -- caps barely touch it; its power is throughput, so it's slowed instead. */ \
+    .heavyWeaponCap      = { [BROADSWORD] = 9,  [WAR_AXE] = 10 }, \
+    .heavyWeaponSlopePct = { [BROADSWORD] = 25, [WAR_AXE] = 25 }, \
+    .weaponRecoveryPct   = { [PIKE] = 200 }, /* pike at 2x recovery: lands at band, restores pack weakness */ \
     .penetrateDamagePct = 100, .passAttackDamagePct = 50, .reachDamagePct = 100, \
 }
 

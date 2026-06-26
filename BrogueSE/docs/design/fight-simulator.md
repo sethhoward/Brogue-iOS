@@ -403,80 +403,97 @@ Each phase is independently runnable and yields a result you can read. Vertical-
 ## 12. Tuning result — the heavy-weapon enchant meta
 
 The flagship question (Q0): does heavy-weapon enchant scaling make one weapon the universal go-to?
-**Answer: yes, late-game — and the fix is differentiated, not a single global cap.** This section records
-the converged tuning, baked as `FIGHTSIM_TUNED_DEFAULTS` (balance.h) and reproducible with `--tuned`.
+**Answer: yes, late-game — but the fix is per-weapon and per-mechanism, not a single global cap (and for
+the pike it isn't even an enchant lever).** This section records the converged tuning, baked as
+`FIGHTSIM_TUNED_DEFAULTS` (balance.h) and reproducible with `--tuned`.
 
 ### Prerequisite: model every weapon's real mechanics first
 Tuning conclusions are only valid once each weapon is credited for what it actually does. The sim models:
-attack speed (rapier 2× / mace+hammer ½× recovery), war-axe cleave (all adjacent), war-pike penetrate
-(2-in-line), rapier lunge (closing crit), mace/hammer knockback+stagger, and flail pass-attacks (every
-enemy adjacent to both the start and destination cell of a move). Before this, rankings were artifacts —
-mace/hammer looked like 95% dominators at 2× their real rate; rapier looked like a 34% joke. Only whip's
-EXTEND reach remains unmodeled (whip is out of roster).
+attack speed (rapier 2× / mace+hammer ½× recovery), war-axe cleave (all adjacent), rapier lunge (closing
+crit), mace/hammer knockback+stagger, flail pass-attacks (every enemy adjacent to both the start and
+destination cell of a move), and the **spear/pike reach-2** — `handleSpearAttacks` (Movement.c, range 2)
+strikes a straight-line enemy *two tiles away across an empty gap* without moving, as well as the
+adjacent+behind penetrate. Before each fix, rankings were artifacts: mace/hammer looked like 95%
+dominators at 2× their real rate; rapier looked like a 34% joke; and the pike looked *situational*
+(scattered-pack weakness) only because its reach was missing. Only whip's EXTEND reach (range 5) remains
+unmodeled (whip is out of roster).
 
 ### Findings
 1. **The dominance is a late-game phenomenon.** At depth 10–13 the enchant budget is small, all weapons
-   bunch ~64–84, and the caps don't bite. The runaway is real only at depth ~16–19 (budget +9/+10), exactly
-   where enchant scaling compounds. So the tuning is a **late-game-only correction**; early/mid play is
-   untouched by construction (the cap clamps `netEnchant`'s high end, which only the late budget reaches).
-2. **A uniform cap reshuffles, it doesn't balance.** Weapons respond to an enchant cap by *mechanism*:
-   - **Raw-stat weapons** (broadsword — no special mechanic; war axe — cleave) cap cleanly: their per-hit
-     dominance falls into band without erasing identity.
-   - **war pike is cap-resistant** — penetrate is flat extra damage; even a 50% penetrate cut moves it ~2
-     points. Its power is the *primary* hit, so it needs a *tighter enchant cap* (8), not a mechanic nerf.
-   - **flail is cap-fragile** — pass-attacks multiply enchant across hits, so an enchant cap is a cliff
-     (86→68 between cap 12 and 10). Trim its **pass-attack damage** instead.
-3. **Whack-a-mole.** Capping the top weapon promotes the next even-profile generalist to "best everywhere."
-   The fix must hit all the universal generalists at once or it just trades one king for another (flail
-   inherited the crown at 88% once broadsword/axe/pike were capped — hence its pass-attack trim).
+   bunch ~64–84, and the levers don't bite. The runaway is real only at depth ~16–19 (budget +9/+10),
+   exactly where enchant scaling compounds. So the tuning is a **late-game-only correction**; early/mid
+   play is untouched by construction (the knee clamps the high end of `netEnchant`, which only the late
+   budget reaches).
+2. **One lever per *mechanism*, not a blanket cap.** Weapons respond to an enchant cap by what drives them:
+   - **Raw-stat weapons** (broadsword — no mechanic; war axe — cleave) take a clean enchant **soft knee**:
+     full value to the knee, then a 25% marginal taper. No cliff — past the knee each enchant still helps a
+     little, so a rational player diversifies into staff/armor (a hybrid nudge by incentive, not a wall).
+   - **war pike is immune to damage levers.** Enchant cap (→94 capped), penetrate-damage (→90 at 50%), and
+     even reach-damage (→93 at 0%) barely move it. Its power is **throughput**: normal attack cadence +
+     penetrate (2-in-line) + reach out-damages even war hammer (base 30, but ½-speed). The lever that works
+     is **attack speed** — at 2× recovery the pike lands at band (84) and its scattered-pack weakness
+     returns (48), because it can no longer poke the approach fast enough.
+   - **flail** takes a **pass-attack damage** trim (its multi-hit *is* its power; an enchant cap on it is a
+     cliff, 86→68 between cap 12 and 10).
+3. **Whack-a-mole.** Each time the top weapon is reined in, the next even-profile generalist inherits
+   "best everywhere" (flail jumped to 88 once the others were handled — hence its pass trim). The fix has
+   to hit every universal generalist or it just trades one king for another.
+4. **Model fidelity beats lever cleverness.** The pike chase is the cautionary tale: three plausible
+   mechanic levers (penetrate, reach, enchant) all failed because the *model* was incomplete (missing
+   reach) and the real driver (throughput) was only visible once it was fixed. Correct the mechanics first.
 
 ### The tuned config (`FIGHTSIM_TUNED_DEFAULTS`)
-Per-weapon enchant caps + one mechanic lever; everything else untouched (war hammer stays the 1v1 king,
-mace self-balances via stagger recovery, nimble weapons stay free):
+One lever matched to each weapon's actual driver; everything else untouched (war hammer stays the 1v1
+king, mace self-balances via stagger recovery, nimble weapons stay free):
 
 | weapon | lever | rationale |
 |---|---|---|
-| broadsword | enchant cap **9** | pure raw-stat generalist, no mechanic to preserve |
-| war_axe | enchant cap **10** | raw scaling; cleave survives as a mild pack lean |
-| war_pike | enchant cap **8** | primary-hit power; penetrate lever proved a dud |
-| flail | pass-attack damage **50%** | enchant cap too non-linear; trim the mechanic directly |
+| broadsword | enchant **soft knee 9 @ 25% slope** | pure raw-stat generalist; taper, no cliff |
+| war_axe | enchant **soft knee 10 @ 25% slope** | raw scaling; cleave survives as a pack lean |
+| war_pike | **2× attack recovery** | throughput weapon — speed is the only lever that bites |
+| flail | pass-attack damage **50%** | its multi-hit is its power; trim the mechanic directly |
 
 ### Achieved end-state (depth 19, win% per archetype, `--tuned`)
 `lone_tank` ≈ 98 for everyone (a single ogre at full enchant is trivial) — read the other four columns.
 
-| weapon | corridor | cluster | pack | ambush | mean |
-|---|---|---|---|---|---|
-| dagger | 18 | 22 | 15 | 10 | 32 |
-| sword | 72 | 82 | 48 | 60 | 72 |
-| rapier | 90 | 78 | 75 | 72 | 82 |
-| mace | 75 | 82 | 55 | 48 | 72 |
-| axe | 68 | 80 | **78** | 52 | 75 |
-| broadsword | 85 | 85 | 68 | 75 | 82 |
-| flail | 88 | 88 | 65 | 75 | 82 |
-| war_pike | **90** | **92** | 52 | **85** | 84 |
-| war_axe | 78 | 80 | 75 | 78 | 82 |
-| war_hammer | 80 | **88** | 75 | 80 | 84 |
+| weapon | corridor | cluster | pack | ambush | mean | identity |
+|---|---|---|---|---|---|---|
+| dagger | 18 | 22 | 15 | 10 | 32 | floor (buff candidate) |
+| sword | 72 | 82 | 48 | 60 | 72 | honest baseline |
+| rapier | 90 | 78 | 75 | 72 | 82 | corridor / skill |
+| mace | 75 | 82 | 55 | 48 | 72 | even, self-balanced |
+| axe | 68 | 80 | **78** | 52 | 75 | light pack pick |
+| broadsword | 85 | 88 | 68 | 85 | 84 | even generalist |
+| flail | 88 | 88 | 65 | 75 | 82 | line-ish multi-hit |
+| war_pike | **92** | **95** | **48** | 85 | 84 | line king, pack-helpless |
+| war_axe | 80 | 85 | **78** | 80 | 84 | pack / cleave king |
+| war_hammer | 80 | **88** | 75 | 80 | 84 | cluster / 1v1 king |
 
-No weapon is dominant in every situation. War pike is the line/cluster king with a real scattered-pack
-weakness (52); the light axe emerges as a pack specialist (78); war hammer owns clusters/1v1; rapier owns
-corridors. The whole roster (dagger aside) sits in an 72–84 band with **distinct per-archetype shapes** —
-"right tool for the right situation." Dagger (32) is the lone floor and the next candidate for a buff
-(runic-odds, not enchant).
+The four heavies all land at **84 — tied — with completely different shapes**, and no weapon is dominant in
+every situation. War pike is the line/cluster king (92/95) but helpless in scattered packs (48); war axe
+and the light axe own packs (78); war hammer owns clusters/1v1; rapier owns corridors. The whole roster
+(dagger aside) sits in a 72–84 band with **distinct per-archetype identities** — "right tool for the right
+situation." Dagger (32) is the lone floor and the next candidate for a buff (runic-odds, not enchant).
 
 ### Mechanism (how the knobs reach the engine)
-- Per-weapon enchant cap: `balanceConfig.heavyWeaponCap[NUMBER_WEAPON_KINDS]` (0 = uncapped), read in
-  `netEnchant` (`Combat.c`) behind `#ifdef FIGHTSIM`. Per-kind (not a scalar) so caps can differ per weapon.
-- Mechanic damage levers: `penetrateDamagePct` / `passAttackDamagePct` (default 100). `sim.c` sets a runtime
-  `gFsDamageScalePct` around the pike penetrate / flail pass-attack hits; `Combat.c` scales the player's
-  weapon damage by it. No-op (100) in shipping → goldens stay byte-identical.
+- Per-weapon enchant **soft knee**: `heavyWeaponCap[kind]` is the knee and `heavyWeaponSlopePct[kind]` the
+  marginal % above it (0 = hard cap, 100 = no taper), read in `netEnchant` (`Combat.c`) behind
+  `#ifdef FIGHTSIM`. Per-kind so each weapon curves differently.
+- **Attack-speed lever**: `weaponRecoveryPct[kind]` scales the turn cost of melee/pass/lunge actions
+  (sim-only — cadence lives in sim.c's tick loop, not the engine). 2× = the pike penalty.
+- **Mechanic damage levers**: `penetrateDamagePct` / `passAttackDamagePct` / `reachDamagePct` (default 100).
+  `sim.c` sets a runtime `gFsDamageScalePct` around the relevant secondary hit; `Combat.c` scales the
+  player's weapon damage by it. All default to no-op → goldens stay byte-identical.
 - Reproduce: `--tuned` (loads the preset, prints the table above). Explore: `--capsweep`, `--archprofile`,
-  `--levertune`, `--final`.
+  `--levertune`, `--tapersweep`, `--pikespeed`, `--reachsweep`, `--final`.
 
 ## Open / deferred
 
-- **Land the tuned values in the shipping game** — port the per-weapon caps to `netEnchant`/`weaponTable`
-  and the flail pass-attack reduction to `Movement.c`, ungated. An actual gameplay balance change; needs
-  its own review. The sim values are the recommendation, not yet applied.
+- **Land the tuned values in the shipping game** — port the soft-knee enchant curve to `netEnchant`, the
+  flail pass-attack reduction to `Movement.c`, and the pike 2× recovery as an "extra turn to recover"
+  (the existing mace/hammer stagger mechanic, minus the knockback) in `Items.c`/`Combat.c`. All ungated;
+  an actual gameplay balance change that needs its own review. The sim values are the recommendation,
+  not yet applied.
 - **Buff the dagger** (32% floor) — via runic-odds, not enchant; re-verify it doesn't overshoot.
 - Phase 6 creature/boss lethality — sentinel HP OFF (see §"Open"), monster-leveling axis already wired.
 - Exact archetype parameters (N enemies, ranges, turns-between-encounters) — to calibrate against real runs.
