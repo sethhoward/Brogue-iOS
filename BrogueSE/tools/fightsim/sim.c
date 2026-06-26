@@ -309,7 +309,32 @@ EncounterResult fs_run(const BuildSpec *b, Archetype arch, int playerMaxHP,
             boolean zapWorthIt = staff && staff->charges > 0 && fireSafe
                 && (nearby >= 3 || (nearby >= 1 && toughestNear >= 30));
             short pcost = player.attackSpeed; // turn cost; zap/wait = normal, melee adjusts per weapon
-            if (zapWorthIt) {
+
+            // Rapier lunge: no adjacent foe but an enemy is exactly 2 tiles away in a straight line with
+            // the gap cell free -> close in and strike with a guaranteed crit (attack(..., lunge=true)).
+            creature *lungeTgt = NULL; pos lungeStep = {0,0};
+            if (rogue.weapon && (rogue.weapon->flags & ITEM_LUNGE_ATTACKS) && !adj && !zapWorthIt) {
+                for (creatureIterator it = iterateCreatures(monsters); hasNextCreature(it);) {
+                    creature *m = nextCreature(&it);
+                    short dx = m->loc.x - player.loc.x, dy = m->loc.y - player.loc.y;
+                    if ((dx==-2||dx==0||dx==2) && (dy==-2||dy==0||dy==2) && (dx||dy)) {
+                        short ux = (dx>0)-(dx<0), uy = (dy>0)-(dy<0);
+                        pos gap = { player.loc.x + ux, player.loc.y + uy };
+                        if (!cellHasTerrainFlag(gap, T_OBSTRUCTS_PASSABILITY)
+                            && !(pmapAt(gap)->flags & (HAS_MONSTER | HAS_PLAYER))) {
+                            lungeTgt = m; lungeStep = gap; break;
+                        }
+                    }
+                }
+            }
+
+            if (lungeTgt) {
+                pmapAt(player.loc)->flags &= ~HAS_PLAYER;
+                player.loc = lungeStep;
+                pmapAt(player.loc)->flags |= HAS_PLAYER;
+                attack(&player, lungeTgt, true /*lunge: guaranteed hit + bonus*/);
+                if (rogue.weapon->flags & ITEM_ATTACKS_QUICKLY) pcost /= 2;
+            } else if (zapWorthIt) {
                 bolt bt = boltCatalog[boltForItem(staff)]; // staff-agnostic: lightning, firebolt, etc.
                 bt.magnitude = staff->enchant1;
                 if (netEnchant(staff) >= 5 * FP_FACTOR) bt.empowerment = (short)(netEnchant(staff) / FP_FACTOR);
