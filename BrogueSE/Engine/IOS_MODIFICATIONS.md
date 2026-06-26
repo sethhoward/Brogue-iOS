@@ -32,6 +32,40 @@ See `BrogueCE/Engine/IOS_MODIFICATIONS.md` (faithful CE) and
 
 ## Change log
 
+### 2026-06-25 — Staff "glow-up": lightning stun+chain and firebolt bloom at netEnchant ≥ 5 (new content)
+
+**What.** Two staffs gain new behavior once their **netEnchant reaches 5**, then ramp with further enchant:
+- **Lightning** — every creature the bolt strikes is **briefly stunned** (non-stacking `STATUS_PARALYZED`,
+  ramp 1→3 turns), and the charge **chains** from the last struck creature to nearby enemies the straight
+  line *missed* (1 jump at +5, ramping to 3; per-link damage falloff; each arc also stuns).
+- **Firebolt** — the bolt **erupts into an incineration bloom** at its impact point (augmenting the direct
+  hit), reusing `DF_INCINERATION_POTION`; the bloom spreads farther with enchant. Real fire — it burns the
+  player and ignites the dungeon (the built-in cost).
+
+**Gating / ramp.** Keyed on **`netEnchant >= 5`** (so curse/low-strength can't cheat it), carried into the
+bolt via a new `empowerment` field on the `bolt` struct (set in `useStaffOrWand`, `Items.c`; catalog
+entries default it to 0). Behavior triggers on actual enchant regardless of identification; only the
+*description specifics* are gated on the enchant being known. New `PowerTables.c` ramps:
+`staffLightningStunDuration`, `staffLightningChainCount`, `staffLightningChainRange`,
+`staffFireboltBloomDecrement` (lower decrement = bigger bloom).
+
+**Reuse / no double-hits.** Stun reuses the electrified-water pattern (`max(existing, dur)` — non-stacking,
+can't stun-lock). The chain is a **controlled arc** (`resolveLightningChain`, `Items.c`), *not* `zap()`
+recursion: it reuses the same `staffDamage` roll + stun, picks the nearest unstruck enemy within range on
+an open path (deterministic; monster-iteration order breaks ties), and shares a **struck-set** with the
+line (generalizing electrified water's "ring-0 exclusion") so a creature already pierced by the line is
+never hit again and the chain can't ping-pong.
+
+**Where.** `Rogue.h` (bolt `empowerment` field + power-fn prototypes); `PowerTables.c` (4 ramp fns);
+`Items.c` (`useStaffOrWand` sets empowerment; `updateBolt` BE_DAMAGE applies the stun; `zap` records the
+struck-set and, once the bolt lands, runs the chain or spawns the firebolt bloom at the last passable
+cell; `resolveLightningChain` helper; `itemDetails` enchant-known clauses); `Globals.c` (generic clause
+appended to both staff descriptions, within the ~540-char cap).
+
+**Determinism / save-safety.** Pure deterministic math + substantive-RNG damage rolls; the `bolt` struct is
+transient (never serialized), so the new field is save-safe. Player-staff-only — monster-cast bolts have no
+enchant and stay vanilla. Marked `// iOS port (Brogue SE):`.
+
 ### 2026-06-25 — Explosions knock everything caught in them back (new content)
 
 **What.** A concussive explosion now flings every animate, mobile creature (the player included) caught in

@@ -2665,14 +2665,35 @@ void itemDetails(char *buf, item *theItem) {
             if (((theItem->flags & (ITEM_IDENTIFIED | ITEM_MAX_CHARGES_KNOWN)) && staffTable[theItem->kind].identified)
                 || rogue.playbackOmniscience) {
                 switch (theItem->kind) {
-                    case STAFF_LIGHTNING:
+                    case STAFF_LIGHTNING: {
                         sprintf(buf2, "This staff deals damage to every creature in its line of fire; nothing is immune. (If the staff is enchanted, its average damage will increase by %i%%.)",
                                 (int) (100 * (staffDamageLow(enchant + enchantMagnitude() * FP_FACTOR) + staffDamageHigh(enchant + enchantMagnitude() * FP_FACTOR)) / (staffDamageLow(enchant) + staffDamageHigh(enchant)) - 100));
+                        // iOS port (Brogue SE): glow-up clause -- specifics only here, where the enchant is known.
+                        const short lvl = (short) (enchant / FP_FACTOR);
+                        char glow[COLS*2];
+                        if (lvl >= 5) {
+                            const short stun = staffLightningStunDuration(lvl), jumps = staffLightningChainCount(lvl);
+                            sprintf(glow, " At its current power, the bolt also briefly stuns every creature it strikes (%i turn%s) and arcs to up to %i nearby %s the line missed.",
+                                    stun, stun == 1 ? "" : "s", jumps, jumps == 1 ? "foe" : "foes");
+                        } else {
+                            strcpy(glow, " Enchanted to +5 or beyond, it will also briefly stun those it strikes and arc to a nearby foe.");
+                        }
+                        strcat(buf2, glow);
                         break;
-                    case STAFF_FIRE:
+                    }
+                    case STAFF_FIRE: {
                         sprintf(buf2, "This staff deals damage to any creature that it hits, unless the creature is immune to fire. (If the staff is enchanted, its average damage will increase by %i%%.) It also sets creatures and flammable terrain on fire.",
                                 (int) (100 * (staffDamageLow(enchant + enchantMagnitude() * FP_FACTOR) + staffDamageHigh(enchant + enchantMagnitude() * FP_FACTOR)) / (staffDamageLow(enchant) + staffDamageHigh(enchant)) - 100));
+                        // iOS port (Brogue SE): glow-up clause -- specifics only here, where the enchant is known.
+                        char glow[COLS*2];
+                        if (enchant / FP_FACTOR >= 5) {
+                            strcpy(glow, " At its current power, the bolt erupts into an incineration blast where it lands -- beware igniting yourself and the dungeon around you.");
+                        } else {
+                            strcpy(glow, " Enchanted to +5 or beyond, the bolt will erupt into an incineration blast where it lands.");
+                        }
+                        strcat(buf2, glow);
                         break;
+                    }
                     case STAFF_POISON:
                         sprintf(buf2, "The bolt from this staff will poison any creature that it hits for %i turns. (If the staff is enchanted, this will increase to %i turns.)",
                                 staffPoison(enchant),
@@ -4798,6 +4819,16 @@ static boolean updateBolt(bolt *theBolt, creature *caster, short x, short y,
                     if (theBolt->flags & BF_FIERY) {
                         exposeCreatureToFire(monst);
                     }
+                    // iOS port (Brogue SE): staff of lightning glow-up. An empowered electric bolt briefly
+                    // stuns everything it shocks -- non-stacking paralysis (the electrified-water pattern),
+                    // duration ramping with enchant. Symmetric: a reflected bolt can stun the player.
+                    if (theBolt->empowerment >= 5
+                        && (theBolt->flags & BF_ELECTRIC)
+                        && !(monst->info.flags & (MONST_INANIMATE | MONST_INVULNERABLE))) {
+                        const short stunDur = staffLightningStunDuration(theBolt->empowerment);
+                        monst->status[STATUS_PARALYZED] = monst->maxStatus[STATUS_PARALYZED] =
+                            max(monst->status[STATUS_PARALYZED], stunDur);
+                    }
                     if (!alreadyReflected
                         || caster != &player) {
                         moralAttack(caster, monst);
@@ -5400,6 +5431,97 @@ static void electrifyWater(bolt *theBolt, creature *caster, const pos *sources, 
 }
 
 // returns whether the bolt effect should autoID any staff or wand it came from, if it came from a staff or wand
+// iOS port (Brogue SE): staff of lightning glow-up -- the controlled chain arc. After the primary bolt
+// resolves, the charge leaps from the last creature it struck to nearby enemies the straight line MISSED.
+// struck[] holds every creature the line already hit, so the chain never double-hits or ping-pongs. Each
+// link arcs to the nearest unstruck enemy within range along an open path (deterministic: nearest by
+// distance, monster-iteration order breaks ties), deals falling-off damage, and briefly stuns -- it's
+// still lightning. Bounded by a ramping jump count; reuses the same damage roll + stun as the line.
+static void resolveLightningChain(bolt *theBolt, creature *caster, pos struck[], short numStruck, const color *boltColor) {
+    char buf[COLS], monstName[COLS];
+    const short maxJumps = staffLightningChainCount(theBolt->empowerment);
+    const short chainRange = staffLightningChainRange(theBolt->empowerment);
+    const short stunDur = staffLightningStunDuration(theBolt->empowerment);
+    pos origin = struck[numStruck - 1]; // arc from the last creature the line struck
+    short falloffNum = 3, falloffDen = 4; // first link at 75% damage, then ~56%, ~42% ...
+
+    for (short jump = 0; jump < maxJumps && numStruck < MAX_BOLT_LENGTH; jump++) {
+        creature *target = NULL;
+        short bestDist = chainRange + 1;
+
+        for (creatureIterator it = iterateCreatures(monsters); hasNextCreature(it);) {
+            creature *m = nextCreature(&it);
+            if ((m->bookkeepingFlags & (MB_SUBMERGED | MB_IS_DYING))
+                || !monstersAreEnemies(caster, m)) {
+                continue;
+            }
+            boolean skip = false;
+            for (short s = 0; s < numStruck; s++) {
+                if (posEq(struck[s], m->loc)) {
+                    skip = true;
+                    break;
+                }
+            }
+            if (skip) {
+                continue;
+            }
+            const short d = distanceBetween(origin, m->loc);
+            if (d >= 1 && d < bestDist && openPathBetween(origin, m->loc)) {
+                bestDist = d;
+                target = m;
+            }
+        }
+
+        if (!target) {
+            break; // no nearby unstruck enemy -- the chain fizzles out
+        }
+
+        // Quick lightning-arc visual along the hop.
+        if (boltColor) {
+            pos arc[MAX_BOLT_LENGTH];
+            const short n = getLineCoordinates(arc, origin, target->loc, &boltCatalog[BOLT_NONE]);
+            boolean arcInView = false;
+            for (short k = 0; k < n && k < MAX_BOLT_LENGTH; k++) {
+                if (playerCanSee(arc[k].x, arc[k].y)) {
+                    hiliteCell(arc[k].x, arc[k].y, boltColor, 50, false);
+                    arcInView = true;
+                }
+                if (posEq(arc[k], target->loc)) {
+                    break;
+                }
+            }
+            if (arcInView && !rogue.playbackFastForward) {
+                pauseAnimation(16, PAUSE_BEHAVIOR_DEFAULT);
+            }
+        }
+
+        if (canSeeMonster(target)) {
+            monsterName(monstName, target, true);
+            sprintf(buf, "the lightning arcs to %s", monstName);
+            combatMessage(buf, boltColor);
+        }
+        exposeTileToElectricity(target->loc.x, target->loc.y); // promote any electric-reactive terrain
+
+        const short dmg = (short) (staffDamage(theBolt->magnitude * FP_FACTOR) * falloffNum / falloffDen);
+        if (dmg >= 1 && inflictDamage(caster, target, dmg, boltColor, false)) {
+            killCreature(target, false);
+        } else {
+            if (!(target->info.flags & (MONST_INANIMATE | MONST_INVULNERABLE))) {
+                target->status[STATUS_PARALYZED] = target->maxStatus[STATUS_PARALYZED] =
+                    max(target->status[STATUS_PARALYZED], stunDur);
+            }
+            if (canSeeMonster(target)) {
+                flashMonster(target, boltColor, 100);
+            }
+        }
+
+        struck[numStruck++] = target->loc; // never arc back to this creature
+        origin = target->loc;
+        falloffNum *= 3;
+        falloffDen *= 4;
+    }
+}
+
 boolean zap(pos originLoc, pos targetLoc, bolt *theBolt, boolean hideDetails, boolean reverseBoltDir) {
     pos listOfCoordinates[MAX_BOLT_LENGTH];
     short i, j, k, x, y, x2, y2, numCells, blinkDistance = 0, boltLength, initialBoltLength, lights[DCOLS][DROWS][3];
@@ -5416,6 +5538,10 @@ boolean zap(pos originLoc, pos targetLoc, bolt *theBolt, boolean hideDetails, bo
     // creature standing in water; seeds the post-bolt flood-fill shock. See electrifyWater().
     pos electricStrikes[MAX_BOLT_LENGTH];
     short numElectricStrikes = 0;
+    // iOS port (Brogue SE): staff of lightning glow-up -- locs of creatures the primary bolt struck, so
+    // the post-bolt chain only arcs to enemies the straight line missed (no double-hits / ping-pong).
+    pos lightningStruck[MAX_BOLT_LENGTH];
+    short numLightningStruck = 0;
 
     enum displayGlyph theChar;
     color foreColor, backColor, multColor;
@@ -5557,6 +5683,19 @@ boolean zap(pos originLoc, pos targetLoc, bolt *theBolt, boolean hideDetails, bo
                 && creatureContactsWater(waterMonst)) {
 
                 electricStrikes[numElectricStrikes++] = (pos){ x, y };
+            }
+        }
+
+        // iOS port (Brogue SE): staff of lightning glow-up -- record every creature an empowered bolt
+        // strikes (loc-based, before updateBolt which may kill it) so the post-bolt chain skips the line.
+        if (theBolt->empowerment >= 5
+            && (theBolt->flags & BF_ELECTRIC)
+            && theBolt->boltEffect == BE_DAMAGE
+            && numLightningStruck < MAX_BOLT_LENGTH) {
+
+            creature *hitMonst = monsterAtLoc((pos){ x, y });
+            if (hitMonst && !(hitMonst->bookkeepingFlags & MB_SUBMERGED)) {
+                lightningStruck[numLightningStruck++] = (pos){ x, y };
             }
         }
 
@@ -5786,6 +5925,26 @@ boolean zap(pos originLoc, pos targetLoc, bolt *theBolt, boolean hideDetails, bo
     // through any body of water it struck and shock everything else standing in it.
     if (numElectricStrikes > 0) {
         electrifyWater(theBolt, shootingMonst, electricStrikes, numElectricStrikes);
+    }
+
+    // iOS port (Brogue SE): staff glow-up effects, resolved once the bolt has fully landed at (x,y).
+    if (theBolt->empowerment >= 5 && theBolt->boltEffect == BE_DAMAGE) {
+        if ((theBolt->flags & BF_ELECTRIC) && numLightningStruck > 0) {
+            // Lightning chains from the last creature it struck to nearby enemies the line missed.
+            resolveLightningChain(theBolt, shootingMonst, lightningStruck, numLightningStruck, boltColor);
+        } else if (theBolt->flags & BF_FIERY) {
+            // Firebolt blooms into incineration fire at the impact point (augmenting the direct hit); the
+            // bloom spreads farther with enchant. Real fire -- it burns the player and ignites the dungeon,
+            // exactly like a potion of incineration (the built-in cost). Bloom at the last passable cell so
+            // it never lands inside a wall the bolt stopped against.
+            pos bloomLoc = (pos){ x, y };
+            if (cellHasTerrainFlag(bloomLoc, T_OBSTRUCTS_PASSABILITY) && i > 0) {
+                bloomLoc = listOfCoordinates[i - 1];
+            }
+            dungeonFeature bloom = dungeonFeatureCatalog[DF_INCINERATION_POTION];
+            bloom.probabilityDecrement = staffFireboltBloomDecrement(theBolt->empowerment);
+            spawnDungeonFeature(bloomLoc.x, bloomLoc.y, &bloom, true, false);
+        }
     }
 
     return autoID;
@@ -7780,6 +7939,12 @@ static boolean useStaffOrWand(item *theItem) {
     theBolt = boltCatalog[tableForItemCategory(theItem->category)[theItem->kind].power];
     if (theItem->category == STAFF) {
         theBolt.magnitude = theItem->enchant1;
+        // iOS port (Brogue SE): staff glow-up. At netEnchant >= 5 the lightning/firebolt staffs gain new
+        // behavior (lightning: brief stun + chain to a nearby unit; firebolt: incineration bloom). Carry
+        // the effective net-enchant level so zap()/updateBolt can gate and ramp it. 0 = not empowered.
+        if (netEnchant(theItem) >= 5 * FP_FACTOR) {
+            theBolt.empowerment = (short) (netEnchant(theItem) / FP_FACTOR);
+        }
     }
 
     if ((theItem->category & STAFF) && theItem->kind == STAFF_BLINKING

@@ -2315,6 +2315,10 @@ typedef struct bolt {
     short targetDF;
     unsigned long forbiddenMonsterFlags;
     unsigned long flags;
+    // iOS port (Brogue SE): staff "glow-up". The effective net-enchant LEVEL of the staff that fired this
+    // bolt, when >= 5 (else 0). Gates + ramps the high-enchant upgrades (lightning: brief stun + chain;
+    // firebolt: incineration bloom). Set at zap time; catalog entries default it to 0.
+    short empowerment;
 } bolt;
 
 // Level profiles, affecting what rooms get chosen and how they're connected:
@@ -4180,6 +4184,10 @@ extern "C" {
     short staffEntrancementDuration(fixpt enchant);
     short staffFreezeDuration(fixpt enchant); // iOS port (iBrogue): staff of frost — hard-freeze turns
     short staffFreezeSlowDuration(fixpt enchant); // iOS port (iBrogue): staff of frost — slow tail on thaw
+    short staffLightningStunDuration(short level); // iOS port (Brogue SE): glow-up — brief stun turns
+    short staffLightningChainCount(short level); // iOS port (Brogue SE): glow-up — chain jumps
+    short staffLightningChainRange(short level); // iOS port (Brogue SE): glow-up — chain arc range
+    short staffFireboltBloomDecrement(short level); // iOS port (Brogue SE): glow-up — bloom spread decrement
     fixpt ringWisdomMultiplier(fixpt enchant);
     short charmHealing(fixpt enchant);
     int charmProtection(fixpt enchant);

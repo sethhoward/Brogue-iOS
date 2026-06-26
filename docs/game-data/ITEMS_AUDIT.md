@@ -256,7 +256,7 @@ use `enchant/FP_FACTOR` (= the displayed staff level).
 
 | Staff | Effect formula |
 |---|---|
-| damage staffs (lightning/fire/etc.) | `staffDamageLow = (2 + level)*3/4`; `staffDamageHigh = 4 + 5*level/2`; rolled clumped |
+| damage staffs (lightning/fire/etc.) | `staffDamageLow = (2 + level)*3/4`; `staffDamageHigh = 4 + 5*level/2`; rolled clumped. *(iOS port: lightning & firebolt gain stun/chain/bloom at netEnchant ≥ 5 — see [Staff glow-up](#staff-glow-up-ios-port--lightning--firebolt-at-netenchant--5) below.)* |
 | poison | `staffPoison(e) = 5 * 1.3^(level-2)` doses (table `POW_POISON`, 1.3^x) |
 | blinking | `staffBlinkDistance = 2 + level*2` cells |
 | haste | `staffHasteDuration = 2 + level*4` turns |
@@ -266,6 +266,34 @@ use `enchant/FP_FACTOR` (= the displayed staff level).
 | obstruction | scales with level (larger crystal walls); uses bolt magnitude |
 | protection (shielding) | `staffProtection(e) = 130 * 1.40^(level-2)` shield points |
 | frost (iOS port) | single-target freeze: `staffFreezeDuration` turns frozen, then a `staffFreezeSlowDuration` slow tail (both scale with level, `PowerTables.c`); freezes deep water into temporary walkable ice and dense foliage into brittle walls; quenches fire it crosses. Anything ablaze/`MONST_FIERY` is doused + slowed instead of frozen. Shared `freezeCreature()` with the potion of ice. |
+
+### Staff glow-up (iOS port) — lightning & firebolt at netEnchant ≥ 5
+
+The staffs of **lightning** and **firebolt** gain new behavior once their **netEnchant reaches 5**, then
+ramp with further enchant. The gate is `netEnchant >= 5` (so curse/low strength can't cheat it), carried
+into the bolt via a new `bolt.empowerment` field (the effective net-enchant level, else 0) set in
+`useStaffOrWand` (`Items.c`); catalog bolts default it to 0. Behavior triggers on the actual enchant
+regardless of identification — only the description *specifics* are gated on the enchant being known.
+**Player-staff-only:** monster-cast lightning/fire bolts have no enchant and stay vanilla. Single charge,
+fully automatic. Deterministic (substantive-RNG damage rolls only; the `bolt` struct is transient/never
+serialized, so the field is save-safe). Ramp formulas in `PowerTables.c`:
+
+| Staff | Empowered effect (netEnchant ≥ 5) | Ramp |
+|---|---|---|
+| lightning | every creature the bolt damages is briefly **stunned** (non-stacking `STATUS_PARALYZED`, the electrified-water `max(existing, dur)` pattern) **and** the charge **chains** to nearby enemies the straight line *missed* | `staffLightningStunDuration` 1→3 turns; `staffLightningChainCount` 1→3 jumps; `staffLightningChainRange` 3→8 cells |
+| firebolt | the bolt **erupts into an incineration bloom** at its impact point (the last passable cell), *augmenting* the direct line hit — reuses `DF_INCINERATION_POTION` (real fire: burns the player and ignites the dungeon) | `staffFireboltBloomDecrement` 37→12 (lower = larger bloom) |
+
+- **Stun** is applied in `updateBolt` BE_DAMAGE (the "monster lives" branch); symmetric — a reflected bolt
+  can stun the player. Non-stacking, so it can't stun-lock.
+- **Chain** is a *controlled arc* (`resolveLightningChain`, `Items.c`), **not** `zap()` recursion: it reuses
+  the same `staffDamage` roll + stun, arcs from the last struck creature to the nearest **unstruck** enemy
+  within range on an open path (deterministic — nearest by distance, monster-iteration order breaks ties),
+  with **per-link damage falloff** (~75% each hop). It shares a **struck-set** with the primary line
+  (generalizing electrified water's "ring-0 exclusion" below), so a creature already pierced by the line is
+  never hit twice and the chain can't ping-pong. Fires only if the primary bolt struck a creature.
+- **Firebolt bloom** spawns once the bolt lands; on a clean miss into a wall it blooms at the cell before
+  the wall (never inside it). It does **not** use the concussive `GAS_EXPLOSION` / knockback path — it's
+  incineration *fire*, by design (lightning is the crowd-control staff; firebolt is area-denial).
 
 ### Electrified water (iOS port) — lightning + water
 

@@ -59,6 +59,17 @@ short staffEntrancementDuration(fixpt enchant) {return ((int) (enchant * 3 / FP_
 // slow tail is capped at 20 so it never exceeds a dedicated wand of slowness (30).
 short staffFreezeDuration(fixpt enchant)       {return (max(2, (int) (2 + (enchant / FP_FACTOR))));}
 short staffFreezeSlowDuration(fixpt enchant)   {return (min(20, max(10, (int) (enchant * 3 / FP_FACTOR))));}
+// iOS port (Brogue SE): staff "glow-up" ramps. These take the effective net-enchant LEVEL (integer, >= 5)
+// rather than fixpt, since the upgrade gates on netEnchant >= 5 and scales from there.
+// Lightning: brief non-stacking paralysis, ramping 1 turn (+5) -> 3 (+9 and up).
+short staffLightningStunDuration(short level)  {return (short) min(3, max(1, 1 + (level - 5) / 2));}
+// Lightning: chain jumps, 1 (+5) -> +1 per 3 levels, capped at 3.
+short staffLightningChainCount(short level)    {return (short) min(3, max(1, 1 + (level - 5) / 3));}
+// Lightning: how far each chain link may arc, 3 (+5) -> 8.
+short staffLightningChainRange(short level)    {return (short) min(8, max(3, 3 + (level - 5)));}
+// Firebolt: incineration-bloom spread decrement -- LOWER spreads farther. 37 (+5, == potion of incineration)
+// down to a floor of 12 at high enchant, so the bloom grows with investment.
+short staffFireboltBloomDecrement(short level) {return (short) max(12, 37 - (level - 5) * 4);}
 int staffProtection(fixpt enchant) {
     return 130 * fp_pow(FP_FACTOR * 140 / 100, enchant / FP_FACTOR - 2) / FP_FACTOR;
 }
