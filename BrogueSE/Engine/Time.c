@@ -366,6 +366,13 @@ void applyInstantTileEffectsToCreature(creature *monst) {
                 gameOver(buf, true);
                 return;
             }
+            // iOS port (Brogue SE): the blast's concussive force flings a surviving player away from the
+            // flame front (into a wall, another creature, or a hazard -- everything caught is hurled). If
+            // actually relocated, skip the rest of this (old) cell's tile effects -- they applied at the
+            // destination via setMonsterLocation.
+            if (knockCreatureFromExplosion(&player, *x, *y)) {
+                return;
+            }
         } else { // it's a monster
             if (monst->creatureState == MONSTER_SLEEPING) {
                 monst->creatureState = MONSTER_TRACKING_SCENT;
@@ -388,6 +395,11 @@ void applyInstantTileEffectsToCreature(creature *monst) {
                 sprintf(buf2, "%s engulfs %s.",
                         tileCatalog[pmap[*x][*y].layers[layerWithFlag(*x, *y, T_CAUSES_EXPLOSIVE_DAMAGE)]].description, buf);
                 messageWithColor(buf2, messageColorFromVictim(monst), 0);
+                // iOS port (Brogue SE): a surviving monster is flung away from the blast. If relocated,
+                // skip the rest of this (old) cell's tile effects (applied at the destination instead).
+                if (knockCreatureFromExplosion(monst, *x, *y)) {
+                    return;
+                }
             }
         }
     }

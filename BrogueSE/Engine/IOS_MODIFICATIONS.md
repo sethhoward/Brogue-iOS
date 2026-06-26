@@ -32,6 +32,38 @@ See `BrogueCE/Engine/IOS_MODIFICATIONS.md` (faithful CE) and
 
 ## Change log
 
+### 2026-06-25 — Explosions knock everything caught in them back (new content)
+
+**What.** A concussive explosion now flings every animate, mobile creature (the player included) caught in
+it away from the blast — into a wall, another creature, or a hazard. Covers every source uniformly because
+they all funnel through the one tile that carries `T_CAUSES_EXPLOSIVE_DAMAGE` (`GAS_EXPLOSION`): exploding
+bloat, vampire blood-burst, explosive-mutation death, **and** methane/swamp-gas ignition. Incendiary darts
+and the incineration potion place *fire*, not `GAS_EXPLOSION`, so they (correctly) don't knock back — fire
+isn't concussive.
+
+**Reuse (the "force effect").** Extracted the frost block-push into two shared primitives in `Combat.c`:
+`shoveCreatureAlong` (slide along a vector, stop on hazard / before wall/creature/edge, relocate via
+`setMonsterLocation` so it's correct for player *and* monsters) and `applyShoveImpact` (momentum damage to
+whatever it slams into). `pushFrozenCreature` (staff of frost) now consumes both; the new public
+`knockCreatureFromExplosion` also consumes both — no duplicated movement code.
+
+**Direction without an origin.** A gas cascade has no single epicenter (each methane cell detonates
+independently — `Time.c` `exposeTileToFire`). So direction comes from the **local gradient**: push away
+from the centroid of nearby fire/blast cells (radius 3), collapsed to one of eight unit directions. Point
+sources (bloat/dart) and distributed methane both work through this one path; a creature dead-centre in a
+symmetric blast (net-zero gradient) isn't flung.
+
+**Where / how it stays correct.** Hooked into the existing `T_CAUSES_EXPLOSIVE_DAMAGE` branch of
+`applyInstantTileEffectsToCreature` (`Time.c`), for both the player and monster survive paths. The blast's
+own fire/explosive damage is unchanged and applied first. The pre-existing `STATUS_EXPLOSION_IMMUNITY = 6`
+(set before the knockback) means each creature is flung **once** per blast and prevents the re-entrant
+`setMonsterLocation` → `applyInstantTileEffectsToCreature` from re-triggering the explosion at the landing
+cell. The hook only short-circuits the rest of the old cell's tile effects when the creature was actually
+relocated (knockback returns a moved/not-moved boolean). Per design call: the **player can be flung into
+lava/a chasm** ("everything flung equally"), and a wall/creature slam deals the frost push's momentum
+damage. Deterministic (geometry + flat force, no RNG), so input-replay saves are unaffected. Marked
+`// iOS port (Brogue SE):`.
+
 ### 2026-06-25 — Ring of transference also transfers afflictions on hit (new content)
 
 **What.** The ring of transference (heal-in-proportion-to-damage "blood magic") now also bleeds a fraction

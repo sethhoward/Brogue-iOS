@@ -3932,6 +3932,7 @@ extern "C" {
     short hitProbability(creature *attacker, creature *defender);
     boolean attackHit(creature *attacker, creature *defender);
     void pushFrozenCreature(creature *defender, short dx, short dy); // iOS port (iBrogue): staff of frost — bump-to-push
+    boolean knockCreatureFromExplosion(creature *monst, short cx, short cy); // iOS port (Brogue SE): explosion knockback
     void applyArmorRunicEffect(char returnString[DCOLS], creature *attacker, short *damage, boolean melee);
     void processStaggerHit(creature *attacker, creature *defender);
     boolean attack(creature *attacker, creature *defender, boolean lungeAttack);

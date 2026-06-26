@@ -672,37 +672,26 @@ static boolean forceWeaponHit(creature *defender, item *theItem) {
 #define FROST_PUSH_MIN_DISTANCE 2
 #define FROST_PUSH_MAX_DISTANCE 10
 
-// iOS port (iBrogue): staff of frost. Bumping a frozen creature shoves it like a statue. It slides across open
-// floor -- a distance set by the shover's effective strength (`clamp(str - 8, 2, 10)`) -- then comes to rest
-// the moment it reaches a hazard (lava / a chasm / deep water -- it is deposited ONTO the hazard, to die, fall,
-// or flounder) or runs out of room before a wall, another creature, or the map edge. The frozen block itself
-// takes NO damage; a creature it slams into takes momentum damage (the distance the block travelled) plus a
-// strength shove-bonus (`max(0, str - 12)`, so it bites even on an adjacent slam for a strong shover), and,
-// being struck by ice, is doused if it was on fire. (dx,dy) is the one-tile push direction (away from the
-// shover); the caller guarantees the first cell is open or a hazard (a wedged block is rejected before here).
-void pushFrozenCreature(creature *defender, short dx, short dy) {
-    char buf[DCOLS*3], buf2[COLS], monstName[DCOLS];
-    creature *slamTarget = NULL;
-    short forceDamage, step;
+// iOS port (Brogue SE): an explosion's concussive force flings every (animate, mobile) creature caught in
+// it. Distance is a flat blast force; a creature slammed into a wall/another creature takes this bonus on
+// top of the travel distance. The blast's own fire/explosive damage is separate.
+#define EXPLOSION_KNOCKBACK_DISTANCE 4
+#define EXPLOSION_KNOCKBACK_SLAM_BONUS 3
 
-    monsterName(monstName, defender, false); // bare name; we supply "the frozen ..." ourselves
-
-    pos oldLoc = defender->loc;
+// iOS port (Brogue SE): the shared "force shove" primitive behind BOTH the frost block-push and the
+// explosion knockback (the reusable force effect). Slides `victim` along the unit vector (dx,dy) up to
+// maxDist tiles, coming to rest ON the first hazard (lava/chasm/deep water -- it then meets its fate via
+// the destination's tile effects) or BEFORE a wall, another creature, or the map edge. Relocation goes
+// through setMonsterLocation, so it is correct for the player and monsters alike (creature flag, vision,
+// item pickup, and destination tile effects). If stopped by a creature, that creature is returned via
+// *slamTargetOut so the caller can apply impact damage. Returns the number of tiles actually travelled.
+static short shoveCreatureAlong(creature *victim, short dx, short dy, short maxDist, creature **slamTargetOut) {
+    const pos oldLoc = victim->loc;
     pos cur = oldLoc;
+    creature *slamTarget = NULL;
 
-    const short effectiveStrength = rogue.strength - player.weaknessAmount;
-    const short maxPush = clamp(effectiveStrength - 8, FROST_PUSH_MIN_DISTANCE, FROST_PUSH_MAX_DISTANCE);
-    const short strengthBonus = max(0, effectiveStrength - 12);
-
-    if (canDirectlySeeMonster(defender)) {
-        sprintf(buf, "you send the frozen %s skidding away", monstName);
-        buf[DCOLS] = '\0';
-        combatMessage(buf, messageColorFromVictim(defender));
-    }
-
-    // Walk the slide: stop ON the first hazard, or BEFORE a wall / creature / map edge, up to the max distance.
-    for (step = 0; step < maxPush; step++) {
-        pos next = (pos){ cur.x + dx, cur.y + dy };
+    for (short step = 0; step < maxDist; step++) {
+        const pos next = (pos){ cur.x + dx, cur.y + dy };
         if (!coordinatesAreInMap(next.x, next.y)
             || cellHasTerrainFlag(next, T_OBSTRUCTS_PASSABILITY)
             || diagonalBlocked(cur.x, cur.y, next.x, next.y, false)) {
@@ -714,49 +703,126 @@ void pushFrozenCreature(creature *defender, short dx, short dy) {
         }
         cur = next; // slide onto the next cell
         if (cellHasTerrainFlag(cur, (T_LAVA_INSTA_DEATH | T_AUTO_DESCENT | T_IS_DEEP_WATER))) {
-            break; // deposited onto the hazard; it meets its fate via the tile effects below
+            break; // deposited onto the hazard; it meets its fate via the destination's tile effects
         }
     }
 
-    forceDamage = distanceBetween(oldLoc, cur) + strengthBonus; // momentum + strength shove-force
+    const short dist = distanceBetween(oldLoc, cur);
+    if (dist > 0) {
+        setMonsterLocation(victim, cur); // handles player/monster flags, vision, item pickup, tile effects
+    }
+    if (slamTargetOut) {
+        *slamTargetOut = slamTarget;
+    }
+    return dist;
+}
 
-    // Relocate the block, then let the destination's terrain act on it (lava kills, a chasm drops it a level,
-    // deep water sweeps its carried item away -- and fire there would thaw it).
-    if (distanceBetween(oldLoc, cur) > 0) {
-        pmapAt(oldLoc)->flags &= ~HAS_MONSTER;
-        defender->loc = cur;
-        pmapAt(cur)->flags |= HAS_MONSTER;
-        refreshDungeonCell(oldLoc);
-        refreshDungeonCell(cur);
-        applyInstantTileEffectsToCreature(defender);
+// iOS port (Brogue SE): apply a shove's momentum damage to whatever the shoved creature slammed into (the
+// shoved creature itself is unharmed). `pusher` is credited for morale/aggravation (NULL = the environment,
+// e.g. an explosion -- no morale attribution). `douse` extinguishes a burning slam target (the icy frost
+// block). Shared by the frost push and the explosion knockback.
+static void applyShoveImpact(creature *victim, creature *slamTarget, short forceDamage,
+                             creature *pusher, boolean douse) {
+    char buf[DCOLS*3], buf2[COLS];
+
+    if (!slamTarget
+        || (victim->bookkeepingFlags & MB_IS_DYING)
+        || (slamTarget->info.flags & (MONST_IMMUNE_TO_WEAPONS | MONST_INVULNERABLE))) {
+        return;
+    }
+    monsterName(buf2, slamTarget, true);
+    if (douse && slamTarget->status[STATUS_BURNING]) {
+        extinguishFireOnCreature(slamTarget);
+    }
+    if (inflictDamage(NULL, slamTarget, forceDamage, &lightBlue, false)) {
+        if (canDirectlySeeMonster(slamTarget)) {
+            sprintf(buf, "%s %s the impact.",
+                    buf2,
+                    (slamTarget->info.flags & MONST_INANIMATE) ? "is shattered by" : "is crushed by");
+            buf[DCOLS] = '\0';
+            combatMessage(buf, messageColorFromVictim(slamTarget));
+        }
+        killCreature(slamTarget, false);
+    }
+    if (pusher && slamTarget->creatureState != MONSTER_ALLY) {
+        moralAttack(pusher, slamTarget);
+        splitMonster(slamTarget, pusher);
+    }
+}
+
+// iOS port (Brogue SE): explosion knockback. Flings `monst` away from the blast. A gas-cascade explosion
+// (methane) has no single origin -- each cell detonates independently -- so direction comes from the LOCAL
+// gradient: push away from the centroid of nearby fire/blast cells. (cx,cy) is the creature's own cell.
+// Reuses the shared shove primitives; the blast's fire/explosive damage is applied separately by the caller.
+boolean knockCreatureFromExplosion(creature *monst, short cx, short cy) {
+    short sumX = 0, sumY = 0, count = 0;
+    const short radius = 3;
+
+    // Things that can't be flung: inanimate/immobile/invulnerable, captives, and the already-dying.
+    if ((monst->info.flags & (MONST_INANIMATE | MONST_INVULNERABLE | MONST_IMMOBILE))
+        || (monst->bookkeepingFlags & (MB_CAPTIVE | MB_IS_DYING))) {
+        return false;
     }
 
-    // Momentum damage to whatever the block slammed into (the block itself is unharmed).
-    if (slamTarget
-        && !(defender->bookkeepingFlags & MB_IS_DYING)
-        && !(slamTarget->info.flags & (MONST_IMMUNE_TO_WEAPONS | MONST_INVULNERABLE))) {
-
-        monsterName(buf2, slamTarget, true);
-        if (slamTarget->status[STATUS_BURNING]) {
-            extinguishFireOnCreature(slamTarget); // the icy block douses what it strikes
-        }
-        if (inflictDamage(NULL, slamTarget, forceDamage, &lightBlue, false)) {
-            if (canDirectlySeeMonster(slamTarget)) {
-                sprintf(buf, "%s %s when the frozen %s slams into $HIMHER",
-                        buf2,
-                        (slamTarget->info.flags & MONST_INANIMATE) ? "is destroyed" : "dies",
-                        monstName);
-                resolvePronounEscapes(buf, slamTarget);
-                buf[DCOLS] = '\0';
-                combatMessage(buf, messageColorFromVictim(slamTarget));
+    for (short i = -radius; i <= radius; i++) {
+        for (short j = -radius; j <= radius; j++) {
+            const short nx = cx + i, ny = cy + j;
+            if ((i == 0 && j == 0) || !coordinatesAreInMap(nx, ny)) {
+                continue;
             }
-            killCreature(slamTarget, false);
-        }
-        if (slamTarget->creatureState != MONSTER_ALLY) {
-            moralAttack(&player, slamTarget);
-            splitMonster(slamTarget, &player);
+            if (cellHasTerrainFlag((pos){ nx, ny }, (T_CAUSES_EXPLOSIVE_DAMAGE | T_IS_FIRE))) {
+                sumX += i;
+                sumY += j;
+                count++;
+            }
         }
     }
+    if (count == 0) {
+        return false;
+    }
+
+    // Push opposite the blast mass; the sign collapses the gradient to one of eight unit directions.
+    // A creature dead-centre in a symmetric blast (net-zero gradient) isn't flung -- deterministic, no RNG.
+    const short dx = (sumX > 0) ? -1 : (sumX < 0) ? 1 : 0;
+    const short dy = (sumY > 0) ? -1 : (sumY < 0) ? 1 : 0;
+    if (dx == 0 && dy == 0) {
+        return false;
+    }
+
+    creature *slamTarget = NULL;
+    const short dist = shoveCreatureAlong(monst, dx, dy, EXPLOSION_KNOCKBACK_DISTANCE, &slamTarget);
+    applyShoveImpact(monst, slamTarget, dist + EXPLOSION_KNOCKBACK_SLAM_BONUS, NULL /*environment*/, false /*no douse*/);
+    return (dist > 0); // true only if the creature was actually relocated
+}
+
+// iOS port (iBrogue): staff of frost. Bumping a frozen creature shoves it like a statue. It slides across open
+// floor -- a distance set by the shover's effective strength (`clamp(str - 8, 2, 10)`) -- then comes to rest
+// the moment it reaches a hazard (lava / a chasm / deep water -- it is deposited ONTO the hazard, to die, fall,
+// or flounder) or runs out of room before a wall, another creature, or the map edge. The frozen block itself
+// takes NO damage; a creature it slams into takes momentum damage (the distance the block travelled) plus a
+// strength shove-bonus (`max(0, str - 12)`, so it bites even on an adjacent slam for a strong shover), and,
+// being struck by ice, is doused if it was on fire. (dx,dy) is the one-tile push direction (away from the
+// shover); the caller guarantees the first cell is open or a hazard (a wedged block is rejected before here).
+void pushFrozenCreature(creature *defender, short dx, short dy) {
+    char buf[DCOLS*3], monstName[DCOLS];
+    creature *slamTarget = NULL;
+
+    monsterName(monstName, defender, false);
+
+    const short effectiveStrength = rogue.strength - player.weaknessAmount;
+    const short maxPush = clamp(effectiveStrength - 8, FROST_PUSH_MIN_DISTANCE, FROST_PUSH_MAX_DISTANCE);
+    const short strengthBonus = max(0, effectiveStrength - 12);
+
+    if (canDirectlySeeMonster(defender)) {
+        sprintf(buf, "you send the frozen %s skidding away", monstName);
+        buf[DCOLS] = '\0';
+        combatMessage(buf, messageColorFromVictim(defender));
+    }
+
+    // Slide via the shared force-shove primitive, then deal the icy slam's momentum + strength shove-force
+    // (the frozen block itself is unharmed; a creature it slams into is doused if it was burning).
+    const short dist = shoveCreatureAlong(defender, dx, dy, maxPush, &slamTarget);
+    applyShoveImpact(defender, slamTarget, dist + strengthBonus, &player, true /*douse*/);
 }
 
 void magicWeaponHit(creature *defender, item *theItem, boolean backstabbed) {
