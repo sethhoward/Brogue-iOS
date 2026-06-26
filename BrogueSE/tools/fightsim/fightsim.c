@@ -305,6 +305,47 @@ static void depthSweep(Archetype arch, int trials, int staffGlow, int maxDepth, 
     }
 }
 
+// TUNING: three-way (all-in war axe vs all-in lightning staff vs glow-up hybrid) across every
+// scenario at one depth, run at baseline AND at a tuned weapon enchant cap (the net-enchant clamp),
+// so we can watch the balance shift. HP lost (lower=better) + win%.
+static void tuneThreeWay(int depth, int trials, int tunedCap) {
+    fs_buildBudgetTable(depth, 8);
+    DepthBudget bud = fs_budgetAt(depth);
+    int B = (int)(bud.enchantScrolls + 0.5);
+    int strength = 12 + (int)(bud.strengthPotions + 0.5);
+    int hp = 30 + 10 * (int)(bud.lifePotions + 0.5);
+    int sE = (B < 6) ? B : 6, wE = B - sE;
+    BuildSpec axe = { "war_axe",   WAR_AXE, LEATHER_ARMOR, NONE,            NONE, (short)B,  0, 0,        0 };
+    BuildSpec lgt = { "lightning", DAGGER,  LEATHER_ARMOR, STAFF_LIGHTNING, NONE, 0,        0, (short)B, 0 };
+    BuildSpec hyb = { "hybrid",    WAR_AXE, LEATHER_ARMOR, STAFF_LIGHTNING, NONE, (short)wE,0, (short)sE,0 };
+    const BuildSpec *builds[3] = { &axe, &lgt, &hyb };
+    int caps[2] = { 50, tunedCap }; // baseline cap, tuned cap
+
+    printf("# THREE-WAY tuning @ depth %d (str %d, HP %d, budget +%d): all-in war axe vs all-in\n", depth, strength, hp, B);
+    printf("#   lightning vs glow-up hybrid (axe+%d/staff+%d). HP lost (win%%). cap=net-enchant clamp.\n", wE, sE);
+    for (int c = 0; c < 2; c++) {
+        gBalance.netEnchantClampHi = caps[c];
+        printf("--- weapon enchant cap = %d%s ---\n", caps[c], c == 0 ? " (baseline)" : " (tuned)");
+        printf("scenario,axe_hp,axe_win,lightning_hp,lgt_win,hybrid_hp,hyb_win\n");
+        for (Archetype a = 0; a < ARCH_COUNT; a++) {
+            int n = (a == ARCH_LONE_TANK) ? 1 : 4;
+            Stat h[3] = {0}, w[3] = {0};
+            for (int t = 0; t < trials; t++) {
+                uint64_t s = (uint64_t) t + 1;
+                for (int bi = 0; bi < 3; bi++) {
+                    EncounterResult r = fs_run(builds[bi], a, hp, MK_OGRE, n, s, 0, -1, strength, depth);
+                    statAdd(&h[bi], r.hpLost); statAdd(&w[bi], r.won);
+                }
+            }
+            printf("%s,%.0f,%.0f,%.0f,%.0f,%.0f,%.0f\n", fs_archetypeName(a),
+                   statMean(&h[0]), 100*statMean(&w[0]),
+                   statMean(&h[1]), 100*statMean(&w[1]),
+                   statMean(&h[2]), 100*statMean(&w[2]));
+        }
+    }
+    gBalance.netEnchantClampHi = 50;
+}
+
 int main(int argc, char **argv) {
     gameVariant = VARIANT_BROGUE;
     initializeGameVariant();
@@ -353,6 +394,13 @@ int main(int argc, char **argv) {
         int glow   = (argc > 5) ? atoi(argv[5]) : 6;  // staff glow-up target (+5/6)
         int n = (arch == ARCH_LONE_TANK) ? 1 : 4;
         curveSweep((Archetype) arch, trials, 90 /*playerHP*/, n, maxB, glow);
+        return 0;
+    }
+    if (strcmp(mode, "--tune") == 0) {
+        int depth   = (argc > 2) ? atoi(argv[2]) : 17;
+        int trials  = (argc > 3) ? atoi(argv[3]) : 30;
+        int cap     = (argc > 4) ? atoi(argv[4]) : 8;  // tuned weapon enchant cap to compare vs baseline 50
+        tuneThreeWay(depth, trials, cap);
         return 0;
     }
     if (strcmp(mode, "--baseline") == 0) {
