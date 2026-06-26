@@ -184,6 +184,25 @@ static void stepToward(creature *m) {
     pmapAt(next)->flags |= HAS_MONSTER;
 }
 
+// Per-turn status effects the mini-loop must process itself (the engine ticks these in the turn
+// pipeline we don't run): burning (firebolt) and poison DoT, using the real inflictDamage with the
+// engine's per-turn values. Returns 1 if the creature died (caller removes monsters; the player has
+// sentinel HP so never dies here -> models firebolt self-immolation as HP-budget cost). Paralysis/
+// entrancement (the SE lightning stun) is honored separately in the action loop.
+static int processTurnEffects(creature *m) {
+    int dead = 0;
+    if (m->status[STATUS_BURNING] > 0 && !m->status[STATUS_IMMUNE_TO_FIRE]) {
+        if (inflictDamage(NULL, m, rand_range(1, 3), &orange, true)) dead = 1; // rand_range(1,3)/turn
+        if (m->status[STATUS_BURNING] > 0) m->status[STATUS_BURNING]--;
+    }
+    if (!dead && m->status[STATUS_POISONED] > 0) {
+        m->status[STATUS_POISONED]--;
+        if (inflictDamage(NULL, m, m->poisonAmount, &green, true)) dead = 1;  // poisonAmount/turn
+        if (m->status[STATUS_POISONED] <= 0) m->poisonAmount = 0;
+    }
+    return dead;
+}
+
 // --- encounter ------------------------------------------------------------
 
 EncounterResult fs_run(const BuildSpec *b, Archetype arch, int playerMaxHP,
@@ -256,6 +275,17 @@ EncounterResult fs_run(const BuildSpec *b, Archetype arch, int playerMaxHP,
                 nextCreature(&it)->ticksUntilTurn -= minTicks;
         }
 
+        // Per-turn DoTs on the monsters (snapshot first so killCreature can't break iteration).
+        {
+            creature *snap[64]; int ns = 0;
+            for (creatureIterator it = iterateCreatures(monsters); hasNextCreature(it) && ns < 64;)
+                snap[ns++] = nextCreature(&it);
+            for (int i = 0; i < ns; i++)
+                if (snap[i]->ticksUntilTurn <= 0 && processTurnEffects(snap[i]))
+                    killCreature(snap[i], false);
+        }
+        if (player.ticksUntilTurn <= 0) processTurnEffects(&player); // firebolt self-burn, etc.
+
         // Player acts. Realistic hybrid policy: MELEE by default; zap only when it's clearly worth a
         // charge -- ie. enough enemies are within bolt-rake range that one bolt hits several. This both
         // models how a staff is actually used (situationally, not every turn) and avoids zap-spam.
@@ -300,6 +330,13 @@ EncounterResult fs_run(const BuildSpec *b, Archetype arch, int playerMaxHP,
         for (creatureIterator it = iterateCreatures(monsters); hasNextCreature(it);) {
             creature *m = nextCreature(&it);
             if (m->ticksUntilTurn > 0) continue;
+            // Honor the SE lightning stun (and entrancement): a paralyzed monster loses its turn.
+            if (m->status[STATUS_PARALYZED] > 0 || m->status[STATUS_ENTRANCED] > 0) {
+                if (m->status[STATUS_PARALYZED] > 0) m->status[STATUS_PARALYZED]--;
+                if (m->status[STATUS_ENTRANCED] > 0) m->status[STATUS_ENTRANCED]--;
+                m->ticksUntilTurn = m->movementSpeed;
+                continue;
+            }
             if (distanceBetween(player.loc, m->loc) == 1) { attack(m, &player, false); m->ticksUntilTurn = m->attackSpeed; }
             else { stepToward(m); m->ticksUntilTurn = m->movementSpeed; }
         }
