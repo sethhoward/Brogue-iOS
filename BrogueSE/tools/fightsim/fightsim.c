@@ -13,6 +13,7 @@
 #include "Globals.h"
 #include "balance.h"
 #include "sim.h"
+#include "budget.h"
 #include <stdio.h>
 #include <string.h>
 #include <math.h>
@@ -110,7 +111,7 @@ static void runMatrix(const char *title, const BuildSpec *builds, int nBuilds, A
         uint64_t seed = (uint64_t) t + 1;
         EncounterResult res[8];
         for (int bi = 0; bi < nBuilds; bi++)
-            res[bi] = fs_run(&builds[bi], arch, playerHP, monsterKind, numMonsters, seed, 0, -1);
+            res[bi] = fs_run(&builds[bi], arch, playerHP, monsterKind, numMonsters, seed, 0, -1, 12, 0);
         for (int bi = 0; bi < nBuilds; bi++) {
             statAdd(&st[bi].hp, res[bi].hpLost);   statAdd(&st[bi].turns, res[bi].turns);
             statAdd(&st[bi].win, res[bi].won);     statAdd(&st[bi].charges, res[bi].chargesSpent);
@@ -182,11 +183,11 @@ static void clampAB(int trials, int clampHi, int B, int playerHP) {
     for (int t = 0; t < trials; t++) {
         uint64_t s = (uint64_t) t + 1;
         gBalance = base;
-        statAdd(&bAxe, fs_run(&axe,   ARCH_CORRIDOR_LINE, playerHP, MK_OGRE, 4, s, 0, -1).hpLost);
-        statAdd(&bSt,  fs_run(&staff, ARCH_CORRIDOR_LINE, playerHP, MK_OGRE, 4, s, 0, -1).hpLost);
+        statAdd(&bAxe, fs_run(&axe,   ARCH_CORRIDOR_LINE, playerHP, MK_OGRE, 4, s, 0, -1, 12, 0).hpLost);
+        statAdd(&bSt,  fs_run(&staff, ARCH_CORRIDOR_LINE, playerHP, MK_OGRE, 4, s, 0, -1, 12, 0).hpLost);
         gBalance = base; gBalance.netEnchantClampHi = clampHi;
-        statAdd(&vAxe, fs_run(&axe,   ARCH_CORRIDOR_LINE, playerHP, MK_OGRE, 4, s, 0, -1).hpLost);
-        statAdd(&vSt,  fs_run(&staff, ARCH_CORRIDOR_LINE, playerHP, MK_OGRE, 4, s, 0, -1).hpLost);
+        statAdd(&vAxe, fs_run(&axe,   ARCH_CORRIDOR_LINE, playerHP, MK_OGRE, 4, s, 0, -1, 12, 0).hpLost);
+        statAdd(&vSt,  fs_run(&staff, ARCH_CORRIDOR_LINE, playerHP, MK_OGRE, 4, s, 0, -1, 12, 0).hpLost);
     }
     gBalance = base;
     printf("# A/B: net-enchant clamp (weapon enchant cap) 50 -> %d, budget +%d, 4 ogres, %d CRN trials\n",
@@ -226,7 +227,7 @@ static void trajectory(int trials, int B, int playerHP) {
             int done = 0; int alive = 1;
             for (int d = 0; d < nSeq; d++) {
                 uint64_t seed = (uint64_t)(t * 100 + d + 1);
-                EncounterResult r = fs_run(builds[bi], seq[d], playerHP, MK_OGRE, 4, seed, hp, charges);
+                EncounterResult r = fs_run(builds[bi], seq[d], playerHP, MK_OGRE, 4, seed, hp, charges, 12, 0);
                 hp = r.endHP;
                 if (builds[bi]->staffKind >= 0) charges = r.endCharges;
                 if (!r.won || hp <= 0) { alive = 0; break; }
@@ -241,30 +242,65 @@ static void trajectory(int trials, int B, int playerHP) {
     }
 }
 
-// The flagship scenario: how much does heavy-weapon enchant SCALING tilt the game toward
-// "all-in on the weapon" vs a skilled hybrid (same weapon at half the enchant + a situational
-// staff, melee-by-default)? Sweep the enchant budget -> a CRN-paired crossover curve.
-static void curveSweep(Archetype arch, int trials, int playerHP, int numMonsters, int maxB) {
-    printf("# crossover curve: all-in war axe (+B) vs hybrid (war axe +B/2 & lightning staff +B/2, melee-default)\n");
+// The flagship scenario: how much does heavy-weapon enchant SCALING tilt the game toward "all-in on
+// the weapon" vs a SMART hybrid that buys the staff just to its +5/6 glow-up (the SE lightning ramp)
+// and dumps every remaining point into the war axe? Sweep the enchant budget -> CRN-paired curve.
+static void curveSweep(Archetype arch, int trials, int playerHP, int numMonsters, int maxB, int staffGlow) {
+    printf("# crossover curve: all-in war axe (+B) vs glow-up hybrid (staff at +%d ramp, rest in war axe)\n", staffGlow);
     printf("# archetype=%s, %d ogres, player %d HP, %d CRN trials/point\n",
            fs_archetypeName(arch), numMonsters, playerHP, trials);
-    printf("budget,weapon_hp,weapon_turns,weapon_win,hybrid_hp,hybrid_turns,hybrid_charges,hybrid_win,delta_hp(hyb-wpn)\n");
+    printf("budget,allin_hp,allin_turns,allin_win,hyb_axe,hyb_staff,hyb_hp,hyb_turns,hyb_charges,hyb_win,delta_hp(hyb-allin)\n");
     for (int B = 4; B <= maxB; B += 2) {
-        BuildSpec wpn = { "weapon", WAR_AXE, LEATHER_ARMOR, NONE,            NONE, (short)B,       0, 0,             0 };
-        BuildSpec hyb = { "hybrid", WAR_AXE, LEATHER_ARMOR, STAFF_LIGHTNING, NONE, (short)(B/2),   0, (short)(B-B/2),0 };
+        int sE = (B < staffGlow) ? B : staffGlow; // staff to its glow-up (capped by budget)
+        int wE = B - sE;                           // everything else into the axe
+        BuildSpec wpn = { "weapon", WAR_AXE, LEATHER_ARMOR, NONE,            NONE, (short)B,  0, 0,        0 };
+        BuildSpec hyb = { "hybrid", WAR_AXE, LEATHER_ARMOR, STAFF_LIGHTNING, NONE, (short)wE, 0, (short)sE,0 };
         Stat wHP={0}, wT={0}, wW={0}, hHP={0}, hT={0}, hC={0}, hW={0}, dHP={0};
         for (int t = 0; t < trials; t++) {
             uint64_t s = (uint64_t) t + 1;
-            EncounterResult w = fs_run(&wpn, arch, playerHP, MK_OGRE, numMonsters, s, 0, -1);
-            EncounterResult h = fs_run(&hyb, arch, playerHP, MK_OGRE, numMonsters, s, 0, -1);
+            EncounterResult w = fs_run(&wpn, arch, playerHP, MK_OGRE, numMonsters, s, 0, -1, 12, 0);
+            EncounterResult h = fs_run(&hyb, arch, playerHP, MK_OGRE, numMonsters, s, 0, -1, 12, 0);
             statAdd(&wHP,w.hpLost); statAdd(&wT,w.turns); statAdd(&wW,w.won);
             statAdd(&hHP,h.hpLost); statAdd(&hT,h.turns); statAdd(&hC,h.chargesSpent); statAdd(&hW,h.won);
             statAdd(&dHP,(double)h.hpLost - w.hpLost);
         }
-        printf("+%d,%.1f,%.1f,%.0f,%.1f,%.1f,%.1f,%.0f,%+.1f\n", B,
-               statMean(&wHP), statMean(&wT), 100*statMean(&wW),
+        printf("+%d,%.1f,%.1f,%.0f,+%d,+%d,%.1f,%.1f,%.1f,%.0f,%+.1f\n", B,
+               statMean(&wHP), statMean(&wT), 100*statMean(&wW), wE, sE,
                statMean(&hHP), statMean(&hT), statMean(&hC), 100*statMean(&hW),
                statMean(&dHP));
+    }
+}
+
+// DEPTH-indexed flagship: budget AND strength AND HP all derived from the metered cadence by depth,
+// so the weapon's curve reflects strength accrual (not just enchants). all-in axe vs glow-up hybrid.
+static void depthSweep(Archetype arch, int trials, int staffGlow, int maxDepth, int tableSeeds) {
+    fs_buildBudgetTable(maxDepth, tableSeeds);
+    int n = (arch == ARCH_LONE_TANK) ? 1 : 4;
+    printf("# DEPTH curve (resources derived from metered cadence, avg of %d seeds): all-in war axe\n", tableSeeds);
+    printf("#   vs glow-up hybrid (staff +%d, rest axe). archetype=%s, %d ogres.\n",
+           staffGlow, fs_archetypeName(arch), n);
+    printf("depth,strength,maxHP,budget,allin_hp,allin_win,hyb_axe,hyb_staff,hyb_hp,hyb_win,delta(hyb-allin)\n");
+    for (int d = 3; d <= maxDepth; d += 2) {
+        DepthBudget bud = fs_budgetAt(d);
+        int B = (int)(bud.enchantScrolls + 0.5);
+        int strength = 12 + (int)(bud.strengthPotions + 0.5);
+        int hp = 30 + 10 * (int)(bud.lifePotions + 0.5);
+        int sE = (B < staffGlow) ? B : staffGlow;
+        int wE = B - sE;
+        BuildSpec wpn = { "weapon", WAR_AXE, LEATHER_ARMOR, NONE,            NONE, (short)B,  0, 0,        0 };
+        BuildSpec hyb = { "hybrid", WAR_AXE, LEATHER_ARMOR, STAFF_LIGHTNING, NONE, (short)wE, 0, (short)sE,0 };
+        Stat wHP={0}, wW={0}, hHP={0}, hW={0}, dHP={0};
+        for (int t = 0; t < trials; t++) {
+            uint64_t s = (uint64_t) t + 1;
+            EncounterResult w = fs_run(&wpn, arch, hp, MK_OGRE, n, s, 0, -1, strength, d);
+            EncounterResult h = fs_run(&hyb, arch, hp, MK_OGRE, n, s, 0, -1, strength, d);
+            statAdd(&wHP,w.hpLost); statAdd(&wW,w.won);
+            statAdd(&hHP,h.hpLost); statAdd(&hW,h.won);
+            statAdd(&dHP,(double)h.hpLost - w.hpLost);
+        }
+        printf("%d,%d,%d,+%d,%.1f,%.0f,+%d,+%d,%.1f,%.0f,%+.1f\n", d, strength, hp, B,
+               statMean(&wHP), 100*statMean(&wW), wE, sE,
+               statMean(&hHP), 100*statMean(&hW), statMean(&dHP));
     }
 }
 
@@ -313,8 +349,17 @@ int main(int argc, char **argv) {
         int arch   = (argc > 2) ? atoi(argv[2]) : ARCH_FRENZY_CLUSTER;
         int maxB   = (argc > 3) ? atoi(argv[3]) : 16;
         int trials = (argc > 4) ? atoi(argv[4]) : 20;
+        int glow   = (argc > 5) ? atoi(argv[5]) : 6;  // staff glow-up target (+5/6)
         int n = (arch == ARCH_LONE_TANK) ? 1 : 4;
-        curveSweep((Archetype) arch, trials, 90 /*playerHP*/, n, maxB);
+        curveSweep((Archetype) arch, trials, 90 /*playerHP*/, n, maxB, glow);
+        return 0;
+    }
+    if (strcmp(mode, "--depth") == 0) {
+        int arch     = (argc > 2) ? atoi(argv[2]) : ARCH_FRENZY_CLUSTER;
+        int maxDepth = (argc > 3) ? atoi(argv[3]) : 20;
+        int trials   = (argc > 4) ? atoi(argv[4]) : 25;
+        int glow     = (argc > 5) ? atoi(argv[5]) : 6;
+        depthSweep((Archetype) arch, trials, glow, maxDepth, 8 /*table seeds*/);
         return 0;
     }
     return selftest();

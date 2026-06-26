@@ -349,8 +349,15 @@ Each phase is independently runnable and yields a result you can read. Vertical-
     flags; high-damage blood spread (war axe vs ogre) hit a stray `HAS_MONSTER` cell → `monsterAtLoc`
     NULL → SEGV. Now the whole `pmap` is wall-filled with cleared flags each encounter, and the cell
     behind the player stays wall so knockback can't relocate the player into the heavy updateVision path.
-  - **Still open in Phase 2:** (1) **metered-cadence budget derivation** (enchant/strength/HP-by-depth) —
-    currently the enchant budget is an explicit input, not derived from `meteredItemsGenerationTable_Brogue`;
+  - **Budget-by-depth DONE (`budget.c`, `fightsim --depth`).** `fs_buildBudgetTable` descends the engine's
+    own generated levels (avg of N seeds) counting cumulative floor items → expected strength potions
+    (`strength = 12 + count`), enchant scrolls (`= budget B`), life potions (`maxHP = 30 + 10*count`) by
+    depth. `--depth` sweeps depth with all three derived, so the weapon's curve reflects *strength* accrual
+    (str 12→18 by D19), not just enchants — strength is the other half of the weapon graph.
+  - **Monster-leveling DONE.** `fs_run(depth>0)` picks a depth-appropriate monster from `hordeCatalog`
+    (`pickHordeType`, frequency-weighted, deterministic per seed → CRN-safe), bulk member or leader, so
+    deep fights face deep monsters. Count/geometry stay controlled per archetype; only the tier scales.
+  - **Still open in Phase 2:** (1) ~~metered-cadence budget derivation~~ — done above;
     (2) **perf** — short fights (goblins) are ~6 ms/encounter; tanky fights (ogres, many turns) cost more.
     Two cosmetic hot paths suppressed so far: **blood spread** (`info.bloodType = 0` — `spawnDungeonFeature`
     ran on every hit) and **bolt animation** (carved cells are left *unseen*, so `zap()`'s per-cell

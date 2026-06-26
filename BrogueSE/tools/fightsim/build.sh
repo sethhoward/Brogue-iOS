@@ -10,6 +10,7 @@ clang -I "$ENGINE" -I "$HERE" -DFIGHTSIM -w \
     "$ENGINE"/*.c \
     "$HERE"/fightsim.c \
     "$HERE"/sim.c \
+    "$HERE"/budget.c \
     "$HERE"/platform_stubs.c \
     -o "$HERE/build/fightsim" -lm
 echo "built: $HERE/build/fightsim"

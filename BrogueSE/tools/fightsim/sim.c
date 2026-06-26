@@ -188,7 +188,7 @@ static void stepToward(creature *m) {
 
 EncounterResult fs_run(const BuildSpec *b, Archetype arch, int playerMaxHP,
                        short monsterKind, int numMonsters, uint64_t seed,
-                       int startHP, int startCharges) {
+                       int startHP, int startCharges, int strength, int depth) {
     EncounterResult r = {0};
 
     static boolean inited = false;
@@ -196,6 +196,19 @@ EncounterResult fs_run(const BuildSpec *b, Archetype arch, int playerMaxHP,
     initializeGameVariant();
     initializeRogue(seed);
     inited = true;
+    if (strength > 0) rogue.strength = strength; // depth-derived strength (else initializeRogue's 12)
+
+    // Depth-appropriate monster: pick a normal-spawn horde valid at this depth (frequency-weighted,
+    // deterministic per seed) and use its bulk member (or leader). depth<=0 keeps monsterKind as given.
+    short kind = monsterKind;
+    if (depth > 0) {
+        short hid = pickHordeType(depth, 0,
+                                  HORDE_IS_SUMMONED | HORDE_LEADER_CAPTIVE | HORDE_MACHINE_ONLY, 0);
+        if (hid >= 0) {
+            const hordeType *h = &hordeCatalog[hid];
+            kind = (h->numberOfMemberTypes > 0) ? h->memberType[0] : h->leaderType;
+        }
+    }
 
     // Give the engine player a huge sentinel HP so it NEVER sees HP<=0 -> gameOver() (which runs
     // save-recording / high-score / name-prompt machinery and was the dominant per-death cost). We track
@@ -221,7 +234,7 @@ EncounterResult fs_run(const BuildSpec *b, Archetype arch, int playerMaxHP,
     }
     recalculateEquipmentBonuses();
 
-    placeMonsters(arch, monsterKind, numMonsters);
+    placeMonsters(arch, kind, numMonsters);
 
     long clock = 0, lastProgress = 0;
     int prevMonHP = 0;

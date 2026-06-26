@@ -37,8 +37,10 @@ typedef struct {
 // Run one encounter. Fully resets engine state from `seed` (common random numbers).
 // startHP <= 0 means start at full (playerMaxHP); startCharges < 0 means full (staffEnchant).
 // These let the Phase 4 sustain layer carry HP/charges across a sequence of encounters.
+// depth <= 0: use monsterKind as given. depth > 0: pick a depth-appropriate monster from the
+// horde catalog (frequency-weighted, deterministic per seed) and use that instead of monsterKind.
 EncounterResult fs_run(const BuildSpec *b, Archetype arch, int playerMaxHP,
                        short monsterKind, int numMonsters, uint64_t seed,
-                       int startHP, int startCharges);
+                       int startHP, int startCharges, int strength /* <=0 => 12 */, int depth);
 
 #endif
