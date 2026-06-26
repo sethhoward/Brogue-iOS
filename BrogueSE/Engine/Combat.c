@@ -90,14 +90,16 @@ fixpt netEnchant(item *theItem) {
     }
     // Clamp all net enchantment values to [-20, 50].
 #ifdef FIGHTSIM
-    fixpt hi = gBalance.netEnchantClampHi;
-    // Per-weapon cap: weapons with a positive per-kind cap clamp lower than nimble ones.
-    if ((theItem->category & WEAPON)
-        && gBalance.heavyWeaponCap[theItem->kind] > 0
-        && gBalance.heavyWeaponCap[theItem->kind] < hi) {
-        hi = gBalance.heavyWeaponCap[theItem->kind];
+    // Soft knee per weapon: full value up to heavyWeaponCap[kind] (the knee), then each point above it
+    // is worth only heavyWeaponSlopePct% (diminishing returns instead of a wall). slope 0 == a hard cap;
+    // slope 100 == no taper. knee 0 == untouched, so shipping (all-zero) is byte-identical.
+    if ((theItem->category & WEAPON) && gBalance.heavyWeaponCap[theItem->kind] > 0) {
+        fixpt kneeFp = (fixpt)gBalance.heavyWeaponCap[theItem->kind] * FP_FACTOR;
+        if (retval > kneeFp) {
+            retval = kneeFp + (retval - kneeFp) * gBalance.heavyWeaponSlopePct[theItem->kind] / 100;
+        }
     }
-    return clamp(retval, gBalance.netEnchantClampLo * FP_FACTOR, hi * FP_FACTOR);
+    return clamp(retval, gBalance.netEnchantClampLo * FP_FACTOR, gBalance.netEnchantClampHi * FP_FACTOR);
 #else
     return clamp(retval, -20 * FP_FACTOR, 50 * FP_FACTOR);
 #endif

@@ -24,18 +24,30 @@ typedef struct balanceConfig {
     int staffDmgLowNum, staffDmgLowDen;          // 3, 4
     // SE lightning/firebolt ramp gate (PowerTables.c:62-72).
     int seRampThreshold;                         // 5
-    // Per-weapon enchant cap, indexed by weapon kind. A weapon's net enchant is capped at
-    // heavyWeaponCap[kind] (instead of netEnchantClampHi) when that entry is > 0. Per-kind (not a
-    // single scalar) so each heavy weapon can cap at a different value -- the tuned config caps war
-    // pike at 8 but broadsword at 9, which one scalar couldn't express. Default all-0 = nothing
-    // capped, so shipping is unchanged.
-    int heavyWeaponCap[NUMBER_WEAPON_KINDS];     // {0} (off)
+    // Per-weapon soft-knee enchant curve. heavyWeaponCap[kind] is the KNEE (full value up to it);
+    // above it each point is worth only heavyWeaponSlopePct%. Per-kind (not a scalar) so each heavy
+    // weapon can knee at a different value -- the tuned config knees war pike at 8 but broadsword at 9.
+    // slope 0 == a hard cap (a cliff); slope 100 == no taper. knee 0 == untouched. Default all-0 =
+    // nothing knee'd, so shipping is unchanged.
+    int heavyWeaponCap[NUMBER_WEAPON_KINDS];      // {0} (off) -- the per-weapon knee
+    int heavyWeaponSlopePct[NUMBER_WEAPON_KINDS]; // per-weapon marginal % above the knee: 0 == hard cap
+                                                  // (cliff), 100 == no taper. Per-kind because weapons
+                                                  // re-inflate differently -- war pike's primary hit
+                                                  // scales hard, so it wants a gentle slope where the
+                                                  // raw-stat generalists can take a full 25% taper.
+    // Per-weapon melee recovery multiplier (percent), indexed by weapon kind. Scales the turn cost of
+    // melee/pass/lunge actions (NOT zaps): >100 = slower to recover, <100 = faster. 0 == default (100%).
+    // A mechanic-flavored, cliff-free lever -- e.g. a long/unwieldy war pike recovers slowly, scaling its
+    // whole curve down uniformly instead of capping enchant. sim-only (cadence lives in sim.c's tick loop).
+    int weaponRecoveryPct[NUMBER_WEAPON_KINDS];  // {0} (all default 100%)
     // Mechanic-specific damage levers (percent of normal, 100 = unchanged). The enchant cap is the
     // wrong tool for mechanic-driven weapons: war pike's penetrate is flat (cap-resistant) and flail's
     // pass-attacks multiply enchant across hits (cap is a cliff). So we trim those mechanics directly.
     // sim.c sets gFsDamageScalePct to these around the secondary hits; Combat.c reads it (see below).
-    int penetrateDamagePct;                      // 100 (war pike behind-target hit)
+    int penetrateDamagePct;                      // 100 (war pike behind-target hit, adjacent case)
     int passAttackDamagePct;                     // 100 (flail per-flanked-enemy hit while moving)
+    int reachDamagePct;                          // 100 (spear/pike reach poke: distance-2 strike with
+                                                 //      no adjacent foe -- the kite-the-approach benefit)
 } balanceConfig;
 
 #define FIGHTSIM_SHIPPING_DEFAULTS (balanceConfig){ \
@@ -45,8 +57,8 @@ typedef struct balanceConfig {
     .staffDmgHighBase = 4, .staffDmgHighSlopeNum = 5, .staffDmgHighSlopeDen = 2, \
     .staffDmgLowNum = 3, .staffDmgLowDen = 4, \
     .seRampThreshold = 5, \
-    .heavyWeaponCap = {0}, \
-    .penetrateDamagePct = 100, .passAttackDamagePct = 100, \
+    .heavyWeaponCap = {0}, .heavyWeaponSlopePct = {0}, .weaponRecoveryPct = {0}, \
+    .penetrateDamagePct = 100, .passAttackDamagePct = 100, .reachDamagePct = 100, \
 }
 
 // The tuned balance config the simulator converged on (see docs/design/fight-simulator.md §"Tuning").
@@ -60,8 +72,12 @@ typedef struct balanceConfig {
     .staffDmgHighBase = 4, .staffDmgHighSlopeNum = 5, .staffDmgHighSlopeDen = 2, \
     .staffDmgLowNum = 3, .staffDmgLowDen = 4, \
     .seRampThreshold = 5, \
-    .heavyWeaponCap = { [BROADSWORD] = 9, [WAR_AXE] = 10, [PIKE] = 8 }, \
-    .penetrateDamagePct = 100, .passAttackDamagePct = 50, \
+    .heavyWeaponCap      = { [BROADSWORD] = 9,  [WAR_AXE] = 10, [PIKE] = 8 }, \
+    /* soft knee: raw-stat generalists keep a full 25% taper past the knee; pike re-inflates fast, so */ \
+    /* it gets a gentle 10% (still growth, no cliff) while staying out of universal-go-to territory.   */ \
+    .heavyWeaponSlopePct = { [BROADSWORD] = 25, [WAR_AXE] = 25, [PIKE] = 10 }, \
+    .weaponRecoveryPct = {0}, /* pike speed penalty TBD from --pikespeed sweep */ \
+    .penetrateDamagePct = 100, .passAttackDamagePct = 50, .reachDamagePct = 100, \
 }
 
 extern balanceConfig gBalance; // = FIGHTSIM_SHIPPING_DEFAULTS (defined in fightsim.c)

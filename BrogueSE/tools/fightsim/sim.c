@@ -313,6 +313,7 @@ EncounterResult fs_run(const BuildSpec *b, Archetype arch, int playerMaxHP,
             boolean zapWorthIt = staff && staff->charges > 0 && fireSafe
                 && (nearby >= 3 || (nearby >= 1 && toughestNear >= 30));
             short pcost = player.attackSpeed; // turn cost; zap/wait = normal, melee adjusts per weapon
+            boolean meleeAction = false;      // set by melee/pass/lunge branches; gates the recovery lever
 
             // Rapier lunge: no adjacent foe but an enemy is exactly 2 tiles away in a straight line with
             // the gap cell free -> close in and strike with a guaranteed crit (attack(..., lunge=true)).
@@ -358,12 +359,33 @@ EncounterResult fs_run(const BuildSpec *b, Archetype arch, int playerMaxHP,
                 }
             }
 
+            // Pike/spear reach: with NO adjacent foe, strike a straight-line enemy exactly 2 tiles away
+            // across an empty, passable gap -- the engine's handleSpearAttacks (range 2) pokes it without
+            // moving (Movement.c:714). This is the kite-the-approach benefit; we stand and poke (a
+            // conservative model -- a real player would also retreat to keep the gap, which we don't).
+            creature *reachTgt = NULL;
+            if (rogue.weapon && (rogue.weapon->flags & ITEM_ATTACKS_PENETRATE) && !adj && !zapWorthIt) {
+                for (creatureIterator it = iterateCreatures(monsters); hasNextCreature(it);) {
+                    creature *m = nextCreature(&it);
+                    short dx = m->loc.x - player.loc.x, dy = m->loc.y - player.loc.y;
+                    if ((dx==-2||dx==0||dx==2) && (dy==-2||dy==0||dy==2) && (dx||dy)) {
+                        short ux = (dx>0)-(dx<0), uy = (dy>0)-(dy<0);
+                        pos gap = { player.loc.x + ux, player.loc.y + uy };
+                        if (!cellHasTerrainFlag(gap, T_OBSTRUCTS_PASSABILITY)
+                            && !(pmapAt(gap)->flags & (HAS_MONSTER | HAS_PLAYER))) {
+                            reachTgt = m; break;
+                        }
+                    }
+                }
+            }
+
             if (lungeTgt) {
                 pmapAt(player.loc)->flags &= ~HAS_PLAYER;
                 player.loc = lungeStep;
                 pmapAt(player.loc)->flags |= HAS_PLAYER;
                 attack(&player, lungeTgt, true /*lunge: guaranteed hit + bonus*/);
                 if (rogue.weapon->flags & ITEM_ATTACKS_QUICKLY) pcost /= 2;
+                meleeAction = true;
             } else if (passTargets > 0) {
                 // move, then strike each flanked enemy (pointers snapshotted before any attack frees them)
                 pmapAt(player.loc)->flags &= ~HAS_PLAYER;
@@ -372,6 +394,7 @@ EncounterResult fs_run(const BuildSpec *b, Archetype arch, int playerMaxHP,
                 gFsDamageScalePct = gBalance.passAttackDamagePct; // lever: trim each pass-attack hit
                 for (int i = 0; i < passTargets; i++) attack(&player, passHits[i], false);
                 gFsDamageScalePct = 100;
+                meleeAction = true;
             } else if (zapWorthIt) {
                 bolt bt = boltCatalog[boltForItem(staff)]; // staff-agnostic: lightning, firebolt, etc.
                 bt.magnitude = staff->enchant1;
@@ -379,6 +402,11 @@ EncounterResult fs_run(const BuildSpec *b, Archetype arch, int playerMaxHP,
                 pos target = far ? far->loc : (pos){ ROOM_X1, PY };
                 zap(player.loc, target, &bt, false, false);
                 staff->charges--; r.chargesSpent++;
+            } else if (reachTgt) {
+                gFsDamageScalePct = gBalance.reachDamagePct; // lever: trim the distance-2 reach poke
+                attack(&player, reachTgt, false);
+                gFsDamageScalePct = 100;
+                meleeAction = true;
             } else if (adj) {
                 boolean cleave  = rogue.weapon && (rogue.weapon->flags & ITEM_ATTACKS_ALL_ADJACENT);
                 boolean pierce  = rogue.weapon && (rogue.weapon->flags & ITEM_ATTACKS_PENETRATE);
@@ -406,6 +434,12 @@ EncounterResult fs_run(const BuildSpec *b, Archetype arch, int playerMaxHP,
                 // (STAGGER, "extra turn to recover") are 2x slower. Otherwise normal.
                 if (rogue.weapon && (rogue.weapon->flags & ITEM_ATTACKS_QUICKLY)) pcost /= 2;
                 if (rogue.weapon && (rogue.weapon->flags & ITEM_ATTACKS_STAGGER)) pcost *= 2;
+                meleeAction = true;
+            }
+            // Per-weapon recovery lever (melee/pass/lunge only): scale the turn cost. 0 == default 100%.
+            if (meleeAction && rogue.weapon) {
+                int rec = gBalance.weaponRecoveryPct[rogue.weapon->kind];
+                if (rec > 0 && rec != 100) pcost = (short)(pcost * rec / 100);
             }
             player.ticksUntilTurn = pcost;
         }

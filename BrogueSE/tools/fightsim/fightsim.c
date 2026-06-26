@@ -25,14 +25,21 @@ balanceConfig gBalance = FIGHTSIM_SHIPPING_DEFAULTS;
 // can't be dodged by swapping to them. Light/finesse weapons (dagger/sword/rapier/axe) stay free.
 #define FS_HEAVY_MASK ((1UL<<WAR_AXE)|(1UL<<HAMMER)|(1UL<<PIKE)|(1UL<<FLAIL)|(1UL<<MACE)|(1UL<<BROADSWORD))
 
-// Per-kind enchant-cap helpers (the config field is now an array, not a scalar + mask).
+// Per-kind enchant-knee helpers (the config fields are now arrays).
 static void fsResetCaps(void) {
-    for (int i = 0; i < NUMBER_WEAPON_KINDS; i++) gBalance.heavyWeaponCap[i] = 0;
+    for (int i = 0; i < NUMBER_WEAPON_KINDS; i++) {
+        gBalance.heavyWeaponCap[i] = 0;
+        gBalance.heavyWeaponSlopePct[i] = 0;
+        gBalance.weaponRecoveryPct[i] = 0;
+    }
 }
-// Cap every weapon kind whose bit is set in `mask` at `cap`; clear all others.
+// Knee every weapon kind whose bit is set in `mask` at `cap`, as a HARD cap (slope 0); clear the rest.
 static void fsCapSet(unsigned long mask, int cap) {
-    for (int i = 0; i < NUMBER_WEAPON_KINDS; i++)
-        gBalance.heavyWeaponCap[i] = (mask & (1UL << i)) ? cap : 0;
+    for (int i = 0; i < NUMBER_WEAPON_KINDS; i++) {
+        boolean on = (mask & (1UL << i)) != 0;
+        gBalance.heavyWeaponCap[i] = on ? cap : 0;
+        gBalance.heavyWeaponSlopePct[i] = 0;
+    }
 }
 
 static int g_failures = 0;
@@ -621,7 +628,8 @@ static void tunedConfig(int trials) {
     fs_buildBudgetTable(depths[(int)(sizeof depths/sizeof depths[0]) - 1], 8);
     balanceConfig saved = gBalance;
     gBalance = FIGHTSIM_TUNED_DEFAULTS;
-    printf("# TUNED CONFIG (FIGHTSIM_TUNED_DEFAULTS): broadsword cap9, war_axe cap10, war_pike cap8, flail pass50.\n");
+    printf("# TUNED CONFIG (FIGHTSIM_TUNED_DEFAULTS): soft knees broadsword 9/war_axe 10 @slope25, "
+           "war_pike 8 @slope10; flail pass50.\n");
     for (int di = 0; di < (int)(sizeof depths/sizeof depths[0]); di++) {
         int depth = depths[di];
         DepthBudget bud = fs_budgetAt(depth);
@@ -635,6 +643,103 @@ static void tunedConfig(int trials) {
         printf("\n");
     }
     gBalance = saved;
+}
+
+// Soft-knee slope sweep: for the tuned per-weapon knees, vary the marginal % above the knee
+// (0 = hard cap .. 100 = no taper) and watch each weapon climb back from the hard-cap floor toward
+// uncapped. Finds the slope that keeps post-knee growth without restoring universal dominance.
+static void taperSweep(int trials) {
+    const int depths[] = {16, 19};
+    const int slopes[] = {0, 25, 50, 75, 100};
+    struct { short kind; const char *name; int knee; } K[] = {
+        {BROADSWORD,"broadsword",9}, {WAR_AXE,"war_axe",10}, {PIKE,"war_pike",8},
+    };
+    fs_buildBudgetTable(depths[(int)(sizeof depths/sizeof depths[0]) - 1], 8);
+    for (int di = 0; di < (int)(sizeof depths/sizeof depths[0]); di++) {
+        int depth = depths[di];
+        DepthBudget bud = fs_budgetAt(depth);
+        int B = (int)(bud.enchantScrolls + 0.5);
+        int strength = 12 + (int)(bud.strengthPotions + 0.5);
+        int hp = 30 + 10 * (int)(bud.lifePotions + 0.5);
+        char lbl[48];
+        printf("# TAPER SWEEP @ depth %d -- win%% per archetype (str %d, HP %d, +%d). slope 0=hard cap.\n",
+               depth, strength, hp, B);
+        printf("config,corridor,cluster,pack,lone_tank,ambush,mean\n");
+        fsResetCaps();
+        printArchRow("rapier(ref)", RAPIER, "rapier", B, hp, strength, depth, trials);
+        printArchRow("war_hammer(ref)", HAMMER, "war_hammer", B, hp, strength, depth, trials);
+        for (int ki = 0; ki < (int)(sizeof K/sizeof K[0]); ki++) {
+            for (int si = 0; si < (int)(sizeof slopes/sizeof slopes[0]); si++) {
+                fsCapSet((1UL << K[ki].kind), K[ki].knee);          // sets knee, slope 0
+                gBalance.heavyWeaponSlopePct[K[ki].kind] = slopes[si]; // then the taper
+                sprintf(lbl, "%s@knee%d/slope%d", K[ki].name, K[ki].knee, slopes[si]);
+                printArchRow(lbl, K[ki].kind, K[ki].name, B, hp, strength, depth, trials);
+            }
+        }
+        printf("\n");
+    }
+    fsResetCaps();
+}
+
+// Pike attack-speed lever: pike UNCAPPED (no enchant knee), recovery % varied, to see whether a
+// cliff-free speed penalty alone tames it while preserving its per-archetype shape. Refs for the band.
+static void pikeSpeedSweep(int trials) {
+    const int depths[] = {16, 19};
+    const int rec[] = {100, 125, 150, 175, 200};
+    fs_buildBudgetTable(depths[(int)(sizeof depths/sizeof depths[0]) - 1], 8);
+    for (int di = 0; di < (int)(sizeof depths/sizeof depths[0]); di++) {
+        int depth = depths[di];
+        DepthBudget bud = fs_budgetAt(depth);
+        int B = (int)(bud.enchantScrolls + 0.5);
+        int strength = 12 + (int)(bud.strengthPotions + 0.5);
+        int hp = 30 + 10 * (int)(bud.lifePotions + 0.5);
+        char lbl[48];
+        printf("# PIKE SPEED SWEEP @ depth %d -- pike uncapped, melee recovery%% varied (100=normal).\n",
+               depth);
+        printf("config,corridor,cluster,pack,lone_tank,ambush,mean\n");
+        fsResetCaps();
+        printArchRow("rapier(ref)", RAPIER, "rapier", B, hp, strength, depth, trials);
+        printArchRow("war_hammer(ref)", HAMMER, "war_hammer", B, hp, strength, depth, trials);
+        for (int ri = 0; ri < (int)(sizeof rec/sizeof rec[0]); ri++) {
+            fsResetCaps();
+            gBalance.weaponRecoveryPct[PIKE] = rec[ri];
+            sprintf(lbl, "war_pike@rec%d", rec[ri]);
+            printArchRow(lbl, PIKE, "war_pike", B, hp, strength, depth, trials);
+        }
+        printf("\n");
+    }
+    fsResetCaps();
+}
+
+// Pike reach-damage lever sweep: pike UNCAPPED, the distance-2 reach poke's damage varied
+// (100 = full reach .. 0 = no reach benefit), to see whether trimming the reach restores pike's
+// natural scattered-pack/approach weakness and pulls it back to a situational line weapon.
+static void reachSweep(int trials) {
+    const int depths[] = {16, 19};
+    const int pcts[] = {100, 75, 50, 25, 0};
+    fs_buildBudgetTable(depths[(int)(sizeof depths/sizeof depths[0]) - 1], 8);
+    for (int di = 0; di < (int)(sizeof depths/sizeof depths[0]); di++) {
+        int depth = depths[di];
+        DepthBudget bud = fs_budgetAt(depth);
+        int B = (int)(bud.enchantScrolls + 0.5);
+        int strength = 12 + (int)(bud.strengthPotions + 0.5);
+        int hp = 30 + 10 * (int)(bud.lifePotions + 0.5);
+        char lbl[48];
+        printf("# REACH SWEEP @ depth %d -- pike uncapped, reach-poke damage%% varied (100=full reach).\n",
+               depth);
+        printf("config,corridor,cluster,pack,lone_tank,ambush,mean\n");
+        fsResetCaps(); gBalance.reachDamagePct = 100;
+        printArchRow("rapier(ref)", RAPIER, "rapier", B, hp, strength, depth, trials);
+        printArchRow("war_hammer(ref)", HAMMER, "war_hammer", B, hp, strength, depth, trials);
+        for (int i = 0; i < (int)(sizeof pcts/sizeof pcts[0]); i++) {
+            gBalance.reachDamagePct = pcts[i];
+            sprintf(lbl, "war_pike@reach%d", pcts[i]);
+            printArchRow(lbl, PIKE, "war_pike", B, hp, strength, depth, trials);
+        }
+        gBalance.reachDamagePct = 100;
+        printf("\n");
+    }
+    fsResetCaps();
 }
 
 int main(int argc, char **argv) {
@@ -685,6 +790,21 @@ int main(int argc, char **argv) {
         int glow   = (argc > 5) ? atoi(argv[5]) : 6;  // staff glow-up target (+5/6)
         int n = (arch == ARCH_LONE_TANK) ? 1 : 4;
         curveSweep((Archetype) arch, trials, 90 /*playerHP*/, n, maxB, glow);
+        return 0;
+    }
+    if (strcmp(mode, "--reachsweep") == 0) {
+        int trials = (argc > 2) ? atoi(argv[2]) : 40;
+        reachSweep(trials);
+        return 0;
+    }
+    if (strcmp(mode, "--pikespeed") == 0) {
+        int trials = (argc > 2) ? atoi(argv[2]) : 30;
+        pikeSpeedSweep(trials);
+        return 0;
+    }
+    if (strcmp(mode, "--tapersweep") == 0) {
+        int trials = (argc > 2) ? atoi(argv[2]) : 30;
+        taperSweep(trials);
         return 0;
     }
     if (strcmp(mode, "--tuned") == 0) {
