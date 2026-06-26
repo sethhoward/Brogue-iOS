@@ -349,6 +349,49 @@ static void tuneThreeWay(int depth, int trials, int tunedCap) {
     gBalance.heavyWeaponMask = 0; // restore
 }
 
+// WEAPON ROSTER: every weapon, all-in at the depth's budget, averaged over all five scenarios,
+// at baseline vs the heavy-weapon cap -- so we see which weapons dominate as generalists AND confirm
+// the cap lands only on the heavy set (war axe/hammer/pike/flail), sparing dagger/sword/rapier/etc.
+static void weaponRoster(int depth, int trials, int heavyCap) {
+    fs_buildBudgetTable(depth, 8);
+    DepthBudget bud = fs_budgetAt(depth);
+    int B = (int)(bud.enchantScrolls + 0.5);
+    int strength = 12 + (int)(bud.strengthPotions + 0.5);
+    int hp = 30 + 10 * (int)(bud.lifePotions + 0.5);
+    struct { short kind; const char *name; } roster[] = {
+        {DAGGER,"dagger"}, {SWORD,"sword"}, {RAPIER,"rapier"}, {MACE,"mace"}, {AXE,"axe"},
+        {BROADSWORD,"broadsword"}, {FLAIL,"flail"}, {PIKE,"war_pike"}, {WAR_AXE,"war_axe"}, {HAMMER,"war_hammer"},
+    };
+    const unsigned long heavyMask = (1UL<<WAR_AXE) | (1UL<<HAMMER) | (1UL<<PIKE) | (1UL<<FLAIL);
+    const int nW = (int)(sizeof roster / sizeof roster[0]);
+
+    printf("# WEAPON ROSTER @ depth %d (str %d, HP %d, all-in +%d), mean over 5 scenarios, %d trials.\n",
+           depth, strength, hp, B, trials);
+    printf("# heavy cap = %d on {war axe, war hammer, war pike, flail}.\n", heavyCap);
+    printf("weapon,base_hp,base_win,capped_hp,capped_win,in_heavy_set\n");
+    for (int wi = 0; wi < nW; wi++) {
+        double out[2][2]; // [cfg][0=hp,1=win]
+        for (int c = 0; c < 2; c++) {
+            gBalance.heavyWeaponMask = (c == 0) ? 0 : heavyMask;
+            gBalance.heavyWeaponCap = heavyCap;
+            BuildSpec w = { roster[wi].name, roster[wi].kind, LEATHER_ARMOR, NONE, NONE, (short)B, 0, 0, 0 };
+            Stat hS = {0}, wS = {0};
+            for (Archetype a = 0; a < ARCH_COUNT; a++) {
+                int n = (a == ARCH_LONE_TANK) ? 1 : 4;
+                for (int t = 0; t < trials; t++) {
+                    EncounterResult r = fs_run(&w, a, hp, MK_OGRE, n, (uint64_t)t + 1, 0, -1, strength, depth);
+                    statAdd(&hS, r.hpLost); statAdd(&wS, r.won);
+                }
+            }
+            out[c][0] = statMean(&hS); out[c][1] = 100 * statMean(&wS);
+        }
+        printf("%s,%.0f,%.0f,%.0f,%.0f,%s\n", roster[wi].name,
+               out[0][0], out[0][1], out[1][0], out[1][1],
+               (heavyMask & (1UL << roster[wi].kind)) ? "yes" : "no");
+    }
+    gBalance.heavyWeaponMask = 0;
+}
+
 int main(int argc, char **argv) {
     gameVariant = VARIANT_BROGUE;
     initializeGameVariant();
@@ -397,6 +440,13 @@ int main(int argc, char **argv) {
         int glow   = (argc > 5) ? atoi(argv[5]) : 6;  // staff glow-up target (+5/6)
         int n = (arch == ARCH_LONE_TANK) ? 1 : 4;
         curveSweep((Archetype) arch, trials, 90 /*playerHP*/, n, maxB, glow);
+        return 0;
+    }
+    if (strcmp(mode, "--weapons") == 0) {
+        int depth   = (argc > 2) ? atoi(argv[2]) : 13;
+        int trials  = (argc > 3) ? atoi(argv[3]) : 20;
+        int cap     = (argc > 4) ? atoi(argv[4]) : 8;
+        weaponRoster(depth, trials, cap);
         return 0;
     }
     if (strcmp(mode, "--tune") == 0) {
