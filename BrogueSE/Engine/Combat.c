@@ -1751,6 +1751,81 @@ void inflictLethalDamage(creature *attacker, creature *defender) {
     inflictDamage(attacker, defender, defender->currentHP, NULL, true);
 }
 
+// iOS port (Brogue SE): ring of transference -- affliction transfer. "Blood magic" cuts both ways: the
+// same conduit that drains a victim's life into you also lets you bleed a fraction of your own harmful
+// statuses INTO whatever you strike. Rate-limited by the ring's transference fraction (transference /
+// playerTransferenceRatio -- the same 5%/level as the heal) so it's tempo-paced relief, NOT a one-hit
+// cleanse: the affliction keeps ticking on you while you punch it off. Curated to the statuses that map
+// cleanly onto a monster (poison, fire, slow, weakness, confusion). Positive ring only -- a cursed ring
+// keeps its existing HP-drain downside and grants no relief. Deterministic (pure arithmetic on game
+// state, no RNG), so save-replay safe.
+static void transferAfflictionsToTarget(creature *defender) {
+    short shed;
+
+    if (rogue.transference <= 0
+        || (defender->info.flags & (MONST_INANIMATE | MONST_INVULNERABLE))) {
+        return;
+    }
+
+    // Turns of an affliction shed per hit: its remaining duration scaled by the transference fraction,
+    // floored at 1 (so any affliction makes some progress) and never more than the player still has.
+    #define SHED_TURNS(dur) (min((dur), max(1, (dur) * rogue.transference / gameConst->playerTransferenceRatio)))
+
+    // Poison -- relocate duration at the player's current concentration onto the target.
+    if (player.status[STATUS_POISONED] > 0) {
+        shed = SHED_TURNS(player.status[STATUS_POISONED]);
+        addPoison(defender, shed, player.poisonAmount);
+        player.status[STATUS_POISONED] -= shed;
+        if (player.status[STATUS_POISONED] <= 0) {
+            player.status[STATUS_POISONED] = 0;
+            player.poisonAmount = 0;
+        }
+    }
+
+    // Fire -- only takes hold on a target that can actually burn.
+    if (player.status[STATUS_BURNING] > 0
+        && !defender->status[STATUS_IMMUNE_TO_FIRE]
+        && !(defender->info.flags & MONST_IMMUNE_TO_FIRE)) {
+        shed = SHED_TURNS(player.status[STATUS_BURNING]);
+        defender->status[STATUS_BURNING] = max(defender->status[STATUS_BURNING], shed);
+        defender->maxStatus[STATUS_BURNING] = max(defender->maxStatus[STATUS_BURNING], defender->status[STATUS_BURNING]);
+        player.status[STATUS_BURNING] -= shed;
+        if (player.status[STATUS_BURNING] <= 0) {
+            extinguishFireOnCreature(&player);
+        }
+    }
+
+    // Slow.
+    if (player.status[STATUS_SLOWED] > 0) {
+        shed = SHED_TURNS(player.status[STATUS_SLOWED]);
+        slow(defender, max(defender->status[STATUS_SLOWED], shed));
+        player.status[STATUS_SLOWED] -= shed;
+    }
+
+    // Weakness -- bleed duration across (deepening the target's enervation by a point); working it fully
+    // off restores the player's strength.
+    if (player.status[STATUS_WEAKENED] > 0) {
+        shed = SHED_TURNS(player.status[STATUS_WEAKENED]);
+        weaken(defender, max(defender->status[STATUS_WEAKENED], shed));
+        player.status[STATUS_WEAKENED] -= shed;
+        if (player.status[STATUS_WEAKENED] <= 0) {
+            player.status[STATUS_WEAKENED] = 0;
+            player.weaknessAmount = 0;
+            updateEncumbrance(); // recompute strength-derived stats now the toxin has drained
+        }
+    }
+
+    // Confusion.
+    if (player.status[STATUS_CONFUSED] > 0) {
+        shed = SHED_TURNS(player.status[STATUS_CONFUSED]);
+        defender->status[STATUS_CONFUSED] = max(defender->status[STATUS_CONFUSED], shed);
+        defender->maxStatus[STATUS_CONFUSED] = max(defender->maxStatus[STATUS_CONFUSED], defender->status[STATUS_CONFUSED]);
+        player.status[STATUS_CONFUSED] -= shed;
+    }
+
+    #undef SHED_TURNS
+}
+
 // returns true if this was a killing stroke; does NOT call killCreature
 // flashColor indicates the color that the damage will cause the creature to flash
 boolean inflictDamage(creature *attacker, creature *defender,
@@ -1830,6 +1905,12 @@ boolean inflictDamage(creature *attacker, creature *defender,
         if (attacker == &player && player.currentHP <= 0) {
             gameOver("Drained by a cursed ring", true);
             return false;
+        }
+
+        // iOS port (Brogue SE): same hit also bleeds a fraction of the player's own afflictions into
+        // the victim (positive ring only; helper no-ops on a cursed ring or an inanimate target).
+        if (attacker == &player) {
+            transferAfflictionsToTarget(defender);
         }
     }
 

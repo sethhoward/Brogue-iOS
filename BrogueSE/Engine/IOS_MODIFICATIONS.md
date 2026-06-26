@@ -32,6 +32,32 @@ See `BrogueCE/Engine/IOS_MODIFICATIONS.md` (faithful CE) and
 
 ## Change log
 
+### 2026-06-25 — Ring of transference also transfers afflictions on hit (new content)
+
+**What.** The ring of transference (heal-in-proportion-to-damage "blood magic") now also bleeds a fraction
+of the *player's own* harmful statuses into whatever it strikes. Curated to the statuses that map cleanly
+onto a monster: **poison, fire (burning), slow, weakness, confusion**. Each hit sheds
+`status * transference / playerTransferenceRatio` turns (the same 5%/level as the heal, floored at 1,
+capped at what the player has) from the player and applies them to the defender — so e.g. a poisoned
+player relocates a slice of the poison onto the creature they hit, at the player's current concentration.
+
+**Why rate-limited (counter-pressure, not a strict upgrade).** Poison/etc. are core attrition clocks;
+a full one-hit dump would let the player launder any affliction into the nearest monster and trivialize a
+whole threat category. Rate-limiting keeps it a *tempo* tool — the affliction keeps ticking on you while
+you punch it off, and you need a valid (animate, non-invulnerable) target. **Positive ring only**: a cursed
+ring keeps its existing HP-drain downside (`gameOver("Drained by a cursed ring")`) and grants no relief.
+
+**Where.** `Combat.c` — new static helper `transferAfflictionsToTarget(defender)` above `inflictDamage`,
+called from the existing transference block in `inflictDamage` (guarded `attacker == &player`; the helper
+no-ops on `rogue.transference <= 0` or an `INANIMATE`/`INVULNERABLE` target). Reuses the existing appliers
+(`addPoison`, `slow`, `weaken`, direct burning/confusion status, `extinguishFireOnCreature` +
+`updateEncumbrance` to clean up the player side on full shed). `Globals.c` — `ringTable` transference
+description rewritten to mention the affliction bleed (still under the ~540-char cap). Only the player ring
+transfers afflictions; monsters/allies with `MA_TRANSFERENCE` keep HP-only transference.
+
+**Determinism / save-safety.** Pure arithmetic on deterministic combat state — no RNG, no new struct
+fields — so input-replay saves are unaffected. Marked `// iOS port (Brogue SE):`.
+
 ### 2026-06-25 — Staff of frost suppresses (not freezes) a fiery aura, which rekindles after N turns (new content)
 
 **What.** Hitting a fiery creature (wisp / salamander / flamedancer — the `MONST_FIERY` set) with the
