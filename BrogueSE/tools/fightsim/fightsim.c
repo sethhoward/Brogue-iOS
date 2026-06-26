@@ -397,6 +397,65 @@ static void weaponRoster(int depth, int trials, int heavyCap) {
     gBalance.heavyWeaponMask = 0;
 }
 
+// Run one weapon across all archetypes at a given depth/budget; return mean win% (0..100).
+static double runWeaponWin(short kind, const char *name, int B, int hp, int strength, int depth, int trials) {
+    BuildSpec w = { name, kind, LEATHER_ARMOR, NONE, NONE, (short)B, 0, 0, 0 };
+    Stat wS = {0};
+    for (Archetype a = 0; a < ARCH_COUNT; a++) {
+        int n = (a == ARCH_LONE_TANK) ? 1 : 4;
+        for (int t = 0; t < trials; t++) {
+            EncounterResult r = fs_run(&w, a, hp, MK_OGRE, n, (uint64_t)t + 1, 0, -1, strength, depth);
+            statAdd(&wS, r.won);
+        }
+    }
+    return 100 * statMean(&wS);
+}
+
+// Focused cap sweep: cap only the four genuine generalists {broadsword, war pike, war axe, flail}
+// (sparing war hammer = 1v1 king, mace = self-balancing, and all nimble weapons), and watch how each
+// cap value pulls their universal dominance toward the "strong but situational" band, depth by depth.
+// sword/rapier/war_hammer are printed as uncapped reference bars (the floor the cap must not cross).
+static void capSweep(int trials) {
+    const int depths[] = {10, 13, 16, 19};
+    const int caps[]   = {12, 10, 8, 6};
+    const unsigned long focusMask =
+        (1UL<<BROADSWORD) | (1UL<<PIKE) | (1UL<<WAR_AXE) | (1UL<<FLAIL);
+    struct { short kind; const char *name; } capped[] = {
+        {BROADSWORD,"broadsword"}, {PIKE,"war_pike"}, {WAR_AXE,"war_axe"}, {FLAIL,"flail"},
+    };
+    struct { short kind; const char *name; } refs[] = {
+        {SWORD,"sword"}, {RAPIER,"rapier"}, {HAMMER,"war_hammer"},
+    };
+    printf("# CAP SWEEP -- mask = {broadsword, war_pike, war_axe, flail}; %d trials x 5 archetypes.\n", trials);
+    printf("# refs (sword/rapier/war_hammer) are uncapped baselines. cap=0 row is the capped weapon's own baseline.\n");
+    printf("depth,cap,weapon,win,role\n");
+    fs_buildBudgetTable(depths[(int)(sizeof depths/sizeof depths[0]) - 1], 8); // build once to max depth (repeat calls double-free)
+    for (int di = 0; di < (int)(sizeof depths/sizeof depths[0]); di++) {
+        int depth = depths[di];
+        DepthBudget bud = fs_budgetAt(depth);
+        int B = (int)(bud.enchantScrolls + 0.5);
+        int strength = 12 + (int)(bud.strengthPotions + 0.5);
+        int hp = 30 + 10 * (int)(bud.lifePotions + 0.5);
+        gBalance.heavyWeaponMask = 0;
+        for (int i = 0; i < (int)(sizeof refs/sizeof refs[0]); i++)
+            printf("%d,0,%s,%.0f,ref\n", depth, refs[i].name,
+                   runWeaponWin(refs[i].kind, refs[i].name, B, hp, strength, depth, trials));
+        for (int wi = 0; wi < (int)(sizeof capped/sizeof capped[0]); wi++) {
+            gBalance.heavyWeaponMask = 0;
+            printf("%d,0,%s,%.0f,capped\n", depth, capped[wi].name,
+                   runWeaponWin(capped[wi].kind, capped[wi].name, B, hp, strength, depth, trials));
+            for (int ci = 0; ci < (int)(sizeof caps/sizeof caps[0]); ci++) {
+                gBalance.heavyWeaponMask = focusMask;
+                gBalance.heavyWeaponCap = caps[ci];
+                printf("%d,%d,%s,%.0f,capped\n", depth, caps[ci], capped[wi].name,
+                       runWeaponWin(capped[wi].kind, capped[wi].name, B, hp, strength, depth, trials));
+            }
+        }
+        fflush(stdout);
+    }
+    gBalance.heavyWeaponMask = 0;
+}
+
 int main(int argc, char **argv) {
     gameVariant = VARIANT_BROGUE;
     initializeGameVariant();
@@ -445,6 +504,11 @@ int main(int argc, char **argv) {
         int glow   = (argc > 5) ? atoi(argv[5]) : 6;  // staff glow-up target (+5/6)
         int n = (arch == ARCH_LONE_TANK) ? 1 : 4;
         curveSweep((Archetype) arch, trials, 90 /*playerHP*/, n, maxB, glow);
+        return 0;
+    }
+    if (strcmp(mode, "--capsweep") == 0) {
+        int trials = (argc > 2) ? atoi(argv[2]) : 20;
+        capSweep(trials);
         return 0;
     }
     if (strcmp(mode, "--weapons") == 0) {
