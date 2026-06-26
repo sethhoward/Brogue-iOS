@@ -291,17 +291,22 @@ EncounterResult fs_run(const BuildSpec *b, Archetype arch, int playerMaxHP,
         // models how a staff is actually used (situationally, not every turn) and avoids zap-spam.
         if (player.ticksUntilTurn <= 0 && player.currentHP > 0) {
             creature *adj = adjacentEnemy();
-            int nearby = 0; creature *far = NULL; short bestD = -1; short toughestNear = 0;
+            int nearby = 0; creature *far = NULL; short bestD = -1, nearD = 9999; short toughestNear = 0;
             for (creatureIterator it = iterateCreatures(monsters); hasNextCreature(it);) {
                 creature *m = nextCreature(&it);
                 short d = distanceBetween(player.loc, m->loc);
                 if (d <= 7) { nearby++; if (m->currentHP > toughestNear) toughestNear = m->currentHP; } // in bolt reach
                 if (d > bestD) { bestD = d; far = m; }
+                if (d < nearD) nearD = d;
             }
+            // Firebolt-safe: don't fire when the nearest enemy is close enough that the incineration
+            // bloom would wash back over the player (self-immolation). Lightning has no such risk
+            // (safe down your own line), so this only gates fire staves.
+            boolean fireSafe = !(staff && boltForItem(staff) == BOLT_FIRE) || nearD >= 4;
             // Worth a charge when: several enemies in reach (rake the group), OR a single tough target
             // in reach that would cost many melee rounds (the lone-dragon case). Don't waste it on a
             // lone weakling — melee that.
-            boolean zapWorthIt = staff && staff->charges > 0
+            boolean zapWorthIt = staff && staff->charges > 0 && fireSafe
                 && (nearby >= 3 || (nearby >= 1 && toughestNear >= 30));
             if (zapWorthIt) {
                 bolt bt = boltCatalog[boltForItem(staff)]; // staff-agnostic: lightning, firebolt, etc.
