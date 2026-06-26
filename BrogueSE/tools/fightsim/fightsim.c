@@ -742,6 +742,62 @@ static void reachSweep(int trials) {
     fsResetCaps();
 }
 
+// Run a full BuildSpec (weapon and/or staff) across all archetypes; print win% row + mean.
+static void printBuildRow(const char *lbl, const BuildSpec *b, int hp, int strength, int depth, int trials) {
+    double sum = 0;
+    printf("%s", lbl);
+    for (Archetype a = 0; a < ARCH_COUNT; a++) {
+        int n = (a == ARCH_LONE_TANK) ? 1 : 4;
+        Stat wS = {0};
+        for (int t = 0; t < trials; t++) {
+            EncounterResult r = fs_run(b, a, hp, MK_OGRE, n, (uint64_t)t + 1, 0, -1, strength, depth);
+            statAdd(&wS, r.won);
+        }
+        double v = 100 * statMean(&wS); sum += v; printf(",%.0f", v);
+    }
+    printf(",%.0f\n", sum / ARCH_COUNT);
+    fflush(stdout);
+}
+
+// Hybrid question: with the weapon's surplus enchants tapered (or the pike slowed), does diverting
+// budget into a glowed lightning staff (+6 -> the SE >=5 chain/range/stun ramp) pay off better?
+// For each weapon, compare ALL-IN (weapon +B) vs HYBRID (weapon +B-6 / staff +6) under SHIPPING vs TUNED.
+static void hybridCompare(int trials) {
+    const int depths[] = {16, 19};
+    struct { short kind; const char *name; } W[] = {
+        {SWORD,"sword"},          // control: no lever touches it
+        {BROADSWORD,"broadsword"}, {WAR_AXE,"war_axe"}, {PIKE,"war_pike"},
+    };
+    const int glow = 6;
+    fs_buildBudgetTable(depths[(int)(sizeof depths/sizeof depths[0]) - 1], 8);
+    balanceConfig saved = gBalance;
+    for (int di = 0; di < (int)(sizeof depths/sizeof depths[0]); di++) {
+        int depth = depths[di];
+        DepthBudget bud = fs_budgetAt(depth);
+        int B = (int)(bud.enchantScrolls + 0.5);
+        int strength = 12 + (int)(bud.strengthPotions + 0.5);
+        int hp = 30 + 10 * (int)(bud.lifePotions + 0.5);
+        int sE = (B < glow) ? B : glow, wHyb = B - sE;
+        printf("# HYBRID @ depth %d (B=%d): all-in weapon (+%d) vs hybrid (weapon +%d / lightning +%d).\n",
+               depth, B, B, wHyb, sE);
+        printf("weapon,build,cfg,corridor,cluster,pack,lone_tank,ambush,mean\n");
+        for (int wi = 0; wi < (int)(sizeof W/sizeof W[0]); wi++) {
+            char lbl[64];
+            for (int cfg = 0; cfg < 2; cfg++) {
+                gBalance = cfg ? FIGHTSIM_TUNED_DEFAULTS : FIGHTSIM_SHIPPING_DEFAULTS;
+                const char *cn = cfg ? "TU" : "SH";
+                BuildSpec allin = { W[wi].name, W[wi].kind, LEATHER_ARMOR, NONE, NONE, (short)B, 0, 0, 0 };
+                BuildSpec hyb   = { W[wi].name, W[wi].kind, LEATHER_ARMOR, STAFF_LIGHTNING, NONE,
+                                    (short)wHyb, 0, (short)sE, 0 };
+                sprintf(lbl, "%s,all-in,%s", W[wi].name, cn); printBuildRow(lbl, &allin, hp, strength, depth, trials);
+                sprintf(lbl, "%s,hybrid,%s", W[wi].name, cn); printBuildRow(lbl, &hyb,   hp, strength, depth, trials);
+            }
+        }
+        printf("\n");
+    }
+    gBalance = saved;
+}
+
 int main(int argc, char **argv) {
     gameVariant = VARIANT_BROGUE;
     initializeGameVariant();
@@ -790,6 +846,11 @@ int main(int argc, char **argv) {
         int glow   = (argc > 5) ? atoi(argv[5]) : 6;  // staff glow-up target (+5/6)
         int n = (arch == ARCH_LONE_TANK) ? 1 : 4;
         curveSweep((Archetype) arch, trials, 90 /*playerHP*/, n, maxB, glow);
+        return 0;
+    }
+    if (strcmp(mode, "--hybrid") == 0) {
+        int trials = (argc > 2) ? atoi(argv[2]) : 30;
+        hybridCompare(trials);
         return 0;
     }
     if (strcmp(mode, "--reachsweep") == 0) {
