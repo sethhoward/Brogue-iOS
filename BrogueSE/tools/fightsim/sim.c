@@ -328,12 +328,44 @@ EncounterResult fs_run(const BuildSpec *b, Archetype arch, int playerMaxHP,
                 }
             }
 
+            // Flail pass-attack: stepping from P to a free neighbor N strikes every enemy adjacent
+            // to BOTH cells (Movement.c buildFlailHitList). It's a kiting/gauntlet mechanic, so we
+            // only take the step when it clips >=2 enemies; with 0-1 flanked, plain melee is just as
+            // good and keeps our footing (correctly making 1v1 flail behave like a normal weapon).
+            creature *passHits[8]; int passTargets = 0; pos passStep = {0,0};
+            if (rogue.weapon && (rogue.weapon->flags & ITEM_PASS_ATTACKS) && !zapWorthIt) {
+                int best = 1; // require >=2 to bother moving
+                for (short dx = -1; dx <= 1; dx++) for (short dy = -1; dy <= 1; dy++) {
+                    if (!dx && !dy) continue;
+                    pos n = { player.loc.x + dx, player.loc.y + dy };
+                    if (!coordinatesAreInMap(n.x, n.y)) continue;
+                    if (cellHasTerrainFlag(n, T_OBSTRUCTS_PASSABILITY)) continue;
+                    if (pmapAt(n)->flags & (HAS_MONSTER | HAS_PLAYER)) continue;
+                    creature *hits[8]; int nh = 0;
+                    for (creatureIterator it = iterateCreatures(monsters); hasNextCreature(it);) {
+                        creature *m = nextCreature(&it);
+                        if (distanceBetween(player.loc, m->loc) == 1
+                            && distanceBetween(n, m->loc) == 1 && nh < 8) hits[nh++] = m;
+                    }
+                    if (nh > best) {
+                        best = nh; passTargets = nh; passStep = n;
+                        for (int i = 0; i < nh; i++) passHits[i] = hits[i];
+                    }
+                }
+            }
+
             if (lungeTgt) {
                 pmapAt(player.loc)->flags &= ~HAS_PLAYER;
                 player.loc = lungeStep;
                 pmapAt(player.loc)->flags |= HAS_PLAYER;
                 attack(&player, lungeTgt, true /*lunge: guaranteed hit + bonus*/);
                 if (rogue.weapon->flags & ITEM_ATTACKS_QUICKLY) pcost /= 2;
+            } else if (passTargets > 0) {
+                // move, then strike each flanked enemy (pointers snapshotted before any attack frees them)
+                pmapAt(player.loc)->flags &= ~HAS_PLAYER;
+                player.loc = passStep;
+                pmapAt(player.loc)->flags |= HAS_PLAYER;
+                for (int i = 0; i < passTargets; i++) attack(&player, passHits[i], false);
             } else if (zapWorthIt) {
                 bolt bt = boltCatalog[boltForItem(staff)]; // staff-agnostic: lightning, firebolt, etc.
                 bt.magnitude = staff->enchant1;
