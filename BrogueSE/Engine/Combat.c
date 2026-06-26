@@ -1415,6 +1415,14 @@ boolean attack(creature *attacker, creature *defender, boolean lungeAttack) {
         damage = (defender->info.flags & (MONST_IMMUNE_TO_WEAPONS | MONST_INVULNERABLE)
                   ? 0 : randClump(attacker->info.damage) * monsterDamageAdjustmentAmount(attacker) / FP_FACTOR);
 
+#ifdef FIGHTSIM
+        // Mechanic-specific damage lever: sim.c scales the player's secondary hits (pike penetrate,
+        // flail pass-attack) via gFsDamageScalePct, then resets to 100. No-op (100) in shipping.
+        if (attacker == &player && gFsDamageScalePct != 100) {
+            damage = damage * gFsDamageScalePct / 100;
+        }
+#endif
+
         if (sneakAttack || defenderWasAsleep || defenderWasParalyzed) {
             if (defender != &player) {
                 // The non-player defender doesn't hit back this turn because it's still flat-footed.

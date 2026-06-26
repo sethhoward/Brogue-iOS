@@ -30,6 +30,12 @@ typedef struct balanceConfig {
     // not broadsword (both req 19). Default 0 = nothing capped, so shipping is unchanged.
     unsigned long heavyWeaponMask;               // 0 (off)
     int heavyWeaponCap;                          // 50
+    // Mechanic-specific damage levers (percent of normal, 100 = unchanged). The enchant cap is the
+    // wrong tool for mechanic-driven weapons: war pike's penetrate is flat (cap-resistant) and flail's
+    // pass-attacks multiply enchant across hits (cap is a cliff). So we trim those mechanics directly.
+    // sim.c sets gFsDamageScalePct to these around the secondary hits; Combat.c reads it (see below).
+    int penetrateDamagePct;                      // 100 (war pike behind-target hit)
+    int passAttackDamagePct;                     // 100 (flail per-flanked-enemy hit while moving)
 } balanceConfig;
 
 #define FIGHTSIM_SHIPPING_DEFAULTS (balanceConfig){ \
@@ -40,8 +46,13 @@ typedef struct balanceConfig {
     .staffDmgLowNum = 3, .staffDmgLowDen = 4, \
     .seRampThreshold = 5, \
     .heavyWeaponMask = 0, .heavyWeaponCap = 50, \
+    .penetrateDamagePct = 100, .passAttackDamagePct = 100, \
 }
 
 extern balanceConfig gBalance; // = FIGHTSIM_SHIPPING_DEFAULTS (defined in fightsim.c)
+
+// Runtime damage scale (percent) applied to the player's next weapon hit, then reset to 100 by sim.c.
+// 100 by default so the engine is byte-identical until sim.c deliberately scales a secondary hit.
+extern short gFsDamageScalePct;
 
 #endif

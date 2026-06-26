@@ -26,6 +26,10 @@
 #define PX       8          // player x
 #define PY      15          // player y (room mid)
 
+// Runtime damage scale read by Combat.c (extern in balance.h). 100 = unchanged; sim.c sets it to the
+// mechanic-specific knob around a secondary hit and resets it to 100 immediately after.
+short gFsDamageScalePct = 100;
+
 const char *fs_archetypeName(Archetype a) {
     switch (a) {
         case ARCH_CORRIDOR_LINE:  return "corridor_line";
@@ -365,7 +369,9 @@ EncounterResult fs_run(const BuildSpec *b, Archetype arch, int playerMaxHP,
                 pmapAt(player.loc)->flags &= ~HAS_PLAYER;
                 player.loc = passStep;
                 pmapAt(player.loc)->flags |= HAS_PLAYER;
+                gFsDamageScalePct = gBalance.passAttackDamagePct; // lever: trim each pass-attack hit
                 for (int i = 0; i < passTargets; i++) attack(&player, passHits[i], false);
+                gFsDamageScalePct = 100;
             } else if (zapWorthIt) {
                 bolt bt = boltCatalog[boltForItem(staff)]; // staff-agnostic: lightning, firebolt, etc.
                 bt.magnitude = staff->enchant1;
@@ -390,7 +396,11 @@ EncounterResult fs_run(const BuildSpec *b, Archetype arch, int playerMaxHP,
                     // spear/pike: also strike the creature directly behind the target (same line).
                     pos beyond = { adjLoc.x + (adjLoc.x - player.loc.x), adjLoc.y + (adjLoc.y - player.loc.y) };
                     creature *b = monsterAtLoc(beyond);
-                    if (b && b != &player) attack(&player, b, false);
+                    if (b && b != &player) {
+                        gFsDamageScalePct = gBalance.penetrateDamagePct; // lever: trim the behind-target hit
+                        attack(&player, b, false);
+                        gFsDamageScalePct = 100;
+                    }
                 }
                 // Per-weapon attack recovery: rapier (QUICKLY) is 2x faster; mace/war hammer
                 // (STAGGER, "extra turn to recover") are 2x slower. Otherwise normal.

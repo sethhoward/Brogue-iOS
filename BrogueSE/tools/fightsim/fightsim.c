@@ -509,6 +509,94 @@ static void archProfile(int trials) {
     gBalance.heavyWeaponMask = 0;
 }
 
+static void printArchRow(const char *label, short kind, const char *name,
+                         int B, int hp, int strength, int depth, int trials) {
+    double sum = 0;
+    printf("%s", label);
+    for (Archetype a = 0; a < ARCH_COUNT; a++) {
+        double v = runWA(kind, name, a, B, hp, strength, depth, trials);
+        sum += v; printf(",%.0f", v);
+    }
+    printf(",%.0f\n", sum / ARCH_COUNT);
+    fflush(stdout);
+}
+
+// Differentiated lever tuning at d16/d19: broadsword+war_axe locked at enchant cap 10, then sweep
+// war_pike's penetrate-damage % and flail's pass-attack % to find values that land them in the
+// reference band (rapier ~82 / war_hammer ~83 at d19) with genuine per-archetype variation.
+static void leverTune(int trials) {
+    const int depths[] = {16, 19};
+    const int pcts[] = {100, 75, 50};
+    fs_buildBudgetTable(depths[(int)(sizeof depths/sizeof depths[0]) - 1], 8);
+    for (int di = 0; di < (int)(sizeof depths/sizeof depths[0]); di++) {
+        int depth = depths[di];
+        DepthBudget bud = fs_budgetAt(depth);
+        int B = (int)(bud.enchantScrolls + 0.5);
+        int strength = 12 + (int)(bud.strengthPotions + 0.5);
+        int hp = 30 + 10 * (int)(bud.lifePotions + 0.5);
+        char lbl[48];
+        printf("# LEVER TUNE @ depth %d -- win%% per archetype (str %d, HP %d, +%d)\n", depth, strength, hp, B);
+        printf("config,corridor,cluster,pack,lone_tank,ambush,mean\n");
+        // References (uncapped, levers off)
+        gBalance.heavyWeaponMask = 0; gBalance.penetrateDamagePct = 100; gBalance.passAttackDamagePct = 100;
+        printArchRow("sword", SWORD, "sword", B, hp, strength, depth, trials);
+        printArchRow("rapier", RAPIER, "rapier", B, hp, strength, depth, trials);
+        printArchRow("war_hammer", HAMMER, "war_hammer", B, hp, strength, depth, trials);
+        // Locked decisions: broadsword + war_axe at enchant cap 10
+        gBalance.heavyWeaponMask = (1UL<<BROADSWORD) | (1UL<<WAR_AXE); gBalance.heavyWeaponCap = 10;
+        printArchRow("broadsword@cap10", BROADSWORD, "broadsword", B, hp, strength, depth, trials);
+        printArchRow("war_axe@cap10", WAR_AXE, "war_axe", B, hp, strength, depth, trials);
+        gBalance.heavyWeaponMask = 0;
+        // war_pike: penetrate-damage % sweep (enchant cap is ineffective on it)
+        for (int i = 0; i < (int)(sizeof pcts/sizeof pcts[0]); i++) {
+            gBalance.penetrateDamagePct = pcts[i];
+            sprintf(lbl, "war_pike@pen%d", pcts[i]);
+            printArchRow(lbl, PIKE, "war_pike", B, hp, strength, depth, trials);
+        }
+        gBalance.penetrateDamagePct = 100;
+        // flail: pass-attack % sweep (enchant cap is a cliff on it)
+        for (int i = 0; i < (int)(sizeof pcts/sizeof pcts[0]); i++) {
+            gBalance.passAttackDamagePct = pcts[i];
+            sprintf(lbl, "flail@pass%d", pcts[i]);
+            printArchRow(lbl, FLAIL, "flail", B, hp, strength, depth, trials);
+        }
+        gBalance.passAttackDamagePct = 100;
+        printf("\n");
+    }
+    gBalance.heavyWeaponMask = 0;
+}
+
+// Final proposed config across the curve: broadsword/war_axe @ enchant cap 10, war_pike @ cap 8,
+// flail left as-is, vs sword/rapier/war_hammer references. The cap is per-weapon here (each weapon
+// is equipped alone per run, so a single gBalance.heavyWeaponCap set before each row suffices).
+static void finalConfig(int trials) {
+    const int depths[] = {13, 16, 19};
+    fs_buildBudgetTable(depths[(int)(sizeof depths/sizeof depths[0]) - 1], 8);
+    for (int di = 0; di < (int)(sizeof depths/sizeof depths[0]); di++) {
+        int depth = depths[di];
+        DepthBudget bud = fs_budgetAt(depth);
+        int B = (int)(bud.enchantScrolls + 0.5);
+        int strength = 12 + (int)(bud.strengthPotions + 0.5);
+        int hp = 30 + 10 * (int)(bud.lifePotions + 0.5);
+        printf("# FINAL CONFIG @ depth %d -- win%% per archetype (str %d, HP %d, +%d)\n", depth, strength, hp, B);
+        printf("config,corridor,cluster,pack,lone_tank,ambush,mean\n");
+        gBalance.heavyWeaponMask = 0; gBalance.penetrateDamagePct = 100; gBalance.passAttackDamagePct = 100;
+        printArchRow("sword", SWORD, "sword", B, hp, strength, depth, trials);
+        printArchRow("rapier", RAPIER, "rapier", B, hp, strength, depth, trials);
+        printArchRow("war_hammer", HAMMER, "war_hammer", B, hp, strength, depth, trials);
+        gBalance.heavyWeaponMask = (1UL<<BROADSWORD); gBalance.heavyWeaponCap = 10;
+        printArchRow("broadsword@cap10", BROADSWORD, "broadsword", B, hp, strength, depth, trials);
+        gBalance.heavyWeaponMask = (1UL<<WAR_AXE); gBalance.heavyWeaponCap = 10;
+        printArchRow("war_axe@cap10", WAR_AXE, "war_axe", B, hp, strength, depth, trials);
+        gBalance.heavyWeaponMask = (1UL<<PIKE); gBalance.heavyWeaponCap = 8;
+        printArchRow("war_pike@cap8", PIKE, "war_pike", B, hp, strength, depth, trials);
+        gBalance.heavyWeaponMask = 0;
+        printArchRow("flail@leave", FLAIL, "flail", B, hp, strength, depth, trials);
+        printf("\n");
+    }
+    gBalance.heavyWeaponMask = 0;
+}
+
 int main(int argc, char **argv) {
     gameVariant = VARIANT_BROGUE;
     initializeGameVariant();
@@ -557,6 +645,16 @@ int main(int argc, char **argv) {
         int glow   = (argc > 5) ? atoi(argv[5]) : 6;  // staff glow-up target (+5/6)
         int n = (arch == ARCH_LONE_TANK) ? 1 : 4;
         curveSweep((Archetype) arch, trials, 90 /*playerHP*/, n, maxB, glow);
+        return 0;
+    }
+    if (strcmp(mode, "--final") == 0) {
+        int trials = (argc > 2) ? atoi(argv[2]) : 40;
+        finalConfig(trials);
+        return 0;
+    }
+    if (strcmp(mode, "--levertune") == 0) {
+        int trials = (argc > 2) ? atoi(argv[2]) : 30;
+        leverTune(trials);
         return 0;
     }
     if (strcmp(mode, "--archprofile") == 0) {
