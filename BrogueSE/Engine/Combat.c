@@ -90,7 +90,14 @@ fixpt netEnchant(item *theItem) {
     }
     // Clamp all net enchantment values to [-20, 50].
 #ifdef FIGHTSIM
-    return clamp(retval, gBalance.netEnchantClampLo * FP_FACTOR, gBalance.netEnchantClampHi * FP_FACTOR);
+    fixpt hi = gBalance.netEnchantClampHi;
+    // Per-weapon cap: weapons in the explicit "heavy" set cap lower than nimble ones.
+    if ((theItem->category & WEAPON)
+        && (gBalance.heavyWeaponMask & (1UL << theItem->kind))
+        && gBalance.heavyWeaponCap < hi) {
+        hi = gBalance.heavyWeaponCap;
+    }
+    return clamp(retval, gBalance.netEnchantClampLo * FP_FACTOR, hi * FP_FACTOR);
 #else
     return clamp(retval, -20 * FP_FACTOR, 50 * FP_FACTOR);
 #endif

@@ -24,6 +24,12 @@ typedef struct balanceConfig {
     int staffDmgLowNum, staffDmgLowDen;          // 3, 4
     // SE lightning/firebolt ramp gate (PowerTables.c:62-72).
     int seRampThreshold;                         // 5
+    // Per-weapon enchant cap (the heavy-weapon lever): an EXPLICIT set of weapon kinds (bitmask,
+    // bit (1<<WEAPON_KIND)) whose net enchant is capped at heavyWeaponCap instead of netEnchantClampHi.
+    // A bitmask (not a str-req threshold) so same-req weapons can be separated -- e.g. cap war axe but
+    // not broadsword (both req 19). Default 0 = nothing capped, so shipping is unchanged.
+    unsigned long heavyWeaponMask;               // 0 (off)
+    int heavyWeaponCap;                          // 50
 } balanceConfig;
 
 #define FIGHTSIM_SHIPPING_DEFAULTS (balanceConfig){ \
@@ -33,6 +39,7 @@ typedef struct balanceConfig {
     .staffDmgHighBase = 4, .staffDmgHighSlopeNum = 5, .staffDmgHighSlopeDen = 2, \
     .staffDmgLowNum = 3, .staffDmgLowDen = 4, \
     .seRampThreshold = 5, \
+    .heavyWeaponMask = 0, .heavyWeaponCap = 50, \
 }
 
 extern balanceConfig gBalance; // = FIGHTSIM_SHIPPING_DEFAULTS (defined in fightsim.c)

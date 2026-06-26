@@ -319,13 +319,16 @@ static void tuneThreeWay(int depth, int trials, int tunedCap) {
     BuildSpec lgt = { "lightning", DAGGER,  LEATHER_ARMOR, STAFF_LIGHTNING, NONE, 0,        0, (short)B, 0 };
     BuildSpec hyb = { "hybrid",    WAR_AXE, LEATHER_ARMOR, STAFF_LIGHTNING, NONE, (short)wE,0, (short)sE,0 };
     const BuildSpec *builds[3] = { &axe, &lgt, &hyb };
-    int caps[2] = { 50, tunedCap }; // baseline cap, tuned cap
+    // "Heavy" weapons that get the enchant cap: war axe, war hammer, war pike, flail (NOT dagger/
+    // sword/rapier/mace/broadsword). Edit this set to taste.
+    const unsigned long heavyMask = (1UL<<WAR_AXE) | (1UL<<HAMMER) | (1UL<<PIKE) | (1UL<<FLAIL);
 
     printf("# THREE-WAY tuning @ depth %d (str %d, HP %d, budget +%d): all-in war axe vs all-in\n", depth, strength, hp, B);
-    printf("#   lightning vs glow-up hybrid (axe+%d/staff+%d). HP lost (win%%). cap=net-enchant clamp.\n", wE, sE);
+    printf("#   lightning vs glow-up hybrid (axe+%d/staff+%d). HP lost (win%%). heavy-weapon enchant cap.\n", wE, sE);
     for (int c = 0; c < 2; c++) {
-        gBalance.netEnchantClampHi = caps[c];
-        printf("--- weapon enchant cap = %d%s ---\n", caps[c], c == 0 ? " (baseline)" : " (tuned)");
+        gBalance.heavyWeaponMask = (c == 0) ? 0 : heavyMask; // baseline: no cap
+        gBalance.heavyWeaponCap  = tunedCap;
+        printf("--- heavy-weapon enchant cap = %s ---\n", c == 0 ? "off (baseline)" : "on (tuned)");
         printf("scenario,axe_hp,axe_win,lightning_hp,lgt_win,hybrid_hp,hyb_win\n");
         for (Archetype a = 0; a < ARCH_COUNT; a++) {
             int n = (a == ARCH_LONE_TANK) ? 1 : 4;
@@ -343,7 +346,7 @@ static void tuneThreeWay(int depth, int trials, int tunedCap) {
                    statMean(&h[2]), 100*statMean(&w[2]));
         }
     }
-    gBalance.netEnchantClampHi = 50;
+    gBalance.heavyWeaponMask = 0; // restore
 }
 
 int main(int argc, char **argv) {
