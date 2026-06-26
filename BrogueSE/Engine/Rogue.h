@@ -2464,6 +2464,7 @@ enum statusEffects {
     STATUS_REGENERATING, // iOS port (iBrogue): honey potion's heal-over-time
     STATUS_EMBOLDENED, // iOS port (iBrogue): ally standing in the light of a worn ring of light
     STATUS_FROZEN, // iOS port (iBrogue): staff of frost — encased in ice (acts like paralysis); thaws into STATUS_SLOWED
+    STATUS_FIERY_DOUSED, // iOS port (Brogue SE): staff of frost SUPPRESSED a fiery creature's aura; its fire rekindles when this lapses
     NUMBER_OF_STATUS_EFFECTS,
 };
 

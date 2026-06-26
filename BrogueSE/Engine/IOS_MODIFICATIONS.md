@@ -32,6 +32,59 @@ See `BrogueCE/Engine/IOS_MODIFICATIONS.md` (faithful CE) and
 
 ## Change log
 
+### 2026-06-25 — Staff of frost suppresses (not freezes) a fiery aura, which rekindles after N turns (new content)
+
+**What.** Hitting a fiery creature (wisp / salamander / flamedancer — the `MONST_FIERY` set) with the
+**staff of frost** already douses + slows it rather than encasing it in ice (frost can't freeze fire).
+Previously that dousing was *accidentally permanent* — `extinguishFireOnCreature` zeroed `STATUS_BURNING`
+and nothing re-pinned it (a stale code comment even claimed "MONST_FIERY creatures relight every turn,"
+which was never implemented). Now the dousing is an explicit **temporary suppression**: the fire
+**rekindles after N turns**. This gives frost and the water bottle distinct roles — frost = a timed
+reprieve, water bottle = permanent declaw (strips the flag).
+
+**How.** New monster-facing status `STATUS_FIERY_DOUSED` (a countdown):
+- `Rogue.h` — new enum value after `STATUS_FROZEN`; `Globals.c` `statusEffectCatalog` gains the matching
+  `{"Doused", …}` row (kept in lockstep with the enum; shows as a countdown bar on the creature's info
+  panel via the generic `IO.c` status-display branch).
+- `Items.c` `freezeCreature` — the fiery/burning branch sets `STATUS_FIERY_DOUSED` to the bolt's freeze
+  duration (`staffFreezeDuration`) **only for `MONST_FIERY` creatures** (an ordinary creature you merely
+  set alight stays doused — it isn't fiery). Reuses the same duration a normal creature would be frozen.
+- `Monsters.c` `decrementMonsterStatus` — new `STATUS_FIERY_DOUSED` case: on lapse, re-pin
+  `STATUS_BURNING`/`maxStatus` to 1000 **iff still `MONST_FIERY`** (a water bottle may have stripped the
+  flag meanwhile) **and not already burning**, with a visible "flares back to life" tell.
+
+**Determinism / save-safety.** Suppression duration derives from staff enchant (deterministic), the
+countdown lives in the per-turn status loop, and adding a status enum grows the in-memory `status[]`
+arrays only — saves are input replays, so no save-format break. Marked `// iOS port (Brogue SE):`.
+
+### 2026-06-25 — Water bottle direct hit douses fire and strips MONST_FIERY (new content)
+
+**What.** A thrown **bottle of water** (`POTION_WATER`) that directly strikes a creature now douses its
+fire: it extinguishes `STATUS_BURNING` on any flammable creature, and on a **fiery** creature
+(wisp / salamander / flamedancer — the `MONST_FIERY` set) it also **permanently strips `MONST_FIERY`**,
+so the creature stops re-igniting its own tile and can stay doused. The tile still floods (`DF_FLOOD`)
+as on any water shatter. A struck creature that is neither burning nor fiery just gets wet — the branch
+falls through to the normal flood.
+
+**Why this is a declaw, not a kill.** All three `MONST_FIERY` creatures carry `MONST_IMMUNE_TO_FIRE`
+as an *independent* flag, so removing `MONST_FIERY` leaves fire immunity intact — the creature loses its
+persistent burning aura and terrain-ignition, not its life or its (`MA_HIT_BURN`/whip) attacks. This is a
+deliberate counter-pressure tool (costs a bottle + a landed direct hit), not a strict upgrade. Precedent:
+negation already treats `MONST_FIERY` as strippable (it's in `NEGATABLE_TRAITS`) and douses on removal.
+
+**Where.** `throwItem` POTION struck-creature path in `Items.c` (alongside the `POTION_LIFE`/`VENOM`/`ACID`
+direct-hit cases), marked `// iOS port (Brogue SE):`. Clears the flag **before** calling
+`extinguishFireOnCreature` so the `MONST_FIERY` water-exemption in `applyInstantTileEffectsToCreature`
+(`Time.c`) no longer blocks the dousing.
+
+**Determinism / save-safety.** A thrown direct hit is a deterministic player input, and per-instance
+`monst->info.flags &= ~MONST_FIERY` is the established runtime flag-mutation pattern (negation,
+resurrection cleanup). Saves replay inputs, so this is save-safe.
+
+**Known availability note.** The empty bottle is refillable at any water tile, so water (and thus this
+effect) is effectively unlimited near water — and the salamander lives in water. Accepted per design call;
+the direct-hit requirement against evasive (submerging / flitting) targets is the intended cost.
+
 ### 2026-06-23 — Trap-anchored thematic terrain: dry grass at fire traps, bones at caustic traps (new content)
 
 **What.** A fire trap (`FLAMETHROWER` / `FLAMETHROWER_HIDDEN`) now has a ~40% chance to be ringed by a patch

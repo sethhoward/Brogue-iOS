@@ -4675,7 +4675,15 @@ boolean freezeCreature(creature *monst, short freezeTurns, short slowTurns) {
             extinguishFireOnCreature(monst);
         }
         slow(monst, slowTurns);
-        // MONST_FIERY creatures relight every turn, so only flash on an actual dousing (avoids per-turn spam in a cloud).
+        // iOS port (Brogue SE): frost doesn't freeze a fiery creature -- it douses + slows. A fiery
+        // creature's aura is only SUPPRESSED: STATUS_FIERY_DOUSED counts down (reusing the freeze
+        // duration) and rekindles the fire on lapse (decrementMonsterStatus). The water bottle, which
+        // strips MONST_FIERY, remains the permanent answer. An ordinary burning creature stays doused.
+        if (monst->info.flags & MONST_FIERY) {
+            monst->status[STATUS_FIERY_DOUSED] = monst->maxStatus[STATUS_FIERY_DOUSED] =
+                max(monst->status[STATUS_FIERY_DOUSED], freezeTurns);
+        }
+        // Flash only on an actual dousing (avoids per-turn spam when sitting in a frost cloud).
         if (wasBurning && canDirectlySeeMonster(monst) && boltCatalog[BOLT_FREEZE].backColor) {
             flashMonster(monst, boltCatalog[BOLT_FREEZE].backColor, 100);
         }
@@ -7377,6 +7385,35 @@ static void throwItem(item *theItem, creature *thrower, pos targetLoc, short max
             spawnDungeonFeature(x, y, &dungeonFeatureCatalog[DF_ACID_BLOOD], true, false);
             monsterName(buf3, struck, true);
             sprintf(buf, "the flask shatters and acid sears %s!", buf3);
+            message(buf, 0);
+            autoIdentify(theItem);
+            refreshDungeonCell((pos){ x, y });
+            deleteItem(theItem);
+            return;
+        }
+        // iOS port (Brogue SE): a thrown water bottle that directly strikes a creature douses its fire.
+        // On a flammable creature it extinguishes STATUS_BURNING; on a fiery creature (wisp/salamander/
+        // flamedancer) it also permanently strips MONST_FIERY -- mirroring negation's fire-trait removal
+        // -- so it stops re-igniting its tile and can stay doused (fire immunity, an independent flag, is
+        // unaffected, so this declaws rather than kills). Clear the flag BEFORE extinguishing so the
+        // MONST_FIERY water-exemption (Time.c) no longer applies. Still floods the tile like a normal
+        // water shatter. Falls through to the plain flood below when the struck creature is neither
+        // burning nor fiery (water just gets it wet).
+        if (theItem->kind == POTION_WATER && struck
+            && ((struck->info.flags & MONST_FIERY) || struck->status[STATUS_BURNING])) {
+
+            const boolean wasFiery = (struck->info.flags & MONST_FIERY) ? true : false;
+            if (wasFiery) {
+                struck->info.flags &= ~MONST_FIERY;
+            }
+            if (struck->status[STATUS_BURNING]) {
+                extinguishFireOnCreature(struck);
+            }
+            spawnDungeonFeature(x, y, &dungeonFeatureCatalog[DF_FLOOD], true, false);
+            monsterName(buf3, struck, true);
+            sprintf(buf, wasFiery
+                    ? "the flask shatters and water hisses over %s, quenching its flames for good!"
+                    : "the flask shatters and water douses the flames on %s!", buf3);
             message(buf, 0);
             autoIdentify(theItem);
             refreshDungeonCell((pos){ x, y });

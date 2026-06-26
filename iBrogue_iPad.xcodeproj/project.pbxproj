@@ -494,6 +494,7 @@
 				C57A962216D7EAD500C233F1 /* Frameworks */,
 				C57A962316D7EAD500C233F1 /* Resources */,
 				C556D4082FD0CDEF00D81184 /* Embed Frameworks */,
+				A07B011D000000000000CAFE /* Auto-increment build number */,
 			);
 			buildRules = (
 			);
@@ -507,6 +508,24 @@
 			productType = "com.apple.product-type.application";
 		};
 /* End PBXNativeTarget section */
+
+/* Begin PBXShellScriptBuildPhase section */
+		A07B011D000000000000CAFE /* Auto-increment build number */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputPaths = (
+			);
+			name = "Auto-increment build number";
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "# iOS port (iBrogue): auto-stamp CFBundleVersion from the git commit count so local\n# archives always upload with a unique, increasing build number (avoids ITMS-90061).\nif ! command -v git >/dev/null 2>&1; then echo \"git not found; keeping CFBundleVersion\"; exit 0; fi\nn=$(git -C \"$SRCROOT\" rev-list --count HEAD 2>/dev/null) || exit 0\n[ -n \"$n\" ] || exit 0\nplist=\"$TARGET_BUILD_DIR/$INFOPLIST_PATH\"\n[ -f \"$plist\" ] && /usr/libexec/PlistBuddy -c \"Set :CFBundleVersion $n\" \"$plist\" && echo \"Stamped CFBundleVersion = $n\"\n";
+		};
+/* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXProject section */
 		C57A961D16D7EAD500C233F1 /* Project object */ = {
@@ -964,7 +983,7 @@
 				DEVELOPMENT_TEAM = KKMWNTN39N;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				ENABLE_TESTABILITY = YES;
-				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				GCC_C_LANGUAGE_STANDARD = gnu99;
 				GCC_DYNAMIC_NO_PIC = NO;
 				GCC_NO_COMMON_BLOCKS = YES;
@@ -1020,7 +1039,7 @@
 				COPY_PHASE_STRIP = YES;
 				DEVELOPMENT_TEAM = KKMWNTN39N;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
-				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				GCC_C_LANGUAGE_STANDARD = gnu99;
 				GCC_NO_COMMON_BLOCKS = YES;
 				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
@@ -1055,7 +1074,7 @@
 				"CODE_SIGN_ENTITLEMENTS[sdk=macosx*]" = "iBrogue_iPad/iBrogue_iPad-Catalyst.entitlements";
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				"CODE_SIGN_IDENTITY[sdk=iphoneos*]" = "iPhone Developer";
-				CURRENT_PROJECT_VERSION = 0;
+				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = KKMWNTN39N;
 				GCC_C_LANGUAGE_STANDARD = "compiler-default";
 				GCC_PRECOMPILE_PREFIX_HEADER = YES;
@@ -1103,7 +1122,7 @@
 				"CODE_SIGN_ENTITLEMENTS[sdk=macosx*]" = "iBrogue_iPad/iBrogue_iPad-Catalyst.entitlements";
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 0;
+				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = KKMWNTN39N;
 				GCC_C_LANGUAGE_STANDARD = "compiler-default";
 				GCC_PRECOMPILE_PREFIX_HEADER = YES;

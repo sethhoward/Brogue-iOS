@@ -1985,4 +1985,5 @@ const statusEffect statusEffectCatalog[NUMBER_OF_STATUS_EFFECTS] = {
     {"",                false, 0}, // STATUS_REGENERATING (iOS port (iBrogue): honey potion heal-over-time)
     {"Emboldened",      true,  0}, // STATUS_EMBOLDENED (iOS port (iBrogue): ring of light ally aura)
     {"Frozen",          false, 0}, // STATUS_FROZEN (iOS port (iBrogue): staff of frost; paralysis-like, not negatable)
+    {"Doused",          false, 0}, // STATUS_FIERY_DOUSED (iOS port (Brogue SE): fiery aura suppressed by frost; rekindles on lapse)
 };
