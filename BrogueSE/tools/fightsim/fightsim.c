@@ -798,6 +798,77 @@ static void hybridCompare(int trials) {
     gBalance = saved;
 }
 
+// Run one build through a fixed encounter sequence, carrying HP + finite staff charges (slow recharge
+// and HP regen between fights). Prints survived%, avg encounters cleared, avg end HP.
+static void runSustain(const char *lbl, const BuildSpec *b, int playerHP, int strength, int depth,
+                       const Archetype *seq, int nSeq, int trials) {
+    const int regenPerRest = 12, rechargePerRest = 1; // walk-to-next-fight heal; staff recharge is slow
+    Stat survived = {0}, cleared = {0}, endHP = {0};
+    for (int t = 0; t < trials; t++) {
+        int hp = playerHP;
+        int charges = (b->staffKind >= 0) ? b->staffEnchant : -1;
+        int done = 0, alive = 1;
+        for (int d = 0; d < nSeq; d++) {
+            int n = (seq[d] == ARCH_LONE_TANK) ? 1 : 4;
+            uint64_t seed = (uint64_t)(t * 100 + d + 1);
+            EncounterResult r = fs_run(b, seq[d], playerHP, MK_OGRE, n, seed, hp, charges, strength, depth);
+            hp = r.endHP;
+            if (b->staffKind >= 0) charges = r.endCharges;
+            if (!r.won || hp <= 0) { alive = 0; break; }
+            done++;
+            hp = (hp + regenPerRest > playerHP) ? playerHP : hp + regenPerRest;
+            if (charges >= 0 && charges < b->staffEnchant) charges += rechargePerRest;
+        }
+        statAdd(&survived, alive); statAdd(&cleared, done); statAdd(&endHP, hp);
+    }
+    printf("%s,%.0f,%.2f,%.1f\n", lbl, 100 * statMean(&survived), statMean(&cleared), statMean(&endHP));
+    fflush(stdout);
+}
+
+// Hybrid under finite charges: does the per-encounter hybrid edge survive a full floor's worth of fights,
+// where the +6 staff runs dry and the (below-knee) fallback weapon must carry? 8-encounter sequence,
+// all-in vs hybrid, shipping vs tuned.
+static void hybridSustain(int trials) {
+    const int depths[] = {16, 19};
+    struct { short kind; const char *name; } W[] = {
+        {SWORD,"sword"}, {BROADSWORD,"broadsword"}, {WAR_AXE,"war_axe"}, {PIKE,"war_pike"},
+    };
+    const Archetype seq[] = { ARCH_AMBUSH_RANGE, ARCH_FRENZY_CLUSTER, ARCH_SCATTERED_PACK,
+                              ARCH_CORRIDOR_LINE, ARCH_LONE_TANK, ARCH_FRENZY_CLUSTER,
+                              ARCH_AMBUSH_RANGE, ARCH_SCATTERED_PACK };
+    const int nSeq = (int)(sizeof seq / sizeof seq[0]);
+    const int glow = 6;
+    fs_buildBudgetTable(depths[(int)(sizeof depths/sizeof depths[0]) - 1], 8);
+    balanceConfig saved = gBalance;
+    for (int di = 0; di < (int)(sizeof depths/sizeof depths[0]); di++) {
+        int depth = depths[di];
+        DepthBudget bud = fs_budgetAt(depth);
+        int B = (int)(bud.enchantScrolls + 0.5);
+        int strength = 12 + (int)(bud.strengthPotions + 0.5);
+        int hp = 30 + 10 * (int)(bud.lifePotions + 0.5);
+        int sE = (B < glow) ? B : glow, wHyb = B - sE;
+        printf("# HYBRID SUSTAIN @ depth %d (B=%d, HP %d): %d encounters, staff +%d (%d charges), recharge +1/rest.\n",
+               depth, B, hp, nSeq, sE, sE);
+        printf("# all-in weapon (+%d) vs hybrid (weapon +%d / lightning +%d). SH=shipping, TU=tuned.\n",
+               B, wHyb, sE);
+        printf("weapon,build,cfg,survived_pct,avg_cleared,avg_end_hp\n");
+        for (int wi = 0; wi < (int)(sizeof W/sizeof W[0]); wi++) {
+            char lbl[64];
+            for (int cfg = 0; cfg < 2; cfg++) {
+                gBalance = cfg ? FIGHTSIM_TUNED_DEFAULTS : FIGHTSIM_SHIPPING_DEFAULTS;
+                const char *cn = cfg ? "TU" : "SH";
+                BuildSpec allin = { W[wi].name, W[wi].kind, LEATHER_ARMOR, NONE, NONE, (short)B, 0, 0, 0 };
+                BuildSpec hyb   = { W[wi].name, W[wi].kind, LEATHER_ARMOR, STAFF_LIGHTNING, NONE,
+                                    (short)wHyb, 0, (short)sE, 0 };
+                sprintf(lbl, "%s,all-in,%s", W[wi].name, cn); runSustain(lbl, &allin, hp, strength, depth, seq, nSeq, trials);
+                sprintf(lbl, "%s,hybrid,%s", W[wi].name, cn); runSustain(lbl, &hyb,   hp, strength, depth, seq, nSeq, trials);
+            }
+        }
+        printf("\n");
+    }
+    gBalance = saved;
+}
+
 int main(int argc, char **argv) {
     gameVariant = VARIANT_BROGUE;
     initializeGameVariant();
@@ -851,6 +922,11 @@ int main(int argc, char **argv) {
     if (strcmp(mode, "--hybrid") == 0) {
         int trials = (argc > 2) ? atoi(argv[2]) : 30;
         hybridCompare(trials);
+        return 0;
+    }
+    if (strcmp(mode, "--hybridsustain") == 0) {
+        int trials = (argc > 2) ? atoi(argv[2]) : 30;
+        hybridSustain(trials);
         return 0;
     }
     if (strcmp(mode, "--reachsweep") == 0) {
