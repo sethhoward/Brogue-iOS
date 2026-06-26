@@ -475,6 +475,33 @@ and the light axe own packs (78); war hammer owns clusters/1v1; rapier owns corr
 (dagger aside) sits in a 72–84 band with **distinct per-archetype identities** — "right tool for the right
 situation." Dagger (32) is the lone floor and the next candidate for a buff (runic-odds, not enchant).
 
+### Hybrid economy — does the tuning nudge weapon → staff?
+The flagship intent was that a weapon shouldn't be the universal go-to: surplus enchants should be
+*better spent* glowing a staff (the SE lightning ramp at net-enchant ≥5: chain / range / stun). Comparing
+all-in (weapon +B) vs hybrid (weapon +B−6 / lightning +6), per-encounter at depth 19 (mean win%):
+
+| weapon | all-in SH | hybrid SH | all-in **TU** | hybrid **TU** |
+|---|---|---|---|---|
+| sword (control) | 71 | 89 | 71 | 89 |
+| broadsword | **95** | 94 | 82 | **94** |
+| war_axe | 92 | 93 | 83 | **93** |
+| war_pike | **97** | 92 | 84 | 83 |
+
+Under **shipping**, all-in wins or ties for the strong weapons (broadsword 95 vs 94, pike 97 vs 92) — there
+is no reason to split, which *is* the "weapon is the go-to" problem. Under **tuned**, the ranking inverts:
+hybrid leads by +10–12 (broadsword, war_axe) and pike's all-in edge collapses to a wash. The lever taxes the
+*all-in* build (its weapon enchant is past the knee / the pike is slowed) but never the *hybrid* one (its
+weapon sits below the knee at full value; the staff is untouched), so the scrolls pay off better on the
+staff. The hybrid's edge concentrates where lightning should shine — cluster/ambush/pack — while the weapon
+still carries single-target and corridors. Right tool, right moment, inside one loadout.
+
+**It survives finite charges.** Over an 8-encounter floor that depletes the +6 staff (recharge +1/rest),
+under the tuned config hybrid clears *more encounters before dying* than all-in for every weapon (d19
+avg cleared: broadsword 1.90 vs 1.50, war_axe 2.17 vs 1.40, war_pike 1.70 vs 1.43), reversed from shipping
+where all-in pike ran away (3.93). The early-fight lightning burst banks enough HP to carry past the point
+the staff runs dry. (Caveat: that gauntlet is harsh enough that survival ≈ 0, so `avg_cleared` is a
+*relative* depth-reached metric, not an absolute clear rate. Reproduce: `--hybrid`, `--hybridsustain`.)
+
 ### Mechanism (how the knobs reach the engine)
 - Per-weapon enchant **soft knee**: `heavyWeaponCap[kind]` is the knee and `heavyWeaponSlopePct[kind]` the
   marginal % above it (0 = hard cap, 100 = no taper), read in `netEnchant` (`Combat.c`) behind
