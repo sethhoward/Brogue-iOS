@@ -586,12 +586,17 @@ static void finalConfig(int trials) {
         printArchRow("war_hammer", HAMMER, "war_hammer", B, hp, strength, depth, trials);
         gBalance.heavyWeaponMask = (1UL<<BROADSWORD); gBalance.heavyWeaponCap = 10;
         printArchRow("broadsword@cap10", BROADSWORD, "broadsword", B, hp, strength, depth, trials);
+        gBalance.heavyWeaponMask = (1UL<<BROADSWORD); gBalance.heavyWeaponCap = 9;
+        printArchRow("broadsword@cap9", BROADSWORD, "broadsword", B, hp, strength, depth, trials);
         gBalance.heavyWeaponMask = (1UL<<WAR_AXE); gBalance.heavyWeaponCap = 10;
         printArchRow("war_axe@cap10", WAR_AXE, "war_axe", B, hp, strength, depth, trials);
         gBalance.heavyWeaponMask = (1UL<<PIKE); gBalance.heavyWeaponCap = 8;
         printArchRow("war_pike@cap8", PIKE, "war_pike", B, hp, strength, depth, trials);
         gBalance.heavyWeaponMask = 0;
         printArchRow("flail@leave", FLAIL, "flail", B, hp, strength, depth, trials);
+        gBalance.passAttackDamagePct = 50;
+        printArchRow("flail@pass50", FLAIL, "flail", B, hp, strength, depth, trials);
+        gBalance.passAttackDamagePct = 100;
         printf("\n");
     }
     gBalance.heavyWeaponMask = 0;
