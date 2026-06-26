@@ -2213,7 +2213,14 @@ static const char gCosmeticImpactRippleChannel = 0;
 
 // Effect kinds hosted by the layer. RIPPLE_* paint via hiliteCell (color overlay); ALERT/BLINK via a
 // glyph (plotCharWithColor). (File-local; promote to Rogue.h if a spawner ever needs a kind parameter.)
-enum cosmeticEffectKind { CE_ALERT_GLYPH, CE_RIPPLE_MONSTER, CE_RIPPLE_PLAYER, CE_RIPPLE_IMPACT, CE_RIPPLE_AGGRAVATE, CE_INVESTIGATE_BLINK, CE_ALERT_BLINK };
+enum cosmeticEffectKind { CE_ALERT_GLYPH, CE_RIPPLE_MONSTER, CE_RIPPLE_PLAYER, CE_RIPPLE_IMPACT, CE_RIPPLE_AGGRAVATE, CE_INVESTIGATE_BLINK, CE_ALERT_BLINK, CE_STATUS_BLINK };
+
+// iOS port (Brogue SE): tints for the status-blink overlays (a glyph that rides a confused/burning/stunned
+// creature, the player included). Flame = fireForeColor's warm flicker; stun = dazed yellow "stars";
+// confused = psychotropic purple (distinct from the white investigate '?').
+static const color cosmeticBurnColor     = {70, 20,  0, 15, 10,  0, 0, true}; // flame (matches fireForeColor)
+static const color cosmeticStunColor     = {90, 85, 30, 25, 25,  0, 0, true}; // seeing-stars yellow
+static const color cosmeticConfusedColor = {60, 25, 75, 35, 15, 45, 0, true}; // psychotropic purple
 
 typedef struct {
     boolean active;
@@ -2483,6 +2490,116 @@ void cosmeticRefreshInvestigateBlinks(void) {
     }
 }
 
+// iOS port (Brogue SE): pick the status-blink glyph + tint for a creature, by priority (one tell at a time):
+// on fire (NOT the MONST_FIERY trait -- only a real STATUS_BURNING, matching the light/extinguish systems) >
+// paralyzed/stunned > confused. Returns false if the creature has no tell-worthy status.
+static boolean statusBlinkGlyphFor(const creature *m, enum displayGlyph *glyph, const color **tint) {
+    if (m->status[STATUS_BURNING] > 0 && !(m->info.flags & MONST_FIERY)) {
+        *glyph = G_FIRE;
+        *tint = &cosmeticBurnColor;
+        return true;
+    }
+    if (m->status[STATUS_PARALYZED] > 0) {
+        *glyph = (enum displayGlyph)'*';
+        *tint = &cosmeticStunColor;
+        return true;
+    }
+    if (m->status[STATUS_CONFUSED] > 0) {
+        *glyph = (enum displayGlyph)'?';
+        *tint = &cosmeticConfusedColor; // purple, so it never reads as the white investigate '?'
+        return true;
+    }
+    return false;
+}
+
+// iOS port (Brogue SE): resolve a status-blink channel (creature pointer) to a live creature -- the player or
+// a current monster -- else NULL. Pointer is only compared, never dereferenced for a freed creature.
+static creature *cosmeticCreatureForChannel(const void *ch) {
+    if (ch == (const void *)&player) {
+        return &player;
+    }
+    for (creatureIterator it = iterateCreatures(monsters); hasNextCreature(it);) {
+        creature *m = nextCreature(&it);
+        if ((const void *)m == ch) {
+            return m;
+        }
+    }
+    return NULL;
+}
+
+// iOS port (Brogue SE): ensure a visible creature with a tell-worthy status has exactly one status-blink.
+// (Existing blinks are followed/refreshed by the lifecycle pass below; this only spawns missing ones.)
+static void cosmeticEnsureStatusBlink(creature *m) {
+    enum displayGlyph glyph;
+    const color *tint;
+    short i;
+
+    if (!((m == &player) || canSeeMonster(m))
+        || !statusBlinkGlyphFor(m, &glyph, &tint)) {
+        return;
+    }
+    for (i = 0; i < MAX_COSMETIC_EFFECTS; i++) {
+        if (gCosmeticEffects[i].active && gCosmeticEffects[i].kind == CE_STATUS_BLINK
+            && gCosmeticEffects[i].channel == (const void *)m) {
+            return; // already has one (lifecycle pass kept its glyph/origin current)
+        }
+    }
+    i = cosmeticFreeSlot();
+    if (i < 0) {
+        return; // pool full -- a missed cosmetic tell is harmless
+    }
+    gCosmeticEffects[i].active = true;
+    gCosmeticEffects[i].kind = CE_STATUS_BLINK;
+    gCosmeticEffects[i].origin = m->loc;
+    gCosmeticEffects[i].glyph = glyph;
+    gCosmeticEffects[i].tint = tint;
+    gCosmeticEffects[i].maxRadius = 0;
+    gCosmeticEffects[i].channel = (const void *)m;
+    gCosmeticEffects[i].frameAge = 0;
+    gCosmeticEffects[i].frameLife = 0; // persistent; this rebuild manages its lifetime
+    gCosmeticEffects[i].turnsLeft = 0;
+}
+
+// iOS port (Brogue SE): rebuild the status-blink overlays -- a glyph that rides any VISIBLE creature (the
+// player included) carrying a confused / on-fire / paralyzed status (one tell at a time, by priority). Sibling
+// to cosmeticRefreshInvestigateBlinks: called once per turn, blinks in the same global unison phase, keyed by
+// creature pointer, suppressed during automation/playback. The lifecycle pass follows each blink to its
+// creature's new cell and refreshes its glyph (status may have changed), dropping it when the creature is gone,
+// no longer visible, or no longer afflicted.
+void cosmeticRefreshStatusBlinks(void) {
+    short i;
+    if (rogue.automationActive || rogue.autoPlayingLevel || rogue.playbackFastForward) {
+        for (i = 0; i < MAX_COSMETIC_EFFECTS; i++) {
+            if (gCosmeticEffects[i].active && gCosmeticEffects[i].kind == CE_STATUS_BLINK) {
+                gCosmeticEffects[i].active = false;
+            }
+        }
+        return;
+    }
+    // Lifecycle: follow + refresh valid blinks; drop the rest.
+    for (i = 0; i < MAX_COSMETIC_EFFECTS; i++) {
+        cosmeticEffect *e = &gCosmeticEffects[i];
+        if (!e->active || e->kind != CE_STATUS_BLINK) {
+            continue;
+        }
+        creature *c = cosmeticCreatureForChannel(e->channel);
+        enum displayGlyph glyph;
+        const color *tint;
+        if (c && ((c == &player) || canSeeMonster(c)) && statusBlinkGlyphFor(c, &glyph, &tint)) {
+            e->origin = c->loc;
+            e->glyph = glyph;   // status may have changed (e.g. doused, now confused)
+            e->tint = tint;
+        } else {
+            e->active = false;
+        }
+    }
+    // Spawn for the player and any visible monster newly carrying a status.
+    cosmeticEnsureStatusBlink(&player);
+    for (creatureIterator it = iterateCreatures(monsters); hasNextCreature(it);) {
+        cosmeticEnsureStatusBlink(nextCreature(&it));
+    }
+}
+
 // iOS port (Brogue SE): spawn (or refresh) the persistent '!' alert-blink for a VISIBLE monster that has just
 // locked onto the player (heard you loud / spotted you) -- the alert counterpart to the '?' investigate-blink.
 // Creature-keyed and follows the monster the same way (cosmeticTickAlertBlinks), but instead of living as long
@@ -2676,6 +2793,23 @@ void advanceCosmeticAnimations(void) {
         if (show && coordinatesAreInMap(e->origin.x, e->origin.y)) {
             enum displayGlyph dchar; color fc, bc;
             cosmeticMarkCell(e->origin, nowIdx); // ensure tracked (idempotent if a ripple already marked it)
+            getCellAppearance(e->origin, &dchar, &fc, &bc);
+            bakeColor(&fc);
+            bakeColor(&bc);
+            plotCharWithColor(e->glyph, mapToWindow(e->origin), e->tint ? e->tint : &fc, &bc);
+        }
+    }
+
+    // 2c. status blinks last (confused/on-fire/stunned), so a status tell paints OVER any investigate '?' or
+    // alert '!' sharing the cell -- a creature's affliction is the more important read.
+    for (i = 0; i < MAX_COSMETIC_EFFECTS; i++) {
+        cosmeticEffect *e = &gCosmeticEffects[i];
+        if (!e->active || e->kind != CE_STATUS_BLINK || !blinkOn) {
+            continue;
+        }
+        if (coordinatesAreInMap(e->origin.x, e->origin.y)) {
+            enum displayGlyph dchar; color fc, bc;
+            cosmeticMarkCell(e->origin, nowIdx);
             getCellAppearance(e->origin, &dchar, &fc, &bc);
             bakeColor(&fc);
             bakeColor(&bc);

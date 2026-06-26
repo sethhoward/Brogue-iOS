@@ -32,6 +32,37 @@ See `BrogueCE/Engine/IOS_MODIFICATIONS.md` (faithful CE) and
 
 ## Change log
 
+### 2026-06-25 — Status-blink overlays: confused / on-fire / stunned tells on the map (new content)
+
+**What.** A creature (or the player) now shows a blinking glyph over its cell while afflicted:
+- **Confused** → `?` tinted psychotropic **purple** (purple so it never reads as the white "investigating,
+  heard something" `?` from the noise system).
+- **On fire** (`STATUS_BURNING`, *not* the `MONST_FIERY` trait — matching the light/extinguish systems) →
+  the **flame** glyph `G_FIRE`.
+- **Paralyzed / stunned** (`STATUS_PARALYZED`) → `*`, "seeing stars" yellow.
+
+One tell at a time, by priority: burning > paralyzed > confused. Applies to the player too.
+
+**Reuse.** Built entirely on the existing noise-system cosmetic-overlay layer (the `?` investigate-blink /
+`!` alert-blink): a new `CE_STATUS_BLINK` effect kind, a `cosmeticRefreshStatusBlinks()` sibling to
+`cosmeticRefreshInvestigateBlinks()` (creature-keyed, follows the creature, despawns when the status/visibility
+ends), and three tint colors. It pulses in the same global unison phase and is rendered in a final pass so a
+status tell paints **over** any investigate `?`/alert `!` on the same cell (the affliction is the more
+important read). All in `IO.c`; per-turn rebuild called from `Time.c` (`playerTurnEnded`) and `Movement.c`
+(travel-end), prototype in `Rogue.h`.
+
+**Player-during-paralysis fix.** The blink is normally driven by the platform idle loop, which is frozen
+while the player is paralyzed/frozen (the engine spins through forced "watch helplessly" turns in
+`playerTurnEnded`, `Time.c`). So a self-stunned player's `*` wouldn't animate. Fixed by ticking the cosmetic
+layer (`cosmeticRefreshStatusBlinks` + `advanceCosmeticAnimations`) across that watch-pause — the single
+25-frame pause became a few short sub-pauses so the tell actually blinks while you're locked out. (Monster
+paralysis always worked — the idle loop runs between the player's turns.)
+
+**Determinism / save-safety.** Display-only — the cosmetic layer runs under `RNG_COSMETIC`, draws nothing
+into game state, and is suppressed during automation / playback fast-forward. No engine-state or save impact.
+Marked `// iOS port (Brogue SE):`. (`STATUS_FROZEN` is deliberately *not* included — frozen already has its
+own strong icy tint in `getCellAppearance`; easy to add a `*` there too if wanted.)
+
 ### 2026-06-25 — Staff "glow-up": lightning stun+chain and firebolt bloom at netEnchant ≥ 5 (new content)
 
 **What.** Two staffs gain new behavior once their **netEnchant reaches 5**, then ramp with further enchant:

@@ -2976,7 +2976,15 @@ void playerTurnEnded() {
 
         if (player.status[STATUS_PARALYZED] || player.status[STATUS_FROZEN]) { // iOS port (iBrogue): frozen loses turns like paralysis
             if (!fastForward) {
-                fastForward = rogue.playbackFastForward || pauseAnimation(25, PAUSE_BEHAVIOR_DEFAULT);
+                // iOS port (Brogue SE): the cosmetic idle clock is frozen during this forced-turn lockout, so
+                // the player's own status tell ('*' stunned / flame / '?' confused) would never animate while
+                // you watch helplessly. Spawn it and tick the cosmetic layer across the watch-pause (a few
+                // short sub-pauses instead of one dead 25-frame pause) so it actually blinks.
+                cosmeticRefreshStatusBlinks();
+                for (short ticks = 0; ticks < 5 && !fastForward; ticks++) {
+                    advanceCosmeticAnimations();
+                    fastForward = rogue.playbackFastForward || pauseAnimation(5, PAUSE_BEHAVIOR_DEFAULT);
+                }
             }
         }
 
@@ -3026,6 +3034,8 @@ void playerTurnEnded() {
     // (3) rebuild the '?' investigate-blink effects to match this turn's visible investigators (the blink
     // is a cosmetic-layer effect now; this is its per-turn lifecycle -- spawn/follow/despawn).
     cosmeticRefreshInvestigateBlinks();
+    // (3b) rebuild the confused/on-fire/stunned status-blink overlays (player + visible monsters).
+    cosmeticRefreshStatusBlinks();
     // (4) advance the '!' alert-blinks: follow each to its monster's new cell and count down its turn life.
     cosmeticTickAlertBlinks();
     // (5) safety net for the automation wake-tell capture (MB_HEARD_DURING_AUTOMATION): travel/auto-explore

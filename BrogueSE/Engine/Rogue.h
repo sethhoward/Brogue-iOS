@@ -3707,6 +3707,7 @@ extern "C" {
     void endCoalescedImpactRipples(pos origin); // iOS port (Brogue SE): emit ONE coalesced, flare-delayed impact ripple if any were suppressed
     void cosmeticSpawnRippleAggravate(pos source, short radius); // iOS port (Brogue SE): cosmetic layer -- level-wide aggravate ripple (alarm trap / aggravate scroll)
     void cosmeticRefreshInvestigateBlinks(void); // iOS port (Brogue SE): cosmetic layer -- per-turn '?' blink rebuild
+    void cosmeticRefreshStatusBlinks(void); // iOS port (Brogue SE): cosmetic layer -- per-turn confused/burning/stun blink rebuild
     void advanceCosmeticAnimations(void);   // iOS port (Brogue SE): cosmetic layer -- one tick (from the platform idle loop)
     void clearCosmeticAnimations(void);     // iOS port (Brogue SE): cosmetic layer -- drop all (level/playback reset)
     void recordPlayerNoiseRippleIfNeeded(void); // iOS port (Brogue SE): spawn the player ripple iff a visible unaware enemy is near earshot

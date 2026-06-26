@@ -1631,6 +1631,7 @@ static void showTravelEndNoiseFeedback(void) {
     recordPlayerNoiseRippleIfNeeded();
     rogue.playerNoise = NOISE_PLAYER_SILENT;
     cosmeticRefreshInvestigateBlinks();
+    cosmeticRefreshStatusBlinks();
     //   (3) Event-edge wake tells ('!' / off-screen '?') captured per-monster during the suppressed steps,
     //       re-emitted once by current state, with a single condensed haptic.
     flushAutomationHeardTells();
