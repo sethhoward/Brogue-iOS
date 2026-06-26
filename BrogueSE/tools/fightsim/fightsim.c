@@ -25,6 +25,16 @@ balanceConfig gBalance = FIGHTSIM_SHIPPING_DEFAULTS;
 // can't be dodged by swapping to them. Light/finesse weapons (dagger/sword/rapier/axe) stay free.
 #define FS_HEAVY_MASK ((1UL<<WAR_AXE)|(1UL<<HAMMER)|(1UL<<PIKE)|(1UL<<FLAIL)|(1UL<<MACE)|(1UL<<BROADSWORD))
 
+// Per-kind enchant-cap helpers (the config field is now an array, not a scalar + mask).
+static void fsResetCaps(void) {
+    for (int i = 0; i < NUMBER_WEAPON_KINDS; i++) gBalance.heavyWeaponCap[i] = 0;
+}
+// Cap every weapon kind whose bit is set in `mask` at `cap`; clear all others.
+static void fsCapSet(unsigned long mask, int cap) {
+    for (int i = 0; i < NUMBER_WEAPON_KINDS; i++)
+        gBalance.heavyWeaponCap[i] = (mask & (1UL << i)) ? cap : 0;
+}
+
 static int g_failures = 0;
 
 static void checkInt(const char *label, long got, long want) {
@@ -331,8 +341,7 @@ static void tuneThreeWay(int depth, int trials, int tunedCap) {
     printf("# THREE-WAY tuning @ depth %d (str %d, HP %d, budget +%d): all-in war axe vs all-in\n", depth, strength, hp, B);
     printf("#   lightning vs glow-up hybrid (axe+%d/staff+%d). HP lost (win%%). heavy-weapon enchant cap.\n", wE, sE);
     for (int c = 0; c < 2; c++) {
-        gBalance.heavyWeaponMask = (c == 0) ? 0 : heavyMask; // baseline: no cap
-        gBalance.heavyWeaponCap  = tunedCap;
+        fsCapSet((c == 0) ? 0 : heavyMask, tunedCap); // baseline: no cap
         printf("--- heavy-weapon enchant cap = %s ---\n", c == 0 ? "off (baseline)" : "on (tuned)");
         printf("scenario,axe_hp,axe_win,lightning_hp,lgt_win,hybrid_hp,hyb_win\n");
         for (Archetype a = 0; a < ARCH_COUNT; a++) {
@@ -351,7 +360,7 @@ static void tuneThreeWay(int depth, int trials, int tunedCap) {
                    statMean(&h[2]), 100*statMean(&w[2]));
         }
     }
-    gBalance.heavyWeaponMask = 0; // restore
+    fsResetCaps(); // restore
 }
 
 // WEAPON ROSTER: every weapon, all-in at the depth's budget, averaged over all five scenarios,
@@ -377,8 +386,7 @@ static void weaponRoster(int depth, int trials, int heavyCap) {
     for (int wi = 0; wi < nW; wi++) {
         double out[2][2]; // [cfg][0=hp,1=win]
         for (int c = 0; c < 2; c++) {
-            gBalance.heavyWeaponMask = (c == 0) ? 0 : heavyMask;
-            gBalance.heavyWeaponCap = heavyCap;
+            fsCapSet((c == 0) ? 0 : heavyMask, heavyCap);
             BuildSpec w = { roster[wi].name, roster[wi].kind, LEATHER_ARMOR, NONE, NONE, (short)B, 0, 0, 0 };
             Stat hS = {0}, wS = {0};
             for (Archetype a = 0; a < ARCH_COUNT; a++) {
@@ -394,7 +402,7 @@ static void weaponRoster(int depth, int trials, int heavyCap) {
                out[0][0], out[0][1], out[1][0], out[1][1],
                (heavyMask & (1UL << roster[wi].kind)) ? "yes" : "no");
     }
-    gBalance.heavyWeaponMask = 0;
+    fsResetCaps();
 }
 
 // Run one weapon across all archetypes at a given depth/budget; return mean win% (0..100).
@@ -436,24 +444,23 @@ static void capSweep(int trials) {
         int B = (int)(bud.enchantScrolls + 0.5);
         int strength = 12 + (int)(bud.strengthPotions + 0.5);
         int hp = 30 + 10 * (int)(bud.lifePotions + 0.5);
-        gBalance.heavyWeaponMask = 0;
+        fsResetCaps();
         for (int i = 0; i < (int)(sizeof refs/sizeof refs[0]); i++)
             printf("%d,0,%s,%.0f,ref\n", depth, refs[i].name,
                    runWeaponWin(refs[i].kind, refs[i].name, B, hp, strength, depth, trials));
         for (int wi = 0; wi < (int)(sizeof capped/sizeof capped[0]); wi++) {
-            gBalance.heavyWeaponMask = 0;
+            fsResetCaps();
             printf("%d,0,%s,%.0f,capped\n", depth, capped[wi].name,
                    runWeaponWin(capped[wi].kind, capped[wi].name, B, hp, strength, depth, trials));
             for (int ci = 0; ci < (int)(sizeof caps/sizeof caps[0]); ci++) {
-                gBalance.heavyWeaponMask = focusMask;
-                gBalance.heavyWeaponCap = caps[ci];
+                fsCapSet(focusMask, caps[ci]);
                 printf("%d,%d,%s,%.0f,capped\n", depth, caps[ci], capped[wi].name,
                        runWeaponWin(capped[wi].kind, capped[wi].name, B, hp, strength, depth, trials));
             }
         }
         fflush(stdout);
     }
-    gBalance.heavyWeaponMask = 0;
+    fsResetCaps();
 }
 
 // One weapon vs one archetype at a given depth/budget; mean win% (0..100).
@@ -488,8 +495,7 @@ static void archProfile(int trials) {
         int strength = 12 + (int)(bud.strengthPotions + 0.5);
         int hp = 30 + 10 * (int)(bud.lifePotions + 0.5);
         for (int cfg = 0; cfg < 2; cfg++) {
-            gBalance.heavyWeaponMask = cfg ? focusMask : 0; // refs unaffected: their bit isn't in the mask
-            gBalance.heavyWeaponCap  = 10;
+            fsCapSet(cfg ? focusMask : 0, 10); // refs unaffected: their bit isn't in the set
             printf("# ARCH PROFILE @ depth %d, %s -- win%% per archetype (str %d, HP %d, +%d)\n",
                    depth, cfg ? "CAP 10 on generalists" : "baseline", strength, hp, B);
             printf("weapon,corridor,cluster,pack,lone_tank,ambush,mean\n");
@@ -506,7 +512,7 @@ static void archProfile(int trials) {
             fflush(stdout);
         }
     }
-    gBalance.heavyWeaponMask = 0;
+    fsResetCaps();
 }
 
 static void printArchRow(const char *label, short kind, const char *name,
@@ -538,15 +544,15 @@ static void leverTune(int trials) {
         printf("# LEVER TUNE @ depth %d -- win%% per archetype (str %d, HP %d, +%d)\n", depth, strength, hp, B);
         printf("config,corridor,cluster,pack,lone_tank,ambush,mean\n");
         // References (uncapped, levers off)
-        gBalance.heavyWeaponMask = 0; gBalance.penetrateDamagePct = 100; gBalance.passAttackDamagePct = 100;
+        fsResetCaps(); gBalance.penetrateDamagePct = 100; gBalance.passAttackDamagePct = 100;
         printArchRow("sword", SWORD, "sword", B, hp, strength, depth, trials);
         printArchRow("rapier", RAPIER, "rapier", B, hp, strength, depth, trials);
         printArchRow("war_hammer", HAMMER, "war_hammer", B, hp, strength, depth, trials);
         // Locked decisions: broadsword + war_axe at enchant cap 10
-        gBalance.heavyWeaponMask = (1UL<<BROADSWORD) | (1UL<<WAR_AXE); gBalance.heavyWeaponCap = 10;
+        fsCapSet((1UL<<BROADSWORD) | (1UL<<WAR_AXE), 10);
         printArchRow("broadsword@cap10", BROADSWORD, "broadsword", B, hp, strength, depth, trials);
         printArchRow("war_axe@cap10", WAR_AXE, "war_axe", B, hp, strength, depth, trials);
-        gBalance.heavyWeaponMask = 0;
+        fsResetCaps();
         // war_pike: penetrate-damage % sweep (enchant cap is ineffective on it)
         for (int i = 0; i < (int)(sizeof pcts/sizeof pcts[0]); i++) {
             gBalance.penetrateDamagePct = pcts[i];
@@ -563,12 +569,12 @@ static void leverTune(int trials) {
         gBalance.passAttackDamagePct = 100;
         printf("\n");
     }
-    gBalance.heavyWeaponMask = 0;
+    fsResetCaps();
 }
 
 // Final proposed config across the curve: broadsword/war_axe @ enchant cap 10, war_pike @ cap 8,
-// flail left as-is, vs sword/rapier/war_hammer references. The cap is per-weapon here (each weapon
-// is equipped alone per run, so a single gBalance.heavyWeaponCap set before each row suffices).
+// flail left as-is, vs sword/rapier/war_hammer references. Each weapon is equipped alone per run,
+// so setting that weapon's per-kind cap before its row is sufficient.
 static void finalConfig(int trials) {
     const int depths[] = {13, 16, 19};
     fs_buildBudgetTable(depths[(int)(sizeof depths/sizeof depths[0]) - 1], 8);
@@ -580,26 +586,55 @@ static void finalConfig(int trials) {
         int hp = 30 + 10 * (int)(bud.lifePotions + 0.5);
         printf("# FINAL CONFIG @ depth %d -- win%% per archetype (str %d, HP %d, +%d)\n", depth, strength, hp, B);
         printf("config,corridor,cluster,pack,lone_tank,ambush,mean\n");
-        gBalance.heavyWeaponMask = 0; gBalance.penetrateDamagePct = 100; gBalance.passAttackDamagePct = 100;
+        fsResetCaps(); gBalance.penetrateDamagePct = 100; gBalance.passAttackDamagePct = 100;
         printArchRow("sword", SWORD, "sword", B, hp, strength, depth, trials);
         printArchRow("rapier", RAPIER, "rapier", B, hp, strength, depth, trials);
         printArchRow("war_hammer", HAMMER, "war_hammer", B, hp, strength, depth, trials);
-        gBalance.heavyWeaponMask = (1UL<<BROADSWORD); gBalance.heavyWeaponCap = 10;
+        fsCapSet((1UL<<BROADSWORD), 10);
         printArchRow("broadsword@cap10", BROADSWORD, "broadsword", B, hp, strength, depth, trials);
-        gBalance.heavyWeaponMask = (1UL<<BROADSWORD); gBalance.heavyWeaponCap = 9;
+        fsCapSet((1UL<<BROADSWORD), 9);
         printArchRow("broadsword@cap9", BROADSWORD, "broadsword", B, hp, strength, depth, trials);
-        gBalance.heavyWeaponMask = (1UL<<WAR_AXE); gBalance.heavyWeaponCap = 10;
+        fsCapSet((1UL<<WAR_AXE), 10);
         printArchRow("war_axe@cap10", WAR_AXE, "war_axe", B, hp, strength, depth, trials);
-        gBalance.heavyWeaponMask = (1UL<<PIKE); gBalance.heavyWeaponCap = 8;
+        fsCapSet((1UL<<PIKE), 8);
         printArchRow("war_pike@cap8", PIKE, "war_pike", B, hp, strength, depth, trials);
-        gBalance.heavyWeaponMask = 0;
+        fsResetCaps();
         printArchRow("flail@leave", FLAIL, "flail", B, hp, strength, depth, trials);
         gBalance.passAttackDamagePct = 50;
         printArchRow("flail@pass50", FLAIL, "flail", B, hp, strength, depth, trials);
         gBalance.passAttackDamagePct = 100;
         printf("\n");
     }
-    gBalance.heavyWeaponMask = 0;
+    fsResetCaps();
+}
+
+// Reproduce the baked tuned end-state: load FIGHTSIM_TUNED_DEFAULTS and print the per-archetype
+// profile for the whole roster across the curve. One command to verify the preset (and to diff
+// against --archprofile's baseline). Restores gBalance afterward.
+static void tunedConfig(int trials) {
+    const int depths[] = {13, 16, 19};
+    struct { short kind; const char *name; } roster[] = {
+        {DAGGER,"dagger"}, {SWORD,"sword"}, {RAPIER,"rapier"}, {MACE,"mace"}, {AXE,"axe"},
+        {BROADSWORD,"broadsword"}, {FLAIL,"flail"}, {PIKE,"war_pike"}, {WAR_AXE,"war_axe"}, {HAMMER,"war_hammer"},
+    };
+    const int nW = (int)(sizeof roster / sizeof roster[0]);
+    fs_buildBudgetTable(depths[(int)(sizeof depths/sizeof depths[0]) - 1], 8);
+    balanceConfig saved = gBalance;
+    gBalance = FIGHTSIM_TUNED_DEFAULTS;
+    printf("# TUNED CONFIG (FIGHTSIM_TUNED_DEFAULTS): broadsword cap9, war_axe cap10, war_pike cap8, flail pass50.\n");
+    for (int di = 0; di < (int)(sizeof depths/sizeof depths[0]); di++) {
+        int depth = depths[di];
+        DepthBudget bud = fs_budgetAt(depth);
+        int B = (int)(bud.enchantScrolls + 0.5);
+        int strength = 12 + (int)(bud.strengthPotions + 0.5);
+        int hp = 30 + 10 * (int)(bud.lifePotions + 0.5);
+        printf("# depth %d -- win%% per archetype (str %d, HP %d, +%d)\n", depth, strength, hp, B);
+        printf("weapon,corridor,cluster,pack,lone_tank,ambush,mean\n");
+        for (int wi = 0; wi < nW; wi++)
+            printArchRow(roster[wi].name, roster[wi].kind, roster[wi].name, B, hp, strength, depth, trials);
+        printf("\n");
+    }
+    gBalance = saved;
 }
 
 int main(int argc, char **argv) {
@@ -650,6 +685,11 @@ int main(int argc, char **argv) {
         int glow   = (argc > 5) ? atoi(argv[5]) : 6;  // staff glow-up target (+5/6)
         int n = (arch == ARCH_LONE_TANK) ? 1 : 4;
         curveSweep((Archetype) arch, trials, 90 /*playerHP*/, n, maxB, glow);
+        return 0;
+    }
+    if (strcmp(mode, "--tuned") == 0) {
+        int trials = (argc > 2) ? atoi(argv[2]) : 40;
+        tunedConfig(trials);
         return 0;
     }
     if (strcmp(mode, "--final") == 0) {

@@ -24,12 +24,12 @@ typedef struct balanceConfig {
     int staffDmgLowNum, staffDmgLowDen;          // 3, 4
     // SE lightning/firebolt ramp gate (PowerTables.c:62-72).
     int seRampThreshold;                         // 5
-    // Per-weapon enchant cap (the heavy-weapon lever): an EXPLICIT set of weapon kinds (bitmask,
-    // bit (1<<WEAPON_KIND)) whose net enchant is capped at heavyWeaponCap instead of netEnchantClampHi.
-    // A bitmask (not a str-req threshold) so same-req weapons can be separated -- e.g. cap war axe but
-    // not broadsword (both req 19). Default 0 = nothing capped, so shipping is unchanged.
-    unsigned long heavyWeaponMask;               // 0 (off)
-    int heavyWeaponCap;                          // 50
+    // Per-weapon enchant cap, indexed by weapon kind. A weapon's net enchant is capped at
+    // heavyWeaponCap[kind] (instead of netEnchantClampHi) when that entry is > 0. Per-kind (not a
+    // single scalar) so each heavy weapon can cap at a different value -- the tuned config caps war
+    // pike at 8 but broadsword at 9, which one scalar couldn't express. Default all-0 = nothing
+    // capped, so shipping is unchanged.
+    int heavyWeaponCap[NUMBER_WEAPON_KINDS];     // {0} (off)
     // Mechanic-specific damage levers (percent of normal, 100 = unchanged). The enchant cap is the
     // wrong tool for mechanic-driven weapons: war pike's penetrate is flat (cap-resistant) and flail's
     // pass-attacks multiply enchant across hits (cap is a cliff). So we trim those mechanics directly.
@@ -45,8 +45,23 @@ typedef struct balanceConfig {
     .staffDmgHighBase = 4, .staffDmgHighSlopeNum = 5, .staffDmgHighSlopeDen = 2, \
     .staffDmgLowNum = 3, .staffDmgLowDen = 4, \
     .seRampThreshold = 5, \
-    .heavyWeaponMask = 0, .heavyWeaponCap = 50, \
+    .heavyWeaponCap = {0}, \
     .penetrateDamagePct = 100, .passAttackDamagePct = 100, \
+}
+
+// The tuned balance config the simulator converged on (see docs/design/fight-simulator.md §"Tuning").
+// Late-game enchant-cap the three universal generalists at per-weapon values + trim flail's
+// pass-attack damage; everything else untouched. Applied via --tuned; NOT the shipping default
+// (shipping stays FIGHTSIM_SHIPPING_DEFAULTS, byte-identical).
+#define FIGHTSIM_TUNED_DEFAULTS (balanceConfig){ \
+    .strengthBonusNum = 1,   .strengthBonusDen = 4,   \
+    .strengthPenaltyNum = 5, .strengthPenaltyDen = 2, \
+    .netEnchantClampLo = -20, .netEnchantClampHi = 50, \
+    .staffDmgHighBase = 4, .staffDmgHighSlopeNum = 5, .staffDmgHighSlopeDen = 2, \
+    .staffDmgLowNum = 3, .staffDmgLowDen = 4, \
+    .seRampThreshold = 5, \
+    .heavyWeaponCap = { [BROADSWORD] = 9, [WAR_AXE] = 10, [PIKE] = 8 }, \
+    .penetrateDamagePct = 100, .passAttackDamagePct = 50, \
 }
 
 extern balanceConfig gBalance; // = FIGHTSIM_SHIPPING_DEFAULTS (defined in fightsim.c)

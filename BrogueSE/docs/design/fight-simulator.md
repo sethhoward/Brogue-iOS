@@ -192,6 +192,9 @@ existing swarm threats.
   - enchant→str-req reduction — `enchantMagnitude` (`Items.c:8456`)
   - Widen later; each parameterized site is a refactor whose defaults must be proven byte-identical to
     shipping.
+- **Implemented knob set** (beyond the initial list): per-weapon enchant cap
+  `heavyWeaponCap[NUMBER_WEAPON_KINDS]` and mechanic damage levers `penetrateDamagePct` /
+  `passAttackDamagePct`. See §12 for the tuning that used them and `FIGHTSIM_TUNED_DEFAULTS` for the result.
 - **A/B = baseline + variant on shared seeds** (paired / common random numbers) → clean per-archetype diff.
 
 ---
@@ -397,9 +400,85 @@ Each phase is independently runnable and yields a result you can read. Vertical-
     `gameOver` cost, or stubbing `gameOver` itself cheaply) rather than the sentinel. Keep the sentinel for
     the loadout/meta scenarios; switch it off for lethality.
 
+## 12. Tuning result — the heavy-weapon enchant meta
+
+The flagship question (Q0): does heavy-weapon enchant scaling make one weapon the universal go-to?
+**Answer: yes, late-game — and the fix is differentiated, not a single global cap.** This section records
+the converged tuning, baked as `FIGHTSIM_TUNED_DEFAULTS` (balance.h) and reproducible with `--tuned`.
+
+### Prerequisite: model every weapon's real mechanics first
+Tuning conclusions are only valid once each weapon is credited for what it actually does. The sim models:
+attack speed (rapier 2× / mace+hammer ½× recovery), war-axe cleave (all adjacent), war-pike penetrate
+(2-in-line), rapier lunge (closing crit), mace/hammer knockback+stagger, and flail pass-attacks (every
+enemy adjacent to both the start and destination cell of a move). Before this, rankings were artifacts —
+mace/hammer looked like 95% dominators at 2× their real rate; rapier looked like a 34% joke. Only whip's
+EXTEND reach remains unmodeled (whip is out of roster).
+
+### Findings
+1. **The dominance is a late-game phenomenon.** At depth 10–13 the enchant budget is small, all weapons
+   bunch ~64–84, and the caps don't bite. The runaway is real only at depth ~16–19 (budget +9/+10), exactly
+   where enchant scaling compounds. So the tuning is a **late-game-only correction**; early/mid play is
+   untouched by construction (the cap clamps `netEnchant`'s high end, which only the late budget reaches).
+2. **A uniform cap reshuffles, it doesn't balance.** Weapons respond to an enchant cap by *mechanism*:
+   - **Raw-stat weapons** (broadsword — no special mechanic; war axe — cleave) cap cleanly: their per-hit
+     dominance falls into band without erasing identity.
+   - **war pike is cap-resistant** — penetrate is flat extra damage; even a 50% penetrate cut moves it ~2
+     points. Its power is the *primary* hit, so it needs a *tighter enchant cap* (8), not a mechanic nerf.
+   - **flail is cap-fragile** — pass-attacks multiply enchant across hits, so an enchant cap is a cliff
+     (86→68 between cap 12 and 10). Trim its **pass-attack damage** instead.
+3. **Whack-a-mole.** Capping the top weapon promotes the next even-profile generalist to "best everywhere."
+   The fix must hit all the universal generalists at once or it just trades one king for another (flail
+   inherited the crown at 88% once broadsword/axe/pike were capped — hence its pass-attack trim).
+
+### The tuned config (`FIGHTSIM_TUNED_DEFAULTS`)
+Per-weapon enchant caps + one mechanic lever; everything else untouched (war hammer stays the 1v1 king,
+mace self-balances via stagger recovery, nimble weapons stay free):
+
+| weapon | lever | rationale |
+|---|---|---|
+| broadsword | enchant cap **9** | pure raw-stat generalist, no mechanic to preserve |
+| war_axe | enchant cap **10** | raw scaling; cleave survives as a mild pack lean |
+| war_pike | enchant cap **8** | primary-hit power; penetrate lever proved a dud |
+| flail | pass-attack damage **50%** | enchant cap too non-linear; trim the mechanic directly |
+
+### Achieved end-state (depth 19, win% per archetype, `--tuned`)
+`lone_tank` ≈ 98 for everyone (a single ogre at full enchant is trivial) — read the other four columns.
+
+| weapon | corridor | cluster | pack | ambush | mean |
+|---|---|---|---|---|---|
+| dagger | 18 | 22 | 15 | 10 | 32 |
+| sword | 72 | 82 | 48 | 60 | 72 |
+| rapier | 90 | 78 | 75 | 72 | 82 |
+| mace | 75 | 82 | 55 | 48 | 72 |
+| axe | 68 | 80 | **78** | 52 | 75 |
+| broadsword | 85 | 85 | 68 | 75 | 82 |
+| flail | 88 | 88 | 65 | 75 | 82 |
+| war_pike | **90** | **92** | 52 | **85** | 84 |
+| war_axe | 78 | 80 | 75 | 78 | 82 |
+| war_hammer | 80 | **88** | 75 | 80 | 84 |
+
+No weapon is dominant in every situation. War pike is the line/cluster king with a real scattered-pack
+weakness (52); the light axe emerges as a pack specialist (78); war hammer owns clusters/1v1; rapier owns
+corridors. The whole roster (dagger aside) sits in an 72–84 band with **distinct per-archetype shapes** —
+"right tool for the right situation." Dagger (32) is the lone floor and the next candidate for a buff
+(runic-odds, not enchant).
+
+### Mechanism (how the knobs reach the engine)
+- Per-weapon enchant cap: `balanceConfig.heavyWeaponCap[NUMBER_WEAPON_KINDS]` (0 = uncapped), read in
+  `netEnchant` (`Combat.c`) behind `#ifdef FIGHTSIM`. Per-kind (not a scalar) so caps can differ per weapon.
+- Mechanic damage levers: `penetrateDamagePct` / `passAttackDamagePct` (default 100). `sim.c` sets a runtime
+  `gFsDamageScalePct` around the pike penetrate / flail pass-attack hits; `Combat.c` scales the player's
+  weapon damage by it. No-op (100) in shipping → goldens stay byte-identical.
+- Reproduce: `--tuned` (loads the preset, prints the table above). Explore: `--capsweep`, `--archprofile`,
+  `--levertune`, `--final`.
+
 ## Open / deferred
 
-- Exact archetype parameters (N enemies, ranges, turns-between-encounters) — to calibrate against real
-  runs during implementation.
+- **Land the tuned values in the shipping game** — port the per-weapon caps to `netEnchant`/`weaponTable`
+  and the flail pass-attack reduction to `Movement.c`, ungated. An actual gameplay balance change; needs
+  its own review. The sim values are the recommendation, not yet applied.
+- **Buff the dagger** (32% floor) — via runic-odds, not enchant; re-verify it doesn't overshoot.
+- Phase 6 creature/boss lethality — sentinel HP OFF (see §"Open"), monster-leveling axis already wired.
+- Exact archetype parameters (N enemies, ranges, turns-between-encounters) — to calibrate against real runs.
 - Which rings beyond Reaping/Transference/Regeneration are worth first-class modeling.
 - Output/report presentation details (CSV schema, diff table layout).
