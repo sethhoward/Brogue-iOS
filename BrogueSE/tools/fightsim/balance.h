@@ -76,7 +76,7 @@ typedef struct balanceConfig {
     /* is NOT enchant-capped -- caps barely touch it; its power is throughput, so it's slowed instead. */ \
     .heavyWeaponCap      = { [BROADSWORD] = 9,  [WAR_AXE] = 10 }, \
     .heavyWeaponSlopePct = { [BROADSWORD] = 25, [WAR_AXE] = 25 }, \
-    .weaponRecoveryPct   = { [PIKE] = 200 }, /* pike at 2x recovery: lands at band, restores pack weakness */ \
+    .weaponRecoveryPct   = { [PIKE] = 200 }, /* pike: 2x recovery (win-rate) -- no enchant knee, by design */ \
     .penetrateDamagePct = 100, .passAttackDamagePct = 50, .reachDamagePct = 100, \
 }
 

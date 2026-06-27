@@ -908,6 +908,44 @@ static void progression(int trials) {
     gBalance = saved;
 }
 
+// Enchant curve: at a fixed depth, sweep weapon enchant 0..18 and report mean win% per weapon, to see
+// where the win-rate curve levels off (the point past which more enchant buys little). Tuned config.
+static void enchantCurve(int trials) {
+    const int depth = 19;
+    const int ench[] = {0, 2, 4, 6, 8, 10, 12, 14, 16, 18};
+    fs_buildBudgetTable(depth, 8);
+    DepthBudget bud = fs_budgetAt(depth);
+    int strength = 12 + (int)(bud.strengthPotions + 0.5);
+    int hp = 30 + 10 * (int)(bud.lifePotions + 0.5);
+    balanceConfig saved = gBalance;
+    gBalance = FIGHTSIM_TUNED_DEFAULTS;
+    printf("# ENCHANT CURVE @ depth %d (str %d, HP %d), tuned config -- mean win%% over 5 archetypes.\n",
+           depth, strength, hp);
+    printf("weapon");
+    for (int i = 0; i < (int)(sizeof ench/sizeof ench[0]); i++) printf(",+%d", ench[i]);
+    printf("\n");
+    short kinds[] = {SWORD, BROADSWORD, WAR_AXE, PIKE, HAMMER};
+    const char *names[] = {"sword", "broadsword", "war_axe", "war_pike", "war_hammer"};
+    for (int w = 0; w < 5; w++) {
+        printf("%s", names[w]);
+        for (int i = 0; i < (int)(sizeof ench/sizeof ench[0]); i++) {
+            BuildSpec b = { names[w], kinds[w], LEATHER_ARMOR, NONE, NONE, (short)ench[i], 0, 0, 0 };
+            Stat wS = {0};
+            for (Archetype a = 0; a < ARCH_COUNT; a++) {
+                int n = (a == ARCH_LONE_TANK) ? 1 : 4;
+                for (int t = 0; t < trials; t++) {
+                    EncounterResult r = fs_run(&b, a, hp, MK_OGRE, n, (uint64_t)t + 1, 0, -1, strength, depth);
+                    statAdd(&wS, r.won);
+                }
+            }
+            printf(",%.0f", 100 * statMean(&wS));
+        }
+        printf("\n");
+        fflush(stdout);
+    }
+    gBalance = saved;
+}
+
 int main(int argc, char **argv) {
     gameVariant = VARIANT_BROGUE;
     initializeGameVariant();
@@ -956,6 +994,11 @@ int main(int argc, char **argv) {
         int glow   = (argc > 5) ? atoi(argv[5]) : 6;  // staff glow-up target (+5/6)
         int n = (arch == ARCH_LONE_TANK) ? 1 : 4;
         curveSweep((Archetype) arch, trials, 90 /*playerHP*/, n, maxB, glow);
+        return 0;
+    }
+    if (strcmp(mode, "--enchantcurve") == 0) {
+        int trials = (argc > 2) ? atoi(argv[2]) : 40;
+        enchantCurve(trials);
         return 0;
     }
     if (strcmp(mode, "--progression") == 0) {
