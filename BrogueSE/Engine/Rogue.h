@@ -528,7 +528,7 @@ typedef struct windowpos {
 // never stops projectiles and never muffles sound (a screen breaks sight, not pursuit). See
 // IOS_MODIFICATIONS.md. These are playtest tuning dials -- adjust freely.
 #define SMOKE_THICK_VOLUME      15          // gas volume at/above which smoke blocks line of sight and lingers
-#define SMOKE_EMISSION_CHANCE   60          // % chance per turn a burning PLAIN_FIRE tile puffs smoke (substantive RNG)
+#define SMOKE_EMISSION_CHANCE   45          // % chance per turn a burning PLAIN_FIRE tile puffs smoke (substantive RNG)
 
 #define MACHINES_BUFFER_LENGTH  200
 

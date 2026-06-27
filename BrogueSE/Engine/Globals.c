@@ -718,7 +718,7 @@ dungeonFeature dungeonFeatureCatalog[NUMBER_DUNGEON_FEATURES] = {
     {ROT_GAS,                   GAS,        15,     0,      0},
     {STEAM,                     GAS,        325,    0,      0},
     {STEAM,                     GAS,        15,     0,      0},
-    {SMOKE_GAS,                 GAS,        25,     0,      0},  // iOS port (Brogue SE): per-turn smoke puff from burning terrain (additive across tiles)
+    {SMOKE_GAS,                 GAS,        14,     0,      0},  // iOS port (Brogue SE): per-turn smoke puff from burning terrain (additive across tiles)
     {METHANE_GAS,               GAS,        2,      0,      0},
     {EMBERS,                    SURFACE,    0,      0,      0},
     {URINE,                     SURFACE,    65,     25,     0},

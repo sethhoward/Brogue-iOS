@@ -137,7 +137,7 @@ flammables; the water itself extinguishes via `TM_EXTINGUISHES_FIRE`.
 | `STEAM` | 521 | `T_CAUSES_DAMAGE` | quickly |
 | `DARKNESS_CLOUD` | 522 | — (light effect) | does not dissipate via flag (managed elsewhere) |
 | `HEALING_CLOUD` | 523 | `T_CAUSES_HEALING` | quickly |
-| `SMOKE_GAS` (iOS port) | ~524 | — (no flag; `SMOKE_LIGHT` dims; thick smoke blocks **sight only** via volume-gated `cellHasThickSmoke()` in `scanOctantFOV`, not a terrain flag) | **volume-keyed** (not flag-driven): thin ~50%/turn, thick (≥ `SMOKE_THICK_VOLUME`) ~20%/turn. Emitted per-turn by burning `PLAIN_FIRE` (`updateEnvironment`). See IOS_MODIFICATIONS.md 2026-06-27. |
+| `SMOKE_GAS` (iOS port) | ~524 | — (no flag; `SMOKE_LIGHT` dims; thick smoke blocks **sight only** via volume-gated `cellHasThickSmoke()` in `scanOctantFOV`, not a terrain flag) | **volume-keyed** (not flag-driven): thin ~75%/turn, thick (≥ `SMOKE_THICK_VOLUME`) ~35%/turn. Emitted per-turn by burning `PLAIN_FIRE` (`updateEnvironment`). See IOS_MODIFICATIONS.md 2026-06-27. |
 
 (Row line numbers approximate within the catalog block; the gas tiles are contiguous around
 `Globals.c:515-523`. The authoritative effect comes from the `T_*` flags, applied in §5.)

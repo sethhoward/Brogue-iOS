@@ -1628,9 +1628,9 @@ static void updateVolumetricMedia() {
                     // both opacity (the FOV sight block) and persistence here. rand_percent keeps it deterministic.
                     if (pmap[i][j].layers[GAS] == SMOKE_GAS) {
                         if (newGasVolume[i][j] >= SMOKE_THICK_VOLUME) {
-                            newGasVolume[i][j] -= (rand_percent(20) ? 1 : 0);
+                            newGasVolume[i][j] -= (rand_percent(35) ? 1 : 0);
                         } else {
-                            newGasVolume[i][j] -= (rand_percent(50) ? 1 : 0);
+                            newGasVolume[i][j] -= (rand_percent(75) ? 1 : 0);
                         }
                     } else if (tileCatalog[pmap[i][j].layers[GAS]].mechFlags & TM_GAS_DISSIPATES_QUICKLY) {
                         newGasVolume[i][j] -= (rand_percent(50) ? 1 : 0);
