@@ -235,8 +235,11 @@ item *makeItemInto(item *theItem, unsigned long itemCategory, short itemKind) {
                     theItem->flags |= ITEM_PASS_ATTACKS;
                     break;
                 case SPEAR:
-                case PIKE:
                     theItem->flags |= ITEM_ATTACKS_PENETRATE;
+                    break;
+                case PIKE:
+                    // war pike: reach + penetrate, but heavy and slow to recover (balance pass)
+                    theItem->flags |= (ITEM_ATTACKS_PENETRATE | ITEM_SLOW_RECOVERY);
                     break;
                 case AXE:
                 case WAR_AXE:

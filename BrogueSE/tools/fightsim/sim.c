@@ -26,10 +26,6 @@
 #define PX       8          // player x
 #define PY      15          // player y (room mid)
 
-// Runtime damage scale read by Combat.c (extern in balance.h). 100 = unchanged; sim.c sets it to the
-// mechanic-specific knob around a secondary hit and resets it to 100 immediately after.
-short gFsDamageScalePct = 100;
-
 const char *fs_archetypeName(Archetype a) {
     switch (a) {
         case ARCH_CORRIDOR_LINE:  return "corridor_line";
@@ -391,9 +387,9 @@ EncounterResult fs_run(const BuildSpec *b, Archetype arch, int playerMaxHP,
                 pmapAt(player.loc)->flags &= ~HAS_PLAYER;
                 player.loc = passStep;
                 pmapAt(player.loc)->flags |= HAS_PLAYER;
-                gFsDamageScalePct = gBalance.passAttackDamagePct; // lever: trim each pass-attack hit
+                gWeaponDamageScalePct = gBalance.passAttackDamagePct; // lever: trim each pass-attack hit
                 for (int i = 0; i < passTargets; i++) attack(&player, passHits[i], false);
-                gFsDamageScalePct = 100;
+                gWeaponDamageScalePct = 100;
                 meleeAction = true;
             } else if (zapWorthIt) {
                 bolt bt = boltCatalog[boltForItem(staff)]; // staff-agnostic: lightning, firebolt, etc.
@@ -403,9 +399,9 @@ EncounterResult fs_run(const BuildSpec *b, Archetype arch, int playerMaxHP,
                 zap(player.loc, target, &bt, false, false);
                 staff->charges--; r.chargesSpent++;
             } else if (reachTgt) {
-                gFsDamageScalePct = gBalance.reachDamagePct; // lever: trim the distance-2 reach poke
+                gWeaponDamageScalePct = gBalance.reachDamagePct; // lever: trim the distance-2 reach poke
                 attack(&player, reachTgt, false);
-                gFsDamageScalePct = 100;
+                gWeaponDamageScalePct = 100;
                 meleeAction = true;
             } else if (adj) {
                 boolean cleave  = rogue.weapon && (rogue.weapon->flags & ITEM_ATTACKS_ALL_ADJACENT);
@@ -425,9 +421,9 @@ EncounterResult fs_run(const BuildSpec *b, Archetype arch, int playerMaxHP,
                     pos beyond = { adjLoc.x + (adjLoc.x - player.loc.x), adjLoc.y + (adjLoc.y - player.loc.y) };
                     creature *b = monsterAtLoc(beyond);
                     if (b && b != &player) {
-                        gFsDamageScalePct = gBalance.penetrateDamagePct; // lever: trim the behind-target hit
+                        gWeaponDamageScalePct = gBalance.penetrateDamagePct; // lever: trim the behind-target hit
                         attack(&player, b, false);
-                        gFsDamageScalePct = 100;
+                        gWeaponDamageScalePct = 100;
                     }
                 }
                 // Per-weapon attack recovery: rapier (QUICKLY) is 2x faster; mace/war hammer

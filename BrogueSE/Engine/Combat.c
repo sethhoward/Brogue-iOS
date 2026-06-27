@@ -28,6 +28,9 @@
 #include "balance.h" // fight-simulator tunables (sim-only build); no effect on shipping
 #endif
 
+// Per-hit player-weapon damage scale in percent; 100 = normal. See the extern in Rogue.h.
+short gWeaponDamageScalePct = 100;
+
 // iOS port (iBrogue): host hook for a haptic when the player takes damage.
 // severity: 0 = ordinary hit, 1 = survived but now under 40% health, 2 = fatal.
 // Defined in CEBridge.mm; no-op on devices without a haptic engine.
@@ -101,6 +104,19 @@ fixpt netEnchant(item *theItem) {
     }
     return clamp(retval, gBalance.netEnchantClampLo * FP_FACTOR, gBalance.netEnchantClampHi * FP_FACTOR);
 #else
+    // Heavy-weapon balance pass: broadsword and war axe earn only a 25% marginal enchant past a knee
+    // (a soft cap, not a cliff) -- curbs their late-game raw-stat dominance as the universal go-to without
+    // inverting the upgrade path (they stay ahead of sword/axe) or punishing continued enchanting. Derived
+    // from the fight simulator; see docs/design/fight-simulator-findings.md.
+    if (theItem->category & WEAPON) {
+        int knee = (theItem->kind == BROADSWORD) ? 9 : (theItem->kind == WAR_AXE) ? 10 : 0;
+        if (knee > 0) {
+            fixpt kneeFp = (fixpt)knee * FP_FACTOR;
+            if (retval > kneeFp) {
+                retval = kneeFp + (retval - kneeFp) * 25 / 100;
+            }
+        }
+    }
     return clamp(retval, -20 * FP_FACTOR, 50 * FP_FACTOR);
 #endif
 }
@@ -1417,13 +1433,11 @@ boolean attack(creature *attacker, creature *defender, boolean lungeAttack) {
         damage = (defender->info.flags & (MONST_IMMUNE_TO_WEAPONS | MONST_INVULNERABLE)
                   ? 0 : randClump(attacker->info.damage) * monsterDamageAdjustmentAmount(attacker) / FP_FACTOR);
 
-#ifdef FIGHTSIM
-        // Mechanic-specific damage lever: sim.c scales the player's secondary hits (pike penetrate,
-        // flail pass-attack) via gFsDamageScalePct, then resets to 100. No-op (100) in shipping.
-        if (attacker == &player && gFsDamageScalePct != 100) {
-            damage = damage * gFsDamageScalePct / 100;
+        // Per-hit damage scale (100 = no-op): the flail pass-attack balance nerf sets this to 50 around
+        // its hits (Movement.c); the sim build also uses it to model pike penetrate/reach. Player only.
+        if (attacker == &player && gWeaponDamageScalePct != 100) {
+            damage = damage * gWeaponDamageScalePct / 100;
         }
-#endif
 
         if (sneakAttack || defenderWasAsleep || defenderWasParalyzed) {
             if (defender != &player) {

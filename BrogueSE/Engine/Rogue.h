@@ -1775,7 +1775,7 @@ enum itemFlags {
     ITEM_EQUIPPED           = Fl(1),
     ITEM_CURSED             = Fl(2),
     ITEM_PROTECTED          = Fl(3),
-    // unused               = Fl(4),
+    ITEM_SLOW_RECOVERY      = Fl(4),    // war pike: long/heavy, takes an extra turn to recover (no knockback)
     ITEM_RUNIC              = Fl(5),
     ITEM_RUNIC_HINTED       = Fl(6),
     ITEM_RUNIC_IDENTIFIED   = Fl(7),
@@ -3941,6 +3941,10 @@ extern "C" {
     void applyArmorRunicEffect(char returnString[DCOLS], creature *attacker, short *damage, boolean melee);
     void processStaggerHit(creature *attacker, creature *defender);
     boolean attack(creature *attacker, creature *defender, boolean lungeAttack);
+    // Per-hit damage scale for the player's weapon, in percent (100 = normal). Set transiently around
+    // specific hits and reset to 100: the flail pass-attack balance nerf (Movement.c) and, in the sim
+    // build, the pike penetrate/reach modeling (sim.c). Read in attack()'s damage roll (Combat.c).
+    extern short gWeaponDamageScalePct;
     void inflictLethalDamage(creature *attacker, creature *defender);
     boolean inflictDamage(creature *attacker, creature *defender,
                           short damage, const color *flashColor, boolean ignoresProtectionShield);

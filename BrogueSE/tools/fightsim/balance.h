@@ -43,7 +43,7 @@ typedef struct balanceConfig {
     // Mechanic-specific damage levers (percent of normal, 100 = unchanged). The enchant cap is the
     // wrong tool for mechanic-driven weapons: war pike's penetrate is flat (cap-resistant) and flail's
     // pass-attacks multiply enchant across hits (cap is a cliff). So we trim those mechanics directly.
-    // sim.c sets gFsDamageScalePct to these around the secondary hits; Combat.c reads it (see below).
+    // sim.c sets gWeaponDamageScalePct (declared in Rogue.h) to these around the secondary hits.
     int penetrateDamagePct;                      // 100 (war pike behind-target hit, adjacent case)
     int passAttackDamagePct;                     // 100 (flail per-flanked-enemy hit while moving)
     int reachDamagePct;                          // 100 (spear/pike reach poke: distance-2 strike with
@@ -81,9 +81,7 @@ typedef struct balanceConfig {
 }
 
 extern balanceConfig gBalance; // = FIGHTSIM_SHIPPING_DEFAULTS (defined in fightsim.c)
-
-// Runtime damage scale (percent) applied to the player's next weapon hit, then reset to 100 by sim.c.
-// 100 by default so the engine is byte-identical until sim.c deliberately scales a secondary hit.
-extern short gFsDamageScalePct;
+// gWeaponDamageScalePct (the runtime per-hit damage scale) is declared in Rogue.h -- now a shared engine
+// global, used by both the shipped flail nerf and the sim's penetrate/reach modeling.
 
 #endif

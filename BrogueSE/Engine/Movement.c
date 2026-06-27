@@ -1263,6 +1263,11 @@ boolean playerMoves(short direction) {
             moveEntrancedMonsters(direction);
 
             // Perform a lunge or flail attack if appropriate.
+            // Balance pass: flail pass-attacks deal 50% damage (its multi-hit while moving is its power).
+            // Scoped to this loop only -- the rapier lunge that shares it is left at full damage.
+            if (rogue.weapon && (rogue.weapon->flags & ITEM_PASS_ATTACKS)) {
+                gWeaponDamageScalePct = 50;
+            }
             for (i=0; i<16; i++) {
                 if (hitList[i]) {
                     if (attack(&player, hitList[i], (rogue.weapon && (rogue.weapon->flags & ITEM_LUNGE_ATTACKS)))) {
@@ -1270,6 +1275,7 @@ boolean playerMoves(short direction) {
                     }
                 }
             }
+            gWeaponDamageScalePct = 100;
             if (hitList[0]) {
                 playerRecoversFromAttacking(anyAttackHit);
             }

@@ -2575,8 +2575,8 @@ void synchronizePlayerTimeState() {
 void playerRecoversFromAttacking(boolean anAttackHit) {
     if (player.ticksUntilTurn >= 0) {
         // Don't do this if the player's weapon of speed just fired.
-        if (rogue.weapon && (rogue.weapon->flags & ITEM_ATTACKS_STAGGER) && anAttackHit) {
-            player.ticksUntilTurn += 2 * player.attackSpeed;
+        if (rogue.weapon && (rogue.weapon->flags & (ITEM_ATTACKS_STAGGER | ITEM_SLOW_RECOVERY)) && anAttackHit) {
+            player.ticksUntilTurn += 2 * player.attackSpeed; // stagger and war-pike slow-recovery: extra turn to recover
         } else if (rogue.weapon && (rogue.weapon->flags & ITEM_ATTACKS_QUICKLY)) {
             player.ticksUntilTurn += player.attackSpeed / 2;
         } else {
