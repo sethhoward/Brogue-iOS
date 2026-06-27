@@ -206,8 +206,33 @@
 		ED0000000000000000000F02 /* FileManagementViewController.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = FileManagementViewController.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		5E0000000000000000000ED1 /* Exceptions for "BrogueSE" folder in "BrogueSE" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				tools/.gitignore,
+				tools/fightsim-spike/bolt_main.c,
+				tools/fightsim-spike/build.sh,
+				tools/fightsim-spike/build/spike,
+				tools/fightsim-spike/build/spike-bolt,
+				tools/fightsim-spike/main.c,
+				tools/fightsim-spike/platform_stubs.c,
+				tools/fightsim/balance.h,
+				tools/fightsim/budget.c,
+				tools/fightsim/budget.h,
+				tools/fightsim/build.sh,
+				tools/fightsim/build/fightsim,
+				tools/fightsim/fightsim.c,
+				tools/fightsim/platform_stubs.c,
+				tools/fightsim/sim.c,
+				tools/fightsim/sim.h,
+			);
+			target = 5E0000000000000000000001 /* BrogueSE */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
+
 /* Begin PBXFileSystemSynchronizedRootGroup section */
-		5E000000000000000000000A /* BrogueSE */ = {isa = PBXFileSystemSynchronizedRootGroup; explicitFileTypes = {}; explicitFolders = (); path = BrogueSE; sourceTree = "<group>"; };
+		5E000000000000000000000A /* BrogueSE */ = {isa = PBXFileSystemSynchronizedRootGroup; exceptions = (5E0000000000000000000ED1 /* Exceptions for "BrogueSE" folder in "BrogueSE" target */, ); explicitFileTypes = {}; explicitFolders = (); path = BrogueSE; sourceTree = "<group>"; };
 		C556D3FC2FD0CDEE00D81184 /* BrogueCE */ = {isa = PBXFileSystemSynchronizedRootGroup; explicitFileTypes = {}; explicitFolders = (); path = BrogueCE; sourceTree = "<group>"; };
 /* End PBXFileSystemSynchronizedRootGroup section */
 
@@ -509,24 +534,6 @@
 		};
 /* End PBXNativeTarget section */
 
-/* Begin PBXShellScriptBuildPhase section */
-		A07B011D000000000000CAFE /* Auto-increment build number */ = {
-			isa = PBXShellScriptBuildPhase;
-			alwaysOutOfDate = 1;
-			buildActionMask = 2147483647;
-			files = (
-			);
-			inputPaths = (
-			);
-			name = "Auto-increment build number";
-			outputPaths = (
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-			shellPath = /bin/sh;
-			shellScript = "# iOS port (iBrogue): auto-stamp CFBundleVersion from the git commit count so local\n# archives always upload with a unique, increasing build number (avoids ITMS-90061).\nif ! command -v git >/dev/null 2>&1; then echo \"git not found; keeping CFBundleVersion\"; exit 0; fi\nn=$(git -C \"$SRCROOT\" rev-list --count HEAD 2>/dev/null) || exit 0\n[ -n \"$n\" ] || exit 0\nplist=\"$TARGET_BUILD_DIR/$INFOPLIST_PATH\"\n[ -f \"$plist\" ] && /usr/libexec/PlistBuddy -c \"Set :CFBundleVersion $n\" \"$plist\" && echo \"Stamped CFBundleVersion = $n\"\n";
-		};
-/* End PBXShellScriptBuildPhase section */
-
 /* Begin PBXProject section */
 		C57A961D16D7EAD500C233F1 /* Project object */ = {
 			isa = PBXProject;
@@ -624,6 +631,24 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXResourcesBuildPhase section */
+
+/* Begin PBXShellScriptBuildPhase section */
+		A07B011D000000000000CAFE /* Auto-increment build number */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputPaths = (
+			);
+			name = "Auto-increment build number";
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "# iOS port (iBrogue): auto-stamp CFBundleVersion from the git commit count so local\n# archives always upload with a unique, increasing build number (avoids ITMS-90061).\nif ! command -v git >/dev/null 2>&1; then echo \"git not found; keeping CFBundleVersion\"; exit 0; fi\nn=$(git -C \"$SRCROOT\" rev-list --count HEAD 2>/dev/null) || exit 0\n[ -n \"$n\" ] || exit 0\nplist=\"$TARGET_BUILD_DIR/$INFOPLIST_PATH\"\n[ -f \"$plist\" ] && /usr/libexec/PlistBuddy -c \"Set :CFBundleVersion $n\" \"$plist\" && echo \"Stamped CFBundleVersion = $n\"\n";
+		};
+/* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
 		5E0000000000000000000003 /* Sources */ = {
