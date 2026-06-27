@@ -869,6 +869,45 @@ static void hybridSustain(int trials) {
     gBalance = saved;
 }
 
+// Upgrade-path sanity check: after the nerf, does each heavy weapon still beat its lighter same-family
+// counterpart (so the upgrade is still worth picking up)? Per family: light (unnerfed), heavy @ shipping,
+// heavy @ tuned/nerfed -- all all-in at the depth budget, per archetype. Heavy@TU must stay >= light.
+static void progression(int trials) {
+    const int depths[] = {16, 19};
+    struct { short light, heavy; const char *ln, *hn; } fam[] = {
+        {SWORD, BROADSWORD, "sword",  "broadsword"},
+        {SPEAR, PIKE,       "spear",  "war_pike"},
+        {AXE,   WAR_AXE,    "axe",    "war_axe"},
+        {MACE,  HAMMER,     "mace",   "war_hammer"}, // war hammer isn't nerfed; included for completeness
+    };
+    fs_buildBudgetTable(depths[(int)(sizeof depths/sizeof depths[0]) - 1], 8);
+    balanceConfig saved = gBalance;
+    for (int di = 0; di < (int)(sizeof depths/sizeof depths[0]); di++) {
+        int depth = depths[di];
+        DepthBudget bud = fs_budgetAt(depth);
+        int B = (int)(bud.enchantScrolls + 0.5);
+        int strength = 12 + (int)(bud.strengthPotions + 0.5);
+        int hp = 30 + 10 * (int)(bud.lifePotions + 0.5);
+        printf("# PROGRESSION @ depth %d (all-in +%d, str %d): does the nerfed heavy still beat its light "
+               "counterpart? SH=shipping, TU=tuned/nerfed.\n", depth, B, strength);
+        printf("config,corridor,cluster,pack,lone_tank,ambush,mean\n");
+        char lbl[64];
+        for (int f = 0; f < (int)(sizeof fam/sizeof fam[0]); f++) {
+            gBalance = FIGHTSIM_TUNED_DEFAULTS; // light weapons are untouched by the levers
+            sprintf(lbl, "%s(light)", fam[f].ln);
+            printArchRow(lbl, fam[f].light, fam[f].ln, B, hp, strength, depth, trials);
+            gBalance = FIGHTSIM_SHIPPING_DEFAULTS;
+            sprintf(lbl, "%s(heavy)@SH", fam[f].hn);
+            printArchRow(lbl, fam[f].heavy, fam[f].hn, B, hp, strength, depth, trials);
+            gBalance = FIGHTSIM_TUNED_DEFAULTS;
+            sprintf(lbl, "%s(heavy)@TU", fam[f].hn);
+            printArchRow(lbl, fam[f].heavy, fam[f].hn, B, hp, strength, depth, trials);
+        }
+        printf("\n");
+    }
+    gBalance = saved;
+}
+
 int main(int argc, char **argv) {
     gameVariant = VARIANT_BROGUE;
     initializeGameVariant();
@@ -917,6 +956,11 @@ int main(int argc, char **argv) {
         int glow   = (argc > 5) ? atoi(argv[5]) : 6;  // staff glow-up target (+5/6)
         int n = (arch == ARCH_LONE_TANK) ? 1 : 4;
         curveSweep((Archetype) arch, trials, 90 /*playerHP*/, n, maxB, glow);
+        return 0;
+    }
+    if (strcmp(mode, "--progression") == 0) {
+        int trials = (argc > 2) ? atoi(argv[2]) : 40;
+        progression(trials);
         return 0;
     }
     if (strcmp(mode, "--hybrid") == 0) {
