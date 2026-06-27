@@ -545,8 +545,6 @@ typedef struct windowpos {
 // variants supported in this code base
 enum gameVariant {
     VARIANT_BROGUE,
-    VARIANT_RAPID_BROGUE,
-    VARIANT_BULLET_BROGUE,
     NUMBER_VARIANTS
 };
 
@@ -2915,7 +2913,6 @@ enum NGCommands {
     NG_FLYOUT_PLAY,
     NG_FLYOUT_VIEW,
     NG_FLYOUT_OPTIONS,
-    NG_GAME_VARIANT,
     NG_GAME_MODE,
     NG_NEW_GAME,
     NG_NEW_GAME_WITH_SEED,
@@ -3371,15 +3368,12 @@ enum machineTypes {
     // Variant-specific machines
     MT_REWARD_HEAVY_OR_RUNIC_WEAPON,
 
-    // iOS port (iBrogue): the altars of transference (Brogue only). A genuine new machine index that
-    // exists only in Brogue's blueprintCatalog (appended after the insight altar); the Bullet/Rapid
-    // catalogs stop at MT_REWARD_HEAVY_OR_RUNIC_WEAPON, so their reward raffle never reaches this index
-    // and it is never force-built outside Brogue. Enters Brogue's random reward raffle via BP_REWARD.
+    // iOS port (iBrogue): the altars of transference. A genuine new machine index appended after the
+    // insight altar in the blueprintCatalog; enters the random reward raffle via BP_REWARD.
     MT_TRANSFER_ALTAR,
 
-    // iOS port (iBrogue): Brogue fills this variant-specific reward slot with the altars of insight
-    // (force-built at fixed depths in addMachines; never collides with the Bullet weapon vault, which
-    // occupies the same index only in BulletBrogue's catalog).
+    // iOS port (iBrogue): the altars of insight fill this reward slot (force-built at fixed depths in
+    // addMachines).
     MT_INSIGHT_ALTAR = MT_REWARD_HEAVY_OR_RUNIC_WEAPON
 };
 

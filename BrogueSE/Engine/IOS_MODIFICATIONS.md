@@ -32,17 +32,49 @@ See `BrogueCE/Engine/IOS_MODIFICATIONS.md` (faithful CE) and
 
 ## Change log
 
+### 2026-06-27 — Remove the Rapid Brogue and Bullet Brogue game variants (SE only)
+
+**What.** SE now ships a single game variant (Brogue). The `VARIANT_RAPID_BROGUE` and
+`VARIANT_BULLET_BROGUE` paths — quarter-length and 5-level speed variants inherited from upstream CE —
+were removed entirely. SE is the firehose fork and never offered variant selection in the shipped iOS UI
+anyway (the "Change Variant" flyout button was already removed; `chooseGameVariant()` was unreachable), so
+this just deletes the now-dead machinery.
+
+**Why.** All SE gameplay/content (item rework, gold goblin, altars, smoke, …) is authored against the
+full-length Brogue variant only. Maintaining three parallel `Globals*.c` catalogs (every potion/scroll/wand
+row, horde, blueprint, depth constant) tripled the edit surface for every content change with no shipped
+benefit, since the variants weren't selectable.
+
+**Changes.**
+- **Deleted** `GlobalsRapidBrogue.{c,h}` and `GlobalsBulletBrogue.{c,h}`. The BrogueSE target is a
+  synchronized folder group in `iBrogue_iPad.xcodeproj`, so removing the files from disk drops them from the
+  build with no pbxproj edit.
+- `Rogue.h` — dropped `VARIANT_RAPID_BROGUE` / `VARIANT_BULLET_BROGUE` from `enum gameVariant` (leaving
+  `VARIANT_BROGUE` + `NUMBER_VARIANTS`); dropped `NG_GAME_VARIANT` from `enum NGCommands`; refreshed the
+  `MT_TRANSFER_ALTAR` / `MT_INSIGHT_ALTAR` comments that referenced the per-variant catalogs.
+- `RogueMain.c` — removed the two `Globals{Rapid,Bullet}Brogue.h` includes, the two `printBrogueVersion()`
+  variant lines, and collapsed `initializeGameVariant()` to call `initializeGameVariantBrogue()` directly.
+- `MainMenu.c` — deleted `chooseGameVariant()` and its two now-dead dispatch sites (the flyout branch and the
+  `NG_GAME_VARIANT` case in the game loop).
+- `Architect.c` — deleted the Bullet-only depth-1 guaranteed weapon vault; simplified the now-always-true
+  `gameVariant == VARIANT_BROGUE` guards on the transfer-altar pair placement and the insight-altar
+  force-build.
+
+**Save/recording compatibility.** Existing Rapid/Bullet recordings (version strings `RB`/`BB`) will no
+longer replay — they fail the normal recording version check like any incompatible recording. Accepted
+(straight removal, no migration); SE saves are isolated under `Documents/se/` and SE is Game-Center-silent.
+
 ### 2026-06-27 — Smoke: burning terrain emits a vision-obscuring gas (new content)
 
 **What.** A new gas, `SMOKE_GAS`, emitted by ordinary burning terrain. It obscures vision in two tiers
 governed by a single threshold (`SMOKE_THICK_VOLUME`, default 15):
 - **Thin smoke (< threshold)** only *dims* the cell (a gentle negative light, `SMOKE_LIGHT` /
   `smokeCloudColor` `-10`, milder than the supernatural darkness cloud's `-20`) and **dissipates fast**
-  (~50%/turn, like steam).
-- **Thick smoke (≥ threshold)** also **blocks line of sight** and **dissipates slowly** (~20%/turn), so a
+  (~75%/turn).
+- **Thick smoke (≥ threshold)** also **blocks line of sight** and **dissipates slowly** (~35%/turn), so a
   real blaze walls off an area for a handful of turns and then the core crumbles once it thins.
 
-It's **additive**: each burning `PLAIN_FIRE` tile rolls (`SMOKE_EMISSION_CHANCE`, default 60%) to puff a
+It's **additive**: each burning `PLAIN_FIRE` tile rolls (`SMOKE_EMISSION_CHANCE`, default 45%) to puff a
 low-volume `DF_SMOKE_ACCUMULATION` into the gas layer each turn, and the volumetric system pools puffs from
 many tiles — a bigger fire makes proportionally more smoke. Only `PLAIN_FIRE` (ordinary burning terrain)
 smokes; gas-fire flashes, brimstone, and explosions do not (keeps firebolt spam from whiting out a fight).
@@ -1864,6 +1896,12 @@ rather than freezing a whole line — so a single frozen creature can be meaning
   slams into takes **distance travelled + `max(0, strength - 12)`** damage (momentum plus a strength shove-bonus
   that bites even on an adjacent slam) and is doused if burning. A block wedged against an obstruction won't
   budge (no turn). Since the frost bolt deals no direct damage, this is the staff's strength-scaling payoff.
+  *Bugfix 2026-06-27:* the bump-to-push guard lives in `playerMoves`, but the special-weapon attack handlers
+  run **before** it, so a reaching weapon could damage/dispatch a frozen creature instead of pushing it (frozen
+  counts as helpless → auto-landing sneak hit). Frozen creatures are now excluded from every player melee
+  hit-list builder — `handleSpearAttacks` (pike/spear penetrate) and `handleWhipAttacks` (`Movement.c`), the
+  axe sweep in `buildHitList` (`Combat.c`), and the flail pass-attack `buildFlailHitList` (`Movement.c`) — so a
+  frozen creature takes no melee damage and the bumped block falls through to the push.
 - **Colour state.** Persistent tints in `getCellAppearance` (`IO.c`): a strong icy cast while `STATUS_FROZEN`,
   a fainter chill while `STATUS_SLOWED` (the slow tint is **game-wide, any source**, not just this staff), plus
   the icy `flashMonster` at the moment of freezing. Ice terrain reads via its own tile colours.

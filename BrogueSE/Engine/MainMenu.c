@@ -428,45 +428,6 @@ static void initializeFlyoutMenu(buttonState *menu, screenDisplayBuffer *shadowB
     initializeMenu(menu, buttons, buttonCount, shadowBuf);
 }
 
-/// @brief Displays a dialog window for the user to chose a game variant
-static void chooseGameVariant() {
-    short gameVariantChoice;
-    char textBuf[TEXT_MAX_LENGTH] = "", tmpBuf[TEXT_MAX_LENGTH] = "", goldColorEscape[5] = "", whiteColorEscape[5] = "";
-
-    encodeMessageColor(goldColorEscape, 0, &yellow);
-    encodeMessageColor(whiteColorEscape, 0, &white);
-
-    snprintf(textBuf, TEXT_MAX_LENGTH, "%sBrogue%s\n", goldColorEscape, whiteColorEscape);
-    append(textBuf, "Classic Brogue. The endlessly captivating masterpiece of dungeon adventuring.\n\n", TEXT_MAX_LENGTH);
-
-    snprintf(tmpBuf, TEXT_MAX_LENGTH, "%sRapid Brogue%s\n", goldColorEscape, whiteColorEscape);
-    append(textBuf, tmpBuf, TEXT_MAX_LENGTH);
-    append(textBuf, "Die faster and more often in this quarter-length version of the classic game!\n\n", TEXT_MAX_LENGTH);
-
-    snprintf(tmpBuf, TEXT_MAX_LENGTH, "%sBullet Brogue%s\n", goldColorEscape, whiteColorEscape);
-    append(textBuf, tmpBuf, TEXT_MAX_LENGTH);
-    append(textBuf, "No time? Death wish? Bullet Brogue is for you. Not best for new players!\n\n", TEXT_MAX_LENGTH);
-
-    brogueButton buttons[3];
-    initializeMainMenuButton(&(buttons[0]), "  %sR%sapid Brogue     ", 'r', 'R', NG_NOTHING);
-    initializeMainMenuButton(&(buttons[1]), "     %sB%srogue        ", 'b', 'B', NG_NOTHING);
-    initializeMainMenuButton(&(buttons[2]), "   Bu%sl%slet Brogue   ", 'l', 'L', NG_NOTHING);
-
-    const SavedDisplayBuffer rbuf = saveDisplayBuffer();
-    gameVariantChoice = printTextBox(textBuf, 20, 7, 45, &white, &black, buttons, 3);
-    restoreDisplayBuffer(&rbuf);
-
-    if (gameVariantChoice == 0) {
-        gameVariant = VARIANT_RAPID_BROGUE;
-    } else if (gameVariantChoice == 1) {
-        gameVariant = VARIANT_BROGUE;
-    } else if (gameVariantChoice == 2) {
-        gameVariant = VARIANT_BULLET_BROGUE;
-    } else {
-        rogue.nextGame = NG_NOTHING;
-    }
-}
-
 /// @brief Displays a dialog window for the user to chose a game mode. The game mode is displayed in the bottom left
 /// on the title screen (except normal mode).
 static void chooseGameMode() {
@@ -647,8 +608,6 @@ static void titleMenu() {
                         }
                         if (rogue.nextGame == NG_GAME_MODE) {
                             chooseGameMode();
-                        } else if (rogue.nextGame == NG_GAME_VARIANT) {
-                            chooseGameVariant();
                         }
                     }
                     // Process the main menu input
@@ -1196,10 +1155,6 @@ void mainBrogueJunction() {
                 brogueCEAtTitle = true;   // iOS port (iBrogue): gate the version chooser
                 titleMenu();
                 brogueCEAtTitle = false;
-                break;
-            case NG_GAME_VARIANT:
-                rogue.nextGame = NG_NOTHING;
-                initializeGameVariant();
                 break;
             case NG_NEW_GAME:
             case NG_NEW_GAME_WITH_SEED:
