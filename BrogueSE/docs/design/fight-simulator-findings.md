@@ -143,6 +143,49 @@ never erases it. Two spots tighten to a tie in the heavy's *weakest* geometry �
 corridors (92 vs 90), war_axe ≈ axe in scattered packs (78 vs 78) — which is healthy: it gives the light
 weapons a genuine niche without breaking progression. Reproduce: `--progression`.
 
+## Enchant curve — where win-rate levels off (depth 19, str 18, HP 80)
+
+Sweeping a single weapon's enchant from +0 to +18 (tuned config, mean win% over the five archetypes;
+reproduce with `--enchantcurve`):
+
+| weapon | +0 | +2 | +4 | +6 | +8 | **+10** | +12 | +14 | +16 | +18 |
+|---|---|---|---|---|---|---|---|---|---|---|
+| sword | 25 | 29 | 36 | 41 | 51 | 72 | 84 | 90 | 90 | 92 |
+| broadsword | 26 | 49 | 56 | 72 | 82 | **84** | 86 | 90 | 92 | 94 |
+| war_axe | 26 | 40 | 56 | 68 | 80 | **84** | 87 | 89 | 92 | 96 |
+| war_pike | 23 | 34 | 43 | 60 | 70 | **84** | 89 | 94 | 95 | 96 |
+| war_hammer | 16 | 38 | 51 | 60 | 72 | **84** | 90 | 94 | 96 | 96 |
+
+- **The inflection is +10.** Below it every weapon climbs steeply (each scroll is huge); at +10 all five
+  converge to **84%**; above it the curves split.
+- **Knee'd weapons (broadsword, war_axe) flatten past +8–10** — gains fall to ~1%/enchant, the soft knee
+  made visible. **Un-knee'd weapons (war_pike, war_hammer) keep climbing to ~+14–16** before the ceiling.
+- **+10 = 84% is by design:** +10 is the realistic depth-19 scroll budget, the exact level the tuning
+  targeted, so all five land at the same balanced point there.
+- The **~95–96% ceiling** is the unwinnable tail (you got surrounded) that no enchant fixes.
+- **The practical cap is the scroll budget, not the curve.** A normal d19 run rarely affords past +10 on a
+  single weapon, so the longer un-knee'd curves are mostly unreachable in play.
+
+## Why the war pike has no enchant knee (kept as-is)
+
+The other three heavies carry levers that also shape the *enchant economy*: the soft knee gives broadsword
+and war_axe diminishing returns past +9/+10, nudging surplus scrolls toward a hybrid staff, and the flail's
+pass-attack trim caps its multi-hit. The war pike is deliberately different — **only** the 2× recovery
+penalty, **no** enchant knee. This was a considered decision, not an oversight:
+
+1. **Recovery already balances its win rate.** At the realistic +10 budget the pike sits at 84% — the same
+   band as everything else (see the curve above). It is not a dominance source, so it doesn't *need* a knee.
+2. **A knee would over-nerf the all-in build.** Recovery (a flat ÷2 on attack rate) and a knee (a per-hit
+   damage trim) double-dip. Tested: knee 8 @ 25% on top of recovery dropped all-in pike to **66%** (below a
+   plain sword); even a gentle knee (10 @ 50%) pulled it to **77%**. Recovery-only (84%) keeps all-in viable.
+3. **Having no enchant disincentive is the point.** The `--hybrid` data shows pike all-in 84 ≈ hybrid 83 —
+   a wash, so the player is genuinely free to choose. The pike is the "commitment" weapon: a strong
+   all-rounder *whether or not* the run goes hybrid. Its longer enchant curve (to +14–16) needs a
+   scroll-rich run that's rarely affordable, so it isn't a hidden dominance source — just upside for a lucky
+   run. Not every run can be a hybrid, and the pike is the one heavy that doesn't ask you to be.
+
+Trade-off accepted: the pike is the lone heavy without a hybrid nudge — by design.
+
 ## What's best so far — recommendation
 
 **Adopt the four-lever tuned config above.** It is the strongest result the sim has produced:
