@@ -685,6 +685,7 @@ boolean handleWhipAttacks(creature *attacker, enum directions dir, boolean *abor
     defender = monsterAtLoc(strikeLoc);
     if (defender
         && (attacker != &player || canSeeMonster(defender))
+        && !defender->status[STATUS_FROZEN] // iOS port (Brogue SE): staff of frost -- a frozen creature is a block to be pushed, not a target to be damaged; fall through so the push guard in playerMoves handles it.
         && !monsterIsHidden(defender, attacker)
         && monsterWillAttackTarget(attacker, defender)) {
 
@@ -750,6 +751,7 @@ boolean handleSpearAttacks(creature *attacker, enum directions dir, boolean *abo
         trigger the attack. */
         defender = monsterAtLoc(targetLoc);
         if (defender
+            && !defender->status[STATUS_FROZEN] // iOS port (Brogue SE): staff of frost -- a frozen creature can't be speared for damage; skip it so the bumped block is pushed (playerMoves) rather than dispatched.
             && (!cellHasTerrainFlag(targetLoc, T_OBSTRUCTS_PASSABILITY)
                 || (defender->info.flags & MONST_ATTACKABLE_THRU_WALLS))
             && monsterWillAttackTarget(attacker, defender)) {
@@ -830,6 +832,7 @@ static void buildFlailHitList(const short x, const short y, const short newX, co
             && canSeeMonster(monst)
             && monstersAreEnemies(&player, monst)
             && monst->creatureState != MONSTER_ALLY
+            && !monst->status[STATUS_FROZEN] // iOS port (Brogue SE): staff of frost -- a flail pass-attack skips a frozen creature; it takes no damage (frozen creatures are pushed, not struck).
             && !(monst->bookkeepingFlags & MB_IS_DYING)
             && (!cellHasTerrainFlag(monst->loc, T_OBSTRUCTS_PASSABILITY) || (monst->info.flags & MONST_ATTACKABLE_THRU_WALLS))) {
 

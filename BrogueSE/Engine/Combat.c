@@ -2237,6 +2237,7 @@ void buildHitList(const creature **hitList, const creature *attacker, creature *
             if (coordinatesAreInMap(newestX, newestY) && (pmap[newestX][newestY].flags & (HAS_MONSTER | HAS_PLAYER))) {
                 defender = monsterAtLoc((pos){ newestX, newestY });
                 if (defender
+                    && !defender->status[STATUS_FROZEN] // iOS port (Brogue SE): staff of frost -- an axe sweep skips a frozen creature; frozen creatures take no damage (they are pushed, not struck).
                     && monsterWillAttackTarget(attacker, defender)
                     && (!cellHasTerrainFlag(defender->loc, T_OBSTRUCTS_PASSABILITY) || (defender->info.flags & MONST_ATTACKABLE_THRU_WALLS))) {
 
