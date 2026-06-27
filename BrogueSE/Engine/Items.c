@@ -9975,6 +9975,20 @@ void recalculateEquipmentBonuses() {
         if (player.info.damage.upperBound < 1) {
             player.info.damage.upperBound = 1;
         }
+    } else {
+        // Unarmed: fists scale with strength, so a strong adventurer can fight bare-handed -- e.g. against
+        // acid mounds/jellies, which corrode an equipped weapon -- instead of being stuck at 1-2 damage
+        // regardless of might. Strength 12 (the starting value) is the baseline; effective strength above
+        // it (net of weakness) widens the punch. The bonus is additive because the 1-2 base is far too
+        // small for the multiplicative weapon damageFraction to move it meaningfully.
+        int over = (rogue.strength - player.weaknessAmount) - 12;
+        player.info.damage.lowerBound = 1;
+        player.info.damage.upperBound = 2;
+        player.info.damage.clumpFactor = 1;
+        if (over > 0) {
+            player.info.damage.lowerBound += over / 4; // +1 floor per 4 str over 12
+            player.info.damage.upperBound += over / 2; // +1 ceiling per 2 str over 12 (a wide, swingy punch)
+        }
     }
 
     if (rogue.armor) {
