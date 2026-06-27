@@ -125,6 +125,24 @@ With the tuning in place, splitting enchants into a glowed lightning staff becom
 
 ---
 
+## Upgrade-path integrity (pre-ship check)
+
+A nerf that made a heavy weapon worse than its lighter same-family version would invert the upgrade
+incentive (why pick up the war axe?). Verified under the tuned/nerfed config — each heavy still beats its
+light counterpart in mean at both depths and **in every archetype (no inversions)**:
+
+| family | light (d19) | heavy @ tuned (d19) | margin |
+|---|---|---|---|
+| sword → broadsword | 72 | 84 | +12 |
+| spear → war_pike | 74 | 84 | +10 |
+| axe → war_axe | 75 | 84 | +9 |
+| mace → war_hammer | 72 | 84 | +12 (unnerfed) |
+
+The nerf roughly halves each heavy's margin over its light version (broadsword was +22 over sword) but
+never erases it. Two spots tighten to a tie in the heavy's *weakest* geometry — war_pike ≈ spear in
+corridors (92 vs 90), war_axe ≈ axe in scattered packs (78 vs 78) — which is healthy: it gives the light
+weapons a genuine niche without breaking progression. Reproduce: `--progression`.
+
 ## What's best so far — recommendation
 
 **Adopt the four-lever tuned config above.** It is the strongest result the sim has produced:
