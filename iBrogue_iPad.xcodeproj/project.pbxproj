@@ -207,16 +207,16 @@
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
-		5E0000000000000000000ED1 /* Exceptions for "BrogueSE" folder in "BrogueSE" target */ = {
+		5E0000000000000000000ED1 /* PBXFileSystemSynchronizedBuildFileExceptionSet */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
 				tools/.gitignore,
-				tools/fightsim-spike/bolt_main.c,
-				tools/fightsim-spike/build.sh,
-				tools/fightsim-spike/build/spike,
-				tools/fightsim-spike/build/spike-bolt,
-				tools/fightsim-spike/main.c,
-				tools/fightsim-spike/platform_stubs.c,
+				"tools/fightsim-spike/bolt_main.c",
+				"tools/fightsim-spike/build.sh",
+				"tools/fightsim-spike/build/spike",
+				"tools/fightsim-spike/build/spike-bolt",
+				"tools/fightsim-spike/main.c",
+				"tools/fightsim-spike/platform_stubs.c",
 				tools/fightsim/balance.h,
 				tools/fightsim/budget.c,
 				tools/fightsim/budget.h,
@@ -232,7 +232,7 @@
 /* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
-		5E000000000000000000000A /* BrogueSE */ = {isa = PBXFileSystemSynchronizedRootGroup; exceptions = (5E0000000000000000000ED1 /* Exceptions for "BrogueSE" folder in "BrogueSE" target */, ); explicitFileTypes = {}; explicitFolders = (); path = BrogueSE; sourceTree = "<group>"; };
+		5E000000000000000000000A /* BrogueSE */ = {isa = PBXFileSystemSynchronizedRootGroup; exceptions = (5E0000000000000000000ED1 /* PBXFileSystemSynchronizedBuildFileExceptionSet */, ); explicitFileTypes = {}; explicitFolders = (); path = BrogueSE; sourceTree = "<group>"; };
 		C556D3FC2FD0CDEE00D81184 /* BrogueCE */ = {isa = PBXFileSystemSynchronizedRootGroup; explicitFileTypes = {}; explicitFolders = (); path = BrogueCE; sourceTree = "<group>"; };
 /* End PBXFileSystemSynchronizedRootGroup section */
 
