@@ -219,6 +219,11 @@ const color fungusTrampledLightColor ={10,  10,     10,     0,      50,         
 const color redFlashColor =         {100,   10,     10,     0,      0,          0,          0,      false};
 const color darknessPatchColor =    {-10,   -10,    -10,    0,      0,          0,          0,      false};
 const color darknessCloudColor =    {-20,   -20,    -20,    0,      0,          0,          0,      false};
+// iOS port (Brogue SE): smoke. smokeColor is the gray background tint of a smoked cell; smokeCloudColor
+// is the gentle negative light (milder than darknessCloudColor) that dims smoke -- the heavy opacity
+// comes from the thick-smoke line-of-sight block, not from this light.
+const color smokeColor =            {35,    35,     40,     0,      0,          0,          15,     false};
+const color smokeCloudColor =       {-10,   -10,    -10,    0,      0,          0,          0,      false};
 const color magicMapFlashColor =    {60,    20,     60,     0,      0,          0,          0,      false};
 const color sentinelLightColor =    {20,    20,     120,    10,     10,         60,         0,      true};
 const color telepathyColor =        {30,    30,     130,    0,      0,          0,          0,      false};
@@ -521,6 +526,11 @@ const floorTileType tileCatalog[NUMBER_TILETYPES] = {
  /*STEAM*/                      {' ',       0,                      &white,             35, 0,  DF_GAS_FIRE,0,0,                            0,  NO_LIGHT,       (T_CAUSES_DAMAGE), (TM_STAND_IN_TILE | TM_GAS_DISSIPATES_QUICKLY),                                  "a cloud of scalding steam", "scalding steam fills the air!"},
  /*DARKNESS_CLOUD*/             {' ',       0,                      0,                  35, 0,  DF_GAS_FIRE,0,0,                            0,  DARKNESS_CLOUD_LIGHT,   (0), (TM_STAND_IN_TILE),                                                                    "a cloud of supernatural darkness", "everything is obscured by an aura of supernatural darkness."},
  /*HEALING_CLOUD*/              {' ',       0,                      &darkRed,           35, 0,  DF_GAS_FIRE,0,0,                            0,  NO_LIGHT,       (T_CAUSES_HEALING), (TM_STAND_IN_TILE | TM_GAS_DISSIPATES_QUICKLY),                                 "a cloud of healing spores", "bloodwort spores, renowned for their healing properties, fill the air."},
+ // iOS port (Brogue SE): smoke. Non-flammable (ign% 0, no T_IS_FLAMMABLE) and harmless to touch (no T_CAUSES_*). It
+ // carries SMOKE_LIGHT (dims) but NOT T_OBSTRUCTS_VISION -- the thick-smoke sight block is gated by volume in the FOV
+ // scan instead, so smoke never stops bolts or muffles sound. Dissipation is volume-keyed in updateVolumetricMedia
+ // (no TM_GAS_DISSIPATES* flag here): thin clears fast, thick lingers.
+ /*SMOKE_GAS*/                  {' ',       0,                      &smokeColor,        35, 0,  DF_GAS_FIRE,0,0,                            0,  SMOKE_LIGHT,    (0), (TM_STAND_IN_TILE),                                                                            "a cloud of smoke",     "acrid smoke fills the air, obscuring everything."},
 
  // bloodwort pods              char        fore color              back color        prio ign% [fire,discover,promote]Type     promoteChance   glowLight       flags mechflags                                                                                     description             flavorText
  /*BLOODFLOWER_STALK*/  {G_BLOODWORT_STALK, &bloodflowerForeColor,&bloodflowerBackColor,10, 20, DF_PLAIN_FIRE,0,DF_BLOODFLOWER_PODS_GROW, 100,  NO_LIGHT,       (T_OBSTRUCTS_PASSABILITY | T_OBSTRUCTS_ITEMS | T_IS_FLAMMABLE), (TM_LIST_IN_SIDEBAR | TM_VISUALLY_DISTINCT), "a bloodwort stalk", "this spindly plant grows seed pods famous for their healing properties."},
@@ -623,6 +633,14 @@ unsigned long terrainFlags(pos p) {
     );
 }
 
+// iOS port (Brogue SE): smoke. True when a cell holds enough smoke to block line of sight. Smoke
+// deliberately does NOT carry the T_OBSTRUCTS_VISION terrain flag (which would also stop bolts and
+// muffle sound); instead the FOV scan and monster line-of-sight consult this volume-gated helper, so
+// thick smoke blocks SIGHT only, while thin smoke merely dims (via SMOKE_LIGHT). See SMOKE_THICK_VOLUME.
+boolean cellHasThickSmoke(pos loc) {
+    return (pmapAt(loc)->layers[GAS] == SMOKE_GAS && pmapAt(loc)->volume >= SMOKE_THICK_VOLUME);
+}
+
 unsigned long terrainMechFlags(pos loc) {
     return (
         tileCatalog[pmapAt(loc)->layers[DUNGEON]].mechFlags
@@ -700,6 +718,7 @@ dungeonFeature dungeonFeatureCatalog[NUMBER_DUNGEON_FEATURES] = {
     {ROT_GAS,                   GAS,        15,     0,      0},
     {STEAM,                     GAS,        325,    0,      0},
     {STEAM,                     GAS,        15,     0,      0},
+    {SMOKE_GAS,                 GAS,        25,     0,      0},  // iOS port (Brogue SE): per-turn smoke puff from burning terrain (additive across tiles)
     {METHANE_GAS,               GAS,        2,      0,      0},
     {EMBERS,                    SURFACE,    0,      0,      0},
     {URINE,                     SURFACE,    65,     25,     0},
@@ -823,6 +842,7 @@ dungeonFeature dungeonFeatureCatalog[NUMBER_DUNGEON_FEATURES] = {
     {CONFUSION_GAS,             GAS,        1000,   0,      0,  "", 0,  &confusionGasColor, 4},
     {PLAIN_FIRE,                SURFACE,    100,    37,     0,  "", EXPLOSION_FLARE_LIGHT},
     {DARKNESS_CLOUD,            GAS,        200,    0,      0},
+    {SMOKE_GAS,                 GAS,        250,    0,      0},  // iOS port (Brogue SE): thrown/uncorked captured-smoke screen (crosses the thick threshold at its core)
     {HOLE_EDGE,                 SURFACE,    300,    100,    0,  "", 0,  &darkBlue,3,0,          DF_HOLE_2},
     {LICHEN,                    SURFACE,    70,     60,     0},
 
@@ -1088,6 +1108,7 @@ const lightSource lightCatalog[NUMBER_LIGHT_KINDS] = {
     {&sacredGlyphColor,     {300, 300, 1},          0,      false},     // sacred glyph light
     {&descentLightColor,    {600, 600, 1},          0,      false},     // magical pit light
     {&sacrificeTargetColor, {800, 1200, 1},          0,      true},      // demonic statue light
+    {&smokeCloudColor,      {500, 500, 1},          0,      true},      // iOS port (Brogue SE): smoke (dims smoked cells)
 };
 
 // iOS port (iBrogue): the gold goblin's flee-component config (see docs/guides/reusable-components.md).

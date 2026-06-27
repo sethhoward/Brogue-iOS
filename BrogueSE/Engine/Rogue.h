@@ -520,6 +520,16 @@ typedef struct windowpos {
 
 #define VISIBILITY_THRESHOLD    50          // how bright cumulative light has to be before the cell is marked visible
 
+// iOS port (Brogue SE): smoke. A non-flammable gas emitted by burning terrain (PLAIN_FIRE) that
+// obscures vision. One threshold defines smoke's whole identity: below SMOKE_THICK_VOLUME it only
+// dims (via SMOKE_LIGHT's gentle negative light) and dissipates fast; at/above it smoke also blocks
+// line of sight (gated in the FOV scan + monster LOS) and dissipates slowly, so a real blaze walls
+// off an area for a handful of turns. Sight-only: smoke does NOT carry T_OBSTRUCTS_VISION, so it
+// never stops projectiles and never muffles sound (a screen breaks sight, not pursuit). See
+// IOS_MODIFICATIONS.md. These are playtest tuning dials -- adjust freely.
+#define SMOKE_THICK_VOLUME      15          // gas volume at/above which smoke blocks line of sight and lingers
+#define SMOKE_EMISSION_CHANCE   60          // % chance per turn a burning PLAIN_FIRE tile puffs smoke (substantive RNG)
+
 #define MACHINES_BUFFER_LENGTH  200
 
 #define INPUT_RECORD_BUFFER     1000        // the threshold size before flushing the record buffer to disk
@@ -956,6 +966,7 @@ enum tileType {
     STEAM,
     DARKNESS_CLOUD,
     HEALING_CLOUD,
+    SMOKE_GAS,                  // iOS port (Brogue SE): smoke emitted by burning terrain; obscures vision
 
     BLOODFLOWER_STALK,
     BLOODFLOWER_POD,
@@ -1095,6 +1106,7 @@ enum lightType {
     SACRED_GLYPH_LIGHT,
     DESCENT_LIGHT,
     DEMONIC_STATUE_LIGHT,
+    SMOKE_LIGHT,                // iOS port (Brogue SE): gentle negative light that dims smoked cells
     NUMBER_LIGHT_KINDS
 };
 
@@ -1177,6 +1189,7 @@ enum potionKind {
     POTION_STEAM,           // capture: steam. Thrown/uncorked: scalding steam cloud
     POTION_ICE,             // capture: ice. Thrown: freezes the struck creature (mirrors the frost staff)
     POTION_WATER,           // capture: deep/shallow water. Thrown/uncorked: a large flood puddle
+    POTION_SMOKE,           // capture: smoke. Thrown/uncorked: a vision-obscuring smoke screen (sight only)
 };
 
 enum weaponKind {
@@ -1647,6 +1660,7 @@ unsigned long terrainFlags(pos loc);
 unsigned long terrainMechFlags(pos loc);
 
 boolean cellHasTerrainFlag(pos loc, unsigned long flagMask);
+boolean cellHasThickSmoke(pos loc); // iOS port (Brogue SE): thick smoke blocks line of sight (sight only)
 boolean cellHasTMFlag(pos loc, unsigned long flagMask);
 
 boolean cellHasTerrainType(pos loc, enum tileType terrain);
@@ -1931,6 +1945,7 @@ enum dungeonFeatureTypes {
     DF_ROT_GAS_PUFF,
     DF_STEAM_PUFF,
     DF_STEAM_ACCUMULATION,
+    DF_SMOKE_ACCUMULATION,      // iOS port (Brogue SE): per-turn smoke puff from a burning PLAIN_FIRE tile
     DF_METHANE_GAS_PUFF,
     DF_SALAMANDER_FLAME,
     DF_URINE,
@@ -2049,6 +2064,7 @@ enum dungeonFeatureTypes {
     DF_CONFUSION_GAS_CLOUD_POTION,
     DF_INCINERATION_POTION,
     DF_DARKNESS_POTION,
+    DF_SMOKE_POTION,            // iOS port (Brogue SE): thrown/uncorked captured-smoke screen
     DF_HOLE_POTION,
     DF_LICHEN_PLANTED,
 

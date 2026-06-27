@@ -7041,6 +7041,11 @@ static boolean shatterPotionAtLoc(item *theItem, short x, short y, boolean fiery
             spawnDungeonFeature(x, y, &dungeonFeatureCatalog[DF_STEAM_PUFF], true, false);
             shatterMsg = "the flask shatters and a searing cloud of steam boils out!";
             break;
+        case POTION_SMOKE:
+            // iOS port (Brogue SE): thrown captured smoke -> a real (but short-lived) sight-blocking screen.
+            spawnDungeonFeature(x, y, &dungeonFeatureCatalog[DF_SMOKE_POTION], true, false);
+            shatterMsg = "the flask shatters and a billowing screen of smoke boils out!";
+            break;
         case POTION_WATER:
             spawnDungeonFeature(x, y, &dungeonFeatureCatalog[DF_FLOOD], true, false);
             shatterMsg = "the flask shatters and water gushes out, flooding the area!";
@@ -7157,6 +7162,11 @@ static short emptyBottleCaptureKindForTile(short x, short y, const char **flavor
             case DARKNESS_CLOUD:
                 *flavorText = "the bottle swallows a wisp of darkness; light bends around the stopper.";
                 return POTION_DARKNESS;
+            case SMOKE_GAS:
+                // iOS port (Brogue SE): capture smoke into a throwable screen. Bottle scarcity + single use
+                // is the cost (no fire-free repeatable screen); see emptyBottleCaptureKindForTile callers.
+                *flavorText = "acrid smoke pours into the bottle and roils against the glass.";
+                return POTION_SMOKE;
             case HEALING_CLOUD:
                 // iOS port (iBrogue): capturing wort always yields the wort cloud potion (even in runs
                 // where its themed set is otherwise absent); fillEmptyBottle un-hides the kind.
@@ -9601,6 +9611,12 @@ boolean drinkPotion(item *theItem) {
             message("scalding steam boils out of the open flask!", 0);
             spawnDungeonFeature(player.loc.x, player.loc.y, &dungeonFeatureCatalog[DF_STEAM_PUFF], true, false);
             break;
+        case POTION_SMOKE:
+            // iOS port (Brogue SE): uncorked in hand, smoke blooms around you -- harmless, but you're now
+            // socked in too (thick smoke blinds you and chokes your own light). Usually you want to THROW it.
+            message("acrid smoke billows out of the open flask, and the world vanishes into haze!", 0);
+            spawnDungeonFeature(player.loc.x, player.loc.y, &dungeonFeatureCatalog[DF_SMOKE_POTION], true, false);
+            break;
         case POTION_ICE:
             // Uncorked in hand: a freezing cloud blooms around you (the frost cloud's T_CAUSES_FREEZE
             // freezes you as the turn resolves), and any water underfoot ices over.
@@ -10277,7 +10293,7 @@ void shuffleFlavors() {
     // never generated and only ever exist already-known (the bottle creates them identified), so keep
     // their kinds permanently identified -- they never join the potion-ID guessing pool.
     {
-        const short captureOnlyKinds[] = {POTION_ACID, POTION_WEBBING, POTION_STEAM, POTION_ICE, POTION_WATER};
+        const short captureOnlyKinds[] = {POTION_ACID, POTION_WEBBING, POTION_STEAM, POTION_ICE, POTION_WATER, POTION_SMOKE};
         for (i = 0; i < (short)(sizeof(captureOnlyKinds) / sizeof(captureOnlyKinds[0])); i++) {
             potionTable[captureOnlyKinds[i]].identified = true;
             potionTable[captureOnlyKinds[i]].magicPolarityRevealed = true;

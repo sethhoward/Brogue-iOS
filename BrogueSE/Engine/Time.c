@@ -1621,7 +1621,18 @@ static void updateVolumetricMedia() {
                     refreshDungeonCell((pos){ i, j });
                 }
                 if (pmap[i][j].volume > 0) {
-                    if (tileCatalog[pmap[i][j].layers[GAS]].mechFlags & TM_GAS_DISSIPATES_QUICKLY) {
+                    // iOS port (Brogue SE): smoke dissipates by volume rather than by a fixed flag. Thin smoke
+                    // (wisps, fringe, the tail of a thinning cloud) clears fast like steam; thick smoke -- a real
+                    // sight-blocking screen -- lingers, so the dense core holds for a handful of turns and then
+                    // crumbles quickly once it drops below the threshold. One number (SMOKE_THICK_VOLUME) governs
+                    // both opacity (the FOV sight block) and persistence here. rand_percent keeps it deterministic.
+                    if (pmap[i][j].layers[GAS] == SMOKE_GAS) {
+                        if (newGasVolume[i][j] >= SMOKE_THICK_VOLUME) {
+                            newGasVolume[i][j] -= (rand_percent(20) ? 1 : 0);
+                        } else {
+                            newGasVolume[i][j] -= (rand_percent(50) ? 1 : 0);
+                        }
+                    } else if (tileCatalog[pmap[i][j].layers[GAS]].mechFlags & TM_GAS_DISSIPATES_QUICKLY) {
                         newGasVolume[i][j] -= (rand_percent(50) ? 1 : 0);
                     } else if (tileCatalog[pmap[i][j].layers[GAS]].mechFlags & TM_GAS_DISSIPATES) {
                         newGasVolume[i][j] -= (rand_percent(20) ? 1 : 0);
@@ -1852,6 +1863,14 @@ void updateEnvironment() {
         for (j=0; j<DROWS; j++) {
             if (cellHasTerrainFlag((pos){ i, j }, T_IS_FIRE) && !(pmap[i][j].flags & CAUGHT_FIRE_THIS_TURN)) {
                 exposeTileToFire(i, j, false);
+                // iOS port (Brogue SE): smoke. A burning PLAIN_FIRE tile (ordinary burning terrain -- not gas-fire
+                // flashes, brimstone, or explosions) puffs a little smoke into the gas layer each turn. The volumetric
+                // system pools puffs from many burning tiles, so a bigger blaze makes more smoke ("additive"); smoke is
+                // non-flammable so it just hangs over the fire and drifts outward, lingering after the flames die.
+                // rand_percent is substantive RNG, so the emission replays deterministically from saved input.
+                if (pmap[i][j].layers[SURFACE] == PLAIN_FIRE && rand_percent(SMOKE_EMISSION_CHANCE)) {
+                    spawnDungeonFeature(i, j, &(dungeonFeatureCatalog[DF_SMOKE_ACCUMULATION]), true, false);
+                }
                 for (direction=0; direction<4; direction++) {
                     newX = i + nbDirs[direction][0];
                     newY = j + nbDirs[direction][1];

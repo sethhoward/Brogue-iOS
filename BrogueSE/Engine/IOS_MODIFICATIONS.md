@@ -32,6 +32,63 @@ See `BrogueCE/Engine/IOS_MODIFICATIONS.md` (faithful CE) and
 
 ## Change log
 
+### 2026-06-27 — Smoke: burning terrain emits a vision-obscuring gas (new content)
+
+**What.** A new gas, `SMOKE_GAS`, emitted by ordinary burning terrain. It obscures vision in two tiers
+governed by a single threshold (`SMOKE_THICK_VOLUME`, default 15):
+- **Thin smoke (< threshold)** only *dims* the cell (a gentle negative light, `SMOKE_LIGHT` /
+  `smokeCloudColor` `-10`, milder than the supernatural darkness cloud's `-20`) and **dissipates fast**
+  (~50%/turn, like steam).
+- **Thick smoke (≥ threshold)** also **blocks line of sight** and **dissipates slowly** (~20%/turn), so a
+  real blaze walls off an area for a handful of turns and then the core crumbles once it thins.
+
+It's **additive**: each burning `PLAIN_FIRE` tile rolls (`SMOKE_EMISSION_CHANCE`, default 60%) to puff a
+low-volume `DF_SMOKE_ACCUMULATION` into the gas layer each turn, and the volumetric system pools puffs from
+many tiles — a bigger fire makes proportionally more smoke. Only `PLAIN_FIRE` (ordinary burning terrain)
+smokes; gas-fire flashes, brimstone, and explosions do not (keeps firebolt spam from whiting out a fight).
+Smoke is **non-flammable** and does **no damage** — purely an obscuring effect.
+
+**Symmetric, with built-in counter-pressure.** Smoke blocks the player's and monsters' sight equally
+(monsters perceive the player via the player FOV grid `IN_FIELD_OF_VIEW`, which the gate below feeds). The
+costs that keep it from being a free escape: smoke comes *from dangerous fire*; standing in thick smoke
+blinds **you** too and chokes your own light; and — crucially — smoke does **not** muffle sound (see below),
+so a screen breaks line of sight but a pursuer can still *hear* you via the SE noise system. (Grilled design;
+see the Q&A captured in the design notes.)
+
+**Sight-only, not a wall.** Smoke deliberately carries **no `T_OBSTRUCTS_VISION` terrain flag**. Instead a
+volume-gated helper `cellHasThickSmoke()` (`Globals.c`, declared in `Rogue.h`) is consulted in the FOV
+shadowcaster `scanOctantFOV` (`Movement.c`, both the init and loop obstruction checks) **only when the scan
+is a vision query** (`forbiddenTerrain & T_OBSTRUCTS_VISION`). Consequences, all intended:
+- Player FOV, monster FOV, and **light propagation** (all route through `scanOctantFOV`) honor the block —
+  so thick smoke is opaque to sight and chokes light.
+- **Projectiles pass through** (bolts/lightning/arrows/blink use `getImpactLoc`/`getLineCoordinates`, which
+  test the terrain flag directly — untouched), and **sound carries through** (the noise cost map keys off
+  `T_OBSTRUCTS_VISION`, which smoke lacks). Monster↔monster LOS (`openPathBetween`) is likewise unaffected.
+
+**Bottle capture/release.** The SE empty bottle can capture smoke (`emptyBottleCaptureKindForTile` →
+`POTION_SMOKE`, a frequency-0 capture-only potion added to all three variant `potionTable`s and the
+`captureOnlyKinds` auto-ID list). Thrown (`shatterPotionAtLoc`) or uncorked in hand it releases a real but
+short-lived screen via `DF_SMOKE_POTION` (`{SMOKE_GAS, GAS, 250, 0, 0}`). The cost is the bottle economy
+itself — scarce + single-use — not a new safeguard; release potency is fixed (doesn't scale to captured
+volume), like every other captured gas.
+
+**Determinism / save-safety.** Smoke is fully state-driven: the per-turn emission rolls with `rand_percent`
+(substantive RNG) in `updateEnvironment`'s fire loop, and volume lives in `pmap[][].volume`, reconstructed
+deterministically each turn — never serialized. The dimming/sight-block are pure reads of that state (no
+RNG). `updateVolumetricMedia` already runs before the FOV/light recompute, so smoke and sight agree within
+the turn. Adding the `SMOKE_GAS`/`SMOKE_LIGHT`/`DF_SMOKE_*`/`POTION_SMOKE` enum entries (each paired with its
+parallel catalog/table row) doesn't touch save format (recordings store inputs, not tile indices).
+
+**Files.** `Rogue.h` (constants `SMOKE_THICK_VOLUME`/`SMOKE_EMISSION_CHANCE`; `SMOKE_GAS`, `SMOKE_LIGHT`,
+`DF_SMOKE_ACCUMULATION`, `DF_SMOKE_POTION`, `POTION_SMOKE` enums; `cellHasThickSmoke` proto). `Globals.c`
+(`smokeColor`/`smokeCloudColor`, the `SMOKE_LIGHT` light row, the `SMOKE_GAS` tile row, the two `DF_SMOKE_*`
+catalog rows, `cellHasThickSmoke`). `Globals{Brogue,BulletBrogue,RapidBrogue}.c` (the `"smoke"` potion row).
+`Time.c` (emission hook in `updateEnvironment`; volume-keyed dissipation in `updateVolumetricMedia`).
+`Movement.c` (the `scanOctantFOV` sight gate). `Items.c` (capture, throw-release, quaff-release, capture-only
+list). All marked `// iOS port (Brogue SE):`. Tuning dials: `SMOKE_THICK_VOLUME`, `SMOKE_EMISSION_CHANCE`,
+the `DF_SMOKE_ACCUMULATION`/`DF_SMOKE_POTION` volumes, and the two dissipation rates. **Deferred v2 dials:**
+ember-emission (longer haze), release potency scaling to captured volume, smoke issuing its own noise tell.
+
 ### 2026-06-25 — Status-blink overlays: confused / on-fire / stunned tells on the map (new content)
 
 **What.** A creature (or the player) now shows a blinking glyph over its cell while afflicted:

@@ -2516,8 +2516,12 @@ void scanOctantFOV(char grid[DCOLS][DROWS], short xLoc, short yLoc, short octant
     x = loc.x + columnsRightFromOrigin;
     y = loc.y + iStart;
     betweenOctant1andN(&x, &y, loc.x, loc.y, octant);
+    // iOS port (Brogue SE): smoke. When this scan is a vision query (forbiddenTerrain includes
+    // T_OBSTRUCTS_VISION -- player FOV, monster FOV, light propagation), thick smoke blocks sight too.
+    // Passability-only scans are unaffected, and smoke carries no terrain flag, so projectiles/sound pass through.
     boolean currentlyLit = coordinatesAreInMap(x, y) && !(cellHasTerrainFlag((pos){ x, y }, forbiddenTerrain) ||
-                                                          (pmap[x][y].flags & forbiddenFlags));
+                                                          (pmap[x][y].flags & forbiddenFlags) ||
+                                                          ((forbiddenTerrain & T_OBSTRUCTS_VISION) && cellHasThickSmoke((pos){ x, y })));
     for (i = iStart; i <= iEnd; i++) {
         x = loc.x + columnsRightFromOrigin;
         y = loc.y + i;
@@ -2526,7 +2530,8 @@ void scanOctantFOV(char grid[DCOLS][DROWS], short xLoc, short yLoc, short octant
             // We're off the map -- here there be memory corruption.
             continue;
         }
-        cellObstructed = (cellHasTerrainFlag((pos){ x, y }, forbiddenTerrain) || (pmap[x][y].flags & forbiddenFlags));
+        cellObstructed = (cellHasTerrainFlag((pos){ x, y }, forbiddenTerrain) || (pmap[x][y].flags & forbiddenFlags)
+                          || ((forbiddenTerrain & T_OBSTRUCTS_VISION) && cellHasThickSmoke((pos){ x, y }))); // iOS port (Brogue SE): thick smoke blocks sight
         // if we're cautious on walls and this is a wall:
         if (cautiousOnWalls && cellObstructed) {
             // (x2, y2) is the tile one space closer to the origin from the tile we're on:
