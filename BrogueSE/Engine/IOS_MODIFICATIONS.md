@@ -128,14 +128,58 @@ ember-emission (longer haze), release potency scaling to captured volume, smoke 
   heard something" `?` from the noise system).
 - **On fire** (`STATUS_BURNING`, *not* the `MONST_FIERY` trait — matching the light/extinguish systems) →
   the **flame** glyph `G_FIRE`.
-- **Paralyzed / stunned** (`STATUS_PARALYZED`) → `*`, "seeing stars" yellow.
+- **Paralyzed / stunned** (`STATUS_PARALYZED`) → a true **star** `G_STUN_STAR` (★, U+2605), "seeing stars"
+  yellow. *(Bugfix 2026-06-27: was an ASCII `'*'`, which is identical to the gold-pile glyph `G_GOLD` — a
+  paralyzed creature read as a pile of money. Monaco has no star glyph, so `G_STUN_STAR` is a new cosmetic
+  glyph appended to the `displayGlyph` enum (`Rogue.h`), mapped to U+2605 in `ce_glyphToUnicode` (`SEBridge.mm`),
+  and classified as an ArialUnicodeMS glyph in `RogueScene.swift` — the same Arial-Unicode path the ring /
+  foliage glyphs already use, since Monaco can't render it. Swap the codepoint to a sparkle (✦/✴/✶) in one
+  line if a burst reads better than a filled star.)*
 
-One tell at a time, by priority: burning > paralyzed > confused. Applies to the player too.
+- **Confused** (`STATUS_CONFUSED`) → an inverted **`¿`** `G_INVERTED_QUESTION`, psychotropic purple.
+  *(2026-06-27: was an upright `'?'` distinguished from the white noise-system investigate `?` by purple tint
+  alone; the inverted glyph differs in shape too. `¿` (U+00BF) is present in Monaco, so unlike the star it
+  renders through the default text path — just the enum constant (`Rogue.h`) + `ce_glyphToUnicode` map
+  (`SEBridge.mm`), no `RogueScene.swift` change.)*
+
+- **Healing** → a rose-pink **`♥`** `G_HEART` (warm/wort family, but lifted lighter + pinker than the dim
+  `darkRed` healing cloud so it separates from the spores it sits in). *(2026-06-27.)* Two triggers, lowest priority (a threat/affliction
+  is the more urgent read): (1) a **discrete heal** just landed — every `heal()` call (potion/charm, staff-of-
+  healing bolt, bloodwort-pod panacea, on-hit mercy heal, resurrection), shown briefly even if it topped the
+  creature off; **passive regeneration is excluded** because it adds HP directly (`currentHP += regenPerTurn`)
+  and never calls `heal()`, so creatures don't wear a permanent heart while slowly recovering. (2) **Actively
+  gaining HP from bloodwort spores** underfoot (`T_CAUSES_HEALING`), shown only while below max HP. The discrete-
+  heal trigger is a small pointer-keyed `gHealMarks[]` table in `IO.c` (set by `cosmeticMarkHealed()` from
+  `heal()` on a real HP gain, **debounced**: it stamps `absoluteTurnNumber` and the heart shows while within
+  `HEAL_BLINK_TURNS` = 2 turns — a turn *window*, not a per-refresh countdown, because the rebuild fires several
+  times in some turns, e.g. the paralysis watch sub-loop, so a countdown would flash off mid-turn; rapid
+  re-heals in one turn just re-stamp the same turn, no flicker); the wort trigger is a
+  live terrain check, no state. `♥` (U+2665) isn't in Monaco, so like the star it routes through ArialUnicodeMS
+  (the renderer's `.arialSymbol` glyph type, shared with `G_STUN_STAR`).
+
+- **Protected** (`STATUS_SHIELDED` — staff/charm of protection, dar-priestess/sentinel shielding bolts) → a
+  green crest **`◈`** `G_SHIELD_CREST`. *(2026-06-27.)* A persistent `status[]` value, so it needs no marker —
+  just a check in `statusBlinkGlyphFor`, ranked above healing (your damage being absorbed is the more
+  actionable read). No true shield glyph exists in Monaco or Arial Unicode (🛡/⛨ are absent, and the emoji
+  couldn't be tinted), so `◈` (U+25C8) is the geometric stand-in; like the star/heart it routes through
+  ArialUnicodeMS (`.arialSymbol`).
+
+One tell at a time, by priority: burning > paralyzed > confused > shielded > healing. Applies to the player too.
+
+**Hasted → a fading after-image** *(2026-06-27)*, a **separate** effect from the one-tell status glyphs (it can
+coexist with them). When a visible `STATUS_HASTED` creature (player included) moves, it leaves a single
+electric-cyan ghost of its own glyph on the tile it just vacated, dimming as it ages out
+(`NOISE_HASTE_TRAIL_FRAMES`). A fast mover drops one ghost per step, so a short fading train trails it — motion
+without a full streak. A new `CE_SPEED_TRAIL` cosmetic kind (single-cell; `origin` = the vacated tile); movement
+is detected per-turn in `cosmeticRefreshStatusBlinks` via a pointer-keyed `gHasteTrack[]` last-position table
+(`cosmeticTrackHasteTrails`), capped at `NOISE_HASTE_TRAIL_MAX_DIST` so a non-walk jump doesn't drop a ghost
+across the map. Cosmetic-only and suppressed under automation/playback (positions jump there), so it's
+display-only and replay-safe.
 
 **Reuse.** Built entirely on the existing noise-system cosmetic-overlay layer (the `?` investigate-blink /
 `!` alert-blink): a new `CE_STATUS_BLINK` effect kind, a `cosmeticRefreshStatusBlinks()` sibling to
 `cosmeticRefreshInvestigateBlinks()` (creature-keyed, follows the creature, despawns when the status/visibility
-ends), and three tint colors. It pulses in the same global unison phase and is rendered in a final pass so a
+ends), and four tint colors. It pulses in the same global unison phase and is rendered in a final pass so a
 status tell paints **over** any investigate `?`/alert `!` on the same cell (the affliction is the more
 important read). All in `IO.c`; per-turn rebuild called from `Time.c` (`playerTurnEnded`) and `Movement.c`
 (travel-end), prototype in `Rogue.h`.
@@ -144,13 +188,16 @@ important read). All in `IO.c`; per-turn rebuild called from `Time.c` (`playerTu
 while the player is paralyzed/frozen (the engine spins through forced "watch helplessly" turns in
 `playerTurnEnded`, `Time.c`). So a self-stunned player's `*` wouldn't animate. Fixed by ticking the cosmetic
 layer (`cosmeticRefreshStatusBlinks` + `advanceCosmeticAnimations`) across that watch-pause — the single
-25-frame pause became a few short sub-pauses so the tell actually blinks while you're locked out. (Monster
+25-frame pause became a few short sub-pauses so the tell (the ★) actually blinks while you're locked out. (Monster
 paralysis always worked — the idle loop runs between the player's turns.)
 
 **Determinism / save-safety.** Display-only — the cosmetic layer runs under `RNG_COSMETIC`, draws nothing
 into game state, and is suppressed during automation / playback fast-forward. No engine-state or save impact.
 Marked `// iOS port (Brogue SE):`. (`STATUS_FROZEN` is deliberately *not* included — frozen already has its
-own strong icy tint in `getCellAppearance`; easy to add a `*` there too if wanted.)
+own strong icy tint in `getCellAppearance`; easy to add a `*` there too if wanted.) The healing tell's
+`cosmeticMarkHealed()` hook in `heal()` (`Items.c`) is the one touch outside `IO.c`: it only writes the
+pointer-keyed `gHealMarks[]` cosmetic table (never read by game logic or the substantive RNG) and bails early
+under automation/playback, so it stays display-only and replay-safe.
 
 ### 2026-06-25 — Staff "glow-up": lightning stun+chain and firebolt bloom at netEnchant ≥ 5 (new content)
 

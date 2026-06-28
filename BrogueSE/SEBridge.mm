@@ -42,6 +42,10 @@
 // header). Mirrored here for the text-mode glyph translation below.
 // ---------------------------------------------------------------------------
 #define U_MIDDLE_DOT          0x00b7
+#define U_BLACK_STAR          0x2605 // iOS port (Brogue SE): G_STUN_STAR (paralyzed status-blink). Not in Monaco; RogueScene routes it through ArialUnicodeMS (like the ring/foliage glyphs).
+#define U_INVERTED_QUESTION   0x00bf // iOS port (Brogue SE): G_INVERTED_QUESTION (confused status-blink). Present in Monaco, so it renders through the default text path.
+#define U_BLACK_HEART         0x2665 // iOS port (Brogue SE): G_HEART (healing status-blink). Not in Monaco; RogueScene routes it through ArialUnicodeMS (like the star).
+#define U_SHIELD_CREST        0x25c8 // iOS port (Brogue SE): G_SHIELD_CREST (protected status-blink). Not in Monaco; RogueScene routes it through ArialUnicodeMS (like the star/heart).
 #define U_FOUR_DOTS           0x2237
 #define U_DIAMOND             0x25c7
 #define U_FLIPPED_V           0x22CF
@@ -291,6 +295,10 @@ static unsigned int ce_glyphToUnicode(enum displayGlyph glyph) {
         case G_SAC_ALTAR: return '|';
         case G_ORB_ALTAR: return '|';
         case G_LEFT_TRIANGLE: return U_LEFT_TRIANGLE;
+        case G_STUN_STAR: return U_BLACK_STAR; // iOS port (Brogue SE): paralyzed status-blink star (see Rogue.h G_STUN_STAR).
+        case G_INVERTED_QUESTION: return U_INVERTED_QUESTION; // iOS port (Brogue SE): confused status-blink (see Rogue.h G_INVERTED_QUESTION).
+        case G_HEART: return U_BLACK_HEART; // iOS port (Brogue SE): healing status-blink (see Rogue.h G_HEART).
+        case G_SHIELD_CREST: return U_SHIELD_CREST; // iOS port (Brogue SE): protected status-blink (see Rogue.h G_SHIELD_CREST).
         default: return '?';
     }
 }

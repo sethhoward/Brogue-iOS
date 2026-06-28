@@ -4250,7 +4250,11 @@ void haste(creature *monst, short turns) {
 
 void heal(creature *monst, short percent, boolean panacea) {
     char buf[COLS], monstName[COLS];
+    const short hpBefore = monst->currentHP; // iOS port (Brogue SE): so we can flag the cosmetic '♥' tell only on a real gain
     monst->currentHP = min(monst->info.maxHP, monst->currentHP + percent * monst->info.maxHP / 100);
+    if (monst->currentHP > hpBefore) {
+        cosmeticMarkHealed(monst); // iOS port (Brogue SE): a discrete heal blinks a green heart (passive regen never reaches heal(), so it stays quiet)
+    }
     if (panacea) {
         if (monst->status[STATUS_HALLUCINATING] > 1) {
             monst->status[STATUS_HALLUCINATING] = 1;

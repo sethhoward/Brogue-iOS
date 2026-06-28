@@ -370,6 +370,9 @@
 // tick that drives water/hallucination (shuffleTerrainColors(_, true) from the platform bridge while
 // colorsDance is on). This is the half-cycle in idle frames: glyph for N frames, '?' for N frames.
 #define NOISE_INVESTIGATE_BLINK_FRAMES  30  // ~0.5s per half at 60Hz (a slow, readable blink)
+#define NOISE_HASTE_TRAIL_FRAMES        16  // iOS port (Brogue SE): lifetime (frames) of a hasted creature's fading "blink dash" contrail
+#define NOISE_HASTE_TRAIL_STRENGTH      70  // iOS port (Brogue SE): peak brightness (0-100) of the contrail, just behind the creature
+#define NOISE_HASTE_TRAIL_MAX_DIST      8   // iOS port (Brogue SE): skip the trail past this Chebyshev jump (not an ordinary walk -- avoids a map-spanning streak)
 // When a VISIBLE monster locks onto you (hears you loud / spots you), a reddish '!' rides its glyph -- the
 // alert counterpart to the investigate '?'. Unlike the '?' (which lives as long as MB_INVESTIGATING), the
 // '!' is bounded: it follows the monster for this many player-turns, then fades. Adjustable; baseline 2.
@@ -681,7 +684,11 @@ enum displayGlyph {
     G_PIPES,
     G_SAC_ALTAR,
     G_ORB_ALTAR,
-    G_LEFT_TRIANGLE
+    G_LEFT_TRIANGLE,
+    G_STUN_STAR, // iOS port (Brogue SE): a true star glyph for the paralyzed/stunned status-blink overlay (was an ASCII '*', which collided with the gold-pile glyph). Cosmetic-only and appended at the enum tail, so it is never recorded and stays save-safe.
+    G_INVERTED_QUESTION, // iOS port (Brogue SE): an inverted '¿' for the confused status-blink overlay, so its shape (not just its purple tint) differs from the white noise-system investigate '?'. Cosmetic-only, appended at the enum tail -> save-safe.
+    G_HEART, // iOS port (Brogue SE): a '♥' for the healing status-blink overlay (creature being healed, or standing in bloodwort spores). Cosmetic-only, appended at the enum tail -> save-safe. Like G_STUN_STAR, not in Monaco -> rendered via ArialUnicodeMS.
+    G_SHIELD_CREST // iOS port (Brogue SE): a '◈' crest for the protected (STATUS_SHIELDED) status-blink overlay. Cosmetic-only, appended at the enum tail -> save-safe. Not in Monaco -> rendered via ArialUnicodeMS.
 };
 
 enum graphicsModes {
@@ -3717,7 +3724,8 @@ extern "C" {
     void endCoalescedImpactRipples(pos origin); // iOS port (Brogue SE): emit ONE coalesced, flare-delayed impact ripple if any were suppressed
     void cosmeticSpawnRippleAggravate(pos source, short radius); // iOS port (Brogue SE): cosmetic layer -- level-wide aggravate ripple (alarm trap / aggravate scroll)
     void cosmeticRefreshInvestigateBlinks(void); // iOS port (Brogue SE): cosmetic layer -- per-turn '?' blink rebuild
-    void cosmeticRefreshStatusBlinks(void); // iOS port (Brogue SE): cosmetic layer -- per-turn confused/burning/stun blink rebuild
+    void cosmeticRefreshStatusBlinks(void); // iOS port (Brogue SE): cosmetic layer -- per-turn confused/burning/stun/healing blink rebuild
+    void cosmeticMarkHealed(const creature *monst); // iOS port (Brogue SE): cosmetic layer -- flag a creature as just-healed so the '♥' tell blinks for a couple turns
     void advanceCosmeticAnimations(void);   // iOS port (Brogue SE): cosmetic layer -- one tick (from the platform idle loop)
     void clearCosmeticAnimations(void);     // iOS port (Brogue SE): cosmetic layer -- drop all (level/playback reset)
     void recordPlayerNoiseRippleIfNeeded(void); // iOS port (Brogue SE): spawn the player ripple iff a visible unaware enemy is near earshot
