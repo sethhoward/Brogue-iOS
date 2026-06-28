@@ -473,6 +473,23 @@ boolean pauseForMilliseconds(short milliseconds, PauseBehavior behavior) {
     reportAtTitleIfChanged();
 
     [NSThread sleepForTimeInterval:milliseconds / 1000.];
+
+    // iOS port (Brogue SE): keep the cosmetic layer (status blinks, dash trails) animating through engine-driven
+    // automation -- rest / travel / auto-explore -- where the idle pump (nextKeyOrMouseEvent's colorsDance tick)
+    // never runs, so the blink clock would otherwise freeze and the tells would vanish/reset. Throttled to ~60Hz
+    // of real time so a fast rest loop (sub-ms turns) doesn't strobe the blink. Skipped during fast replay.
+    if ((rogue.automationActive || rogue.autoPlayingLevel)
+        && !(rogue.playbackMode && rogue.playbackFastForward)) {
+
+        static NSTimeInterval lastCosmeticPump = 0;
+        const NSTimeInterval now = NSProcessInfo.processInfo.systemUptime;
+        if (now - lastCosmeticPump >= 1.0 / 60.0) {
+            lastCosmeticPump = now;
+            advanceCosmeticAnimations();
+            commitDraws();
+        }
+    }
+
     seTakeBackgroundSnapshotIfRequested(); // iOS port (Brogue SE): snapshot mid-animation (e.g. resting)
     if (brogueSETerminationRequested) {
         return true; // wake the title loop so it can observe the request

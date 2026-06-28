@@ -184,20 +184,34 @@ status tell paints **over** any investigate `?`/alert `!` on the same cell (the 
 important read). All in `IO.c`; per-turn rebuild called from `Time.c` (`playerTurnEnded`) and `Movement.c`
 (travel-end), prototype in `Rogue.h`.
 
-**Player-during-paralysis fix.** The blink is normally driven by the platform idle loop, which is frozen
-while the player is paralyzed/frozen (the engine spins through forced "watch helplessly" turns in
-`playerTurnEnded`, `Time.c`). So a self-stunned player's `*` wouldn't animate. Fixed by ticking the cosmetic
-layer (`cosmeticRefreshStatusBlinks` + `advanceCosmeticAnimations`) across that watch-pause — the single
-25-frame pause became a few short sub-pauses so the tell (the ★) actually blinks while you're locked out. (Monster
-paralysis always worked — the idle loop runs between the player's turns.)
+**Animating during paralysis / rest / travel.** The blink clock (`gCosmeticBlinkTick`) is driven by the
+platform idle pump (`nextKeyOrMouseEvent`'s `colorsDance` tick), which doesn't run while the engine is spinning
+its own turn loop — forced "watch helplessly" paralysis turns, *and* rest / travel / auto-explore. Left alone
+the tells freeze, and (worse) the per-turn rebuild used to **deactivate** them under `automationActive`, so a
+heart/star would vanish for the whole rest and pop back at the end — read as a "reset." Fixed two ways: (1) the
+rebuild now keeps the tells up during interactive automation (only fast *replay* hard-suppresses); (2) the
+cosmetic layer is pumped through those stretches — `advanceCosmeticAnimations` + `commitDraws` from
+`pauseForMilliseconds` (`SEBridge.mm`), throttled to ~60 Hz of real time so a sub-millisecond rest loop doesn't
+strobe the blink — plus the existing paralysis-watch sub-pauses in `Time.c`. So the tell keeps a steady on/off
+pulse while you rest or travel. (Monster paralysis always animated — the idle loop runs between your turns.)
 
 **Determinism / save-safety.** Display-only — the cosmetic layer runs under `RNG_COSMETIC`, draws nothing
-into game state, and is suppressed during automation / playback fast-forward. No engine-state or save impact.
+into game state, and is hard-suppressed during playback fast-forward. No engine-state or save impact.
 Marked `// iOS port (Brogue SE):`. (`STATUS_FROZEN` is deliberately *not* included — frozen already has its
 own strong icy tint in `getCellAppearance`; easy to add a `*` there too if wanted.) The healing tell's
 `cosmeticMarkHealed()` hook in `heal()` (`Items.c`) is the one touch outside `IO.c`: it only writes the
 pointer-keyed `gHealMarks[]` cosmetic table (never read by game logic or the substantive RNG) and bails early
 under automation/playback, so it stays display-only and replay-safe.
+
+**Known minor nuisance (deliberately NOT fixed).** A status/investigate/alert tell on a cell touched by the
+per-cursor-move redraw (`refreshDungeonCell` / `hilitePath` / `hiliteCell`) — most visibly the creature you
+hover toward — blanks for up to one idle frame (~16ms) until `advanceCosmeticAnimations` repaints it. Two
+attempts to re-stamp the overlay from `mainInputLoop` both produced worse artifacts: running the whole
+compositor on every move stranded expanding ripple wavefronts on screen ("hanging"), and an additive glyph-only
+re-stamp got pinned on screen by `moveCursor`'s `saveDisplayBuffer`/`restoreDisplayBuffer` dance (the saved
+buffer captured the stamped `?`/`!`, which `restoreDisplayBuffer` then re-applied after the idle tick cleared
+them). The overlay layer compositing into the display buffer fundamentally fights `moveCursor`'s save/restore,
+so the momentary blank is accepted rather than chased. See KNOWN_CAVEATS.md.
 
 ### 2026-06-25 — Staff "glow-up": lightning stun+chain and firebolt bloom at netEnchant ≥ 5 (new content)
 

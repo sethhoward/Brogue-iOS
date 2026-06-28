@@ -2700,24 +2700,38 @@ static void cosmeticEnsureStatusBlink(creature *m) {
 }
 
 // iOS port (Brogue SE): rebuild the status-blink overlays -- a glyph that rides any VISIBLE creature (the
-// player included) carrying a confused / on-fire / paralyzed status (one tell at a time, by priority). Sibling
-// to cosmeticRefreshInvestigateBlinks: called once per turn, blinks in the same global unison phase, keyed by
-// creature pointer, suppressed during automation/playback. The lifecycle pass follows each blink to its
-// creature's new cell and refreshes its glyph (status may have changed), dropping it when the creature is gone,
-// no longer visible, or no longer afflicted.
+// player included) carrying a confused / on-fire / paralyzed / ... status (one tell at a time, by priority).
+// Sibling to cosmeticRefreshInvestigateBlinks: called once per turn, blinks in the same global unison phase,
+// keyed by creature pointer. The lifecycle pass follows each blink to its creature's new cell and refreshes its
+// glyph (status may have changed), dropping it when the creature is gone, no longer visible, or no longer
+// afflicted.
+//
+// The tells STAY UP during interactive automation (rest / travel / auto-explore) -- resting to heal is exactly
+// when you want to see the '♥' pulse -- and the cosmetic animator is pumped through that stretch from the
+// platform's pauseForMilliseconds (the idle blink clock doesn't run during automation). Only fast replay
+// hard-suppresses them.
 void cosmeticRefreshStatusBlinks(void) {
     short i;
-    if (rogue.automationActive || rogue.autoPlayingLevel || rogue.playbackFastForward) {
+    if (rogue.playbackFastForward) {
         for (i = 0; i < MAX_COSMETIC_EFFECTS; i++) {
             if (gCosmeticEffects[i].active && gCosmeticEffects[i].kind == CE_STATUS_BLINK) {
                 gCosmeticEffects[i].active = false;
             }
             gHealMarks[i].c = NULL;
-            gHasteTrack[i].c = NULL; // no dash trails across an automated/replayed stretch (positions jump)
+            gHasteTrack[i].c = NULL;
         }
         return;
     }
-    cosmeticTrackHasteTrails(); // spawn dash contrails for hasted creatures that moved this turn
+    if (rogue.automationActive || rogue.autoPlayingLevel) {
+        // Dash trails are interactive-only: while automating, the player can jump many cells between rebuilds,
+        // which would spawn a bogus map-spanning streak. Skip tracking and reset the table (the status-blink
+        // rebuild below still runs, so the tells stay up).
+        for (i = 0; i < MAX_COSMETIC_EFFECTS; i++) {
+            gHasteTrack[i].c = NULL;
+        }
+    } else {
+        cosmeticTrackHasteTrails(); // spawn dash contrails for hasted creatures that moved this turn
+    }
     // Lifecycle: follow + refresh valid blinks; drop the rest.
     for (i = 0; i < MAX_COSMETIC_EFFECTS; i++) {
         cosmeticEffect *e = &gCosmeticEffects[i];
