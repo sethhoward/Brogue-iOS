@@ -74,7 +74,7 @@ typedef struct balanceConfig {
     .seRampThreshold = 5, \
     /* Soft knee: raw-stat generalists keep a full 25% taper past the knee (growth, no cliff). Pike */ \
     /* is NOT enchant-capped -- caps barely touch it; its power is throughput, so it's slowed instead. */ \
-    .heavyWeaponCap      = { [BROADSWORD] = 9,  [WAR_AXE] = 10 }, \
+    .heavyWeaponCap      = { [BROADSWORD] = 10, [WAR_AXE] = 10 }, \
     .heavyWeaponSlopePct = { [BROADSWORD] = 25, [WAR_AXE] = 25 }, \
     .weaponRecoveryPct   = { [PIKE] = 200 }, /* pike: 2x recovery (win-rate) -- no enchant knee, by design */ \
     .penetrateDamagePct = 100, .passAttackDamagePct = 50, .reachDamagePct = 100, \

@@ -109,7 +109,7 @@ fixpt netEnchant(item *theItem) {
     // inverting the upgrade path (they stay ahead of sword/axe) or punishing continued enchanting. Derived
     // from the fight simulator; see docs/design/fight-simulator-findings.md.
     if (theItem->category & WEAPON) {
-        int knee = (theItem->kind == BROADSWORD) ? 9 : (theItem->kind == WAR_AXE) ? 10 : 0;
+        int knee = (theItem->kind == BROADSWORD) ? 10 : (theItem->kind == WAR_AXE) ? 10 : 0;
         if (knee > 0) {
             fixpt kneeFp = (fixpt)knee * FP_FACTOR;
             if (retval > kneeFp) {
