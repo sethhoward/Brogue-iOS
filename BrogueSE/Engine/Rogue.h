@@ -225,7 +225,9 @@
 #define NOISE_NEARFIELD_RADIUS          2 //1 - original value // ### <=this cost-distance = "right on top of you, unseen" (corner/
                                             // foliage/dark/blind): flat boost. Kept at 1 so an open-stone
                                             // approach's last tile doesn't auto-ping (stone stays stealthy).
-#define NOISE_NEARFIELD_BONUS           10  // the near-field detection boost
+#define NOISE_NEARFIELD_BONUS           20  // the near-field detection boost (additive %, applies to BOTH ringless
+                                            // and ring-of-awareness listeners, so a bump lifts close-range hearing
+                                            // equally for both -- raised 10->20 to turn up what's heard right on top of you)
 #define NOISE_FALLOFF_PER_TILE          2   // detection lost per effective tile beyond the near field (gentle
                                             // -> flat, directional pings inside the ear; the gate sets range)
 #define NOISE_DOOR_COST                 3   // extra sound-map cost to pass a closed door / foliage / smoke
