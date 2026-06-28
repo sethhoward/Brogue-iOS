@@ -626,7 +626,7 @@ const blueprint blueprintCatalog_Brogue[] = {
     {1,DEEPEST_LEVEL}, {40, 40},   0,      2,          0,                  (BP_NO_INTERIOR_FLAG), {
         {0,         STATUE_INERT,DUNGEON,       {3, 3},     3,          0,          -1,         MK_SENTINEL,    2,              0,          0,          (MF_NOT_IN_HALLWAY | MF_TREAT_AS_BLOCKING | MF_IN_VIEW_OF_ORIGIN)},
         {DF_ASH,    0,          0,              {2, 3},     0,          0,          -1,         0,              0,              0,          0,          0}}},
-    // iOS port (iBrogue): altars of insight -- force-built at depths 5 and 15 (see addMachines); occupies
+    // iOS port (iBrogue): altars of insight -- force-built at depths 6 and 12 (see addMachines); occupies
     // the variant-specific reward slot (index 72 = MT_INSIGHT_ALTAR). Force-only: no BP_REWARD, freq 0, so
     // it never enters the random reward raffle. The blueprint builds ONLY the carpeted room; the two altars
     // are then placed in addMachines in a fixed "s . o" arrangement (payment west, one-tile gap, insight

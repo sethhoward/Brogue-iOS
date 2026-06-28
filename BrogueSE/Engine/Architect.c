@@ -1859,16 +1859,16 @@ static void addMachines() {
         }
     }
 
-    // iOS port (iBrogue): guaranteed altars-of-insight reward rooms at depths 6 and 11.
+    // iOS port (iBrogue): guaranteed altars-of-insight reward rooms at depths 6 and 12.
     // The blueprint is a BP_ROOM machine and needs a gate site whose interior choke-size lands in the
     // {7,14} range; a level with no qualifying room can't fit it. Rather than silently skip (as the
     // amulet vault does), we track how many altars are *due* by the current depth and how many have
     // actually been built, and carry any unmet obligation forward: if depth 6 has no room we retry on
-    // 7, 8, ... until one is placed, and likewise for the depth-11 altar. The carry-forward is bounded: if
+    // 7, 8, ... until one is placed, and likewise for the depth-12 altar. The carry-forward is bounded: if
     // an altar still hasn't found a room by INSIGHT_ALTAR_MAX_DEPTH (20), the obligation is abandoned rather
     // than chased into the late dungeon. Deterministic (depth-driven, buildAMachine uses the substantive
     // RNG) and save-safe.
-    static const short insightAltarDepths[] = {6, 11};
+    static const short insightAltarDepths[] = {6, 12};
     const int insightAltarCount = sizeof(insightAltarDepths) / sizeof(insightAltarDepths[0]);
     const short INSIGHT_ALTAR_MAX_DEPTH = 20;
     if (rogue.depthLevel <= INSIGHT_ALTAR_MAX_DEPTH
