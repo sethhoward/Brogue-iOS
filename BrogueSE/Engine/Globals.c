@@ -219,6 +219,11 @@ const color fungusTrampledLightColor ={10,  10,     10,     0,      50,         
 const color redFlashColor =         {100,   10,     10,     0,      0,          0,          0,      false};
 const color darknessPatchColor =    {-10,   -10,    -10,    0,      0,          0,          0,      false};
 const color darknessCloudColor =    {-20,   -20,    -20,    0,      0,          0,          0,      false};
+// iOS port (Brogue SE): smoke. smokeColor is the gray background tint of a smoked cell; smokeCloudColor
+// is the gentle negative light (milder than darknessCloudColor) that dims smoke -- the heavy opacity
+// comes from the thick-smoke line-of-sight block, not from this light.
+const color smokeColor =            {35,    35,     40,     0,      0,          0,          15,     false};
+const color smokeCloudColor =       {-10,   -10,    -10,    0,      0,          0,          0,      false};
 const color magicMapFlashColor =    {60,    20,     60,     0,      0,          0,          0,      false};
 const color sentinelLightColor =    {20,    20,     120,    10,     10,         60,         0,      true};
 const color telepathyColor =        {30,    30,     130,    0,      0,          0,          0,      false};
@@ -521,6 +526,11 @@ const floorTileType tileCatalog[NUMBER_TILETYPES] = {
  /*STEAM*/                      {' ',       0,                      &white,             35, 0,  DF_GAS_FIRE,0,0,                            0,  NO_LIGHT,       (T_CAUSES_DAMAGE), (TM_STAND_IN_TILE | TM_GAS_DISSIPATES_QUICKLY),                                  "a cloud of scalding steam", "scalding steam fills the air!"},
  /*DARKNESS_CLOUD*/             {' ',       0,                      0,                  35, 0,  DF_GAS_FIRE,0,0,                            0,  DARKNESS_CLOUD_LIGHT,   (0), (TM_STAND_IN_TILE),                                                                    "a cloud of supernatural darkness", "everything is obscured by an aura of supernatural darkness."},
  /*HEALING_CLOUD*/              {' ',       0,                      &darkRed,           35, 0,  DF_GAS_FIRE,0,0,                            0,  NO_LIGHT,       (T_CAUSES_HEALING), (TM_STAND_IN_TILE | TM_GAS_DISSIPATES_QUICKLY),                                 "a cloud of healing spores", "bloodwort spores, renowned for their healing properties, fill the air."},
+ // iOS port (Brogue SE): smoke. Non-flammable (ign% 0, no T_IS_FLAMMABLE) and harmless to touch (no T_CAUSES_*). It
+ // carries SMOKE_LIGHT (dims) but NOT T_OBSTRUCTS_VISION -- the thick-smoke sight block is gated by volume in the FOV
+ // scan instead, so smoke never stops bolts or muffles sound. Dissipation is volume-keyed in updateVolumetricMedia
+ // (no TM_GAS_DISSIPATES* flag here): thin clears fast, thick lingers.
+ /*SMOKE_GAS*/                  {' ',       0,                      &smokeColor,        35, 0,  DF_GAS_FIRE,0,0,                            0,  SMOKE_LIGHT,    (0), (TM_STAND_IN_TILE),                                                                            "a cloud of smoke",     "acrid smoke fills the air, obscuring everything."},
 
  // bloodwort pods              char        fore color              back color        prio ign% [fire,discover,promote]Type     promoteChance   glowLight       flags mechflags                                                                                     description             flavorText
  /*BLOODFLOWER_STALK*/  {G_BLOODWORT_STALK, &bloodflowerForeColor,&bloodflowerBackColor,10, 20, DF_PLAIN_FIRE,0,DF_BLOODFLOWER_PODS_GROW, 100,  NO_LIGHT,       (T_OBSTRUCTS_PASSABILITY | T_OBSTRUCTS_ITEMS | T_IS_FLAMMABLE), (TM_LIST_IN_SIDEBAR | TM_VISUALLY_DISTINCT), "a bloodwort stalk", "this spindly plant grows seed pods famous for their healing properties."},
@@ -623,6 +633,14 @@ unsigned long terrainFlags(pos p) {
     );
 }
 
+// iOS port (Brogue SE): smoke. True when a cell holds enough smoke to block line of sight. Smoke
+// deliberately does NOT carry the T_OBSTRUCTS_VISION terrain flag (which would also stop bolts and
+// muffle sound); instead the FOV scan and monster line-of-sight consult this volume-gated helper, so
+// thick smoke blocks SIGHT only, while thin smoke merely dims (via SMOKE_LIGHT). See SMOKE_THICK_VOLUME.
+boolean cellHasThickSmoke(pos loc) {
+    return (pmapAt(loc)->layers[GAS] == SMOKE_GAS && pmapAt(loc)->volume >= SMOKE_THICK_VOLUME);
+}
+
 unsigned long terrainMechFlags(pos loc) {
     return (
         tileCatalog[pmapAt(loc)->layers[DUNGEON]].mechFlags
@@ -700,6 +718,7 @@ dungeonFeature dungeonFeatureCatalog[NUMBER_DUNGEON_FEATURES] = {
     {ROT_GAS,                   GAS,        15,     0,      0},
     {STEAM,                     GAS,        325,    0,      0},
     {STEAM,                     GAS,        15,     0,      0},
+    {SMOKE_GAS,                 GAS,        14,     0,      0},  // iOS port (Brogue SE): per-turn smoke puff from burning terrain (additive across tiles)
     {METHANE_GAS,               GAS,        2,      0,      0},
     {EMBERS,                    SURFACE,    0,      0,      0},
     {URINE,                     SURFACE,    65,     25,     0},
@@ -823,6 +842,7 @@ dungeonFeature dungeonFeatureCatalog[NUMBER_DUNGEON_FEATURES] = {
     {CONFUSION_GAS,             GAS,        1000,   0,      0,  "", 0,  &confusionGasColor, 4},
     {PLAIN_FIRE,                SURFACE,    100,    37,     0,  "", EXPLOSION_FLARE_LIGHT},
     {DARKNESS_CLOUD,            GAS,        200,    0,      0},
+    {SMOKE_GAS,                 GAS,        250,    0,      0},  // iOS port (Brogue SE): thrown/uncorked captured-smoke screen (crosses the thick threshold at its core)
     {HOLE_EDGE,                 SURFACE,    300,    100,    0,  "", 0,  &darkBlue,3,0,          DF_HOLE_2},
     {LICHEN,                    SURFACE,    70,     60,     0},
 
@@ -1088,6 +1108,7 @@ const lightSource lightCatalog[NUMBER_LIGHT_KINDS] = {
     {&sacredGlyphColor,     {300, 300, 1},          0,      false},     // sacred glyph light
     {&descentLightColor,    {600, 600, 1},          0,      false},     // magical pit light
     {&sacrificeTargetColor, {800, 1200, 1},          0,      true},      // demonic statue light
+    {&smokeCloudColor,      {500, 500, 1},          0,      true},      // iOS port (Brogue SE): smoke (dims smoked cells)
 };
 
 // iOS port (iBrogue): the gold goblin's flee-component config (see docs/guides/reusable-components.md).
@@ -1743,20 +1764,20 @@ itemTable foodTable[NUMBER_FOOD_KINDS] = {
 itemTable weaponTable[NUMBER_WEAPON_KINDS] = {
     {"dagger",              "", "", 10, 190,        12, 0, {3, 4,  1},     true, false, 0, false, "A simple iron dagger with a well-worn wooden handle. Daggers will deal quintuple damage upon a successful sneak attack instead of triple damage."},
     {"sword",               "", "", 10, 440,        14, 0, {7, 9,  1},     true, false, 0, false, "The razor-sharp length of steel blade shines reassuringly."},
-    {"broadsword",          "", "", 10, 990,        19, 0, {14, 22, 1},    true, false, 0, false, "This towering blade inflicts heavy damage by investing its heft into every cut."},
+    {"broadsword",          "", "", 10, 990,        19, 0, {14, 22, 1},    true, false, 0, false, "This towering blade inflicts heavy damage by investing its heft into every cut. Its great mass blunts the benefit of enchantment, however: once its effective power -- its enchant level plus any strength to spare -- climbs past +10, each further point adds only a quarter of what it would to a lighter weapon."},
 
     {"whip",                "", "", 10, 440,        14, 0, {3, 5,  1},     true, false, 0, false, "The lash from this coil of braided leather can tear bark from trees, and it will reach opponents up to five spaces away."},
     {"rapier",              "", "", 10, 440,        15, 0, {3, 5,  1},     true, false, 0, false, "This blade is thin and flexible, designed for deft and rapid maneuvers. It inflicts less damage than comparable weapons, but permits you to attack twice as quickly. If there is one space between you and an enemy and you step directly toward it, you will perform a devastating lunge attack, which deals triple damage and never misses."},
-    {"flail",               "", "", 10, 440,        17, 0, {9, 15, 1},     true, false, 0, false, "This spiked iron ball can be whirled at the end of its chain in synchronicity with your movement, allowing you a free attack whenever moving between two spaces that are adjacent to an enemy."},
+    {"flail",               "", "", 10, 440,        17, 0, {9, 15, 1},     true, false, 0, false, "This spiked iron ball can be whirled at the end of its chain in synchronicity with your movement, allowing you a free attack whenever moving between two spaces that are adjacent to an enemy. Such a glancing blow in passing lands at reduced force, dealing only half its normal damage."},
 
     {"mace",                "", "", 10, 660,        16, 0, {16, 20, 1},    true, false, 0, false, "The iron flanges at the head of this weapon inflict substantial damage with every weighty blow. Because of its heft, it takes an extra turn to recover when it hits, and will push your opponent backward if there is room."},
     {"war hammer",          "", "", 10, 1100,       20, 0, {25, 35, 1},    true, false, 0, false, "Few creatures can withstand the crushing blow of this towering mass of lead and steel, but only the strongest of adventurers can effectively wield it. Because of its heft, it takes an extra turn to recover when it hits, and will push your opponent backward if there is room."},
 
     {"spear",               "", "", 10, 330,        13, 0, {4, 5, 1},      true, false, 0, false, "A slender wooden rod tipped with sharpened iron. The reach of the spear permits you to simultaneously attack an adjacent enemy and the enemy directly behind it."},
-    {"war pike",            "", "", 10, 880,        18, 0, {11, 15, 1},    true, false, 0, false, "A long steel pole ending in a razor-sharp point. The reach of the pike permits you to simultaneously attack an adjacent enemy and the enemy directly behind it."},
+    {"war pike",            "", "", 10, 880,        18, 0, {11, 15, 1},    true, false, 0, false, "A long steel pole ending in a razor-sharp point. The reach of the pike permits you to simultaneously attack an adjacent enemy and the enemy directly behind it. Because of its length and weight, it takes an extra turn to recover when it hits."},
 
     {"axe",                 "", "", 10, 550,        15, 0, {7, 9, 1},      true, false, 0, false, "The blunt iron edge on this axe glints in the darkness. The arc of its swing permits you to attack all adjacent enemies simultaneously."},
-    {"war axe",             "", "", 10, 990,        19, 0, {12, 17, 1},    true, false, 0, false, "The enormous steel head of this war axe puts considerable heft behind each stroke. The arc of its swing permits you to attack all adjacent enemies simultaneously."},
+    {"war axe",             "", "", 10, 990,        19, 0, {12, 17, 1},    true, false, 0, false, "The enormous steel head of this war axe puts considerable heft behind each stroke. The arc of its swing permits you to attack all adjacent enemies simultaneously. Its great mass blunts the benefit of enchantment, however: once its effective power -- its enchant level plus any strength to spare -- climbs past +10, each further point adds only a quarter of what it would to a lighter weapon."},
 
     {"dart",                "", "", 0,  15,         10, 0, {2, 4,  1},     true, false, 0, false, "These simple metal spikes are weighted to fly true and sting their prey with a flick of the wrist."},
     {"incendiary dart",     "", "", 10, 25,         12, 0, {1, 2,  1},     true, false, 0, false, "The barbed spike on each of these darts is designed to stick to its target while the compounds strapped to its length explode into flame."},
@@ -1800,8 +1821,8 @@ const char armorRunicNames[NUMBER_ARMOR_ENCHANT_KINDS][30] = {
 };
 
 itemTable staffTable[NUMBER_STAFF_KINDS] = {
-    {"lightning",       itemWoods[0], "",   15, 1300,   0, BOLT_LIGHTNING,     {2,4,1}, false, false, 1,  false, "This staff conjures forth deadly arcs of electricity to damage to any number of creatures in a straight line."},
-    {"firebolt",        itemWoods[1], "",   15, 1300,   0, BOLT_FIRE,          {2,4,1}, false, false, 1,  false, "This staff unleashes bursts of magical fire. It will ignite flammable terrain and burn any creature that it hits. Creatures with an immunity to fire will be unaffected by the bolt."},
+    {"lightning",       itemWoods[0], "",   15, 1300,   0, BOLT_LIGHTNING,     {2,4,1}, false, false, 1,  false, "This staff conjures forth deadly arcs of electricity to damage to any number of creatures in a straight line. A sufficiently powerful staff will also briefly stun those it strikes and arc to a nearby foe."},
+    {"firebolt",        itemWoods[1], "",   15, 1300,   0, BOLT_FIRE,          {2,4,1}, false, false, 1,  false, "This staff unleashes bursts of magical fire. It will ignite flammable terrain and burn any creature that it hits. Creatures with an immunity to fire will be unaffected by the bolt. A sufficiently powerful staff erupts its bolt into a blast of fire where it lands."},
     {"poison",          itemWoods[3], "",   10, 1200,   0, BOLT_POISON,        {2,4,1}, false, false, 1,  false, "The vile blast of this twisted staff will imbue its target with a deadly venom. Each turn, a creature that is poisoned will suffer one point of damage per dose of poison it has received, and poisoned creatures will not regenerate lost health until the poison clears."},
     {"tunneling",       itemWoods[4], "",   10, 1000,   0, BOLT_TUNNELING,     {2,4,1}, false, false, 1,  false, "Bursts of magic from this staff will pass harmlessly through creatures but will reduce most obstructions to rubble."},
     {"blinking",        itemWoods[5], "",   11, 1200,   0, BOLT_BLINKING,      {2,4,1}, false, false, 1,  false, "This staff will allow you to teleport in the chosen direction. Creatures and inanimate obstructions will block the teleportation."},
@@ -1810,19 +1831,19 @@ itemTable staffTable[NUMBER_STAFF_KINDS] = {
     {"discord",         itemWoods[8], "",   10, 1000,   0, BOLT_DISCORD,       {2,4,1}, false, false, 1,  false, "This staff will alter the perception of a creature and cause it to lash out indiscriminately. Strangers and allies alike will turn on the victim."},
     {"conjuration",     itemWoods[9], "",   8,  1000,   0, BOLT_CONJURATION,   {2,4,1}, false, false, 1,  false, "A flick of this staff will summon a number of phantom blades to fight on your behalf."},
     // iOS port (iBrogue): staff of frost
-    {"frost",           itemWoods[13], "",  12,  1200,   0, BOLT_FREEZE,        {2,4,1}, false, false, 1,  false, "A flick of this frozen staff unleashes a lancing bolt of cold. The first creature it strikes is encased in ice, frozen helpless for a short time before thawing into a sluggish chill -- though anything already ablaze is merely doused and slowed, never frozen. The cold sweeps across deep water, freezing a temporary walkable sheet over the depths, and stiffens dense foliage into brittle, impassable thickets. A frozen creature can be shoved aside like a statue, shattering anything it slams into. The cold smothers open flame in its path, and fire melts the staff's ice wherever the two meet."},
+    {"frost",           itemWoods[13], "",  12,  1200,   0, BOLT_FREEZE,        {2,4,1}, false, false, 1,  false, "A flick of this frozen staff looses a lancing bolt of cold. The first creature struck is encased in ice -- frozen helpless briefly, then thawing into a sluggish chill -- though anything ablaze is merely doused and slowed, never frozen. The cold freezes a temporary walkable sheet over deep water and stiffens dense foliage into brittle, impassable thickets. A frozen creature can be shoved aside like a statue, shattering whatever it slams into. The cold smothers open flame, and fire melts its ice wherever they meet."},
     {"healing",         itemWoods[10], "",  5,  1100,   0, BOLT_HEALING,       {2,4,1}, false, false, -1, false, "This staff will heal any creature, friend or foe. Unfortunately, you cannot use this or any staff on yourself except by reflecting the bolt."},
     {"haste",           itemWoods[11], "",  5,  900,    0, BOLT_HASTE,         {2,4,1}, false, false, -1, false, "This staff will temporarily double the speed of any creature, friend or foe. Unfortunately, you cannot use this or any staff on yourself except by reflecting the bolt."},
     {"protection",      itemWoods[12], "",  5,  900,    0, BOLT_SHIELDING,     {2,4,1}, false, false, -1, false, "This staff will bathe a creature in a protective light that will absorb all damage until it is depleted. Unfortunately, you cannot use this or any staff on yourself except by reflecting the bolt."},
 };
 
 itemTable ringTable[NUMBER_RING_KINDS] = {
-    {"clairvoyance",    itemGems[0], "",    1,  900,    0, 0, {1,3,1}, false, false, 1, false, "This ring of eldritch scrying will permit you to see through nearby walls and doors, within a radius determined by the level of the ring. A cursed ring of clairvoyance will blind you to your immediate surroundings."},
+    {"clairvoyance",    itemGems[0], "",    1,  900,    0, 0, {1,3,1}, false, false, 1, false, "This ring of eldritch scrying will permit you to see through nearby walls and doors, within a radius determined by the level of the ring. On arriving at a new depth, its scrying also reveals the benevolent or malevolent aura of magic items lying anywhere on the floor -- even in undiscovered rooms -- sensing as many of them as the ring's level of enchantment. A cursed ring of clairvoyance will blind you to your immediate surroundings and cloud this scrying."},
     {"stealth",         itemGems[1], "",    1,  800,    0, 0, {1,3,1}, false, false, 1, false, "This ring of silent passage will reduce your stealth range, making enemies less likely to notice you and more likely to lose your trail. Staying motionless and lurking in the shadows will make you even harder to spot. Cursed rings of stealth will increase your stealth range, making you easier to spot and to track."},
     {"regeneration",    itemGems[2], "",    1,  750,    0, 0, {1,3,1}, false, false, 1, false, "This ring of sacred life will allow you to recover lost health at an accelerated rate. Cursed rings will decrease or even halt your natural regeneration."},
-    {"transference",    itemGems[3], "",    1,  750,    0, 0, {1,3,1}, false, false, 1, false, "This ring of blood magic will heal you in proportion to the damage you inflict on others. Cursed rings will cause you to lose health when inflicting damage."},
+    {"transference",    itemGems[3], "",    1,  750,    0, 0, {1,3,1}, false, false, 1, false, "This ring of blood magic heals you in proportion to the damage you inflict on others, and bleeds a share of your own afflictions (poison, fire, slowing, weakness, and confusion) into whatever you strike. Cursed rings instead drain your health when you inflict damage."},
     {"light",           itemGems[4], "",    1,  600,    0, 0, {1,3,1}, false, false, 1, false, "This ring of preternatural vision will allow you to see farther in the dimming light of the deeper dungeon levels, and it will not make you more noticeable to enemies. Allies who stand within your light are emboldened -- better defended, unflinching, slowly mending their wounds -- and no invisible creature can hide within its glow. A cursed ring of light will dim your sight and unsettle your companions, who will lose heart and falter at your side."},
-    {"awareness",       itemGems[5], "",    1,  700,    0, 0, {1,3,1}, false, false, 1, false, "This ring of effortless vigilance will enable you to notice traps, secret doors and hidden levers more often and from a greater distance, and your sharpened hearing catches unseen creatures stirring ever farther off as the ring grows in power. On arriving at a new depth it may sense a nearby chamber of significance, and reveal the benevolent or malevolent aura of magic items lying anywhere on the floor -- even in undiscovered rooms, several at once for the most powerful rings. Cursed rings dull all of this."},
+    {"awareness",       itemGems[5], "",    1,  700,    0, 0, {1,3,1}, false, false, 1, false, "This ring of effortless vigilance will enable you to notice traps, secret doors and hidden levers more often and from a greater distance, and your sharpened hearing catches unseen creatures stirring ever farther off as the ring grows in power. On arriving at a new depth it may sense a nearby chamber of significance. Cursed rings dull all of this."},
     {"wisdom",          itemGems[6], "",    1,  700,    0, 0, {1,3,1}, false, false, 1, false, "This ring of arcane insight sharpens your command of magic. Your staffs recharge at an accelerated rate; you grow familiar with worn armor and rings more quickly, identifying them sooner; quiet rest more readily reveals whether an unknown item in your pack is benevolent or malevolent; and a potion of detect magic, drunk or hurled, lays bare more of your surroundings. The more powerful the ring, the keener these insights. A cursed ring of wisdom dulls them all -- staffs recharge sluggishly and understanding comes slowly."},
     {"reaping",         itemGems[7], "",    1,  700,    0, 0, {1,3,1}, false, false, 1, false, "This ring of blood magic will recharge your staffs and charms every time you hit an enemy. Cursed rings of reaping will drain your staffs and charms with every hit."},
 };
@@ -1985,4 +2006,5 @@ const statusEffect statusEffectCatalog[NUMBER_OF_STATUS_EFFECTS] = {
     {"",                false, 0}, // STATUS_REGENERATING (iOS port (iBrogue): honey potion heal-over-time)
     {"Emboldened",      true,  0}, // STATUS_EMBOLDENED (iOS port (iBrogue): ring of light ally aura)
     {"Frozen",          false, 0}, // STATUS_FROZEN (iOS port (iBrogue): staff of frost; paralysis-like, not negatable)
+    {"Doused",          false, 0}, // STATUS_FIERY_DOUSED (iOS port (Brogue SE): fiery aura suppressed by frost; rekindles on lapse)
 };

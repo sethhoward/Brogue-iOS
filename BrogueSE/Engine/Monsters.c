@@ -2511,6 +2511,22 @@ void decrementMonsterStatus(creature *monst) {
                     }
                 }
                 break;
+            case STATUS_FIERY_DOUSED:
+                // iOS port (Brogue SE): the staff of frost only SUPPRESSES a fiery creature's aura
+                // (water bottle, which strips MONST_FIERY, is the permanent answer). When the
+                // suppression lapses, rekindle the fire -- but only if the creature is still fiery
+                // (a water bottle may have stripped the flag meanwhile) and not already burning.
+                if (monst->status[i] && !--monst->status[i]) {
+                    if ((monst->info.flags & MONST_FIERY) && !monst->status[STATUS_BURNING]) {
+                        monst->status[STATUS_BURNING] = monst->maxStatus[STATUS_BURNING] = 1000;
+                        if (canSeeMonster(monst)) {
+                            monsterName(buf, monst, true);
+                            sprintf(buf2, "%s flares back to life.", buf);
+                            messageWithColor(buf2, &orange, 0);
+                        }
+                    }
+                }
+                break;
             case STATUS_LIFESPAN_REMAINING:
                 if (monst->status[i]) {
                     monst->status[i]--;

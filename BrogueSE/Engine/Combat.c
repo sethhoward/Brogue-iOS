@@ -24,6 +24,12 @@
 #include "Rogue.h"
 #include "GlobalsBase.h"
 #include "Globals.h"
+#ifdef FIGHTSIM
+#include "balance.h" // fight-simulator tunables (sim-only build); no effect on shipping
+#endif
+
+// Per-hit player-weapon damage scale in percent; 100 = normal. See the extern in Rogue.h.
+short gWeaponDamageScalePct = 100;
 
 // iOS port (iBrogue): host hook for a haptic when the player takes damage.
 // severity: 0 = ordinary hit, 1 = survived but now under 40% health, 2 = fatal.
@@ -64,11 +70,20 @@ extern void cePlayerTookDamage(int severity);
 
 fixpt strengthModifier(item *theItem) {
     int difference = (rogue.strength - player.weaknessAmount) - theItem->strengthRequired;
+#ifdef FIGHTSIM
+    // Fight-simulator tunable (sim-only build; gBalance defaults == the literals below).
+    if (difference > 0) {
+        return difference * FP_FACTOR * gBalance.strengthBonusNum / gBalance.strengthBonusDen;
+    } else {
+        return difference * FP_FACTOR * gBalance.strengthPenaltyNum / gBalance.strengthPenaltyDen;
+    }
+#else
     if (difference > 0) {
         return difference * FP_FACTOR / 4; // 0.25x
     } else {
         return difference * FP_FACTOR * 5/2; // 2.5x
     }
+#endif
 }
 
 fixpt netEnchant(item *theItem) {
@@ -77,7 +92,33 @@ fixpt netEnchant(item *theItem) {
         retval += strengthModifier(theItem);
     }
     // Clamp all net enchantment values to [-20, 50].
+#ifdef FIGHTSIM
+    // Soft knee per weapon: full value up to heavyWeaponCap[kind] (the knee), then each point above it
+    // is worth only heavyWeaponSlopePct% (diminishing returns instead of a wall). slope 0 == a hard cap;
+    // slope 100 == no taper. knee 0 == untouched, so shipping (all-zero) is byte-identical.
+    if ((theItem->category & WEAPON) && gBalance.heavyWeaponCap[theItem->kind] > 0) {
+        fixpt kneeFp = (fixpt)gBalance.heavyWeaponCap[theItem->kind] * FP_FACTOR;
+        if (retval > kneeFp) {
+            retval = kneeFp + (retval - kneeFp) * gBalance.heavyWeaponSlopePct[theItem->kind] / 100;
+        }
+    }
+    return clamp(retval, gBalance.netEnchantClampLo * FP_FACTOR, gBalance.netEnchantClampHi * FP_FACTOR);
+#else
+    // Heavy-weapon balance pass: broadsword and war axe earn only a 25% marginal enchant past a knee
+    // (a soft cap, not a cliff) -- curbs their late-game raw-stat dominance as the universal go-to without
+    // inverting the upgrade path (they stay ahead of sword/axe) or punishing continued enchanting. Derived
+    // from the fight simulator; see docs/design/fight-simulator-findings.md.
+    if (theItem->category & WEAPON) {
+        int knee = (theItem->kind == BROADSWORD) ? 10 : (theItem->kind == WAR_AXE) ? 10 : 0;
+        if (knee > 0) {
+            fixpt kneeFp = (fixpt)knee * FP_FACTOR;
+            if (retval > kneeFp) {
+                retval = kneeFp + (retval - kneeFp) * 25 / 100;
+            }
+        }
+    }
     return clamp(retval, -20 * FP_FACTOR, 50 * FP_FACTOR);
+#endif
 }
 
 fixpt monsterDamageAdjustmentAmount(const creature *monst) {
@@ -672,37 +713,26 @@ static boolean forceWeaponHit(creature *defender, item *theItem) {
 #define FROST_PUSH_MIN_DISTANCE 2
 #define FROST_PUSH_MAX_DISTANCE 10
 
-// iOS port (iBrogue): staff of frost. Bumping a frozen creature shoves it like a statue. It slides across open
-// floor -- a distance set by the shover's effective strength (`clamp(str - 8, 2, 10)`) -- then comes to rest
-// the moment it reaches a hazard (lava / a chasm / deep water -- it is deposited ONTO the hazard, to die, fall,
-// or flounder) or runs out of room before a wall, another creature, or the map edge. The frozen block itself
-// takes NO damage; a creature it slams into takes momentum damage (the distance the block travelled) plus a
-// strength shove-bonus (`max(0, str - 12)`, so it bites even on an adjacent slam for a strong shover), and,
-// being struck by ice, is doused if it was on fire. (dx,dy) is the one-tile push direction (away from the
-// shover); the caller guarantees the first cell is open or a hazard (a wedged block is rejected before here).
-void pushFrozenCreature(creature *defender, short dx, short dy) {
-    char buf[DCOLS*3], buf2[COLS], monstName[DCOLS];
-    creature *slamTarget = NULL;
-    short forceDamage, step;
+// iOS port (Brogue SE): an explosion's concussive force flings every (animate, mobile) creature caught in
+// it. Distance is a flat blast force; a creature slammed into a wall/another creature takes this bonus on
+// top of the travel distance. The blast's own fire/explosive damage is separate.
+#define EXPLOSION_KNOCKBACK_DISTANCE 4
+#define EXPLOSION_KNOCKBACK_SLAM_BONUS 3
 
-    monsterName(monstName, defender, false); // bare name; we supply "the frozen ..." ourselves
-
-    pos oldLoc = defender->loc;
+// iOS port (Brogue SE): the shared "force shove" primitive behind BOTH the frost block-push and the
+// explosion knockback (the reusable force effect). Slides `victim` along the unit vector (dx,dy) up to
+// maxDist tiles, coming to rest ON the first hazard (lava/chasm/deep water -- it then meets its fate via
+// the destination's tile effects) or BEFORE a wall, another creature, or the map edge. Relocation goes
+// through setMonsterLocation, so it is correct for the player and monsters alike (creature flag, vision,
+// item pickup, and destination tile effects). If stopped by a creature, that creature is returned via
+// *slamTargetOut so the caller can apply impact damage. Returns the number of tiles actually travelled.
+static short shoveCreatureAlong(creature *victim, short dx, short dy, short maxDist, creature **slamTargetOut) {
+    const pos oldLoc = victim->loc;
     pos cur = oldLoc;
+    creature *slamTarget = NULL;
 
-    const short effectiveStrength = rogue.strength - player.weaknessAmount;
-    const short maxPush = clamp(effectiveStrength - 8, FROST_PUSH_MIN_DISTANCE, FROST_PUSH_MAX_DISTANCE);
-    const short strengthBonus = max(0, effectiveStrength - 12);
-
-    if (canDirectlySeeMonster(defender)) {
-        sprintf(buf, "you send the frozen %s skidding away", monstName);
-        buf[DCOLS] = '\0';
-        combatMessage(buf, messageColorFromVictim(defender));
-    }
-
-    // Walk the slide: stop ON the first hazard, or BEFORE a wall / creature / map edge, up to the max distance.
-    for (step = 0; step < maxPush; step++) {
-        pos next = (pos){ cur.x + dx, cur.y + dy };
+    for (short step = 0; step < maxDist; step++) {
+        const pos next = (pos){ cur.x + dx, cur.y + dy };
         if (!coordinatesAreInMap(next.x, next.y)
             || cellHasTerrainFlag(next, T_OBSTRUCTS_PASSABILITY)
             || diagonalBlocked(cur.x, cur.y, next.x, next.y, false)) {
@@ -714,49 +744,126 @@ void pushFrozenCreature(creature *defender, short dx, short dy) {
         }
         cur = next; // slide onto the next cell
         if (cellHasTerrainFlag(cur, (T_LAVA_INSTA_DEATH | T_AUTO_DESCENT | T_IS_DEEP_WATER))) {
-            break; // deposited onto the hazard; it meets its fate via the tile effects below
+            break; // deposited onto the hazard; it meets its fate via the destination's tile effects
         }
     }
 
-    forceDamage = distanceBetween(oldLoc, cur) + strengthBonus; // momentum + strength shove-force
+    const short dist = distanceBetween(oldLoc, cur);
+    if (dist > 0) {
+        setMonsterLocation(victim, cur); // handles player/monster flags, vision, item pickup, tile effects
+    }
+    if (slamTargetOut) {
+        *slamTargetOut = slamTarget;
+    }
+    return dist;
+}
 
-    // Relocate the block, then let the destination's terrain act on it (lava kills, a chasm drops it a level,
-    // deep water sweeps its carried item away -- and fire there would thaw it).
-    if (distanceBetween(oldLoc, cur) > 0) {
-        pmapAt(oldLoc)->flags &= ~HAS_MONSTER;
-        defender->loc = cur;
-        pmapAt(cur)->flags |= HAS_MONSTER;
-        refreshDungeonCell(oldLoc);
-        refreshDungeonCell(cur);
-        applyInstantTileEffectsToCreature(defender);
+// iOS port (Brogue SE): apply a shove's momentum damage to whatever the shoved creature slammed into (the
+// shoved creature itself is unharmed). `pusher` is credited for morale/aggravation (NULL = the environment,
+// e.g. an explosion -- no morale attribution). `douse` extinguishes a burning slam target (the icy frost
+// block). Shared by the frost push and the explosion knockback.
+static void applyShoveImpact(creature *victim, creature *slamTarget, short forceDamage,
+                             creature *pusher, boolean douse) {
+    char buf[DCOLS*3], buf2[COLS];
+
+    if (!slamTarget
+        || (victim->bookkeepingFlags & MB_IS_DYING)
+        || (slamTarget->info.flags & (MONST_IMMUNE_TO_WEAPONS | MONST_INVULNERABLE))) {
+        return;
+    }
+    monsterName(buf2, slamTarget, true);
+    if (douse && slamTarget->status[STATUS_BURNING]) {
+        extinguishFireOnCreature(slamTarget);
+    }
+    if (inflictDamage(NULL, slamTarget, forceDamage, &lightBlue, false)) {
+        if (canDirectlySeeMonster(slamTarget)) {
+            sprintf(buf, "%s %s the impact.",
+                    buf2,
+                    (slamTarget->info.flags & MONST_INANIMATE) ? "is shattered by" : "is crushed by");
+            buf[DCOLS] = '\0';
+            combatMessage(buf, messageColorFromVictim(slamTarget));
+        }
+        killCreature(slamTarget, false);
+    }
+    if (pusher && slamTarget->creatureState != MONSTER_ALLY) {
+        moralAttack(pusher, slamTarget);
+        splitMonster(slamTarget, pusher);
+    }
+}
+
+// iOS port (Brogue SE): explosion knockback. Flings `monst` away from the blast. A gas-cascade explosion
+// (methane) has no single origin -- each cell detonates independently -- so direction comes from the LOCAL
+// gradient: push away from the centroid of nearby fire/blast cells. (cx,cy) is the creature's own cell.
+// Reuses the shared shove primitives; the blast's fire/explosive damage is applied separately by the caller.
+boolean knockCreatureFromExplosion(creature *monst, short cx, short cy) {
+    short sumX = 0, sumY = 0, count = 0;
+    const short radius = 3;
+
+    // Things that can't be flung: inanimate/immobile/invulnerable, captives, and the already-dying.
+    if ((monst->info.flags & (MONST_INANIMATE | MONST_INVULNERABLE | MONST_IMMOBILE))
+        || (monst->bookkeepingFlags & (MB_CAPTIVE | MB_IS_DYING))) {
+        return false;
     }
 
-    // Momentum damage to whatever the block slammed into (the block itself is unharmed).
-    if (slamTarget
-        && !(defender->bookkeepingFlags & MB_IS_DYING)
-        && !(slamTarget->info.flags & (MONST_IMMUNE_TO_WEAPONS | MONST_INVULNERABLE))) {
-
-        monsterName(buf2, slamTarget, true);
-        if (slamTarget->status[STATUS_BURNING]) {
-            extinguishFireOnCreature(slamTarget); // the icy block douses what it strikes
-        }
-        if (inflictDamage(NULL, slamTarget, forceDamage, &lightBlue, false)) {
-            if (canDirectlySeeMonster(slamTarget)) {
-                sprintf(buf, "%s %s when the frozen %s slams into $HIMHER",
-                        buf2,
-                        (slamTarget->info.flags & MONST_INANIMATE) ? "is destroyed" : "dies",
-                        monstName);
-                resolvePronounEscapes(buf, slamTarget);
-                buf[DCOLS] = '\0';
-                combatMessage(buf, messageColorFromVictim(slamTarget));
+    for (short i = -radius; i <= radius; i++) {
+        for (short j = -radius; j <= radius; j++) {
+            const short nx = cx + i, ny = cy + j;
+            if ((i == 0 && j == 0) || !coordinatesAreInMap(nx, ny)) {
+                continue;
             }
-            killCreature(slamTarget, false);
-        }
-        if (slamTarget->creatureState != MONSTER_ALLY) {
-            moralAttack(&player, slamTarget);
-            splitMonster(slamTarget, &player);
+            if (cellHasTerrainFlag((pos){ nx, ny }, (T_CAUSES_EXPLOSIVE_DAMAGE | T_IS_FIRE))) {
+                sumX += i;
+                sumY += j;
+                count++;
+            }
         }
     }
+    if (count == 0) {
+        return false;
+    }
+
+    // Push opposite the blast mass; the sign collapses the gradient to one of eight unit directions.
+    // A creature dead-centre in a symmetric blast (net-zero gradient) isn't flung -- deterministic, no RNG.
+    const short dx = (sumX > 0) ? -1 : (sumX < 0) ? 1 : 0;
+    const short dy = (sumY > 0) ? -1 : (sumY < 0) ? 1 : 0;
+    if (dx == 0 && dy == 0) {
+        return false;
+    }
+
+    creature *slamTarget = NULL;
+    const short dist = shoveCreatureAlong(monst, dx, dy, EXPLOSION_KNOCKBACK_DISTANCE, &slamTarget);
+    applyShoveImpact(monst, slamTarget, dist + EXPLOSION_KNOCKBACK_SLAM_BONUS, NULL /*environment*/, false /*no douse*/);
+    return (dist > 0); // true only if the creature was actually relocated
+}
+
+// iOS port (iBrogue): staff of frost. Bumping a frozen creature shoves it like a statue. It slides across open
+// floor -- a distance set by the shover's effective strength (`clamp(str - 8, 2, 10)`) -- then comes to rest
+// the moment it reaches a hazard (lava / a chasm / deep water -- it is deposited ONTO the hazard, to die, fall,
+// or flounder) or runs out of room before a wall, another creature, or the map edge. The frozen block itself
+// takes NO damage; a creature it slams into takes momentum damage (the distance the block travelled) plus a
+// strength shove-bonus (`max(0, str - 12)`, so it bites even on an adjacent slam for a strong shover), and,
+// being struck by ice, is doused if it was on fire. (dx,dy) is the one-tile push direction (away from the
+// shover); the caller guarantees the first cell is open or a hazard (a wedged block is rejected before here).
+void pushFrozenCreature(creature *defender, short dx, short dy) {
+    char buf[DCOLS*3], monstName[DCOLS];
+    creature *slamTarget = NULL;
+
+    monsterName(monstName, defender, false);
+
+    const short effectiveStrength = rogue.strength - player.weaknessAmount;
+    const short maxPush = clamp(effectiveStrength - 8, FROST_PUSH_MIN_DISTANCE, FROST_PUSH_MAX_DISTANCE);
+    const short strengthBonus = max(0, effectiveStrength - 12);
+
+    if (canDirectlySeeMonster(defender)) {
+        sprintf(buf, "you send the frozen %s skidding away", monstName);
+        buf[DCOLS] = '\0';
+        combatMessage(buf, messageColorFromVictim(defender));
+    }
+
+    // Slide via the shared force-shove primitive, then deal the icy slam's momentum + strength shove-force
+    // (the frozen block itself is unharmed; a creature it slams into is doused if it was burning).
+    const short dist = shoveCreatureAlong(defender, dx, dy, maxPush, &slamTarget);
+    applyShoveImpact(defender, slamTarget, dist + strengthBonus, &player, true /*douse*/);
 }
 
 void magicWeaponHit(creature *defender, item *theItem, boolean backstabbed) {
@@ -1326,6 +1433,12 @@ boolean attack(creature *attacker, creature *defender, boolean lungeAttack) {
         damage = (defender->info.flags & (MONST_IMMUNE_TO_WEAPONS | MONST_INVULNERABLE)
                   ? 0 : randClump(attacker->info.damage) * monsterDamageAdjustmentAmount(attacker) / FP_FACTOR);
 
+        // Per-hit damage scale (100 = no-op): the flail pass-attack balance nerf sets this to 50 around
+        // its hits (Movement.c); the sim build also uses it to model pike penetrate/reach. Player only.
+        if (attacker == &player && gWeaponDamageScalePct != 100) {
+            damage = damage * gWeaponDamageScalePct / 100;
+        }
+
         if (sneakAttack || defenderWasAsleep || defenderWasParalyzed) {
             if (defender != &player) {
                 // The non-player defender doesn't hit back this turn because it's still flat-footed.
@@ -1751,6 +1864,81 @@ void inflictLethalDamage(creature *attacker, creature *defender) {
     inflictDamage(attacker, defender, defender->currentHP, NULL, true);
 }
 
+// iOS port (Brogue SE): ring of transference -- affliction transfer. "Blood magic" cuts both ways: the
+// same conduit that drains a victim's life into you also lets you bleed a fraction of your own harmful
+// statuses INTO whatever you strike. Rate-limited by the ring's transference fraction (transference /
+// playerTransferenceRatio -- the same 5%/level as the heal) so it's tempo-paced relief, NOT a one-hit
+// cleanse: the affliction keeps ticking on you while you punch it off. Curated to the statuses that map
+// cleanly onto a monster (poison, fire, slow, weakness, confusion). Positive ring only -- a cursed ring
+// keeps its existing HP-drain downside and grants no relief. Deterministic (pure arithmetic on game
+// state, no RNG), so save-replay safe.
+static void transferAfflictionsToTarget(creature *defender) {
+    short shed;
+
+    if (rogue.transference <= 0
+        || (defender->info.flags & (MONST_INANIMATE | MONST_INVULNERABLE))) {
+        return;
+    }
+
+    // Turns of an affliction shed per hit: its remaining duration scaled by the transference fraction,
+    // floored at 1 (so any affliction makes some progress) and never more than the player still has.
+    #define SHED_TURNS(dur) (min((dur), max(1, (dur) * rogue.transference / gameConst->playerTransferenceRatio)))
+
+    // Poison -- relocate duration at the player's current concentration onto the target.
+    if (player.status[STATUS_POISONED] > 0) {
+        shed = SHED_TURNS(player.status[STATUS_POISONED]);
+        addPoison(defender, shed, player.poisonAmount);
+        player.status[STATUS_POISONED] -= shed;
+        if (player.status[STATUS_POISONED] <= 0) {
+            player.status[STATUS_POISONED] = 0;
+            player.poisonAmount = 0;
+        }
+    }
+
+    // Fire -- only takes hold on a target that can actually burn.
+    if (player.status[STATUS_BURNING] > 0
+        && !defender->status[STATUS_IMMUNE_TO_FIRE]
+        && !(defender->info.flags & MONST_IMMUNE_TO_FIRE)) {
+        shed = SHED_TURNS(player.status[STATUS_BURNING]);
+        defender->status[STATUS_BURNING] = max(defender->status[STATUS_BURNING], shed);
+        defender->maxStatus[STATUS_BURNING] = max(defender->maxStatus[STATUS_BURNING], defender->status[STATUS_BURNING]);
+        player.status[STATUS_BURNING] -= shed;
+        if (player.status[STATUS_BURNING] <= 0) {
+            extinguishFireOnCreature(&player);
+        }
+    }
+
+    // Slow.
+    if (player.status[STATUS_SLOWED] > 0) {
+        shed = SHED_TURNS(player.status[STATUS_SLOWED]);
+        slow(defender, max(defender->status[STATUS_SLOWED], shed));
+        player.status[STATUS_SLOWED] -= shed;
+    }
+
+    // Weakness -- bleed duration across (deepening the target's enervation by a point); working it fully
+    // off restores the player's strength.
+    if (player.status[STATUS_WEAKENED] > 0) {
+        shed = SHED_TURNS(player.status[STATUS_WEAKENED]);
+        weaken(defender, max(defender->status[STATUS_WEAKENED], shed));
+        player.status[STATUS_WEAKENED] -= shed;
+        if (player.status[STATUS_WEAKENED] <= 0) {
+            player.status[STATUS_WEAKENED] = 0;
+            player.weaknessAmount = 0;
+            updateEncumbrance(); // recompute strength-derived stats now the toxin has drained
+        }
+    }
+
+    // Confusion.
+    if (player.status[STATUS_CONFUSED] > 0) {
+        shed = SHED_TURNS(player.status[STATUS_CONFUSED]);
+        defender->status[STATUS_CONFUSED] = max(defender->status[STATUS_CONFUSED], shed);
+        defender->maxStatus[STATUS_CONFUSED] = max(defender->maxStatus[STATUS_CONFUSED], defender->status[STATUS_CONFUSED]);
+        player.status[STATUS_CONFUSED] -= shed;
+    }
+
+    #undef SHED_TURNS
+}
+
 // returns true if this was a killing stroke; does NOT call killCreature
 // flashColor indicates the color that the damage will cause the creature to flash
 boolean inflictDamage(creature *attacker, creature *defender,
@@ -1830,6 +2018,12 @@ boolean inflictDamage(creature *attacker, creature *defender,
         if (attacker == &player && player.currentHP <= 0) {
             gameOver("Drained by a cursed ring", true);
             return false;
+        }
+
+        // iOS port (Brogue SE): same hit also bleeds a fraction of the player's own afflictions into
+        // the victim (positive ring only; helper no-ops on a cursed ring or an inanimate target).
+        if (attacker == &player) {
+            transferAfflictionsToTarget(defender);
         }
     }
 
@@ -2043,6 +2237,7 @@ void buildHitList(const creature **hitList, const creature *attacker, creature *
             if (coordinatesAreInMap(newestX, newestY) && (pmap[newestX][newestY].flags & (HAS_MONSTER | HAS_PLAYER))) {
                 defender = monsterAtLoc((pos){ newestX, newestY });
                 if (defender
+                    && !defender->status[STATUS_FROZEN] // iOS port (Brogue SE): staff of frost -- an axe sweep skips a frozen creature; frozen creatures take no damage (they are pushed, not struck).
                     && monsterWillAttackTarget(attacker, defender)
                     && (!cellHasTerrainFlag(defender->loc, T_OBSTRUCTS_PASSABILITY) || (defender->info.flags & MONST_ATTACKABLE_THRU_WALLS))) {
 

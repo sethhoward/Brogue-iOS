@@ -685,6 +685,7 @@ boolean handleWhipAttacks(creature *attacker, enum directions dir, boolean *abor
     defender = monsterAtLoc(strikeLoc);
     if (defender
         && (attacker != &player || canSeeMonster(defender))
+        && !defender->status[STATUS_FROZEN] // iOS port (Brogue SE): staff of frost -- a frozen creature is a block to be pushed, not a target to be damaged; fall through so the push guard in playerMoves handles it.
         && !monsterIsHidden(defender, attacker)
         && monsterWillAttackTarget(attacker, defender)) {
 
@@ -750,6 +751,7 @@ boolean handleSpearAttacks(creature *attacker, enum directions dir, boolean *abo
         trigger the attack. */
         defender = monsterAtLoc(targetLoc);
         if (defender
+            && !defender->status[STATUS_FROZEN] // iOS port (Brogue SE): staff of frost -- a frozen creature can't be speared for damage; skip it so the bumped block is pushed (playerMoves) rather than dispatched.
             && (!cellHasTerrainFlag(targetLoc, T_OBSTRUCTS_PASSABILITY)
                 || (defender->info.flags & MONST_ATTACKABLE_THRU_WALLS))
             && monsterWillAttackTarget(attacker, defender)) {
@@ -830,6 +832,7 @@ static void buildFlailHitList(const short x, const short y, const short newX, co
             && canSeeMonster(monst)
             && monstersAreEnemies(&player, monst)
             && monst->creatureState != MONSTER_ALLY
+            && !monst->status[STATUS_FROZEN] // iOS port (Brogue SE): staff of frost -- a flail pass-attack skips a frozen creature; it takes no damage (frozen creatures are pushed, not struck).
             && !(monst->bookkeepingFlags & MB_IS_DYING)
             && (!cellHasTerrainFlag(monst->loc, T_OBSTRUCTS_PASSABILITY) || (monst->info.flags & MONST_ATTACKABLE_THRU_WALLS))) {
 
@@ -1263,6 +1266,11 @@ boolean playerMoves(short direction) {
             moveEntrancedMonsters(direction);
 
             // Perform a lunge or flail attack if appropriate.
+            // Balance pass: flail pass-attacks deal 50% damage (its multi-hit while moving is its power).
+            // Scoped to this loop only -- the rapier lunge that shares it is left at full damage.
+            if (rogue.weapon && (rogue.weapon->flags & ITEM_PASS_ATTACKS)) {
+                gWeaponDamageScalePct = 50;
+            }
             for (i=0; i<16; i++) {
                 if (hitList[i]) {
                     if (attack(&player, hitList[i], (rogue.weapon && (rogue.weapon->flags & ITEM_LUNGE_ATTACKS)))) {
@@ -1270,6 +1278,7 @@ boolean playerMoves(short direction) {
                     }
                 }
             }
+            gWeaponDamageScalePct = 100;
             if (hitList[0]) {
                 playerRecoversFromAttacking(anyAttackHit);
             }
@@ -1631,6 +1640,7 @@ static void showTravelEndNoiseFeedback(void) {
     recordPlayerNoiseRippleIfNeeded();
     rogue.playerNoise = NOISE_PLAYER_SILENT;
     cosmeticRefreshInvestigateBlinks();
+    cosmeticRefreshStatusBlinks();
     //   (3) Event-edge wake tells ('!' / off-screen '?') captured per-monster during the suppressed steps,
     //       re-emitted once by current state, with a single condensed haptic.
     flushAutomationHeardTells();
@@ -2509,8 +2519,12 @@ void scanOctantFOV(char grid[DCOLS][DROWS], short xLoc, short yLoc, short octant
     x = loc.x + columnsRightFromOrigin;
     y = loc.y + iStart;
     betweenOctant1andN(&x, &y, loc.x, loc.y, octant);
+    // iOS port (Brogue SE): smoke. When this scan is a vision query (forbiddenTerrain includes
+    // T_OBSTRUCTS_VISION -- player FOV, monster FOV, light propagation), thick smoke blocks sight too.
+    // Passability-only scans are unaffected, and smoke carries no terrain flag, so projectiles/sound pass through.
     boolean currentlyLit = coordinatesAreInMap(x, y) && !(cellHasTerrainFlag((pos){ x, y }, forbiddenTerrain) ||
-                                                          (pmap[x][y].flags & forbiddenFlags));
+                                                          (pmap[x][y].flags & forbiddenFlags) ||
+                                                          ((forbiddenTerrain & T_OBSTRUCTS_VISION) && cellHasThickSmoke((pos){ x, y })));
     for (i = iStart; i <= iEnd; i++) {
         x = loc.x + columnsRightFromOrigin;
         y = loc.y + i;
@@ -2519,7 +2533,8 @@ void scanOctantFOV(char grid[DCOLS][DROWS], short xLoc, short yLoc, short octant
             // We're off the map -- here there be memory corruption.
             continue;
         }
-        cellObstructed = (cellHasTerrainFlag((pos){ x, y }, forbiddenTerrain) || (pmap[x][y].flags & forbiddenFlags));
+        cellObstructed = (cellHasTerrainFlag((pos){ x, y }, forbiddenTerrain) || (pmap[x][y].flags & forbiddenFlags)
+                          || ((forbiddenTerrain & T_OBSTRUCTS_VISION) && cellHasThickSmoke((pos){ x, y }))); // iOS port (Brogue SE): thick smoke blocks sight
         // if we're cautious on walls and this is a wall:
         if (cautiousOnWalls && cellObstructed) {
             // (x2, y2) is the tile one space closer to the origin from the tile we're on:

@@ -137,6 +137,7 @@ flammables; the water itself extinguishes via `TM_EXTINGUISHES_FIRE`.
 | `STEAM` | 521 | `T_CAUSES_DAMAGE` | quickly |
 | `DARKNESS_CLOUD` | 522 | — (light effect) | does not dissipate via flag (managed elsewhere) |
 | `HEALING_CLOUD` | 523 | `T_CAUSES_HEALING` | quickly |
+| `SMOKE_GAS` (iOS port) | ~524 | — (no flag; `SMOKE_LIGHT` dims; thick smoke blocks **sight only** via volume-gated `cellHasThickSmoke()` in `scanOctantFOV`, not a terrain flag) | **volume-keyed** (not flag-driven): thin ~75%/turn, thick (≥ `SMOKE_THICK_VOLUME`) ~35%/turn. Emitted per-turn by burning `PLAIN_FIRE` (`updateEnvironment`). See IOS_MODIFICATIONS.md 2026-06-27. |
 
 (Row line numbers approximate within the catalog block; the gas tiles are contiguous around
 `Globals.c:515-523`. The authoritative effect comes from the `T_*` flags, applied in §5.)
@@ -315,6 +316,7 @@ drink path (`Items.c:8948`). Gas on the tile (`volume > 0`) takes priority; othe
 | `ROT_GAS` | lichen |
 | `DARKNESS_CLOUD` | darkness |
 | `HEALING_CLOUD` | wort |
+| `SMOKE_GAS` (iOS port) | smoke (capture-only `POTION_SMOKE`; thrown/uncorked → a short-lived sight-blocking screen via `DF_SMOKE_POTION`) |
 | deep water (`T_IS_DEEP_WATER`, while **not** levitating) | fire immunity |
 
 If nothing is capturable: *"the bottle is empty, and there is nothing here to capture."* — no turn
@@ -350,6 +352,10 @@ The bottle's own flavor text promises *"stepping into a gas **or hazard you can 
 through**."* In v1 code, "hazard you can walk through" is **only deep water**; everything else
 routes through the GAS layer. So a number of walkable liquids/surfaces and several gases were
 **unaccounted for** (v2 addresses these):
+
+> **Note (iOS port, 2026-06-27):** the new `SMOKE_GAS` (emitted by burning `PLAIN_FIRE`) **is**
+> capturable, as the capture-only `POTION_SMOKE` (thrown/uncorked → a short-lived sight-blocking
+> screen). So it is *not* a gap — see §8.1 and IOS_MODIFICATIONS.md 2026-06-27.
 
 **Gases that exist but aren't capturable:**
 

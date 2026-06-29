@@ -256,7 +256,7 @@ use `enchant/FP_FACTOR` (= the displayed staff level).
 
 | Staff | Effect formula |
 |---|---|
-| damage staffs (lightning/fire/etc.) | `staffDamageLow = (2 + level)*3/4`; `staffDamageHigh = 4 + 5*level/2`; rolled clumped |
+| damage staffs (lightning/fire/etc.) | `staffDamageLow = (2 + level)*3/4`; `staffDamageHigh = 4 + 5*level/2`; rolled clumped. *(iOS port: lightning & firebolt gain stun/chain/bloom at netEnchant ≥ 5 — see [Staff glow-up](#staff-glow-up-ios-port--lightning--firebolt-at-netenchant--5) below.)* |
 | poison | `staffPoison(e) = 5 * 1.3^(level-2)` doses (table `POW_POISON`, 1.3^x) |
 | blinking | `staffBlinkDistance = 2 + level*2` cells |
 | haste | `staffHasteDuration = 2 + level*4` turns |
@@ -266,6 +266,34 @@ use `enchant/FP_FACTOR` (= the displayed staff level).
 | obstruction | scales with level (larger crystal walls); uses bolt magnitude |
 | protection (shielding) | `staffProtection(e) = 130 * 1.40^(level-2)` shield points |
 | frost (iOS port) | single-target freeze: `staffFreezeDuration` turns frozen, then a `staffFreezeSlowDuration` slow tail (both scale with level, `PowerTables.c`); freezes deep water into temporary walkable ice and dense foliage into brittle walls; quenches fire it crosses. Anything ablaze/`MONST_FIERY` is doused + slowed instead of frozen. Shared `freezeCreature()` with the potion of ice. |
+
+### Staff glow-up (iOS port) — lightning & firebolt at netEnchant ≥ 5
+
+The staffs of **lightning** and **firebolt** gain new behavior once their **netEnchant reaches 5**, then
+ramp with further enchant. The gate is `netEnchant >= 5` (so curse/low strength can't cheat it), carried
+into the bolt via a new `bolt.empowerment` field (the effective net-enchant level, else 0) set in
+`useStaffOrWand` (`Items.c`); catalog bolts default it to 0. Behavior triggers on the actual enchant
+regardless of identification — only the description *specifics* are gated on the enchant being known.
+**Player-staff-only:** monster-cast lightning/fire bolts have no enchant and stay vanilla. Single charge,
+fully automatic. Deterministic (substantive-RNG damage rolls only; the `bolt` struct is transient/never
+serialized, so the field is save-safe). Ramp formulas in `PowerTables.c`:
+
+| Staff | Empowered effect (netEnchant ≥ 5) | Ramp |
+|---|---|---|
+| lightning | every creature the bolt damages is briefly **stunned** (non-stacking `STATUS_PARALYZED`, the electrified-water `max(existing, dur)` pattern) **and** the charge **chains** to nearby enemies the straight line *missed* | `staffLightningStunDuration` 1→3 turns; `staffLightningChainCount` 1→3 jumps; `staffLightningChainRange` 3→8 cells |
+| firebolt | the bolt **erupts into an incineration bloom** at its impact point (the last passable cell), *augmenting* the direct line hit — reuses `DF_INCINERATION_POTION` (real fire: burns the player and ignites the dungeon) | `staffFireboltBloomDecrement` 37→12 (lower = larger bloom) |
+
+- **Stun** is applied in `updateBolt` BE_DAMAGE (the "monster lives" branch); symmetric — a reflected bolt
+  can stun the player. Non-stacking, so it can't stun-lock.
+- **Chain** is a *controlled arc* (`resolveLightningChain`, `Items.c`), **not** `zap()` recursion: it reuses
+  the same `staffDamage` roll + stun, arcs from the last struck creature to the nearest **unstruck** enemy
+  within range on an open path (deterministic — nearest by distance, monster-iteration order breaks ties),
+  with **per-link damage falloff** (~75% each hop). It shares a **struck-set** with the primary line
+  (generalizing electrified water's "ring-0 exclusion" below), so a creature already pierced by the line is
+  never hit twice and the chain can't ping-pong. Fires only if the primary bolt struck a creature.
+- **Firebolt bloom** spawns once the bolt lands; on a clean miss into a wall it blooms at the cell before
+  the wall (never inside it). It does **not** use the concussive `GAS_EXPLOSION` / knockback path — it's
+  incineration *fire*, by design (lightning is the crowd-control staff; firebolt is area-denial).
 
 ### Electrified water (iOS port) — lightning + water
 
@@ -352,7 +380,7 @@ immediately on inspection (`Items.c:6489`).
 
 | # | Ring | Freq | MktVal | Effect (positive enchant) | Cursed |
 |---|---|---|---|---|---|
-| 0 | clairvoyance | 1 | 900 | See through walls/doors within radius = enchant | Blinds immediate surroundings |
+| 0 | clairvoyance | 1 | 900 | See through walls/doors within radius = enchant. **Brogue SE:** on first arrival, senses the **good/bad polarity** of **N = enchant** magic floor items, **guaranteed** (secret rooms incl.) — `detectMagicOnItem` (polarity only, *not* a full ID), map-lights each aura (`ITEM_DETECTED`). Pool is all non-neutral floor items incl. already-known ones, but **unknown-polarity items are prioritized** (known ones only fill leftover N as location/secret-room marks). Uncapped (≤ floor contents); random within band. Gated on `clairvoyance > 0`, replay-stable. See ID-audit §5h, `senseFloorPolarityFromClairvoyance` (`Items.c`) | Blinds immediate surroundings; clouds the scry |
 | 1 | stealth | 1 | 800 | Reduces stealth range | Increases stealth range |
 | 2 | regeneration | 1 | 750 | Faster HP regen (`turnsForFullRegenInThousandths`, 0.75^x) | Slows/halts regen |
 | 3 | transference | 1 | 750 | Heal % of damage dealt (`playerTransferenceRatio` = 20% per level base) | Lose HP when dealing damage |
@@ -385,13 +413,9 @@ keyed off `rogue.awarenessBonus`:
   this level." Existence only — never location or reward/danger; truthful (never false-positives), so
   silence is ambiguous. Gated on wearing the ring AND a machine existing, so non-wearers draw no RNG and
   keep vanilla replay behavior (`AWARENESS_MACHINE_SENSE_BASE = 25`, `RogueMain.c:618`, `RogueMain.c:836`).
-- **Sense floor item polarity (Brogue SE).** On first arriving at a level, a positive ring may sense the
-  benevolent/malevolent aura of magic items lying on the floor — *secret rooms included* — lighting each
-  one's map aura and recording its polarity (the passive, per-floor twin of a thrown potion of detect
-  magic). With `enchant = awarenessBonus / 20`: per-item chance `min(90, 10 + 10·(enchant+1))` (+1 = 30% …
-  +7 = 90% cap), with `1 + max(0, enchant − 7)` rolls (each success reveals one more item). Gated on
-  `awarenessBonus > 0` (cursed senses nothing); action-triggered RNG, replay-stable. See the
-  identification audit §5h and `senseFloorPolarityFromAwareness` (`Items.c`).
+- **(Moved 2026-06-28.)** The arrival floor item-polarity sense is no longer an awareness feature — it moved
+  to the **ring of clairvoyance** (same polarity behavior). See the clairvoyance row above, the
+  identification audit §5h, and `senseFloorPolarityFromClairvoyance` (`Items.c`).
 - **Hear unseen monsters farther (Brogue SE noise system).** Awareness extends how far off-screen monster
   movement registers as a "heard something" ripple. The ring's primary effect here is **range, not
   probability** ("bigger ears, not a louder world"): each net enchant adds `NOISE_AWARENESS_RANGE_PER_ENCHANT`

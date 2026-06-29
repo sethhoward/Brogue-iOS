@@ -240,7 +240,7 @@ if (soundDist > audibleRadius || sealed off) -> no roll, inaudible
 
 // (2) PROBABILITY — within the ear, how likely is THIS step heard?
 ambient = NOISE_BASE_PERCEPTION(8) + awarenessEnchant*NOISE_AWARENESS_PER_ENCHANT(2)
-        + distanceModifier         // sound map: near-field(d<=1) +10, else -2/tile
+        + distanceModifier         // sound map: near-field(d<=2) +20, else -2/tile
         + terrainNoiseModifier     // emission, §3.4
         + (playerAdjacentToClosedDoor ? NOISE_DOOR_LISTEN_BONUS(8) : 0)
         + (justRested ? NOISE_REST_PERCEPTION_BONUS(6) : 0)

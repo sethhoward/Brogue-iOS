@@ -235,8 +235,11 @@ item *makeItemInto(item *theItem, unsigned long itemCategory, short itemKind) {
                     theItem->flags |= ITEM_PASS_ATTACKS;
                     break;
                 case SPEAR:
-                case PIKE:
                     theItem->flags |= ITEM_ATTACKS_PENETRATE;
+                    break;
+                case PIKE:
+                    // war pike: reach + penetrate, but heavy and slow to recover (balance pass)
+                    theItem->flags |= (ITEM_ATTACKS_PENETRATE | ITEM_SLOW_RECOVERY);
                     break;
                 case AXE:
                 case WAR_AXE:
@@ -2665,14 +2668,35 @@ void itemDetails(char *buf, item *theItem) {
             if (((theItem->flags & (ITEM_IDENTIFIED | ITEM_MAX_CHARGES_KNOWN)) && staffTable[theItem->kind].identified)
                 || rogue.playbackOmniscience) {
                 switch (theItem->kind) {
-                    case STAFF_LIGHTNING:
+                    case STAFF_LIGHTNING: {
                         sprintf(buf2, "This staff deals damage to every creature in its line of fire; nothing is immune. (If the staff is enchanted, its average damage will increase by %i%%.)",
                                 (int) (100 * (staffDamageLow(enchant + enchantMagnitude() * FP_FACTOR) + staffDamageHigh(enchant + enchantMagnitude() * FP_FACTOR)) / (staffDamageLow(enchant) + staffDamageHigh(enchant)) - 100));
+                        // iOS port (Brogue SE): glow-up clause -- specifics only here, where the enchant is known.
+                        const short lvl = (short) (enchant / FP_FACTOR);
+                        char glow[COLS*2];
+                        if (lvl >= 5) {
+                            const short stun = staffLightningStunDuration(lvl), jumps = staffLightningChainCount(lvl);
+                            sprintf(glow, " At its current power, the bolt also briefly stuns every creature it strikes (%i turn%s) and arcs to up to %i nearby %s the line missed.",
+                                    stun, stun == 1 ? "" : "s", jumps, jumps == 1 ? "foe" : "foes");
+                        } else {
+                            strcpy(glow, " Enchanted to +5 or beyond, it will also briefly stun those it strikes and arc to a nearby foe.");
+                        }
+                        strcat(buf2, glow);
                         break;
-                    case STAFF_FIRE:
+                    }
+                    case STAFF_FIRE: {
                         sprintf(buf2, "This staff deals damage to any creature that it hits, unless the creature is immune to fire. (If the staff is enchanted, its average damage will increase by %i%%.) It also sets creatures and flammable terrain on fire.",
                                 (int) (100 * (staffDamageLow(enchant + enchantMagnitude() * FP_FACTOR) + staffDamageHigh(enchant + enchantMagnitude() * FP_FACTOR)) / (staffDamageLow(enchant) + staffDamageHigh(enchant)) - 100));
+                        // iOS port (Brogue SE): glow-up clause -- specifics only here, where the enchant is known.
+                        char glow[COLS*2];
+                        if (enchant / FP_FACTOR >= 5) {
+                            strcpy(glow, " At its current power, the bolt erupts into an incineration blast where it lands -- beware igniting yourself and the dungeon around you.");
+                        } else {
+                            strcpy(glow, " Enchanted to +5 or beyond, the bolt will erupt into an incineration blast where it lands.");
+                        }
+                        strcat(buf2, glow);
                         break;
+                    }
                     case STAFF_POISON:
                         sprintf(buf2, "The bolt from this staff will poison any creature that it hits for %i turns. (If the staff is enchanted, this will increase to %i turns.)",
                                 staffPoison(enchant),
@@ -4226,7 +4250,11 @@ void haste(creature *monst, short turns) {
 
 void heal(creature *monst, short percent, boolean panacea) {
     char buf[COLS], monstName[COLS];
+    const short hpBefore = monst->currentHP; // iOS port (Brogue SE): so we can flag the cosmetic '♥' tell only on a real gain
     monst->currentHP = min(monst->info.maxHP, monst->currentHP + percent * monst->info.maxHP / 100);
+    if (monst->currentHP > hpBefore) {
+        cosmeticMarkHealed(monst); // iOS port (Brogue SE): a discrete heal blinks a green heart (passive regen never reaches heal(), so it stays quiet)
+    }
     if (panacea) {
         if (monst->status[STATUS_HALLUCINATING] > 1) {
             monst->status[STATUS_HALLUCINATING] = 1;
@@ -4675,7 +4703,15 @@ boolean freezeCreature(creature *monst, short freezeTurns, short slowTurns) {
             extinguishFireOnCreature(monst);
         }
         slow(monst, slowTurns);
-        // MONST_FIERY creatures relight every turn, so only flash on an actual dousing (avoids per-turn spam in a cloud).
+        // iOS port (Brogue SE): frost doesn't freeze a fiery creature -- it douses + slows. A fiery
+        // creature's aura is only SUPPRESSED: STATUS_FIERY_DOUSED counts down (reusing the freeze
+        // duration) and rekindles the fire on lapse (decrementMonsterStatus). The water bottle, which
+        // strips MONST_FIERY, remains the permanent answer. An ordinary burning creature stays doused.
+        if (monst->info.flags & MONST_FIERY) {
+            monst->status[STATUS_FIERY_DOUSED] = monst->maxStatus[STATUS_FIERY_DOUSED] =
+                max(monst->status[STATUS_FIERY_DOUSED], freezeTurns);
+        }
+        // Flash only on an actual dousing (avoids per-turn spam when sitting in a frost cloud).
         if (wasBurning && canDirectlySeeMonster(monst) && boltCatalog[BOLT_FREEZE].backColor) {
             flashMonster(monst, boltCatalog[BOLT_FREEZE].backColor, 100);
         }
@@ -4789,6 +4825,16 @@ static boolean updateBolt(bolt *theBolt, creature *caster, short x, short y,
                     }
                     if (theBolt->flags & BF_FIERY) {
                         exposeCreatureToFire(monst);
+                    }
+                    // iOS port (Brogue SE): staff of lightning glow-up. An empowered electric bolt briefly
+                    // stuns everything it shocks -- non-stacking paralysis (the electrified-water pattern),
+                    // duration ramping with enchant. Symmetric: a reflected bolt can stun the player.
+                    if (theBolt->empowerment >= 5
+                        && (theBolt->flags & BF_ELECTRIC)
+                        && !(monst->info.flags & (MONST_INANIMATE | MONST_INVULNERABLE))) {
+                        const short stunDur = staffLightningStunDuration(theBolt->empowerment);
+                        monst->status[STATUS_PARALYZED] = monst->maxStatus[STATUS_PARALYZED] =
+                            max(monst->status[STATUS_PARALYZED], stunDur);
                     }
                     if (!alreadyReflected
                         || caster != &player) {
@@ -5392,6 +5438,97 @@ static void electrifyWater(bolt *theBolt, creature *caster, const pos *sources, 
 }
 
 // returns whether the bolt effect should autoID any staff or wand it came from, if it came from a staff or wand
+// iOS port (Brogue SE): staff of lightning glow-up -- the controlled chain arc. After the primary bolt
+// resolves, the charge leaps from the last creature it struck to nearby enemies the straight line MISSED.
+// struck[] holds every creature the line already hit, so the chain never double-hits or ping-pongs. Each
+// link arcs to the nearest unstruck enemy within range along an open path (deterministic: nearest by
+// distance, monster-iteration order breaks ties), deals falling-off damage, and briefly stuns -- it's
+// still lightning. Bounded by a ramping jump count; reuses the same damage roll + stun as the line.
+static void resolveLightningChain(bolt *theBolt, creature *caster, pos struck[], short numStruck, const color *boltColor) {
+    char buf[COLS], monstName[COLS];
+    const short maxJumps = staffLightningChainCount(theBolt->empowerment);
+    const short chainRange = staffLightningChainRange(theBolt->empowerment);
+    const short stunDur = staffLightningStunDuration(theBolt->empowerment);
+    pos origin = struck[numStruck - 1]; // arc from the last creature the line struck
+    short falloffNum = 3, falloffDen = 4; // first link at 75% damage, then ~56%, ~42% ...
+
+    for (short jump = 0; jump < maxJumps && numStruck < MAX_BOLT_LENGTH; jump++) {
+        creature *target = NULL;
+        short bestDist = chainRange + 1;
+
+        for (creatureIterator it = iterateCreatures(monsters); hasNextCreature(it);) {
+            creature *m = nextCreature(&it);
+            if ((m->bookkeepingFlags & (MB_SUBMERGED | MB_IS_DYING))
+                || !monstersAreEnemies(caster, m)) {
+                continue;
+            }
+            boolean skip = false;
+            for (short s = 0; s < numStruck; s++) {
+                if (posEq(struck[s], m->loc)) {
+                    skip = true;
+                    break;
+                }
+            }
+            if (skip) {
+                continue;
+            }
+            const short d = distanceBetween(origin, m->loc);
+            if (d >= 1 && d < bestDist && openPathBetween(origin, m->loc)) {
+                bestDist = d;
+                target = m;
+            }
+        }
+
+        if (!target) {
+            break; // no nearby unstruck enemy -- the chain fizzles out
+        }
+
+        // Quick lightning-arc visual along the hop.
+        if (boltColor) {
+            pos arc[MAX_BOLT_LENGTH];
+            const short n = getLineCoordinates(arc, origin, target->loc, &boltCatalog[BOLT_NONE]);
+            boolean arcInView = false;
+            for (short k = 0; k < n && k < MAX_BOLT_LENGTH; k++) {
+                if (playerCanSee(arc[k].x, arc[k].y)) {
+                    hiliteCell(arc[k].x, arc[k].y, boltColor, 50, false);
+                    arcInView = true;
+                }
+                if (posEq(arc[k], target->loc)) {
+                    break;
+                }
+            }
+            if (arcInView && !rogue.playbackFastForward) {
+                pauseAnimation(16, PAUSE_BEHAVIOR_DEFAULT);
+            }
+        }
+
+        if (canSeeMonster(target)) {
+            monsterName(monstName, target, true);
+            sprintf(buf, "the lightning arcs to %s", monstName);
+            combatMessage(buf, boltColor);
+        }
+        exposeTileToElectricity(target->loc.x, target->loc.y); // promote any electric-reactive terrain
+
+        const short dmg = (short) (staffDamage(theBolt->magnitude * FP_FACTOR) * falloffNum / falloffDen);
+        if (dmg >= 1 && inflictDamage(caster, target, dmg, boltColor, false)) {
+            killCreature(target, false);
+        } else {
+            if (!(target->info.flags & (MONST_INANIMATE | MONST_INVULNERABLE))) {
+                target->status[STATUS_PARALYZED] = target->maxStatus[STATUS_PARALYZED] =
+                    max(target->status[STATUS_PARALYZED], stunDur);
+            }
+            if (canSeeMonster(target)) {
+                flashMonster(target, boltColor, 100);
+            }
+        }
+
+        struck[numStruck++] = target->loc; // never arc back to this creature
+        origin = target->loc;
+        falloffNum *= 3;
+        falloffDen *= 4;
+    }
+}
+
 boolean zap(pos originLoc, pos targetLoc, bolt *theBolt, boolean hideDetails, boolean reverseBoltDir) {
     pos listOfCoordinates[MAX_BOLT_LENGTH];
     short i, j, k, x, y, x2, y2, numCells, blinkDistance = 0, boltLength, initialBoltLength, lights[DCOLS][DROWS][3];
@@ -5408,6 +5545,10 @@ boolean zap(pos originLoc, pos targetLoc, bolt *theBolt, boolean hideDetails, bo
     // creature standing in water; seeds the post-bolt flood-fill shock. See electrifyWater().
     pos electricStrikes[MAX_BOLT_LENGTH];
     short numElectricStrikes = 0;
+    // iOS port (Brogue SE): staff of lightning glow-up -- locs of creatures the primary bolt struck, so
+    // the post-bolt chain only arcs to enemies the straight line missed (no double-hits / ping-pong).
+    pos lightningStruck[MAX_BOLT_LENGTH];
+    short numLightningStruck = 0;
 
     enum displayGlyph theChar;
     color foreColor, backColor, multColor;
@@ -5549,6 +5690,19 @@ boolean zap(pos originLoc, pos targetLoc, bolt *theBolt, boolean hideDetails, bo
                 && creatureContactsWater(waterMonst)) {
 
                 electricStrikes[numElectricStrikes++] = (pos){ x, y };
+            }
+        }
+
+        // iOS port (Brogue SE): staff of lightning glow-up -- record every creature an empowered bolt
+        // strikes (loc-based, before updateBolt which may kill it) so the post-bolt chain skips the line.
+        if (theBolt->empowerment >= 5
+            && (theBolt->flags & BF_ELECTRIC)
+            && theBolt->boltEffect == BE_DAMAGE
+            && numLightningStruck < MAX_BOLT_LENGTH) {
+
+            creature *hitMonst = monsterAtLoc((pos){ x, y });
+            if (hitMonst && !(hitMonst->bookkeepingFlags & MB_SUBMERGED)) {
+                lightningStruck[numLightningStruck++] = (pos){ x, y };
             }
         }
 
@@ -5778,6 +5932,26 @@ boolean zap(pos originLoc, pos targetLoc, bolt *theBolt, boolean hideDetails, bo
     // through any body of water it struck and shock everything else standing in it.
     if (numElectricStrikes > 0) {
         electrifyWater(theBolt, shootingMonst, electricStrikes, numElectricStrikes);
+    }
+
+    // iOS port (Brogue SE): staff glow-up effects, resolved once the bolt has fully landed at (x,y).
+    if (theBolt->empowerment >= 5 && theBolt->boltEffect == BE_DAMAGE) {
+        if ((theBolt->flags & BF_ELECTRIC) && numLightningStruck > 0) {
+            // Lightning chains from the last creature it struck to nearby enemies the line missed.
+            resolveLightningChain(theBolt, shootingMonst, lightningStruck, numLightningStruck, boltColor);
+        } else if (theBolt->flags & BF_FIERY) {
+            // Firebolt blooms into incineration fire at the impact point (augmenting the direct hit); the
+            // bloom spreads farther with enchant. Real fire -- it burns the player and ignites the dungeon,
+            // exactly like a potion of incineration (the built-in cost). Bloom at the last passable cell so
+            // it never lands inside a wall the bolt stopped against.
+            pos bloomLoc = (pos){ x, y };
+            if (cellHasTerrainFlag(bloomLoc, T_OBSTRUCTS_PASSABILITY) && i > 0) {
+                bloomLoc = listOfCoordinates[i - 1];
+            }
+            dungeonFeature bloom = dungeonFeatureCatalog[DF_INCINERATION_POTION];
+            bloom.probabilityDecrement = staffFireboltBloomDecrement(theBolt->empowerment);
+            spawnDungeonFeature(bloomLoc.x, bloomLoc.y, &bloom, true, false);
+        }
     }
 
     return autoID;
@@ -6871,6 +7045,11 @@ static boolean shatterPotionAtLoc(item *theItem, short x, short y, boolean fiery
             spawnDungeonFeature(x, y, &dungeonFeatureCatalog[DF_STEAM_PUFF], true, false);
             shatterMsg = "the flask shatters and a searing cloud of steam boils out!";
             break;
+        case POTION_SMOKE:
+            // iOS port (Brogue SE): thrown captured smoke -> a real (but short-lived) sight-blocking screen.
+            spawnDungeonFeature(x, y, &dungeonFeatureCatalog[DF_SMOKE_POTION], true, false);
+            shatterMsg = "the flask shatters and a billowing screen of smoke boils out!";
+            break;
         case POTION_WATER:
             spawnDungeonFeature(x, y, &dungeonFeatureCatalog[DF_FLOOD], true, false);
             shatterMsg = "the flask shatters and water gushes out, flooding the area!";
@@ -6987,6 +7166,11 @@ static short emptyBottleCaptureKindForTile(short x, short y, const char **flavor
             case DARKNESS_CLOUD:
                 *flavorText = "the bottle swallows a wisp of darkness; light bends around the stopper.";
                 return POTION_DARKNESS;
+            case SMOKE_GAS:
+                // iOS port (Brogue SE): capture smoke into a throwable screen. Bottle scarcity + single use
+                // is the cost (no fire-free repeatable screen); see emptyBottleCaptureKindForTile callers.
+                *flavorText = "acrid smoke pours into the bottle and roils against the glass.";
+                return POTION_SMOKE;
             case HEALING_CLOUD:
                 // iOS port (iBrogue): capturing wort always yields the wort cloud potion (even in runs
                 // where its themed set is otherwise absent); fillEmptyBottle un-hides the kind.
@@ -7383,6 +7567,35 @@ static void throwItem(item *theItem, creature *thrower, pos targetLoc, short max
             deleteItem(theItem);
             return;
         }
+        // iOS port (Brogue SE): a thrown water bottle that directly strikes a creature douses its fire.
+        // On a flammable creature it extinguishes STATUS_BURNING; on a fiery creature (wisp/salamander/
+        // flamedancer) it also permanently strips MONST_FIERY -- mirroring negation's fire-trait removal
+        // -- so it stops re-igniting its tile and can stay doused (fire immunity, an independent flag, is
+        // unaffected, so this declaws rather than kills). Clear the flag BEFORE extinguishing so the
+        // MONST_FIERY water-exemption (Time.c) no longer applies. Still floods the tile like a normal
+        // water shatter. Falls through to the plain flood below when the struck creature is neither
+        // burning nor fiery (water just gets it wet).
+        if (theItem->kind == POTION_WATER && struck
+            && ((struck->info.flags & MONST_FIERY) || struck->status[STATUS_BURNING])) {
+
+            const boolean wasFiery = (struck->info.flags & MONST_FIERY) ? true : false;
+            if (wasFiery) {
+                struck->info.flags &= ~MONST_FIERY;
+            }
+            if (struck->status[STATUS_BURNING]) {
+                extinguishFireOnCreature(struck);
+            }
+            spawnDungeonFeature(x, y, &dungeonFeatureCatalog[DF_FLOOD], true, false);
+            monsterName(buf3, struck, true);
+            sprintf(buf, wasFiery
+                    ? "the flask shatters and water hisses over %s, quenching its flames for good!"
+                    : "the flask shatters and water douses the flames on %s!", buf3);
+            message(buf, 0);
+            autoIdentify(theItem);
+            refreshDungeonCell((pos){ x, y });
+            deleteItem(theItem);
+            return;
+        }
         // iOS port (iBrogue): empty-bottle v2 potion of ice now bursts into a freezing CLOUD rather than
         // a single-target hit -- handled (for any target, struck or empty ground, and for the
         // bolt-detonation trap) by shatterPotionAtLoc below.
@@ -7743,6 +7956,12 @@ static boolean useStaffOrWand(item *theItem) {
     theBolt = boltCatalog[tableForItemCategory(theItem->category)[theItem->kind].power];
     if (theItem->category == STAFF) {
         theBolt.magnitude = theItem->enchant1;
+        // iOS port (Brogue SE): staff glow-up. At netEnchant >= 5 the lightning/firebolt staffs gain new
+        // behavior (lightning: brief stun + chain to a nearby unit; firebolt: incineration bloom). Carry
+        // the effective net-enchant level so zap()/updateBolt can gate and ramp it. 0 = not empowered.
+        if (netEnchant(theItem) >= 5 * FP_FACTOR) {
+            theBolt.empowerment = (short) (netEnchant(theItem) / FP_FACTOR);
+        }
     }
 
     if ((theItem->category & STAFF) && theItem->kind == STAFF_BLINKING
@@ -8901,68 +9120,81 @@ static void throwDetectMagicOnFloor(void) {
     messageWithColor(buf, &itemMessageColor, 0);
 }
 
-// iOS port (Brogue SE): the ring of awareness's outward sense. Called once from startLevel when a level is
-// first entered (gated there on !visited), a worn ring of awareness may sense the good/bad POLARITY of magic
-// items lying anywhere on the floor -- including inside still-undiscovered secret rooms, since it sets the
-// ITEM_DETECTED cell flag so the aura glyph shows for items the player hasn't found yet (the level is drawn
-// later in startLevel, so no refreshDungeonCell is needed here). This is the passive, per-floor analogue of a
-// THROWN potion of detect magic (throwDetectMagicOnFloor): identical eligibility (any undiscovered,
+// iOS port (Brogue SE): the ring of clairvoyance's outward scrying. Called once from startLevel when a level
+// is first entered (gated there on !visited), a worn ring of clairvoyance may sense the good/bad POLARITY of
+// magic items lying anywhere on the floor -- including inside still-undiscovered secret rooms, since it sets
+// the ITEM_DETECTED cell flag so the aura glyph shows for items the player hasn't found yet (the level is
+// drawn later in startLevel, so no refreshDungeonCell is needed here). This is the passive, per-floor analogue
+// of a THROWN potion of detect magic (throwDetectMagicOnFloor): identical eligibility (any undiscovered,
 // non-neutral, polarity-bearing floor item) and identical recording (detectMagicOnItem reveals the instance's
-// aura and, for kind-flavored consumables, the kind's polarity run-wide -- feeding deduction). Unlike the
-// thrown potion it does NOT filter on visibility: it runs before the player is positioned (no FOV yet), and
-// detecting a soon-to-be-visible item still usefully records its polarity for the pack.
+// aura and, for kind-flavored consumables, the kind's polarity run-wide -- feeding deduction WITHOUT spoiling
+// the exact kind; it is NOT a full identify()). Unlike the thrown potion it does NOT filter on visibility: it
+// runs before the player is positioned (no FOV yet), and detecting a soon-to-be-visible item still usefully
+// records its polarity for the pack.
 //
-// Chance and reach scale with the ring's net enchant (awarenessEnchant = rogue.awarenessBonus / 20 -- the
-// summed effective enchant of worn awareness rings, which the engine stores pre-multiplied by 20):
-//   per-item chance = min(90, 10 + 10*(enchant+1)) percent   -> +1=30% .. +7=90% (capped)
-//   rolls           = 1 + max(0, enchant - 7)                -> +1..+7 = 1 roll, +8 = 2, +9 = 3, ...
-// Each successful roll reveals one more still-hidden item (a distinct random pick from the eligible pool);
-// failed rolls consume nothing. Gated on rogue.awarenessBonus > 0, so a character without the ring -- or with
-// a cursed (senses-dulled) one -- draws no RNG here and keeps vanilla behavior. The draws are on the gameplay
-// RNG stream at a fixed point in startLevel (after item placement, before the level is shown), so they are
-// deterministic and replay-safe; like any gameplay change they diverge replays from pre-change recordings.
-void senseFloorPolarityFromAwareness(void) {
-    if (rogue.awarenessBonus <= 0) {
-        return; // no awareness ring worn (or it's cursed) -- sense nothing, and draw no RNG
+// Count scales DIRECTLY with the ring's net enchant: it senses exactly N = rogue.clairvoyance items,
+// GUARANTEED (no per-item chance roll) -- so a +1 ring senses 1 aura, +3 senses 3, etc. (rogue.clairvoyance
+// is the summed effective enchant of worn clairvoyance rings; unlike awarenessBonus it is NOT pre-multiplied).
+// No cap beyond what the floor actually holds: if fewer than N magical items exist, every one is sensed. This
+// is strictly the old awareness sense "but better": the ring level IS the number of auras revealed, instead of
+// the awareness version's one-coin-flip-until-+7. Gated on rogue.clairvoyance > 0, so a character without the
+// ring -- or with a cursed (sight-dulled) one -- senses nothing and draws no RNG. The random picks are on the
+// gameplay RNG stream at a fixed point in startLevel (after item placement, before the level is shown), so they
+// are deterministic and replay-safe; like any gameplay change they diverge replays from pre-change recordings.
+//
+// The eligible pool is EVERY non-neutral (magical) floor item, INCLUDING ones whose polarity you already know
+// (identified kind, or aura already sensed). A known item can't teach you anything, but lighting its map aura
+// is still a location / secret-room breadcrumb (the aura renders in unseen cells, IO.c). To spend the N well,
+// still-unknown items are PRIORITIZED: the N reveals draw randomly from the unknown band first (learning their
+// polarity via detectMagicOnItem -- polarity only, never a full identify), and only spill onto already-known
+// items (location mark only) once the unknowns run out.
+void senseFloorPolarityFromClairvoyance(void) {
+    if (rogue.clairvoyance <= 0) {
+        return; // no clairvoyance ring worn (or it's cursed) -- sense nothing, and draw no RNG
     }
     item *eligible[64];
     int count = 0;
     for (item *theItem = floorItems->nextItem; theItem != NULL; theItem = theItem->nextItem) {
         if ((theItem->category & CAN_BE_DETECTED) // matches throwDetectMagicOnFloor: floor gear included
-            && !itemIdentityFullyKnown(theItem)
-            && !(theItem->flags & ITEM_MAGIC_DETECTED) // already-detected (incl. gear whose aura is shown) skipped
-            && itemMagicPolarity(theItem) != MAGIC_POLARITY_NEUTRAL
+            && itemMagicPolarity(theItem) != MAGIC_POLARITY_NEUTRAL // only magical items have an aura to light
             && count < (int)(sizeof(eligible) / sizeof(eligible[0]))) {
 
             eligible[count++] = theItem;
         }
     }
     if (count == 0) {
-        return; // nothing on this level whose aura could be sensed
+        return; // nothing magical on this level to sense
     }
-    const int awarenessEnchant = rogue.awarenessBonus / 20; // awarenessBonus = 20 * net effective enchant
-    const int chance = min(90, 10 + 10 * (awarenessEnchant + 1));
-    const int rolls  = 1 + max(0, awarenessEnchant - 7);
-    // Each successful roll takes one distinct random item from the still-untaken suffix of `eligible`
-    // (partial Fisher-Yates); the `taken` prefix advances only on success, so failed rolls waste no items.
-    int taken = 0;
-    for (int r = 0; r < rolls && taken < count; r++) {
-        if (!rand_percent(chance)) {
-            continue; // this roll sensed nothing
+    // Stable-partition still-unknown-polarity items to the front so the N reveals learn as much as possible
+    // before spilling onto already-known items (which only get a location mark). "Known" = its polarity is
+    // already settled: a fully-identified kind, or an aura already sensed (ITEM_MAGIC_DETECTED).
+    int unknownCount = 0;
+    for (int i = 0; i < count; i++) {
+        const boolean known = itemIdentityFullyKnown(eligible[i]) || (eligible[i]->flags & ITEM_MAGIC_DETECTED);
+        if (!known) {
+            item *tmp = eligible[unknownCount]; eligible[unknownCount] = eligible[i]; eligible[i] = tmp;
+            unknownCount++;
         }
-        const int j = rand_range(taken, count - 1);
+    }
+    // Sense exactly N = enchant items, guaranteed (capped by floor contents): random within the unknown band
+    // first, then the known band.
+    const int toReveal = min(count, rogue.clairvoyance);
+    for (int taken = 0; taken < toReveal; taken++) {
+        const int hi = (taken < unknownCount ? unknownCount : count) - 1; // pick within the current band
+        const int j = rand_range(taken, hi);
         item *tmp = eligible[taken]; eligible[taken] = eligible[j]; eligible[j] = tmp;
-        detectMagicOnItem(eligible[taken]);
-        if (itemMagicPolarity(eligible[taken])) {
-            pmapAt(eligible[taken]->loc)->flags |= ITEM_DETECTED; // aura glyph shows even for unfound items
+        item *picked = eligible[taken];
+        if (taken < unknownCount) {
+            detectMagicOnItem(picked); // unknown -> learn polarity (records on instance + kind, feeds deduction)
         }
-        taken++;
+        if (itemMagicPolarity(picked)) {
+            pmapAt(picked->loc)->flags |= ITEM_DETECTED; // aura/location mark (both bands; shows in unseen cells)
+        }
     }
-    if (taken > 0) {
-        tryIdentifyLastItemKinds(HAS_INTRINSIC_POLARITY);
-        messageWithColor("your ring tingles; you sense a hidden magical aura on this level.",
-                         &backgroundMessageColor, 0);
-    }
+    // At least one item was sensed (toReveal >= 1 whenever the floor had a magical item).
+    tryIdentifyLastItemKinds(HAS_INTRINSIC_POLARITY);
+    messageWithColor("your ring tingles; you sense a hidden magical aura on this level.",
+                     &backgroundMessageColor, 0);
 }
 
 // iOS port (iBrogue): the altars-of-insight machine. When both linked altars hold items, reveal the item
@@ -9396,6 +9628,12 @@ boolean drinkPotion(item *theItem) {
             message("scalding steam boils out of the open flask!", 0);
             spawnDungeonFeature(player.loc.x, player.loc.y, &dungeonFeatureCatalog[DF_STEAM_PUFF], true, false);
             break;
+        case POTION_SMOKE:
+            // iOS port (Brogue SE): uncorked in hand, smoke blooms around you -- harmless, but you're now
+            // socked in too (thick smoke blinds you and chokes your own light). Usually you want to THROW it.
+            message("acrid smoke billows out of the open flask, and the world vanishes into haze!", 0);
+            spawnDungeonFeature(player.loc.x, player.loc.y, &dungeonFeatureCatalog[DF_SMOKE_POTION], true, false);
+            break;
         case POTION_ICE:
             // Uncorked in hand: a freezing cloud blooms around you (the frost cloud's T_CAUSES_FREEZE
             // freezes you as the turn resolves), and any water underfoot ices over.
@@ -9770,6 +10008,20 @@ void recalculateEquipmentBonuses() {
         if (player.info.damage.upperBound < 1) {
             player.info.damage.upperBound = 1;
         }
+    } else {
+        // Unarmed: fists scale with strength, so a strong adventurer can fight bare-handed -- e.g. against
+        // acid mounds/jellies, which corrode an equipped weapon -- instead of being stuck at 1-2 damage
+        // regardless of might. Strength 12 (the starting value) is the baseline; effective strength above
+        // it (net of weakness) widens the punch. The bonus is additive because the 1-2 base is far too
+        // small for the multiplicative weapon damageFraction to move it meaningfully.
+        int over = (rogue.strength - player.weaknessAmount) - 12;
+        player.info.damage.lowerBound = 1;
+        player.info.damage.upperBound = 2;
+        player.info.damage.clumpFactor = 1;
+        if (over > 0) {
+            player.info.damage.lowerBound += over / 4; // +1 floor per 4 str over 12
+            player.info.damage.upperBound += over / 2; // +1 ceiling per 2 str over 12 (a wide, swingy punch)
+        }
     }
 
     if (rogue.armor) {
@@ -10058,7 +10310,7 @@ void shuffleFlavors() {
     // never generated and only ever exist already-known (the bottle creates them identified), so keep
     // their kinds permanently identified -- they never join the potion-ID guessing pool.
     {
-        const short captureOnlyKinds[] = {POTION_ACID, POTION_WEBBING, POTION_STEAM, POTION_ICE, POTION_WATER};
+        const short captureOnlyKinds[] = {POTION_ACID, POTION_WEBBING, POTION_STEAM, POTION_ICE, POTION_WATER, POTION_SMOKE};
         for (i = 0; i < (short)(sizeof(captureOnlyKinds) / sizeof(captureOnlyKinds[0])); i++) {
             potionTable[captureOnlyKinds[i]].identified = true;
             potionTable[captureOnlyKinds[i]].magicPolarityRevealed = true;

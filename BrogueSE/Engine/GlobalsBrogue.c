@@ -626,7 +626,7 @@ const blueprint blueprintCatalog_Brogue[] = {
     {1,DEEPEST_LEVEL}, {40, 40},   0,      2,          0,                  (BP_NO_INTERIOR_FLAG), {
         {0,         STATUE_INERT,DUNGEON,       {3, 3},     3,          0,          -1,         MK_SENTINEL,    2,              0,          0,          (MF_NOT_IN_HALLWAY | MF_TREAT_AS_BLOCKING | MF_IN_VIEW_OF_ORIGIN)},
         {DF_ASH,    0,          0,              {2, 3},     0,          0,          -1,         0,              0,              0,          0,          0}}},
-    // iOS port (iBrogue): altars of insight -- force-built at depths 5 and 15 (see addMachines); occupies
+    // iOS port (iBrogue): altars of insight -- force-built at depths 6 and 12 (see addMachines); occupies
     // the variant-specific reward slot (index 72 = MT_INSIGHT_ALTAR). Force-only: no BP_REWARD, freq 0, so
     // it never enters the random reward raffle. The blueprint builds ONLY the carpeted room; the two altars
     // are then placed in addMachines in a fixed "s . o" arrangement (payment west, one-tile gap, insight
@@ -736,6 +736,7 @@ itemTable potionTable_Brogue[] = {
     {"steam",               itemColors[13], "", 0,  300,    0, 0, {0,0,0}, false, false, -1, false, "Scalding vapor strains against the stopper. Released, it boils outward into a searing cloud that burns anything caught within it."},
     {"ice",                 itemColors[12], "", 0,  300,    0, 0, {5,5,0}, false, false, -1, false, "Aching cold radiates through the glass. Hurled at a creature it encases the victim in ice, frozen helpless before thawing into a sluggish chill; uncorked in hand, it freezes you instead."},
     {"water",               itemColors[5],  "", 0,  300,    0, 0, {0,0,0}, false, false, 1,  false, "Plain captured water, heavier than it looks. Drunk, it douses flames and flushes away the fog of confusion, hallucination, and nausea. Dashed against the ground instead, it floods the area into a wide pool -- treacherous footing that conducts a lightning bolt's shock and washes away the scent you leave behind."},
+    {"smoke",               itemColors[13], "", 0,  300,    0, 0, {0,0,0}, false, false, -1, false, "Captured smoke roils behind the glass. Hurled, it bursts into a thick, drifting screen that blinds everyone caught inside -- you and your pursuers alike -- though sound still carries through it. The dense core soon thins and clears on its own."},
 };
 
 itemTable scrollTable_Brogue[] = {

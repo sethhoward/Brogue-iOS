@@ -32,6 +32,332 @@ See `BrogueCE/Engine/IOS_MODIFICATIONS.md` (faithful CE) and
 
 ## Change log
 
+### 2026-06-27 — Remove the Rapid Brogue and Bullet Brogue game variants (SE only)
+
+**What.** SE now ships a single game variant (Brogue). The `VARIANT_RAPID_BROGUE` and
+`VARIANT_BULLET_BROGUE` paths — quarter-length and 5-level speed variants inherited from upstream CE —
+were removed entirely. SE is the firehose fork and never offered variant selection in the shipped iOS UI
+anyway (the "Change Variant" flyout button was already removed; `chooseGameVariant()` was unreachable), so
+this just deletes the now-dead machinery.
+
+**Why.** All SE gameplay/content (item rework, gold goblin, altars, smoke, …) is authored against the
+full-length Brogue variant only. Maintaining three parallel `Globals*.c` catalogs (every potion/scroll/wand
+row, horde, blueprint, depth constant) tripled the edit surface for every content change with no shipped
+benefit, since the variants weren't selectable.
+
+**Changes.**
+- **Deleted** `GlobalsRapidBrogue.{c,h}` and `GlobalsBulletBrogue.{c,h}`. The BrogueSE target is a
+  synchronized folder group in `iBrogue_iPad.xcodeproj`, so removing the files from disk drops them from the
+  build with no pbxproj edit.
+- `Rogue.h` — dropped `VARIANT_RAPID_BROGUE` / `VARIANT_BULLET_BROGUE` from `enum gameVariant` (leaving
+  `VARIANT_BROGUE` + `NUMBER_VARIANTS`); dropped `NG_GAME_VARIANT` from `enum NGCommands`; refreshed the
+  `MT_TRANSFER_ALTAR` / `MT_INSIGHT_ALTAR` comments that referenced the per-variant catalogs.
+- `RogueMain.c` — removed the two `Globals{Rapid,Bullet}Brogue.h` includes, the two `printBrogueVersion()`
+  variant lines, and collapsed `initializeGameVariant()` to call `initializeGameVariantBrogue()` directly.
+- `MainMenu.c` — deleted `chooseGameVariant()` and its two now-dead dispatch sites (the flyout branch and the
+  `NG_GAME_VARIANT` case in the game loop).
+- `Architect.c` — deleted the Bullet-only depth-1 guaranteed weapon vault; simplified the now-always-true
+  `gameVariant == VARIANT_BROGUE` guards on the transfer-altar pair placement and the insight-altar
+  force-build.
+
+**Save/recording compatibility.** Existing Rapid/Bullet recordings (version strings `RB`/`BB`) will no
+longer replay — they fail the normal recording version check like any incompatible recording. Accepted
+(straight removal, no migration); SE saves are isolated under `Documents/se/` and SE is Game-Center-silent.
+
+### 2026-06-27 — Smoke: burning terrain emits a vision-obscuring gas (new content)
+
+**What.** A new gas, `SMOKE_GAS`, emitted by ordinary burning terrain. It obscures vision in two tiers
+governed by a single threshold (`SMOKE_THICK_VOLUME`, default 15):
+- **Thin smoke (< threshold)** only *dims* the cell (a gentle negative light, `SMOKE_LIGHT` /
+  `smokeCloudColor` `-10`, milder than the supernatural darkness cloud's `-20`) and **dissipates fast**
+  (~75%/turn).
+- **Thick smoke (≥ threshold)** also **blocks line of sight** and **dissipates slowly** (~35%/turn), so a
+  real blaze walls off an area for a handful of turns and then the core crumbles once it thins.
+
+It's **additive**: each burning `PLAIN_FIRE` tile rolls (`SMOKE_EMISSION_CHANCE`, default 45%) to puff a
+low-volume `DF_SMOKE_ACCUMULATION` into the gas layer each turn, and the volumetric system pools puffs from
+many tiles — a bigger fire makes proportionally more smoke. Only `PLAIN_FIRE` (ordinary burning terrain)
+smokes; gas-fire flashes, brimstone, and explosions do not (keeps firebolt spam from whiting out a fight).
+Smoke is **non-flammable** and does **no damage** — purely an obscuring effect.
+
+**Symmetric, with built-in counter-pressure.** Smoke blocks the player's and monsters' sight equally
+(monsters perceive the player via the player FOV grid `IN_FIELD_OF_VIEW`, which the gate below feeds). The
+costs that keep it from being a free escape: smoke comes *from dangerous fire*; standing in thick smoke
+blinds **you** too and chokes your own light; and — crucially — smoke does **not** muffle sound (see below),
+so a screen breaks line of sight but a pursuer can still *hear* you via the SE noise system. (Grilled design;
+see the Q&A captured in the design notes.)
+
+**Sight-only, not a wall.** Smoke deliberately carries **no `T_OBSTRUCTS_VISION` terrain flag**. Instead a
+volume-gated helper `cellHasThickSmoke()` (`Globals.c`, declared in `Rogue.h`) is consulted in the FOV
+shadowcaster `scanOctantFOV` (`Movement.c`, both the init and loop obstruction checks) **only when the scan
+is a vision query** (`forbiddenTerrain & T_OBSTRUCTS_VISION`). Consequences, all intended:
+- Player FOV, monster FOV, and **light propagation** (all route through `scanOctantFOV`) honor the block —
+  so thick smoke is opaque to sight and chokes light.
+- **Projectiles pass through** (bolts/lightning/arrows/blink use `getImpactLoc`/`getLineCoordinates`, which
+  test the terrain flag directly — untouched), and **sound carries through** (the noise cost map keys off
+  `T_OBSTRUCTS_VISION`, which smoke lacks). Monster↔monster LOS (`openPathBetween`) is likewise unaffected.
+
+**Bottle capture/release.** The SE empty bottle can capture smoke (`emptyBottleCaptureKindForTile` →
+`POTION_SMOKE`, a frequency-0 capture-only potion added to all three variant `potionTable`s and the
+`captureOnlyKinds` auto-ID list). Thrown (`shatterPotionAtLoc`) or uncorked in hand it releases a real but
+short-lived screen via `DF_SMOKE_POTION` (`{SMOKE_GAS, GAS, 250, 0, 0}`). The cost is the bottle economy
+itself — scarce + single-use — not a new safeguard; release potency is fixed (doesn't scale to captured
+volume), like every other captured gas.
+
+**Determinism / save-safety.** Smoke is fully state-driven: the per-turn emission rolls with `rand_percent`
+(substantive RNG) in `updateEnvironment`'s fire loop, and volume lives in `pmap[][].volume`, reconstructed
+deterministically each turn — never serialized. The dimming/sight-block are pure reads of that state (no
+RNG). `updateVolumetricMedia` already runs before the FOV/light recompute, so smoke and sight agree within
+the turn. Adding the `SMOKE_GAS`/`SMOKE_LIGHT`/`DF_SMOKE_*`/`POTION_SMOKE` enum entries (each paired with its
+parallel catalog/table row) doesn't touch save format (recordings store inputs, not tile indices).
+
+**Files.** `Rogue.h` (constants `SMOKE_THICK_VOLUME`/`SMOKE_EMISSION_CHANCE`; `SMOKE_GAS`, `SMOKE_LIGHT`,
+`DF_SMOKE_ACCUMULATION`, `DF_SMOKE_POTION`, `POTION_SMOKE` enums; `cellHasThickSmoke` proto). `Globals.c`
+(`smokeColor`/`smokeCloudColor`, the `SMOKE_LIGHT` light row, the `SMOKE_GAS` tile row, the two `DF_SMOKE_*`
+catalog rows, `cellHasThickSmoke`). `Globals{Brogue,BulletBrogue,RapidBrogue}.c` (the `"smoke"` potion row).
+`Time.c` (emission hook in `updateEnvironment`; volume-keyed dissipation in `updateVolumetricMedia`).
+`Movement.c` (the `scanOctantFOV` sight gate). `Items.c` (capture, throw-release, quaff-release, capture-only
+list). All marked `// iOS port (Brogue SE):`. Tuning dials: `SMOKE_THICK_VOLUME`, `SMOKE_EMISSION_CHANCE`,
+the `DF_SMOKE_ACCUMULATION`/`DF_SMOKE_POTION` volumes, and the two dissipation rates. **Deferred v2 dials:**
+ember-emission (longer haze), release potency scaling to captured volume, smoke issuing its own noise tell.
+
+### 2026-06-25 — Status-blink overlays: confused / on-fire / stunned tells on the map (new content)
+
+**What.** A creature (or the player) now shows a blinking glyph over its cell while afflicted:
+- **Confused** → `?` tinted psychotropic **purple** (purple so it never reads as the white "investigating,
+  heard something" `?` from the noise system).
+- **On fire** (`STATUS_BURNING`, *not* the `MONST_FIERY` trait — matching the light/extinguish systems) →
+  the **flame** glyph `G_FIRE`.
+- **Paralyzed / stunned** (`STATUS_PARALYZED`) → a true **star** `G_STUN_STAR` (★, U+2605), "seeing stars"
+  yellow. *(Bugfix 2026-06-27: was an ASCII `'*'`, which is identical to the gold-pile glyph `G_GOLD` — a
+  paralyzed creature read as a pile of money. Monaco has no star glyph, so `G_STUN_STAR` is a new cosmetic
+  glyph appended to the `displayGlyph` enum (`Rogue.h`), mapped to U+2605 in `ce_glyphToUnicode` (`SEBridge.mm`),
+  and classified as an ArialUnicodeMS glyph in `RogueScene.swift` — the same Arial-Unicode path the ring /
+  foliage glyphs already use, since Monaco can't render it. Swap the codepoint to a sparkle (✦/✴/✶) in one
+  line if a burst reads better than a filled star.)*
+
+- **Confused** (`STATUS_CONFUSED`) → an inverted **`¿`** `G_INVERTED_QUESTION`, psychotropic purple.
+  *(2026-06-27: was an upright `'?'` distinguished from the white noise-system investigate `?` by purple tint
+  alone; the inverted glyph differs in shape too. `¿` (U+00BF) is present in Monaco, so unlike the star it
+  renders through the default text path — just the enum constant (`Rogue.h`) + `ce_glyphToUnicode` map
+  (`SEBridge.mm`), no `RogueScene.swift` change.)*
+
+- **Healing** → a rose-pink **`♥`** `G_HEART` (warm/wort family, but lifted lighter + pinker than the dim
+  `darkRed` healing cloud so it separates from the spores it sits in). *(2026-06-27.)* Two triggers, lowest priority (a threat/affliction
+  is the more urgent read): (1) a **discrete heal** just landed — every `heal()` call (potion/charm, staff-of-
+  healing bolt, bloodwort-pod panacea, on-hit mercy heal, resurrection), shown briefly even if it topped the
+  creature off; **passive regeneration is excluded** because it adds HP directly (`currentHP += regenPerTurn`)
+  and never calls `heal()`, so creatures don't wear a permanent heart while slowly recovering. (2) **Actively
+  gaining HP from bloodwort spores** underfoot (`T_CAUSES_HEALING`), shown only while below max HP. The discrete-
+  heal trigger is a small pointer-keyed `gHealMarks[]` table in `IO.c` (set by `cosmeticMarkHealed()` from
+  `heal()` on a real HP gain, **debounced**: it stamps `absoluteTurnNumber` and the heart shows while within
+  `HEAL_BLINK_TURNS` = 2 turns — a turn *window*, not a per-refresh countdown, because the rebuild fires several
+  times in some turns, e.g. the paralysis watch sub-loop, so a countdown would flash off mid-turn; rapid
+  re-heals in one turn just re-stamp the same turn, no flicker); the wort trigger is a
+  live terrain check, no state. `♥` (U+2665) isn't in Monaco, so like the star it routes through ArialUnicodeMS
+  (the renderer's `.arialSymbol` glyph type, shared with `G_STUN_STAR`).
+
+- **Protected** (`STATUS_SHIELDED` — staff/charm of protection, dar-priestess/sentinel shielding bolts) → a
+  green crest **`◈`** `G_SHIELD_CREST`. *(2026-06-27.)* A persistent `status[]` value, so it needs no marker —
+  just a check in `statusBlinkGlyphFor`, ranked above healing (your damage being absorbed is the more
+  actionable read). No true shield glyph exists in Monaco or Arial Unicode (🛡/⛨ are absent, and the emoji
+  couldn't be tinted), so `◈` (U+25C8) is the geometric stand-in; like the star/heart it routes through
+  ArialUnicodeMS (`.arialSymbol`).
+
+One tell at a time, by priority: burning > paralyzed > confused > shielded > healing. Applies to the player too.
+
+**Hasted → a fading after-image** *(2026-06-27)*, a **separate** effect from the one-tell status glyphs (it can
+coexist with them). When a visible `STATUS_HASTED` creature (player included) moves, it leaves a single
+electric-cyan ghost of its own glyph on the tile it just vacated, dimming as it ages out
+(`NOISE_HASTE_TRAIL_FRAMES`). A fast mover drops one ghost per step, so a short fading train trails it — motion
+without a full streak. A new `CE_SPEED_TRAIL` cosmetic kind (single-cell; `origin` = the vacated tile); movement
+is detected per-turn in `cosmeticRefreshStatusBlinks` via a pointer-keyed `gHasteTrack[]` last-position table
+(`cosmeticTrackHasteTrails`), capped at `NOISE_HASTE_TRAIL_MAX_DIST` so a non-walk jump doesn't drop a ghost
+across the map. Cosmetic-only and suppressed under automation/playback (positions jump there), so it's
+display-only and replay-safe.
+
+**Reuse.** Built entirely on the existing noise-system cosmetic-overlay layer (the `?` investigate-blink /
+`!` alert-blink): a new `CE_STATUS_BLINK` effect kind, a `cosmeticRefreshStatusBlinks()` sibling to
+`cosmeticRefreshInvestigateBlinks()` (creature-keyed, follows the creature, despawns when the status/visibility
+ends), and four tint colors. It pulses in the same global unison phase and is rendered in a final pass so a
+status tell paints **over** any investigate `?`/alert `!` on the same cell (the affliction is the more
+important read). All in `IO.c`; per-turn rebuild called from `Time.c` (`playerTurnEnded`) and `Movement.c`
+(travel-end), prototype in `Rogue.h`.
+
+**Animating during paralysis / rest / travel.** The blink clock (`gCosmeticBlinkTick`) is driven by the
+platform idle pump (`nextKeyOrMouseEvent`'s `colorsDance` tick), which doesn't run while the engine is spinning
+its own turn loop — forced "watch helplessly" paralysis turns, *and* rest / travel / auto-explore. Left alone
+the tells freeze, and (worse) the per-turn rebuild used to **deactivate** them under `automationActive`, so a
+heart/star would vanish for the whole rest and pop back at the end — read as a "reset." Fixed two ways: (1) the
+rebuild now keeps the tells up during interactive automation (only fast *replay* hard-suppresses); (2) the
+cosmetic layer is pumped through those stretches — `advanceCosmeticAnimations` + `commitDraws` from
+`pauseForMilliseconds` (`SEBridge.mm`), throttled to ~60 Hz of real time so a sub-millisecond rest loop doesn't
+strobe the blink — plus the existing paralysis-watch sub-pauses in `Time.c`. So the tell keeps a steady on/off
+pulse while you rest or travel. (Monster paralysis always animated — the idle loop runs between your turns.)
+
+**Determinism / save-safety.** Display-only — the cosmetic layer runs under `RNG_COSMETIC`, draws nothing
+into game state, and is hard-suppressed during playback fast-forward. No engine-state or save impact.
+Marked `// iOS port (Brogue SE):`. (`STATUS_FROZEN` is deliberately *not* included — frozen already has its
+own strong icy tint in `getCellAppearance`; easy to add a `*` there too if wanted.) The healing tell's
+`cosmeticMarkHealed()` hook in `heal()` (`Items.c`) is the one touch outside `IO.c`: it only writes the
+pointer-keyed `gHealMarks[]` cosmetic table (never read by game logic or the substantive RNG) and bails early
+under automation/playback, so it stays display-only and replay-safe.
+
+**Known minor nuisance (deliberately NOT fixed).** A status/investigate/alert tell on a cell touched by the
+per-cursor-move redraw (`refreshDungeonCell` / `hilitePath` / `hiliteCell`) — most visibly the creature you
+hover toward — blanks for up to one idle frame (~16ms) until `advanceCosmeticAnimations` repaints it. Two
+attempts to re-stamp the overlay from `mainInputLoop` both produced worse artifacts: running the whole
+compositor on every move stranded expanding ripple wavefronts on screen ("hanging"), and an additive glyph-only
+re-stamp got pinned on screen by `moveCursor`'s `saveDisplayBuffer`/`restoreDisplayBuffer` dance (the saved
+buffer captured the stamped `?`/`!`, which `restoreDisplayBuffer` then re-applied after the idle tick cleared
+them). The overlay layer compositing into the display buffer fundamentally fights `moveCursor`'s save/restore,
+so the momentary blank is accepted rather than chased. See KNOWN_CAVEATS.md.
+
+### 2026-06-25 — Staff "glow-up": lightning stun+chain and firebolt bloom at netEnchant ≥ 5 (new content)
+
+**What.** Two staffs gain new behavior once their **netEnchant reaches 5**, then ramp with further enchant:
+- **Lightning** — every creature the bolt strikes is **briefly stunned** (non-stacking `STATUS_PARALYZED`,
+  ramp 1→3 turns), and the charge **chains** from the last struck creature to nearby enemies the straight
+  line *missed* (1 jump at +5, ramping to 3; per-link damage falloff; each arc also stuns).
+- **Firebolt** — the bolt **erupts into an incineration bloom** at its impact point (augmenting the direct
+  hit), reusing `DF_INCINERATION_POTION`; the bloom spreads farther with enchant. Real fire — it burns the
+  player and ignites the dungeon (the built-in cost).
+
+**Gating / ramp.** Keyed on **`netEnchant >= 5`** (so curse/low-strength can't cheat it), carried into the
+bolt via a new `empowerment` field on the `bolt` struct (set in `useStaffOrWand`, `Items.c`; catalog
+entries default it to 0). Behavior triggers on actual enchant regardless of identification; only the
+*description specifics* are gated on the enchant being known. New `PowerTables.c` ramps:
+`staffLightningStunDuration`, `staffLightningChainCount`, `staffLightningChainRange`,
+`staffFireboltBloomDecrement` (lower decrement = bigger bloom).
+
+**Reuse / no double-hits.** Stun reuses the electrified-water pattern (`max(existing, dur)` — non-stacking,
+can't stun-lock). The chain is a **controlled arc** (`resolveLightningChain`, `Items.c`), *not* `zap()`
+recursion: it reuses the same `staffDamage` roll + stun, picks the nearest unstruck enemy within range on
+an open path (deterministic; monster-iteration order breaks ties), and shares a **struck-set** with the
+line (generalizing electrified water's "ring-0 exclusion") so a creature already pierced by the line is
+never hit again and the chain can't ping-pong.
+
+**Where.** `Rogue.h` (bolt `empowerment` field + power-fn prototypes); `PowerTables.c` (4 ramp fns);
+`Items.c` (`useStaffOrWand` sets empowerment; `updateBolt` BE_DAMAGE applies the stun; `zap` records the
+struck-set and, once the bolt lands, runs the chain or spawns the firebolt bloom at the last passable
+cell; `resolveLightningChain` helper; `itemDetails` enchant-known clauses); `Globals.c` (generic clause
+appended to both staff descriptions, within the ~540-char cap).
+
+**Determinism / save-safety.** Pure deterministic math + substantive-RNG damage rolls; the `bolt` struct is
+transient (never serialized), so the new field is save-safe. Player-staff-only — monster-cast bolts have no
+enchant and stay vanilla. Marked `// iOS port (Brogue SE):`.
+
+### 2026-06-25 — Explosions knock everything caught in them back (new content)
+
+**What.** A concussive explosion now flings every animate, mobile creature (the player included) caught in
+it away from the blast — into a wall, another creature, or a hazard. Covers every source uniformly because
+they all funnel through the one tile that carries `T_CAUSES_EXPLOSIVE_DAMAGE` (`GAS_EXPLOSION`): exploding
+bloat, vampire blood-burst, explosive-mutation death, **and** methane/swamp-gas ignition. Incendiary darts
+and the incineration potion place *fire*, not `GAS_EXPLOSION`, so they (correctly) don't knock back — fire
+isn't concussive.
+
+**Reuse (the "force effect").** Extracted the frost block-push into two shared primitives in `Combat.c`:
+`shoveCreatureAlong` (slide along a vector, stop on hazard / before wall/creature/edge, relocate via
+`setMonsterLocation` so it's correct for player *and* monsters) and `applyShoveImpact` (momentum damage to
+whatever it slams into). `pushFrozenCreature` (staff of frost) now consumes both; the new public
+`knockCreatureFromExplosion` also consumes both — no duplicated movement code.
+
+**Direction without an origin.** A gas cascade has no single epicenter (each methane cell detonates
+independently — `Time.c` `exposeTileToFire`). So direction comes from the **local gradient**: push away
+from the centroid of nearby fire/blast cells (radius 3), collapsed to one of eight unit directions. Point
+sources (bloat/dart) and distributed methane both work through this one path; a creature dead-centre in a
+symmetric blast (net-zero gradient) isn't flung.
+
+**Where / how it stays correct.** Hooked into the existing `T_CAUSES_EXPLOSIVE_DAMAGE` branch of
+`applyInstantTileEffectsToCreature` (`Time.c`), for both the player and monster survive paths. The blast's
+own fire/explosive damage is unchanged and applied first. The pre-existing `STATUS_EXPLOSION_IMMUNITY = 6`
+(set before the knockback) means each creature is flung **once** per blast and prevents the re-entrant
+`setMonsterLocation` → `applyInstantTileEffectsToCreature` from re-triggering the explosion at the landing
+cell. The hook only short-circuits the rest of the old cell's tile effects when the creature was actually
+relocated (knockback returns a moved/not-moved boolean). Per design call: the **player can be flung into
+lava/a chasm** ("everything flung equally"), and a wall/creature slam deals the frost push's momentum
+damage. Deterministic (geometry + flat force, no RNG), so input-replay saves are unaffected. Marked
+`// iOS port (Brogue SE):`.
+
+### 2026-06-25 — Ring of transference also transfers afflictions on hit (new content)
+
+**What.** The ring of transference (heal-in-proportion-to-damage "blood magic") now also bleeds a fraction
+of the *player's own* harmful statuses into whatever it strikes. Curated to the statuses that map cleanly
+onto a monster: **poison, fire (burning), slow, weakness, confusion**. Each hit sheds
+`status * transference / playerTransferenceRatio` turns (the same 5%/level as the heal, floored at 1,
+capped at what the player has) from the player and applies them to the defender — so e.g. a poisoned
+player relocates a slice of the poison onto the creature they hit, at the player's current concentration.
+
+**Why rate-limited (counter-pressure, not a strict upgrade).** Poison/etc. are core attrition clocks;
+a full one-hit dump would let the player launder any affliction into the nearest monster and trivialize a
+whole threat category. Rate-limiting keeps it a *tempo* tool — the affliction keeps ticking on you while
+you punch it off, and you need a valid (animate, non-invulnerable) target. **Positive ring only**: a cursed
+ring keeps its existing HP-drain downside (`gameOver("Drained by a cursed ring")`) and grants no relief.
+
+**Where.** `Combat.c` — new static helper `transferAfflictionsToTarget(defender)` above `inflictDamage`,
+called from the existing transference block in `inflictDamage` (guarded `attacker == &player`; the helper
+no-ops on `rogue.transference <= 0` or an `INANIMATE`/`INVULNERABLE` target). Reuses the existing appliers
+(`addPoison`, `slow`, `weaken`, direct burning/confusion status, `extinguishFireOnCreature` +
+`updateEncumbrance` to clean up the player side on full shed). `Globals.c` — `ringTable` transference
+description rewritten to mention the affliction bleed (still under the ~540-char cap). Only the player ring
+transfers afflictions; monsters/allies with `MA_TRANSFERENCE` keep HP-only transference.
+
+**Determinism / save-safety.** Pure arithmetic on deterministic combat state — no RNG, no new struct
+fields — so input-replay saves are unaffected. Marked `// iOS port (Brogue SE):`.
+
+### 2026-06-25 — Staff of frost suppresses (not freezes) a fiery aura, which rekindles after N turns (new content)
+
+**What.** Hitting a fiery creature (wisp / salamander / flamedancer — the `MONST_FIERY` set) with the
+**staff of frost** already douses + slows it rather than encasing it in ice (frost can't freeze fire).
+Previously that dousing was *accidentally permanent* — `extinguishFireOnCreature` zeroed `STATUS_BURNING`
+and nothing re-pinned it (a stale code comment even claimed "MONST_FIERY creatures relight every turn,"
+which was never implemented). Now the dousing is an explicit **temporary suppression**: the fire
+**rekindles after N turns**. This gives frost and the water bottle distinct roles — frost = a timed
+reprieve, water bottle = permanent declaw (strips the flag).
+
+**How.** New monster-facing status `STATUS_FIERY_DOUSED` (a countdown):
+- `Rogue.h` — new enum value after `STATUS_FROZEN`; `Globals.c` `statusEffectCatalog` gains the matching
+  `{"Doused", …}` row (kept in lockstep with the enum; shows as a countdown bar on the creature's info
+  panel via the generic `IO.c` status-display branch).
+- `Items.c` `freezeCreature` — the fiery/burning branch sets `STATUS_FIERY_DOUSED` to the bolt's freeze
+  duration (`staffFreezeDuration`) **only for `MONST_FIERY` creatures** (an ordinary creature you merely
+  set alight stays doused — it isn't fiery). Reuses the same duration a normal creature would be frozen.
+- `Monsters.c` `decrementMonsterStatus` — new `STATUS_FIERY_DOUSED` case: on lapse, re-pin
+  `STATUS_BURNING`/`maxStatus` to 1000 **iff still `MONST_FIERY`** (a water bottle may have stripped the
+  flag meanwhile) **and not already burning**, with a visible "flares back to life" tell.
+
+**Determinism / save-safety.** Suppression duration derives from staff enchant (deterministic), the
+countdown lives in the per-turn status loop, and adding a status enum grows the in-memory `status[]`
+arrays only — saves are input replays, so no save-format break. Marked `// iOS port (Brogue SE):`.
+
+### 2026-06-25 — Water bottle direct hit douses fire and strips MONST_FIERY (new content)
+
+**What.** A thrown **bottle of water** (`POTION_WATER`) that directly strikes a creature now douses its
+fire: it extinguishes `STATUS_BURNING` on any flammable creature, and on a **fiery** creature
+(wisp / salamander / flamedancer — the `MONST_FIERY` set) it also **permanently strips `MONST_FIERY`**,
+so the creature stops re-igniting its own tile and can stay doused. The tile still floods (`DF_FLOOD`)
+as on any water shatter. A struck creature that is neither burning nor fiery just gets wet — the branch
+falls through to the normal flood.
+
+**Why this is a declaw, not a kill.** All three `MONST_FIERY` creatures carry `MONST_IMMUNE_TO_FIRE`
+as an *independent* flag, so removing `MONST_FIERY` leaves fire immunity intact — the creature loses its
+persistent burning aura and terrain-ignition, not its life or its (`MA_HIT_BURN`/whip) attacks. This is a
+deliberate counter-pressure tool (costs a bottle + a landed direct hit), not a strict upgrade. Precedent:
+negation already treats `MONST_FIERY` as strippable (it's in `NEGATABLE_TRAITS`) and douses on removal.
+
+**Where.** `throwItem` POTION struck-creature path in `Items.c` (alongside the `POTION_LIFE`/`VENOM`/`ACID`
+direct-hit cases), marked `// iOS port (Brogue SE):`. Clears the flag **before** calling
+`extinguishFireOnCreature` so the `MONST_FIERY` water-exemption in `applyInstantTileEffectsToCreature`
+(`Time.c`) no longer blocks the dousing.
+
+**Determinism / save-safety.** A thrown direct hit is a deterministic player input, and per-instance
+`monst->info.flags &= ~MONST_FIERY` is the established runtime flag-mutation pattern (negation,
+resurrection cleanup). Saves replay inputs, so this is save-safe.
+
+**Known availability note.** The empty bottle is refillable at any water tile, so water (and thus this
+effect) is effectively unlimited near water — and the salamander lives in water. Accepted per design call;
+the direct-hit requirement against evasive (submerging / flitting) targets is the intended cost.
+
 ### 2026-06-23 — Trap-anchored thematic terrain: dry grass at fire traps, bones at caustic traps (new content)
 
 **What.** A fire trap (`FLAMETHROWER` / `FLAMETHROWER_HIDDEN`) now has a ~40% chance to be ringed by a patch
@@ -1631,6 +1957,12 @@ rather than freezing a whole line — so a single frozen creature can be meaning
   slams into takes **distance travelled + `max(0, strength - 12)`** damage (momentum plus a strength shove-bonus
   that bites even on an adjacent slam) and is doused if burning. A block wedged against an obstruction won't
   budge (no turn). Since the frost bolt deals no direct damage, this is the staff's strength-scaling payoff.
+  *Bugfix 2026-06-27:* the bump-to-push guard lives in `playerMoves`, but the special-weapon attack handlers
+  run **before** it, so a reaching weapon could damage/dispatch a frozen creature instead of pushing it (frozen
+  counts as helpless → auto-landing sneak hit). Frozen creatures are now excluded from every player melee
+  hit-list builder — `handleSpearAttacks` (pike/spear penetrate) and `handleWhipAttacks` (`Movement.c`), the
+  axe sweep in `buildHitList` (`Combat.c`), and the flail pass-attack `buildFlailHitList` (`Movement.c`) — so a
+  frozen creature takes no melee damage and the bumped block falls through to the push.
 - **Colour state.** Persistent tints in `getCellAppearance` (`IO.c`): a strong icy cast while `STATUS_FROZEN`,
   a fainter chill while `STATUS_SLOWED` (the slow tint is **game-wide, any source**, not just this staff), plus
   the icy `flashMonster` at the moment of freezing. Ice terrain reads via its own tile colours.
@@ -1875,7 +2207,47 @@ existing, so a player without the ring (or on a machine-less level) draws **no**
 vanilla behavior. For ring-wearers it perturbs the stream (their game already diverges), deterministically;
 like any gameplay change it diverges replays from pre-change recordings. CE-only; base chance tunable.
 
-### 2026-06-15 — Ring of awareness senses floor item polarity on arrival (new content)
+### 2026-06-28 — Arrival floor polarity sense moved from awareness to clairvoyance + count made guaranteed (new content)
+
+**What.** Moved the per-floor item sense (the 2026-06-15 entry below) **off the ring of awareness and onto the
+ring of clairvoyance**, and replaced the murky chance/rolls count with a **direct, guaranteed** one. On *first*
+arriving at a level, a worn ring of clairvoyance senses the **good/bad polarity** of **N = enchant** magic items
+lying anywhere on the floor — *secret rooms included* (`ITEM_DETECTED` set so the aura glyph shows for unfound
+cells) — via `detectMagicOnItem`. It is **polarity only, NOT a full `identify()`**: a floor potion/scroll's
+*kind* stays hidden (only its benevolent/malevolent aura, plus the kind's polarity run-wide, is revealed —
+feeding elimination deduction), and gear shows its good/bad aura, never the exact enchant number. Message:
+*"your ring tingles; you sense a hidden magical aura on this level."*
+
+- **Why this ring.** Awareness was overloaded (search, hearing, room-machine sense, *and* the item radar);
+  clairvoyance is the natural scrying home for an item-aura sense. Awareness keeps its trap/door search, the
+  noise-system hearing boost, and the room-machine "something of significance" sense — only the floor item
+  sense left it.
+- **Count made direct & guaranteed (the "but better").** Where awareness did `1 + max(0, enchant − 7)` rolls
+  each at `min(90, 10 + 10·(enchant+1))%` (so +1…+7 gave *at most one* coin-flip item), clairvoyance senses
+  **exactly N = `rogue.clairvoyance` items, guaranteed** — the ring level *is* the number of auras revealed.
+  `enchant` is the raw net enchant (unlike `awarenessBonus`, **not** ×20). **Uncapped** beyond floor contents;
+  when more than N eligible items exist, N are chosen at **random** (partial Fisher-Yates). Gated on
+  `clairvoyance > 0`; no ring (or a cursed one) senses nothing and draws **no** RNG.
+- **No reveal change.** Still `detectMagicOnItem` (polarity), never a full `identify()`. (An interim build
+  briefly used `identify()` to read the literal "+enchant level"; that over-revealed floor
+  potions/scrolls/rings to their exact kind, so it was reverted to the polarity sense.)
+- **Pool includes already-known items (deprioritized).** The eligible pool is *every* non-neutral magical
+  floor item — `CAN_BE_DETECTED`, non-neutral — *including* ones whose polarity you already know (identified
+  kind, or `ITEM_MAGIC_DETECTED`). A known item can't teach you anything, but lighting its map aura is still a
+  location / secret-room breadcrumb (the aura renders in unseen cells). To spend the N well, still-unknown
+  items are stable-partitioned to the front and drawn first (learning their polarity); the N only spills onto
+  already-known items (location mark only) once the unknowns run out.
+
+**Where.** `Items.c` — `senseFloorPolarityFromAwareness()` renamed to `senseFloorPolarityFromClairvoyance()`.
+`RogueMain.c` — the `startLevel()` call + comment. `Rogue.h` — the prototype. `Globals.c` — awareness
+`ringTable` description loses the item-aura sentence; clairvoyance gains it.
+
+**Determinism / RNG.** Identical placement/properties to the 2026-06-15 version: self-gated, substantive
+gameplay RNG at a fixed point in `startLevel` after item placement and before the level is shown, only sets
+existing item/cell flags, no save-format change. SE-only; formula tunable. Recordings from before this change
+desync for ring-wearers.
+
+### 2026-06-15 — Ring of awareness senses floor item polarity on arrival (new content) — SUPERSEDED 2026-06-28 (moved to clairvoyance + enchant-level, see entry above)
 
 **What.** Augments the ring of awareness (companion to the room-machine sense above): on *first* arriving at
 a level, a worn ring may sense the **good/bad polarity** of magic items lying anywhere on the floor — *secret

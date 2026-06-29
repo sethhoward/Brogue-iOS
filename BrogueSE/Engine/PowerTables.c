@@ -24,6 +24,9 @@
 #include "Rogue.h"
 #include "Globals.h"
 #include "GlobalsBase.h"
+#ifdef FIGHTSIM
+#include "balance.h" // fight-simulator tunables (sim-only build); no effect on shipping
+#endif
 
 #define LAST_INDEX(a) (sizeof(a) / sizeof(fixpt) - 1)
 
@@ -46,18 +49,35 @@ short wandDominate(creature *monst)                 {return (((monst)->currentHP
                                                      max(0, 100 * ((monst)->info.maxHP - (monst)->currentHP) / (monst)->info.maxHP));}
 
 // All "enchant" parameters must already be multiplied by FP_FACTOR:
+#ifdef FIGHTSIM
+short staffDamageLow(fixpt enchant)            {return ((int) ((2 + enchant / FP_FACTOR) * gBalance.staffDmgLowNum / gBalance.staffDmgLowDen));}
+short staffDamageHigh(fixpt enchant)           {return ((int) (gBalance.staffDmgHighBase + (gBalance.staffDmgHighSlopeNum * (enchant / FP_FACTOR) / gBalance.staffDmgHighSlopeDen)));}
+#else
 short staffDamageLow(fixpt enchant)            {return ((int) ((2 + enchant / FP_FACTOR) * 3 / 4));}
 short staffDamageHigh(fixpt enchant)           {return ((int) (4 + (5 * enchant / FP_FACTOR / 2)));}
+#endif
 short staffDamage(fixpt enchant)               {return ((int) randClumpedRange(staffDamageLow(enchant), staffDamageHigh(enchant), 1 + (enchant) / 3 / FP_FACTOR));}
 short staffBlinkDistance(fixpt enchant)        {return ((int) (2 + enchant * 2 / FP_FACTOR));}
 short staffHasteDuration(fixpt enchant)        {return ((int) (2 + enchant * 4 / FP_FACTOR));}
 short staffBladeCount(fixpt enchant)           {return ((int) (enchant * 3 / 2 / FP_FACTOR));}
 short staffDiscordDuration(fixpt enchant)      {return ((int) (enchant * 4 / FP_FACTOR));}
 short staffEntrancementDuration(fixpt enchant) {return ((int) (enchant * 3 / FP_FACTOR));}
-// iOS port (iBrogue): staff of frost. Hard-freeze scales slowly like the paralysis runic (it is the strongest
-// effect in the game); the slow tail is capped at 20 so it never exceeds a dedicated wand of slowness (30).
-short staffFreezeDuration(fixpt enchant)       {return (max(2, (int) (2 + (enchant / 2 / FP_FACTOR))));}
+// iOS port (iBrogue): staff of frost. Hard-freeze duration scales +1 turn/level (2 + enchant); it is the
+// strongest effect in the game, and this duration also doubles as the fiery-aura suppression window. The
+// slow tail is capped at 20 so it never exceeds a dedicated wand of slowness (30).
+short staffFreezeDuration(fixpt enchant)       {return (max(2, (int) (2 + (enchant / FP_FACTOR))));}
 short staffFreezeSlowDuration(fixpt enchant)   {return (min(20, max(10, (int) (enchant * 3 / FP_FACTOR))));}
+// iOS port (Brogue SE): staff "glow-up" ramps. These take the effective net-enchant LEVEL (integer, >= 5)
+// rather than fixpt, since the upgrade gates on netEnchant >= 5 and scales from there.
+// Lightning: brief non-stacking paralysis, ramping 1 turn (+5) -> 3 (+9 and up).
+short staffLightningStunDuration(short level)  {return (short) min(3, max(1, 1 + (level - 5) / 2));}
+// Lightning: chain jumps, 1 (+5) -> +1 per 3 levels, capped at 3.
+short staffLightningChainCount(short level)    {return (short) min(3, max(1, 1 + (level - 5) / 3));}
+// Lightning: how far each chain link may arc, 3 (+5) -> 8.
+short staffLightningChainRange(short level)    {return (short) min(8, max(3, 3 + (level - 5)));}
+// Firebolt: incineration-bloom spread decrement -- LOWER spreads farther. 37 (+5, == potion of incineration)
+// down to a floor of 12 at high enchant, so the bloom grows with investment.
+short staffFireboltBloomDecrement(short level) {return (short) max(12, 37 - (level - 5) * 4);}
 int staffProtection(fixpt enchant) {
     return 130 * fp_pow(FP_FACTOR * 140 / 100, enchant / FP_FACTOR - 2) / FP_FACTOR;
 }

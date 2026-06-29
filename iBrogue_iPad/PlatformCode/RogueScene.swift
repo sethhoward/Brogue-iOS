@@ -501,6 +501,10 @@ fileprivate extension RogueScene {
             case foliage
             case amulet
             case weapon
+            // Brogue SE status-blink symbols that Monaco lacks (U+2605 ★ paralyzed,
+            // U+2665 ♥ healing, U+25C8 ◈ protected). Rendered from ArialUnicodeMS
+            // like the special symbols below.
+            case arialSymbol
             case glyph
             // CE tile-graphics glyphs (codepoints 0x4000+, emitted only by the
             // BrogueCE engine in tile/hybrid mode). Rendered from the "Brogue" font.
@@ -512,7 +516,7 @@ fileprivate extension RogueScene {
                 switch self {
                 case .wall, .monster, .tile:
                     return "Brogue"
-                case .foliage, .ring, .weapon:
+                case .foliage, .ring, .weapon, .arialSymbol:
                     return "ArialUnicodeMS"
                 default:
                     return "Monaco"
@@ -533,7 +537,7 @@ fileprivate extension RogueScene {
                 case .scroll, .weapon, .ring:
                     return 1.3
 
-                case .foliage, .charm:
+                case .foliage, .charm, .arialSymbol:
                     return 1.1
 
                 // Tile categories — ported from the iBrogueCE reference renderer.
@@ -597,6 +601,10 @@ fileprivate extension RogueScene {
                     self = .amulet
                 case "\(UnicodeScalar(UInt32(WEAPON_CHAR))!)":
                     self = .weapon
+                case "\u{2605}", // Brogue SE G_STUN_STAR ★ (paralyzed status-blink)
+                     "\u{2665}", // Brogue SE G_HEART ♥ (healing status-blink)
+                     "\u{25C8}": // Brogue SE G_SHIELD_CREST ◈ (protected status-blink)
+                    self = .arialSymbol
                 default:
                     self = .glyph
                 }

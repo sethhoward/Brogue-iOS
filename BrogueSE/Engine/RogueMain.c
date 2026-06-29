@@ -25,8 +25,6 @@
 #include "GlobalsBase.h"
 #include "Globals.h"
 #include "GlobalsBrogue.h"
-#include "GlobalsRapidBrogue.h"
-#include "GlobalsBulletBrogue.h"
 
 #include <time.h>
 
@@ -40,8 +38,6 @@ int rogueMain() {
 
 void printBrogueVersion() {
     printf("Brogue version: %s\n", brogueVersion);
-    printf("Supports variant (rapid_brogue): %s\n", rapidBrogueVersion);
-    printf("Supports variant (bullet_brogue): %s\n", bulletBrogueVersion);
 }
 
 void executeEvent(rogueEvent *theEvent) {
@@ -178,17 +174,7 @@ static void welcome() {
 }
 
 void initializeGameVariant() {
-
-    switch (gameVariant) {
-        case VARIANT_RAPID_BROGUE:
-            initializeGameVariantRapidBrogue();
-            break;
-        case VARIANT_BULLET_BROGUE:
-            initializeGameVariantBulletBrogue();
-            break;
-        default:
-            initializeGameVariantBrogue();
-    }
+    initializeGameVariantBrogue();
 }
 
 // Seed is used as the dungeon seed unless it's zero, in which case generate a new one.
@@ -875,10 +861,10 @@ void startLevel(short oldLevelNumber, short stairDirection) {
             messageWithColor("you sense that something of significance lies hidden on this level.", &backgroundMessageColor, 0);
         }
 
-        // iOS port (Brogue SE): ring of awareness -- on first arriving at a level, also sense the good/bad
+        // iOS port (Brogue SE): ring of clairvoyance -- on first arriving at a level, sense the good/bad
         // polarity of magic items lying on the floor (secret rooms included). Self-gated on wearing the ring,
-        // and rolled here on the gameplay RNG stream so it stays deterministic. See senseFloorPolarityFromAwareness.
-        senseFloorPolarityFromAwareness();
+        // and rolled here on the gameplay RNG stream so it stays deterministic. See senseFloorPolarityFromClairvoyance.
+        senseFloorPolarityFromClairvoyance();
 
         //logLevel();
 
