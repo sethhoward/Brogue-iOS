@@ -1113,7 +1113,7 @@
 					"@executable_path/Frameworks",
 				);
 				LIBRARY_SEARCH_PATHS = "$(inherited)";
-				MARKETING_VERSION = 1.7.2;
+				MARKETING_VERSION = 1.7.3;
 				PRODUCT_BUNDLE_IDENTIFIER = SethHoward.iBrogue;
 				PRODUCT_NAME = Brogue;
 				PROVISIONING_PROFILE = "";
@@ -1161,7 +1161,7 @@
 					"@executable_path/Frameworks",
 				);
 				LIBRARY_SEARCH_PATHS = "$(inherited)";
-				MARKETING_VERSION = 1.7.2;
+				MARKETING_VERSION = 1.7.3;
 				PRODUCT_BUNDLE_IDENTIFIER = SethHoward.iBrogue;
 				PRODUCT_NAME = Brogue;
 				PROVISIONING_PROFILE = "";

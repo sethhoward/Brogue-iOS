@@ -35,9 +35,15 @@
 #define USE_UNICODE
 
 // Brogue version number (for main engine)
+// iOS port (Brogue SE): the recording/save version is "SE <MAJOR>.<MINOR>.<PATCH>" (separate from the
+// user-facing "0.11.0" release name). 0.11.0 "B is for Balance" bumps MINOR 0->1 (PATCH back to 0) on
+// purpose: its balance/terrain changes alter how a seed+inputs evolve, so 0.10.0 ("SE 2.0.1") recordings
+// would desync if replayed. A MINOR bump makes the patch-pattern match fail, so old saves are cleanly
+// rejected with the "cannot be opened in version X" dialog instead of loading and going out-of-sync. (A
+// PATCH bump would NOT reject them -- patch bumps are reserved for replay-safe changes.)
 #define BROGUE_MAJOR 2
-#define BROGUE_MINOR 0
-#define BROGUE_PATCH 1
+#define BROGUE_MINOR 1
+#define BROGUE_PATCH 0
 
 // Expanding a macro as a string constant requires two levels of macros
 #define _str(x) #x
@@ -145,6 +151,11 @@
 // unaffected. PROMOTE TO SUBSTANTIVE only if/when "hearing" starts driving gameplay (e.g. interrupts
 // travel/rest, or feeds monster awareness). See docs/design/noise-system.md and PERCEPTION_AUDIT.md.
 #define NOISE_SYSTEM_ENABLED            1   // single kill switch / pre-ship knob (flip to 0 to disable)
+// iOS port (Brogue SE): explosion knockback kill switch. Gated OFF for the 0.11.0 "B is for Balance"
+// release -- the feature (knockCreatureFromExplosion) ships disabled; flip to 1 to re-enable in a future
+// release. Kept as a knob rather than a revert so the code stays intact. A feature that never fires can't
+// perturb the substantive RNG stream, so leaving it off does not affect seeds, saves, or replays.
+#define SE_EXPLOSION_KNOCKBACK          0   // single kill switch / pre-ship knob (flip to 1 to enable)
 // Per-monster noisiness tiers (the signed modifier noiseLevelForMonsterMove returns). Assigned per
 // monster in that chokepoint; mirrored in docs/game-data/MONSTERS_AUDIT.md's Noise column.
 #define NOISE_NORMAL                    0   // default -- most grounded medium creatures

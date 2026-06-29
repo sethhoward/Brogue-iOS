@@ -32,6 +32,25 @@ See `BrogueCE/Engine/IOS_MODIFICATIONS.md` (faithful CE) and
 
 ## Change log
 
+### 2026-06-29 — 0.11.0 "B is for Balance": release string + save/recording version bump
+
+**What.** Cut the 0.11.0 release. Two version surfaces moved:
+- **Title-screen / `--version`:** `GlobalsBrogue.c` `BROGUE_VERSION_STRING` → `"B is for Balance 0.11.0 "`
+  (display-only, as documented in the 2026-06-13 release-string entry below; trailing space intentional).
+- **Save/recording version:** `Rogue.h` `BROGUE_MINOR` 0 → 1 and `BROGUE_PATCH` 1 → 0, so the recording
+  version string becomes `"SE 2.1.0"` (from `"SE 2.0.1"`).
+
+**Why bump MINOR, not PATCH.** 0.11.0's balance/terrain changes alter how a seed + input stream evolves,
+so 0.10.0 (`"SE 2.0.1"`) recordings/saves would go **out-of-sync** if replayed. The loader
+(`Recordings.c` ~507) accepts a recording when the patch-pattern `"SE 2.1.%hu"` matches *and* its patch ≤
+ours, **or** the version strings are exactly equal. A MINOR bump makes the pattern match fail for old
+`"SE 2.0.x"` saves (and the exact-match too), so they are **cleanly rejected** with the "cannot be opened
+in version X" dialog rather than loading and desyncing. (A PATCH bump would *not* reject them — patch
+bumps are reserved for replay-safe changes; the prior 0.9.0 → 0.10.0 transition only patch-bumped, which
+is why 0.9.0 saves could load into 0.10.0 and desync.) Verified safe: `BROGUE_VERSION_ATLEAST` has **zero
+usages** in the engine, so bumping the version flips no gameplay gate. Recording version string stays ≤ 16
+chars. Marked `// iOS port (Brogue SE):` at the version defines.
+
 ### 2026-06-27 — Remove the Rapid Brogue and Bullet Brogue game variants (SE only)
 
 **What.** SE now ships a single game variant (Brogue). The `VARIANT_RAPID_BROGUE` and
@@ -278,6 +297,13 @@ relocated (knockback returns a moved/not-moved boolean). Per design call: the **
 lava/a chasm** ("everything flung equally"), and a wall/creature slam deals the frost push's momentum
 damage. Deterministic (geometry + flat force, no RNG), so input-replay saves are unaffected. Marked
 `// iOS port (Brogue SE):`.
+
+**Gated OFF for 0.11.0 (2026-06-29).** Shipped disabled behind `SE_EXPLOSION_KNOCKBACK` (Rogue.h, a
+"single kill switch" alongside `NOISE_SYSTEM_ENABLED`). `knockCreatureFromExplosion` early-returns `false`
+under `#if !SE_EXPLOSION_KNOCKBACK`, so the two `Time.c` call sites fall through to the normal tile effects
+— the blast still burns/damages, it just doesn't fling anyone. Kept as a knob rather than reverted so a
+future release can flip it back on without untangling the eight later commits that touch `Combat.c`/`Time.c`.
+A feature that never fires can't perturb the substantive RNG stream, so leaving it off is seed/replay-safe.
 
 ### 2026-06-25 — Ring of transference also transfers afflictions on hit (new content)
 

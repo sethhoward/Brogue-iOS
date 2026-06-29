@@ -1918,7 +1918,30 @@ final class BrogueViewController: UIViewController {
     private static func seInfoBlocks() -> [InfoBlock] {
         return [
             .link("Support", "https://github.com/sethhoward/Brogue-iPad"),
-            .note("Brogue SE — an experimental fork of BrogueCE with original items, monsters, and mechanics. Release 0.10.0, \"A Is For AAaAH!\", is all about sound: the dungeon can finally hear you — and you can hear it. Here's what's new:"),
+            .note("Brogue SE — an experimental fork of BrogueCE with original items, monsters, and mechanics. Release 0.11.0, \"B is for Balance\", retunes the arsenal: heavy weapons, staffs, and rings all carry sharper trade-offs and clearer status tells let you read the fight at a glance. Here's what's new:"),
+            .heading("⚖️ Balance Pass"),
+            .bullets([
+                "Broadsword & war axe, soft-capped — The two late-game staples no longer scale forever: enchanting pays full value only through +10, and each point beyond returns about a quarter of its old kick. Still top-tier, no longer an automatic win.",
+                "War pike, slowed — The pike's strength was always its throughput — reach-2 and a thrust that pierces a whole line — so it now takes twice as long to recover after each attack. Trade tempo for that reach.",
+                "Flail, less of a lawnmower — The flail's signature hits on enemies you sweep past while moving now land for half damage, so wading through a crowd isn't free.",
+                "Bare-knuckle scaling — Unarmed attacks now grow with your strength, so being caught between weapons isn't hopeless.",
+                "Staffs come into their own — Lightning and firebolt get a real power bump once enchanted to +5 and beyond, rewarding committing to a single staff or a hybrid heavy weapon and stave approach.",
+                "Ring of Transference, reworked — It now drains life from whatever you strike and bleeds a share of your own harmful afflictions onto the target — turning your suffering against your enemy.",
+            ]),
+            .heading("💨 Smoke & Terrain"),
+            .bullets([
+                "Where there's fire, there's smoke — Burning terrain now breathes a vision-obscuring haze that drifts and thins over time, so a blaze can blind as much as it burns.",
+                "Traps suit their surroundings — Fire traps nestle in dry grass, caustic traps among scattered bones — the dungeon hints at what's waiting.",
+                "Douse the burning — Fiery creatures are snuffed out by water or frost, so the right element can put out a walking bonfire.",
+            ]),
+            .heading("👁️ Tells & Legibility"),
+            .bullets([
+                "Read the battlefield — A small glyph now blinks over any creature (and you) that's confused, burning, stunned, protected, hasted, or healing, so you can size up the situation.",
+                "Clairvoyance reads the floor — On arriving at a new depth, a worn Ring of Clairvoyance senses whether items on the level are helpful or harmful — as many as the ring's enchant level.",
+                "A sharper ear — The noise system is clearer: a pack raises a rallying cry when one of them rouses the others, submerged creatures fall silent, and close threats are easier to hear.",
+            ]),
+            .heading("📦 Previous Release — 0.10.0 \"A Is For AAaAH!\""),
+            .note("The sound update — the dungeon learned to hear you, and you learned to hear it:"),
             .heading("🔊 The Dungeon Can Hear You"),
             .bullets([
                 "Make noise, get noticed — Footsteps, fighting, and the terrain you cross all send sound rippling through the dungeon. It bends around corners and muffles through closed doors, so unseen monsters can now hear you coming and slip away to investigate the racket.",
@@ -1939,43 +1962,6 @@ final class BrogueViewController: UIViewController {
                 "OS-proof saves — If iOS kills the app while it's in the background, your run reloads right where you left off.",
                 "iPhone haptics — Feel a pulse when something hears you, and a heavier thump when a loud event goes off.",
                 "Refined identification — Detect magic and resting now surface the items you still haven't figured out first before fully identifying ones you already know polarity, and a worn Ring of Wisdom learns your armor and rings faster.",
-            ]),
-            .heading("📦 Previous Release — 0.9.0 \"Alphabet-a Soup\""),
-            .note("The first Brogue SE release, which introduced original items, monsters, and mechanics:"),
-            .heading("🧪 New Items"),
-            .bullets([
-                "The Empty Bottle — Carry it and the world fills it: step into a gas or pool to bottle it, drift over lava or a chasm while levitating to skim it, or set it down and zap it with a bolt. Each capture becomes a real, identified potion.",
-                "Captured potions — Acid, webbing, steam, ice, and water can only be obtained by capturing hazards with the empty bottle. Each one re-creates its hazard when thrown.",
-                "Staff of Frost — Freeze enemies solid, slow them, freeze water into walkable ice bridges, turn foliage into brittle frozen walls, and shove foes back moving them out of your way and damaging enemies in their path.",
-            ]),
-            .heading("👹 Monsters & Allies"),
-            .bullets([
-                "The Gold Goblin — A skittish treasure-hoarder that flees toward the stairs, scattering a trail of gold. Chase it down and corner it before it escapes to the next floor.",
-                "Cleverer thieves — Monkeys and imps now target the items they actually covet, not just whatever's handy. #849 gimballock",
-                "Better allies — Allies keep a safe distance from invulnerable monsters, and the Ring of Light can rally and embolden the companions fighting beside you.",
-            ]),
-            .heading("🔍 A New Way to Identify Items"),
-            .bullets([
-                "Rest to learn — Resting gradually reveals whether your unidentified items are helpful or harmful.",
-                "Clues add up — Gather enough hints about an item — or rule out enough of the alternatives — and the dungeon puts it together for you, identifying it outright.",
-                "Detect magic, reined in — The potion of detect magic now only hints at the good-or-bad nature of couple of items instead of all, and turns up less often than before. But pair it with a Ring of Wisdom and the potion becomes stronger.",
-                "Altars of Insight — Sacrifice one item to reveal the nature of another.",
-                "Everyday tells — Eating a meal, watching a scroll burn, shattering a potion with a thrown weapon or a bolt, freeing a captive, and the rings of awareness and wisdom all quietly reveal clues about what you're carrying.",
-            ]),
-            .heading("🌊 The Living Dungeon"),
-            .bullets([
-                "Electrified water — A lightning bolt striking a pool now shocks the entire connected body of water. Mind where you stand.",
-                "Water has uses — Wading washes away the scent trail you leave for hunters and douses flames.",
-                "Fire spreads consequences — Catching fire sends you into a brief panic; food rations caught in fire cook into edible \"cooked food.\"",
-                "Read the chase — You can now sense when a pursuing monster has lost your trail.",
-            ]),
-            .heading("🎮 Quality of Life"),
-            .bullets([
-                "Potions float away when thrown into deep water",
-                "Pick your controls — Choose between Classic and Modern keyboard layouts; the game adapts when a hardware keyboard is attached.",
-                "Pick up where you left off — Your last-played seed is remembered across launches.",
-                "Smoother and more stable — Numerous community bug fixes, from dungeon-generation quirks to combat, stealth, and identification edge cases (#766, #805, #812, #816, #831, #837, #841).",
-                "..and so much more",
             ]),
         ]
     }

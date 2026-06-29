@@ -796,6 +796,14 @@ static void applyShoveImpact(creature *victim, creature *slamTarget, short force
 // gradient: push away from the centroid of nearby fire/blast cells. (cx,cy) is the creature's own cell.
 // Reuses the shared shove primitives; the blast's fire/explosive damage is applied separately by the caller.
 boolean knockCreatureFromExplosion(creature *monst, short cx, short cy) {
+#if !SE_EXPLOSION_KNOCKBACK
+    // iOS port (Brogue SE): explosion knockback is gated OFF for the 0.11.0 "B is for Balance" release
+    // (see SE_EXPLOSION_KNOCKBACK in Rogue.h). No-op so the Time.c call sites fall through to the normal
+    // tile effects -- the blast still burns/damages as before, it just doesn't fling anything. The body
+    // below is retained intact so a future release can flip the switch back on without a revert.
+    (void)monst; (void)cx; (void)cy;
+    return false;
+#else
     short sumX = 0, sumY = 0, count = 0;
     const short radius = 3;
 
@@ -834,6 +842,7 @@ boolean knockCreatureFromExplosion(creature *monst, short cx, short cy) {
     const short dist = shoveCreatureAlong(monst, dx, dy, EXPLOSION_KNOCKBACK_DISTANCE, &slamTarget);
     applyShoveImpact(monst, slamTarget, dist + EXPLOSION_KNOCKBACK_SLAM_BONUS, NULL /*environment*/, false /*no douse*/);
     return (dist > 0); // true only if the creature was actually relocated
+#endif // SE_EXPLOSION_KNOCKBACK
 }
 
 // iOS port (iBrogue): staff of frost. Bumping a frozen creature shoves it like a statue. It slides across open
