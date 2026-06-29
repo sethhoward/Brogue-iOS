@@ -2228,10 +2228,15 @@ feeding elimination deduction), and gear shows its good/bad aura, never the exac
   `enchant` is the raw net enchant (unlike `awarenessBonus`, **not** ×20). **Uncapped** beyond floor contents;
   when more than N eligible items exist, N are chosen at **random** (partial Fisher-Yates). Gated on
   `clairvoyance > 0`; no ring (or a cursed one) senses nothing and draws **no** RNG.
-- **No reveal change.** Still `detectMagicOnItem` (polarity), same eligibility (`CAN_BE_DETECTED`,
-  undiscovered, `!ITEM_MAGIC_DETECTED`, non-neutral). (An interim build briefly used `identify()` to read the
-  literal "+enchant level"; that over-revealed floor potions/scrolls/rings to their exact kind, so it was
-  reverted to the polarity sense.)
+- **No reveal change.** Still `detectMagicOnItem` (polarity), never a full `identify()`. (An interim build
+  briefly used `identify()` to read the literal "+enchant level"; that over-revealed floor
+  potions/scrolls/rings to their exact kind, so it was reverted to the polarity sense.)
+- **Pool includes already-known items (deprioritized).** The eligible pool is *every* non-neutral magical
+  floor item — `CAN_BE_DETECTED`, non-neutral — *including* ones whose polarity you already know (identified
+  kind, or `ITEM_MAGIC_DETECTED`). A known item can't teach you anything, but lighting its map aura is still a
+  location / secret-room breadcrumb (the aura renders in unseen cells). To spend the N well, still-unknown
+  items are stable-partitioned to the front and drawn first (learning their polarity); the N only spills onto
+  already-known items (location mark only) once the unknowns run out.
 
 **Where.** `Items.c` — `senseFloorPolarityFromAwareness()` renamed to `senseFloorPolarityFromClairvoyance()`.
 `RogueMain.c` — the `startLevel()` call + comment. `Rogue.h` — the prototype. `Globals.c` — awareness

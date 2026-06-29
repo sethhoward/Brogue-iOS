@@ -9135,14 +9135,19 @@ static void throwDetectMagicOnFloor(void) {
 // Count scales DIRECTLY with the ring's net enchant: it senses exactly N = rogue.clairvoyance items,
 // GUARANTEED (no per-item chance roll) -- so a +1 ring senses 1 aura, +3 senses 3, etc. (rogue.clairvoyance
 // is the summed effective enchant of worn clairvoyance rings; unlike awarenessBonus it is NOT pre-multiplied).
-// No cap beyond what the floor actually holds: if fewer than N eligible items exist, every one is sensed. When
-// MORE than N exist, N are chosen at RANDOM from the eligible pool (partial Fisher-Yates) -- you can't predict
-// WHICH auras, only HOW MANY. Gated on rogue.clairvoyance > 0, so a character without the ring -- or with a
-// cursed (sight-dulled) one -- senses nothing and draws no RNG. The random pick is on the gameplay RNG stream
-// at a fixed point in startLevel (after item placement, before the level is shown), so it is deterministic and
-// replay-safe; like any gameplay change it diverges replays from pre-change recordings. This is strictly the
-// old awareness sense "but better": the ring level IS the number of auras revealed, instead of the awareness
-// version's one-coin-flip-until-+7.
+// No cap beyond what the floor actually holds: if fewer than N magical items exist, every one is sensed. This
+// is strictly the old awareness sense "but better": the ring level IS the number of auras revealed, instead of
+// the awareness version's one-coin-flip-until-+7. Gated on rogue.clairvoyance > 0, so a character without the
+// ring -- or with a cursed (sight-dulled) one -- senses nothing and draws no RNG. The random picks are on the
+// gameplay RNG stream at a fixed point in startLevel (after item placement, before the level is shown), so they
+// are deterministic and replay-safe; like any gameplay change they diverge replays from pre-change recordings.
+//
+// The eligible pool is EVERY non-neutral (magical) floor item, INCLUDING ones whose polarity you already know
+// (identified kind, or aura already sensed). A known item can't teach you anything, but lighting its map aura
+// is still a location / secret-room breadcrumb (the aura renders in unseen cells, IO.c). To spend the N well,
+// still-unknown items are PRIORITIZED: the N reveals draw randomly from the unknown band first (learning their
+// polarity via detectMagicOnItem -- polarity only, never a full identify), and only spill onto already-known
+// items (location mark only) once the unknowns run out.
 void senseFloorPolarityFromClairvoyance(void) {
     if (rogue.clairvoyance <= 0) {
         return; // no clairvoyance ring worn (or it's cursed) -- sense nothing, and draw no RNG
@@ -9151,29 +9156,42 @@ void senseFloorPolarityFromClairvoyance(void) {
     int count = 0;
     for (item *theItem = floorItems->nextItem; theItem != NULL; theItem = theItem->nextItem) {
         if ((theItem->category & CAN_BE_DETECTED) // matches throwDetectMagicOnFloor: floor gear included
-            && !itemIdentityFullyKnown(theItem)
-            && !(theItem->flags & ITEM_MAGIC_DETECTED) // already-detected (incl. gear whose aura is shown) skipped
-            && itemMagicPolarity(theItem) != MAGIC_POLARITY_NEUTRAL
+            && itemMagicPolarity(theItem) != MAGIC_POLARITY_NEUTRAL // only magical items have an aura to light
             && count < (int)(sizeof(eligible) / sizeof(eligible[0]))) {
 
             eligible[count++] = theItem;
         }
     }
     if (count == 0) {
-        return; // nothing on this level whose aura could be sensed
+        return; // nothing magical on this level to sense
     }
-    // Sense exactly N = enchant items, guaranteed, capped only by how many eligible items the floor holds.
-    const int toReveal = min(count, rogue.clairvoyance);
-    // Take `toReveal` distinct random items from `eligible` (partial Fisher-Yates over the untaken suffix).
-    for (int taken = 0; taken < toReveal; taken++) {
-        const int j = rand_range(taken, count - 1);
-        item *tmp = eligible[taken]; eligible[taken] = eligible[j]; eligible[j] = tmp;
-        detectMagicOnItem(eligible[taken]);                    // polarity only -- never a full identify
-        if (itemMagicPolarity(eligible[taken])) {
-            pmapAt(eligible[taken]->loc)->flags |= ITEM_DETECTED; // aura glyph shows even for unfound items
+    // Stable-partition still-unknown-polarity items to the front so the N reveals learn as much as possible
+    // before spilling onto already-known items (which only get a location mark). "Known" = its polarity is
+    // already settled: a fully-identified kind, or an aura already sensed (ITEM_MAGIC_DETECTED).
+    int unknownCount = 0;
+    for (int i = 0; i < count; i++) {
+        const boolean known = itemIdentityFullyKnown(eligible[i]) || (eligible[i]->flags & ITEM_MAGIC_DETECTED);
+        if (!known) {
+            item *tmp = eligible[unknownCount]; eligible[unknownCount] = eligible[i]; eligible[i] = tmp;
+            unknownCount++;
         }
     }
-    // At least one item was sensed (toReveal >= 1 whenever the floor had an eligible item).
+    // Sense exactly N = enchant items, guaranteed (capped by floor contents): random within the unknown band
+    // first, then the known band.
+    const int toReveal = min(count, rogue.clairvoyance);
+    for (int taken = 0; taken < toReveal; taken++) {
+        const int hi = (taken < unknownCount ? unknownCount : count) - 1; // pick within the current band
+        const int j = rand_range(taken, hi);
+        item *tmp = eligible[taken]; eligible[taken] = eligible[j]; eligible[j] = tmp;
+        item *picked = eligible[taken];
+        if (taken < unknownCount) {
+            detectMagicOnItem(picked); // unknown -> learn polarity (records on instance + kind, feeds deduction)
+        }
+        if (itemMagicPolarity(picked)) {
+            pmapAt(picked->loc)->flags |= ITEM_DETECTED; // aura/location mark (both bands; shows in unseen cells)
+        }
+    }
+    // At least one item was sensed (toReveal >= 1 whenever the floor had a magical item).
     tryIdentifyLastItemKinds(HAS_INTRINSIC_POLARITY);
     messageWithColor("your ring tingles; you sense a hidden magical aura on this level.",
                      &backgroundMessageColor, 0);

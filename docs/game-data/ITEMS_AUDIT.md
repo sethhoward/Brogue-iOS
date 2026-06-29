@@ -380,7 +380,7 @@ immediately on inspection (`Items.c:6489`).
 
 | # | Ring | Freq | MktVal | Effect (positive enchant) | Cursed |
 |---|---|---|---|---|---|
-| 0 | clairvoyance | 1 | 900 | See through walls/doors within radius = enchant. **Brogue SE:** on first arrival, senses the **good/bad polarity** of **N = enchant** magic floor items, **guaranteed** (secret rooms incl.) — `detectMagicOnItem` (polarity only, *not* a full ID), map-lights each aura (`ITEM_DETECTED`). Uncapped (≤ eligible floor items); when more than N exist, N random picks. Gated on `clairvoyance > 0`, action-triggered RNG, replay-stable. See ID-audit §5h, `senseFloorPolarityFromClairvoyance` (`Items.c`) | Blinds immediate surroundings; clouds the scry |
+| 0 | clairvoyance | 1 | 900 | See through walls/doors within radius = enchant. **Brogue SE:** on first arrival, senses the **good/bad polarity** of **N = enchant** magic floor items, **guaranteed** (secret rooms incl.) — `detectMagicOnItem` (polarity only, *not* a full ID), map-lights each aura (`ITEM_DETECTED`). Pool is all non-neutral floor items incl. already-known ones, but **unknown-polarity items are prioritized** (known ones only fill leftover N as location/secret-room marks). Uncapped (≤ floor contents); random within band. Gated on `clairvoyance > 0`, replay-stable. See ID-audit §5h, `senseFloorPolarityFromClairvoyance` (`Items.c`) | Blinds immediate surroundings; clouds the scry |
 | 1 | stealth | 1 | 800 | Reduces stealth range | Increases stealth range |
 | 2 | regeneration | 1 | 750 | Faster HP regen (`turnsForFullRegenInThousandths`, 0.75^x) | Slows/halts regen |
 | 3 | transference | 1 | 750 | Heal % of damage dealt (`playerTransferenceRatio` = 20% per level base) | Lose HP when dealing damage |
