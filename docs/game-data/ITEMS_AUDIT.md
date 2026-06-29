@@ -380,7 +380,7 @@ immediately on inspection (`Items.c:6489`).
 
 | # | Ring | Freq | MktVal | Effect (positive enchant) | Cursed |
 |---|---|---|---|---|---|
-| 0 | clairvoyance | 1 | 900 | See through walls/doors within radius = enchant | Blinds immediate surroundings |
+| 0 | clairvoyance | 1 | 900 | See through walls/doors within radius = enchant. **Brogue SE:** on first arrival, senses the **good/bad polarity** of **N = enchant** magic floor items, **guaranteed** (secret rooms incl.) — `detectMagicOnItem` (polarity only, *not* a full ID), map-lights each aura (`ITEM_DETECTED`). Uncapped (≤ eligible floor items); when more than N exist, N random picks. Gated on `clairvoyance > 0`, action-triggered RNG, replay-stable. See ID-audit §5h, `senseFloorPolarityFromClairvoyance` (`Items.c`) | Blinds immediate surroundings; clouds the scry |
 | 1 | stealth | 1 | 800 | Reduces stealth range | Increases stealth range |
 | 2 | regeneration | 1 | 750 | Faster HP regen (`turnsForFullRegenInThousandths`, 0.75^x) | Slows/halts regen |
 | 3 | transference | 1 | 750 | Heal % of damage dealt (`playerTransferenceRatio` = 20% per level base) | Lose HP when dealing damage |
@@ -413,13 +413,9 @@ keyed off `rogue.awarenessBonus`:
   this level." Existence only — never location or reward/danger; truthful (never false-positives), so
   silence is ambiguous. Gated on wearing the ring AND a machine existing, so non-wearers draw no RNG and
   keep vanilla replay behavior (`AWARENESS_MACHINE_SENSE_BASE = 25`, `RogueMain.c:618`, `RogueMain.c:836`).
-- **Sense floor item polarity (Brogue SE).** On first arriving at a level, a positive ring may sense the
-  benevolent/malevolent aura of magic items lying on the floor — *secret rooms included* — lighting each
-  one's map aura and recording its polarity (the passive, per-floor twin of a thrown potion of detect
-  magic). With `enchant = awarenessBonus / 20`: per-item chance `min(90, 10 + 10·(enchant+1))` (+1 = 30% …
-  +7 = 90% cap), with `1 + max(0, enchant − 7)` rolls (each success reveals one more item). Gated on
-  `awarenessBonus > 0` (cursed senses nothing); action-triggered RNG, replay-stable. See the
-  identification audit §5h and `senseFloorPolarityFromAwareness` (`Items.c`).
+- **(Moved 2026-06-28.)** The arrival floor item-polarity sense is no longer an awareness feature — it moved
+  to the **ring of clairvoyance** (same polarity behavior). See the clairvoyance row above, the
+  identification audit §5h, and `senseFloorPolarityFromClairvoyance` (`Items.c`).
 - **Hear unseen monsters farther (Brogue SE noise system).** Awareness extends how far off-screen monster
   movement registers as a "heard something" ripple. The ring's primary effect here is **range, not
   probability** ("bigger ears, not a louder world"): each net enchant adds `NOISE_AWARENESS_RANGE_PER_ENCHANT`

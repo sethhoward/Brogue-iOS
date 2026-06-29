@@ -2207,7 +2207,42 @@ existing, so a player without the ring (or on a machine-less level) draws **no**
 vanilla behavior. For ring-wearers it perturbs the stream (their game already diverges), deterministically;
 like any gameplay change it diverges replays from pre-change recordings. CE-only; base chance tunable.
 
-### 2026-06-15 — Ring of awareness senses floor item polarity on arrival (new content)
+### 2026-06-28 — Arrival floor polarity sense moved from awareness to clairvoyance + count made guaranteed (new content)
+
+**What.** Moved the per-floor item sense (the 2026-06-15 entry below) **off the ring of awareness and onto the
+ring of clairvoyance**, and replaced the murky chance/rolls count with a **direct, guaranteed** one. On *first*
+arriving at a level, a worn ring of clairvoyance senses the **good/bad polarity** of **N = enchant** magic items
+lying anywhere on the floor — *secret rooms included* (`ITEM_DETECTED` set so the aura glyph shows for unfound
+cells) — via `detectMagicOnItem`. It is **polarity only, NOT a full `identify()`**: a floor potion/scroll's
+*kind* stays hidden (only its benevolent/malevolent aura, plus the kind's polarity run-wide, is revealed —
+feeding elimination deduction), and gear shows its good/bad aura, never the exact enchant number. Message:
+*"your ring tingles; you sense a hidden magical aura on this level."*
+
+- **Why this ring.** Awareness was overloaded (search, hearing, room-machine sense, *and* the item radar);
+  clairvoyance is the natural scrying home for an item-aura sense. Awareness keeps its trap/door search, the
+  noise-system hearing boost, and the room-machine "something of significance" sense — only the floor item
+  sense left it.
+- **Count made direct & guaranteed (the "but better").** Where awareness did `1 + max(0, enchant − 7)` rolls
+  each at `min(90, 10 + 10·(enchant+1))%` (so +1…+7 gave *at most one* coin-flip item), clairvoyance senses
+  **exactly N = `rogue.clairvoyance` items, guaranteed** — the ring level *is* the number of auras revealed.
+  `enchant` is the raw net enchant (unlike `awarenessBonus`, **not** ×20). **Uncapped** beyond floor contents;
+  when more than N eligible items exist, N are chosen at **random** (partial Fisher-Yates). Gated on
+  `clairvoyance > 0`; no ring (or a cursed one) senses nothing and draws **no** RNG.
+- **No reveal change.** Still `detectMagicOnItem` (polarity), same eligibility (`CAN_BE_DETECTED`,
+  undiscovered, `!ITEM_MAGIC_DETECTED`, non-neutral). (An interim build briefly used `identify()` to read the
+  literal "+enchant level"; that over-revealed floor potions/scrolls/rings to their exact kind, so it was
+  reverted to the polarity sense.)
+
+**Where.** `Items.c` — `senseFloorPolarityFromAwareness()` renamed to `senseFloorPolarityFromClairvoyance()`.
+`RogueMain.c` — the `startLevel()` call + comment. `Rogue.h` — the prototype. `Globals.c` — awareness
+`ringTable` description loses the item-aura sentence; clairvoyance gains it.
+
+**Determinism / RNG.** Identical placement/properties to the 2026-06-15 version: self-gated, substantive
+gameplay RNG at a fixed point in `startLevel` after item placement and before the level is shown, only sets
+existing item/cell flags, no save-format change. SE-only; formula tunable. Recordings from before this change
+desync for ring-wearers.
+
+### 2026-06-15 — Ring of awareness senses floor item polarity on arrival (new content) — SUPERSEDED 2026-06-28 (moved to clairvoyance + enchant-level, see entry above)
 
 **What.** Augments the ring of awareness (companion to the room-machine sense above): on *first* arriving at
 a level, a worn ring may sense the **good/bad polarity** of magic items lying anywhere on the floor — *secret

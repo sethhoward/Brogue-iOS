@@ -4128,7 +4128,7 @@ extern "C" {
     int itemMagicPolarity(item *theItem);
     void gainPolarityInsightFromRest(void);
     void gainScrollInsightFromEating(void);
-    void senseFloorPolarityFromAwareness(void); // iOS port (Brogue SE): ring of awareness senses floor item polarity on first arrival
+    void senseFloorPolarityFromClairvoyance(void); // iOS port (Brogue SE): ring of clairvoyance senses floor item polarity on first arrival
     item *itemAtLoc(pos loc);
     item *dropItem(item *theItem);
     itemTable *tableForItemCategory(enum itemCategory theCat);
