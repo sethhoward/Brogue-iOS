@@ -32,6 +32,42 @@ See `BrogueCE/Engine/IOS_MODIFICATIONS.md` (faithful CE) and
 
 ## Change log
 
+### 2026-07-01 — Noise system: a claimed thrown decoy makes the monster loiter (the "slip by" window)
+
+**What.** A monster investigating a **thrown decoy** used to reach the item, consume it, and immediately
+turn back — but on that arrival turn it was still `MB_INVESTIGATING`, so it rolled the **proximity spot
+curve** (~50–65% at 3–4 tiles) and reliably re-oriented onto a nearby player: it reached the wrong place
+but grabbed you anyway. Now, on claiming the decoy the creature **dwells on the cell** for a seeded
+`rand_range(NOISE_INVESTIGATE_DWELL_MIN..MAX)` (4–8, ~6) turns. While dwelling it holds position and drops
+from the proximity curve back to the **flat 25% ambient roll** (absorbed by the object, not scanning for
+you), keeping `MB_INVESTIGATING` so the `?` blink / `(Investigating)` sidebar persist. That is the "slip
+by" window the decoy was meant to buy: the monster is pinned at the wrong place while you break LoS / move
+through the space it vacated.
+
+**Scoped to thrown decoys** — the dwell keys on a claimed `ITEM_THROWN_DISTRACTION` (a fixation needs a
+physical object). A **player-made-noise** investigate targets an empty cell (`investigateLoc = player.loc`),
+finds nothing, and gives up at once, unchanged — that object-vs-empty-cell split *is* the divergence between
+investigating a thrown item and investigating a noise you made. Point-blank still bites (25% floor stands),
+so a decoy at your own feet is not a free freeze (principle #3). The **approach is unchanged** (proximity
+curve en route) — positioning the throw so its path doesn't pass near you stays the player's job.
+
+**Interruptible.** A LOUD hear, a successful spot, damage, or a **louder/closer new noise** all end the
+dwell early — each resets `investigateDwell` (the two re-target sites in `checkPlayerHeard` /
+`emitEnvironmentalNoise`, and `alertMonster`). Chaining decoys to keep a monster pinned costs one item per
+dwell (consume-on-arrival already fired), so it stays a resource drain, not free CC. Only the creature that
+*claims* the item dwells; a later investigator arriving at the now-empty cell gives up immediately (emerges
+from the item-presence trigger).
+
+**Where.** `Rogue.h` — new `NOISE_INVESTIGATE_DWELL_MIN`/`_MAX` (4/8) levers; new `creature.investigateDwell`
+field. `Monsters.c` — init (`initializeMonster`), clear in `alertMonster`, reset at the two re-target sites,
+the `awareOfTarget` proximity branch now gated on `investigateDwell == 0` (dwellers fall through to 25%), and
+the dwell counter set/decrement + hold-position in the WANDERING arrival block. All marked
+`// iOS port (Brogue SE):`.
+
+**Determinism.** Dwell length via a substantive `rand_range`; all state set deterministically → save/replay-
+safe, no save-version bump (saves are input replays). SE-only gameplay, gated by `NOISE_SYSTEM_ENABLED`.
+Docs: `PERCEPTION_AUDIT.md` §3.2.7 + §7 lever table; `docs/design/environmental-sounds.md` §3.5.1 / §8 (Slice 9a).
+
 ### 2026-06-29 — 0.11.0 "B is for Balance": release string + save/recording version bump
 
 **What.** Cut the 0.11.0 release. Two version surfaces moved:

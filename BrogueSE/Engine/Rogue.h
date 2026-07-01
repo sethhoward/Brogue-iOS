@@ -345,6 +345,16 @@
 #define INVESTIGATE_SPOT_ADJACENT_CHANCE 95  // spot chance/turn when point-blank (1 tile)
 #define INVESTIGATE_SPOT_FALLOFF         20  // spot chance lost per tile of distance
 #define INVESTIGATE_SPOT_FLOOR           25  // never below the vanilla passive-wanderer baseline (continuity)
+// Thrown-decoy DWELL. A monster that reaches a thrown distraction item, claims it (consume-on-arrival),
+// then LOITERS on the spot for a few turns -- absorbed by the curious object -- before losing interest and
+// resuming its give-up (return-home / wander). While dwelling it stays put, keeps the '?' blink, and drops
+// from the proximity spot curve back to the flat 25% ambient roll (it's examining the thing, not scanning
+// for you). This is the "slip by" window: the decoy pins the monster at the wrong place. Scoped to thrown
+// decoy items ONLY (a fixation needs an object) -- player-made noise / traps / shattered potions never
+// dwell. Seeded (rand_range) so it's organic yet deterministic/replay-safe. See awareOfTarget, the WANDERING
+// arrival block in monstersTurn, and docs/design/environmental-sounds.md.
+#define NOISE_INVESTIGATE_DWELL_MIN      4   // fewest turns a monster loiters on a claimed decoy
+#define NOISE_INVESTIGATE_DWELL_MAX      8   // most turns it loiters (rand_range span averages ~6)
 // Player loudness (playerNoiseLevel() base + an action spike). A NEW quantity, NOT currentStealthRange
 // (which bakes in darkness/shadow -- visual, irrelevant to sound -- and lacks terrain/action/levitation).
 #define NOISE_PLAYER_SILENT             (-30000) // sentinel: player made no noise this turn -> no sound check
@@ -2879,6 +2889,9 @@ typedef struct creature {
                                    // so it can return there and doze off again (valid only while MB_RETURNING_HOME).
     short investigateStrength;     // iOS port (Brogue SE): noise system -- the distance-adjusted heard-strength that
                                    // set the current investigateLoc; a new noise re-targets only if louder/closer.
+    short investigateDwell;        // iOS port (Brogue SE): noise system -- turns left LOITERING on a claimed thrown
+                                   // decoy (>0 => arrived + absorbed by the object: stays put, '?' blinks, spot roll
+                                   // drops to ambient 25%). Set on claim via rand_range; 0 = en route or not investigating.
     char targetCorpseName[30];          // name of the deceased monster that we're approaching to gain its abilities
     unsigned long absorptionFlags;      // ability/behavior flags that the monster will gain when absorption is complete
     boolean absorbBehavior;             // above flag is behavior instead of ability (ignored if absorptionBolt is set)
