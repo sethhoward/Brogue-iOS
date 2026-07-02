@@ -880,7 +880,7 @@ void magicWeaponHit(creature *defender, item *theItem, boolean backstabbed) {
 
     const color *effectColors[NUMBER_WEAPON_RUNIC_KINDS] = {&white, &black,
         &yellow, &pink, &green, &confusionGasColor, NULL, NULL, &darkRed, &rainbow};
-    //  W_SPEED, W_QUIETUS, W_PARALYSIS, W_MULTIPLICITY, W_SLOWING, W_CONFUSION, W_FORCE, W_SLAYING, W_MERCY, W_PLENTY
+    //  W_SPEED, W_QUIETUS, W_PARALYSIS, W_MULTIPLICITY, W_SLOWING, W_CONFUSION, W_FORCE, W_SLAYING, W_DELIRIUM, W_RECKLESSNESS, W_CLUMSINESS
     short chance, i;
     fixpt enchant;
     enum weaponEnchants enchantType = theItem->enchant2;
@@ -1048,20 +1048,14 @@ void magicWeaponHit(creature *defender, item *theItem, boolean backstabbed) {
             case W_FORCE:
                 autoID = forceWeaponHit(defender, theItem);
                 break;
-            case W_MERCY:
-                heal(defender, gameConst->onHitMercyHealPercent, false);
-                if (canSeeMonster(defender)) {
-                    autoID = true;
-                }
+            // iOS port (Brogue SE): cursed-runics rework. Delirium (+STR) and Recklessness (damage
+            // in/out) are passive, applied at equip / via damage hooks -- nothing to do on-hit here.
+            // Clumsiness's on-hit decapitate/fumble arrives in Phase 1.
+            case W_DELIRIUM:
+            case W_RECKLESSNESS:
                 break;
-            case W_PLENTY:
-                newMonst = cloneMonster(defender, true, true);
-                if (newMonst) {
-                    flashMonster(newMonst, effectColors[enchantType], 100);
-                    if (canSeeMonster(newMonst)) {
-                        autoID = true;
-                    }
-                }
+            case W_CLUMSINESS:
+                // TODO Phase 1: ~4% decapitate (reuse W_QUIETUS kill path) + ~15% fumble + self-stun.
                 break;
             default:
                 break;
@@ -1235,29 +1229,9 @@ void applyArmorRunicEffect(char returnString[DCOLS], creature *attacker, short *
                 runicDiscovered = true;
             }
             break;
-        case A_BURDEN:
-            if (rand_percent(10)) {
-                rogue.armor->strengthRequired++;
-                sprintf(returnString, "your %s suddenly feels heavier!", armorName);
-                equipItem(rogue.armor, true, NULL);
-                runicDiscovered = true;
-            }
-            break;
-        case A_VULNERABILITY:
-            *damage *= 2;
-            if (!runicKnown) {
-                sprintf(returnString, "your %s pulses and you are wracked with pain!", armorName);
-                runicDiscovered = true;
-            }
-            break;
-        case A_IMMOLATION:
-            if (rand_percent(10)) {
-                sprintf(returnString, "flames suddenly explode out of your %s!", armorName);
-                message(returnString, runicKnown ? 0 : REQUIRE_ACKNOWLEDGMENT);
-                returnString[0] = '\0';
-                spawnDungeonFeature(player.loc.x, player.loc.y, &(dungeonFeatureCatalog[DF_ARMOR_IMMOLATION]), true, false);
-                runicDiscovered = true;
-            }
+        // iOS port (Brogue SE): cursed-runics rework. A_ANCHOR (defense + slow), A_SMOKY (concealing
+        // smoke) and A_ACROPHOBIA (chasm-fear) are passive/contextual runics applied at equip / per
+        // turn / on movement -- none of them react on-hit, so there are no cases here.
         default:
             break;
     }
@@ -1572,9 +1546,6 @@ boolean attack(creature *attacker, creature *defender, boolean lungeAttack) {
             }
             if (armorRunicString[0]) {
                 message(armorRunicString, 0);
-                if (rogue.armor && (rogue.armor->flags & ITEM_RUNIC) && rogue.armor->enchant2 == A_BURDEN) {
-                    strengthCheck(rogue.armor, true);
-                }
             }
         }
 

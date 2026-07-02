@@ -32,6 +32,64 @@ See `BrogueCE/Engine/IOS_MODIFICATIONS.md` (faithful CE) and
 
 ## Change log
 
+### 2026-07-01 — Cursed-runics rework, Phase 0b/0c: weld lifecycle + generation (save break)
+
+**What.** Decoupled the weld from enchant sign and reworked cursed weapon/armor generation.
+- **Generation** (`Items.c`, weapon + armor `makeItemInto`): a negative roll now splits into a
+  *double-edged runic curse* (55%, was 33%) — welds (`ITEM_CURSED | ITEM_RUNIC`), starts at **exactly
+  −1** — or a plain *inferior* item (45%) — random −1…−3, **no runic and no `ITEM_CURSED`**, so it is
+  freely removable.
+- **Weld lifecycle:** a cursed runic stays welded until **purified** (enchanted to its threshold:
+  weapon +6 / armor +4, `WEAPON_RUNIC_PURIFY_ENCHANT` / `ARMOR_RUNIC_PURIFY_ENCHANT` in `Rogue.h`) or
+  **ejected** (remove-curse / protect scroll → `uncurse()`, weld lifts but the downside stays). New
+  helpers `isBadRunic`, `runicPurifyThreshold`, `purifyRunicIfReady` (`Items.c`, above
+  `checkForDisenchantment`). Purify lifts `ITEM_CURSED` and tempers `W_CLUMSINESS` → `W_QUIETUS`.
+- **Enchant scroll path** (`SCROLL_ENCHANTING`): cursed runics no longer uncurse on the first
+  enchant — the weld holds until the threshold, then a purge message (a bespoke one for clumsiness).
+  Non-runic / rings keep the vanilla `uncurse()` behavior.
+- **`checkForDisenchantment`:** the old "any enchant ≥ 0 lifts the curse" clause replaced by
+  `purifyRunicIfReady`.
+
+**Why.** Fixes the core complaint (plain-negative weapons/armor being stuck) by making only *runic*
+curses weld, and gives cursed runics a purify path. Model in `docs/design/cursed-runics-rework.md`.
+The **downside** is not applied yet (Phase 1/2) — the effect code will gate it on
+`enchant1 < runicPurifyThreshold`, so purify's raised enchant switches it off automatically while
+the weld lift + clumsiness→quietus are the visible transition.
+
+**Where.** `Rogue.h` (threshold `#define`s), `Items.c` (`isBadRunic`/`runicPurifyThreshold`/
+`purifyRunicIfReady`, `checkForDisenchantment`, `SCROLL_ENCHANTING`, weapon + armor generation).
+
+**Notes.** `itemMagicPolarity` already flags negatives via `enchant1 < 0`, so inferior items losing
+`ITEM_CURSED` does **not** break detect-magic / polarity tells. Rings unchanged (still 16% cursed,
+weld, no runic). Approx frequencies now: double-edged runic ≈ 11%, inferior ≈ 9% of weapons/armor.
+
+### 2026-07-01 — Cursed-runics rework, Phase 0a: swap the malevolent runic tail (save break)
+
+**What.** Replaced the pure-downside malevolent runics with the placeholders for the new
+double-edged curse set. Weapon `weaponEnchants`: `W_MERCY, W_PLENTY` → `W_DELIRIUM,
+W_RECKLESSNESS, W_CLUMSINESS` (`NUMBER_WEAPON_RUNIC_KINDS` 10 → 11). Armor `armorEnchants`:
+`A_BURDEN, A_VULNERABILITY, A_IMMOLATION` → `A_ANCHOR, A_SMOKY, A_ACROPHOBIA` (count unchanged at
+11). Old on-hit/on-absorb effects removed and **stubbed to no-ops** — the actual behaviors land in
+Phase 1 (weapons) / Phase 2 (armor).
+
+**Why.** First step of the cursed-runics rework (design: `docs/design/cursed-runics-rework.md`):
+turn cursed weapons/armor from pure "identification noise" into double-edged bargains (always-on
+upside + a downside you purify away). This sub-step is the compile-safe rename foundation; weld
+lifecycle (0b) and generation (0c) follow. Enum reordering breaks save-compat (SE bumps freely).
+
+**Where.** `Rogue.h` (both enums + `NUMBER_GOOD_*` markers), `Globals.c`
+(`weaponRunicNames`/`armorRunicNames`), `PowerTables.c` (`effectChances` rows — bad runics return
+early, rows unused), `Combat.c` (`magicWeaponHit` + `applyArmorRunicEffect` dispatch stubbed; the
+`A_BURDEN` post-hit `strengthCheck` hook removed), `Items.c` (`weaponRunicEffectDescriptions` +
+the weapon/armor runic description switches, interim `[name]` copy pending Phase 2). Marked in-code
+`// iOS port (Brogue SE):`.
+
+**Notes.** `Wizard.c`'s create-item runic menu is count-driven
+(`NUMBER_*_RUNIC_KINDS − NUMBER_GOOD_*`) and needed no change. Left in place but now unused:
+`gameConst.onHitMercyHealPercent` (field + `GlobalsBrogue.c` init) and `DF_ARMOR_IMMOLATION` (enum +
+catalog entry) — retire in a later cleanup. No generation/weld changes yet, so cursed items still
+weld and still roll −1…−3; only the runic identities changed.
+
 ### 2026-07-01 — Altars of Divination replace the deprecated Altars of Insight (new content; save break)
 
 **What.** A new guaranteed reward room — a central **totem** with up to four one-use **altars of divination**

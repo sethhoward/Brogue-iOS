@@ -314,8 +314,9 @@ short runicWeaponChance(item *theItem, boolean customEnchantLevel, fixpt enchant
         POW_11_RUNIC_DECREMENT, // W_CONFUSION
         POW_15_RUNIC_DECREMENT, // W_FORCE
         0,      // W_SLAYING
-        0,      // W_MERCY
-        0};     // W_PLENTY
+        0,      // W_DELIRIUM     (bad runics return early below; rows unused)
+        0,      // W_RECKLESSNESS
+        0};     // W_CLUMSINESS
 
     fixpt modifier;
     short runicType = theItem->enchant2;

@@ -1814,8 +1814,9 @@ const char weaponRunicNames[NUMBER_WEAPON_RUNIC_KINDS][30] = {
     "confusion",
     "force",
     "slaying",
-    "mercy",
-    "plenty"
+    "delirium",
+    "recklessness",
+    "clumsiness"
 };
 
 const char armorRunicNames[NUMBER_ARMOR_ENCHANT_KINDS][30] = {
@@ -1827,9 +1828,9 @@ const char armorRunicNames[NUMBER_ARMOR_ENCHANT_KINDS][30] = {
     "reflection",
     "respiration",
     "dampening",
-    "burden",
-    "vulnerability",
-    "immolation",
+    "anchor",
+    "smoky",
+    "acrophobia",
 };
 
 itemTable staffTable[NUMBER_STAFF_KINDS] = {

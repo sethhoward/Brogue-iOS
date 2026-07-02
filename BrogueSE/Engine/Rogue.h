@@ -1263,9 +1263,12 @@ enum weaponEnchants {
     W_CONFUSION,
     W_FORCE,
     W_SLAYING,
-    W_MERCY,
-    NUMBER_GOOD_WEAPON_ENCHANT_KINDS = W_MERCY,
-    W_PLENTY,
+    // iOS port (Brogue SE): cursed-runics rework — the malevolent tail is now double-edged
+    // (always-on upside + a downside you purify away). Replaces W_MERCY/W_PLENTY.
+    W_DELIRIUM,
+    NUMBER_GOOD_WEAPON_ENCHANT_KINDS = W_DELIRIUM,
+    W_RECKLESSNESS,
+    W_CLUMSINESS,
     NUMBER_WEAPON_RUNIC_KINDS
 };
 
@@ -1288,12 +1291,20 @@ enum armorEnchants {
     A_REFLECTION,
     A_RESPIRATION,
     A_DAMPENING,
-    A_BURDEN,
-    NUMBER_GOOD_ARMOR_ENCHANT_KINDS = A_BURDEN,
-    A_VULNERABILITY,
-    A_IMMOLATION,
+    // iOS port (Brogue SE): cursed-runics rework — double-edged armor curses. Replaces
+    // A_BURDEN/A_VULNERABILITY/A_IMMOLATION.
+    A_ANCHOR,
+    NUMBER_GOOD_ARMOR_ENCHANT_KINDS = A_ANCHOR,
+    A_SMOKY,
+    A_ACROPHOBIA,
     NUMBER_ARMOR_ENCHANT_KINDS,
 };
+
+// iOS port (Brogue SE): cursed-runics rework. A double-edged runic welds on until enchanted to its
+// purify threshold, at which point the weld lifts, the downside (gated on enchant level in the
+// effect code) falls away, and W_CLUMSINESS tempers into W_QUIETUS. Weapons cost more than armor.
+#define WEAPON_RUNIC_PURIFY_ENCHANT     6
+#define ARMOR_RUNIC_PURIFY_ENCHANT      4
 
 enum wandKind {
     WAND_TELEPORT,

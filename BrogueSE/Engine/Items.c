@@ -252,12 +252,16 @@ item *makeItemInto(item *theItem, unsigned long itemCategory, short itemKind) {
             if (rand_percent(40)) {
                 theItem->enchant1 += rand_range(1, 3);
                 if (rand_percent(50)) {
-                    // cursed
-                    theItem->enchant1 *= -1;
-                    theItem->flags |= ITEM_CURSED;
-                    if (rand_percent(33)) { // give it a bad runic
+                    // iOS port (Brogue SE): cursed-runics rework. Negative items split two ways: a
+                    // double-edged *runic* curse (welds on, starts at exactly -1, purify to lift it)
+                    // or a plain "inferior" item (random -1..-3, no runic, freely removable -- no
+                    // ITEM_CURSED). Runic share of negatives raised from 33% to 55%.
+                    if (rand_percent(55)) {
+                        theItem->enchant1 = -1;
                         theItem->enchant2 = rand_range(NUMBER_GOOD_WEAPON_ENCHANT_KINDS, NUMBER_WEAPON_RUNIC_KINDS - 1);
-                        theItem->flags |= ITEM_RUNIC;
+                        theItem->flags |= (ITEM_CURSED | ITEM_RUNIC);
+                    } else {
+                        theItem->enchant1 *= -1;
                     }
                 } else if (rand_range(3, 10)
                            * ((theItem->flags & ITEM_ATTACKS_STAGGER) ? 2 : 1)
@@ -300,12 +304,15 @@ item *makeItemInto(item *theItem, unsigned long itemCategory, short itemKind) {
             if (rand_percent(40)) {
                 theItem->enchant1 += rand_range(1, 3);
                 if (rand_percent(50)) {
-                    // cursed
-                    theItem->enchant1 *= -1;
-                    theItem->flags |= ITEM_CURSED;
-                    if (rand_percent(33)) { // give it a bad runic
+                    // iOS port (Brogue SE): cursed-runics rework (see the weapon case above). A
+                    // double-edged runic curse (welds, starts at exactly -1) vs an inferior plain
+                    // negative (random -1..-3, no runic, freely removable); runic share 33% -> 55%.
+                    if (rand_percent(55)) {
+                        theItem->enchant1 = -1;
                         theItem->enchant2 = rand_range(NUMBER_GOOD_ARMOR_ENCHANT_KINDS, NUMBER_ARMOR_ENCHANT_KINDS - 1);
-                        theItem->flags |= ITEM_RUNIC;
+                        theItem->flags |= (ITEM_CURSED | ITEM_RUNIC);
+                    } else {
+                        theItem->enchant1 *= -1;
                     }
                 } else if (rand_range(0, 95) > theItem->armor) { // give it a good runic
                     theItem->enchant2 = rand_range(0, NUMBER_GOOD_ARMOR_ENCHANT_KINDS - 1);
@@ -1132,6 +1139,43 @@ char nextAvailableInventoryCharacter() {
     return 0;
 }
 
+// iOS port (Brogue SE): cursed-runics rework helpers. A "bad" (double-edged) runic is one whose
+// enchant2 sits in the malevolent tail of its category's runic enum.
+static boolean isBadRunic(const item *theItem) {
+    if (!(theItem->flags & ITEM_RUNIC)) {
+        return false;
+    }
+    if (theItem->category & WEAPON) {
+        return theItem->enchant2 >= NUMBER_GOOD_WEAPON_ENCHANT_KINDS;
+    }
+    if (theItem->category & ARMOR) {
+        return theItem->enchant2 >= NUMBER_GOOD_ARMOR_ENCHANT_KINDS;
+    }
+    return false;
+}
+
+static short runicPurifyThreshold(const item *theItem) {
+    return (theItem->category & WEAPON) ? WEAPON_RUNIC_PURIFY_ENCHANT : ARMOR_RUNIC_PURIFY_ENCHANT;
+}
+
+// Once a cursed double-edged runic has been enchanted to its purify threshold, the weld releases.
+// (The downside itself is gated on enchant level in the effect code, so it is already gone by now.)
+// Clumsiness is special: it tempers into a genuine runic of quietus. Returns true only on the
+// transition, so callers can announce it; a no-op for anything that isn't a cursed bad runic at or
+// above its threshold.
+static boolean purifyRunicIfReady(item *theItem) {
+    if ((theItem->flags & (ITEM_CURSED | ITEM_RUNIC)) != (ITEM_CURSED | ITEM_RUNIC)
+        || !isBadRunic(theItem)
+        || theItem->enchant1 < runicPurifyThreshold(theItem)) {
+        return false;
+    }
+    theItem->flags &= ~ITEM_CURSED;
+    if ((theItem->category & WEAPON) && theItem->enchant2 == W_CLUMSINESS) {
+        theItem->enchant2 = W_QUIETUS;
+    }
+    return true;
+}
+
 void checkForDisenchantment(item *theItem) {
     char buf[COLS], buf2[COLS];
 
@@ -1149,11 +1193,10 @@ void checkForDisenchantment(item *theItem) {
             messageWithColor(buf, &itemMessageColor, 0);
         }
     }
-    if (theItem->flags & ITEM_CURSED
-        && theItem->enchant1 >= 0) {
-
-        theItem->flags &= ~ITEM_CURSED;
-    }
+    // iOS port (Brogue SE): cursed-runics rework. A cursed runic's weld lifts only when it reaches
+    // its purify threshold -- the old "any enchant >= 0 lifts the curse" rule is gone. (Rings and
+    // non-runic cursed items are lifted directly by uncurse() on the scroll paths.)
+    purifyRunicIfReady(theItem);
 }
 
 static boolean itemIsSwappable(const item *theItem) {
@@ -2098,8 +2141,9 @@ void itemDetails(char *buf, item *theItem) {
         "the enemy will be confused",
         "the enemy will be flung",
         "[slaying]", // never used
-        "the enemy will be healed",
-        "the enemy will be cloned"
+        "[delirium]", // never used (passive: +strength)
+        "[recklessness]", // never used (passive: damage in/out)
+        "the enemy may be decapitated"
     };
 
     goodColorEscape[0] = badColorEscape[0] = whiteColorEscape[0] = '\0';
@@ -2467,10 +2511,6 @@ void itemDetails(char *buf, item *theItem) {
                                         strcat(buf, buf2);
                                         nextLevelState = weaponForceDistance(enchant + enchantMagnitude() * enchantIncrement(theItem));
                                         break;
-                                    case W_MERCY:
-                                        strcpy(buf2, " by 50% of its maximum health. ");
-                                        strcat(buf, buf2);
-                                        break;
                                     default:
                                         strcpy(buf2, ". ");
                                         strcat(buf, buf2);
@@ -2533,7 +2573,7 @@ void itemDetails(char *buf, item *theItem) {
                                 theName);
                         strcat(buf, buf2);
 
-                        // A_MULTIPLICITY, A_MUTUALITY, A_ABSORPTION, A_REPRISAL, A_IMMUNITY, A_REFLECTION, A_BURDEN, A_VULNERABILITY, A_IMMOLATION
+                        // good runics handled below; the SE double-edged curses A_ANCHOR/A_SMOKY/A_ACROPHOBIA get interim copy (Phase 2 rewrites)
                         switch (theItem->enchant2) {
                             case A_MULTIPLICITY:
                                 sprintf(buf2, "When worn, 33%% of the time that an enemy's attack connects, %i allied spectral duplicate%s of your attacker will appear for 3 turns. ",
@@ -2605,14 +2645,14 @@ void itemDetails(char *buf, item *theItem) {
                             case A_DAMPENING:
                                 strcpy(buf2, "When worn, it will safely absorb the concussive impact of any explosions (though you may still be burned). ");
                                 break;
-                            case A_BURDEN:
-                                strcpy(buf2, "10% of the time it absorbs a blow, its strength requirement will permanently increase. ");
+                            case A_ANCHOR:
+                                strcpy(buf2, "[anchor: heavy but immovable] ");
                                 break;
-                            case A_VULNERABILITY:
-                                strcpy(buf2, "While it is worn, inbound attacks will inflict twice as much damage. ");
+                            case A_SMOKY:
+                                strcpy(buf2, "[smoky: concealing smoke] ");
                                 break;
-                            case A_IMMOLATION:
-                                strcpy(buf2, "10% of the time it absorbs a blow, it will explode in flames. ");
+                            case A_ACROPHOBIA:
+                                strcpy(buf2, "[acrophobia: fear of heights] ");
                                 break;
                             default:
                                 break;
@@ -8533,7 +8573,21 @@ boolean readScroll(item *theItem) {
             itemName(theItem, buf, false, false, NULL);
             sprintf(buf2, "your %s gleam%s briefly in the darkness.", buf, (theItem->quantity == 1 ? "s" : ""));
             messageWithColor(buf2, &itemMessageColor, 0);
-            if (uncurse(theItem)) {
+            // iOS port (Brogue SE): cursed-runics rework. A cursed *runic* isn't lifted by the first
+            // enchant -- its weld holds until you reach the purify threshold, which lifts the curse,
+            // sheds the downside, and tempers clumsiness into an executioner's edge (quietus). Rings
+            // and any non-runic cursed item keep the vanilla "one enchant lifts the curse" behavior.
+            if ((theItem->flags & (ITEM_CURSED | ITEM_RUNIC)) == (ITEM_CURSED | ITEM_RUNIC)
+                && isBadRunic(theItem)) {
+                if (purifyRunicIfReady(theItem)) {
+                    if ((theItem->category & WEAPON) && theItem->enchant2 == W_QUIETUS) {
+                        sprintf(buf2, "your %s finds its balance -- the curse tempers into an executioner's edge.", buf);
+                    } else {
+                        sprintf(buf2, "the curse is purged from your %s -- only its gift remains.", buf);
+                    }
+                    messageWithColor(buf2, &goodMessageColor, 0);
+                }
+            } else if (uncurse(theItem)) {
                 sprintf(buf2, "a malevolent force leaves your %s.", buf);
                 messageWithColor(buf2, &itemMessageColor, 0);
             }
