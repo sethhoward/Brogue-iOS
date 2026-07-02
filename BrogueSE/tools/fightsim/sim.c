@@ -73,11 +73,19 @@ static void carve(Archetype arch) {
 
 // --- loadout --------------------------------------------------------------
 
+// iOS port (Brogue SE): cursed-runics rework -- runic-under-test override (see sim.h). Set per-run by
+// the curse modes; -1 = no runic.
+short gFightsimWeaponRunic = -1;
+
 static item *makeWeapon(short kind, short e) {
     item *w = generateItem(WEAPON, kind);
     short req = w->strengthRequired;
     w->enchant1 = e; w->strengthRequired = (short)(req - e > 0 ? req - e : 0);
     w->flags |= ITEM_IDENTIFIED; w->flags &= ~ITEM_RUNIC;
+    if (gFightsimWeaponRunic >= 0) { // apply the curse/runic under test; cursed-vs-purified keys off enchant1
+        w->enchant2 = gFightsimWeaponRunic;
+        w->flags |= (ITEM_RUNIC | ITEM_RUNIC_IDENTIFIED);
+    }
     return w;
 }
 static item *makeArmor(short kind, short e) {
