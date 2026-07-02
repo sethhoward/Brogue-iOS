@@ -32,6 +32,65 @@ See `BrogueCE/Engine/IOS_MODIFICATIONS.md` (faithful CE) and
 
 ## Change log
 
+### 2026-07-02 — Cursed-runics rework, Phase 2 (armor, part 2): Smoky (armor phase complete)
+
+**What.** The third armor curse (design finalized via a `/grill-me` pass; all Q's landed on the default).
+- **Concealment via smoke, range-only.** While cursed, `emitSmokyArmorCloud` (`Time.c`, called early in
+  `playerTurnEnded` so it lands before FOV/monster-sight) refreshes a **radius-1 thick-smoke cloud**
+  (player + 8 neighbors) — a direct, RNG-free gas write (`layers[GAS]=SMOKE_GAS`, `volume` bumped past
+  `SMOKE_THICK_VOLUME`), never clobbering another gas, skipping `T_OBSTRUCTS_GAS`. The **existing shared
+  `getFOVMask`** (used by both player and monster FOV) does the rest: monsters >1 tile away can't see you
+  (sneak past / can't be targeted / **sneak-attack openers**), adjacent monsters still can, and your own
+  FOV collapses to ~1 tile. Cells you leave dissipate into a short trail (escape cover). Noise system still
+  hears you (the counter).
+- **Purify → stealth aura (a sidegrade, by design).** Purified, the smoke is gone and you gain
+  `SMOKY_STEALTH_BONUS` (3) — applied fresh at the two consumption sites (`Time.c` stealth range +
+  `Monsters.c` player noise) via `smokyPurifyStealthBonus()`, so it's correct regardless of when you
+  purify (avoids the `updateRingBonuses`-not-called-after-armor-enchant trap). So you trade absolute
+  at-range sight-block (+ blindness) for see-normally + harder-to-spot-and-quieter. Keeping it cursed is a
+  legitimate blind-assassin niche.
+- Reveals on equip (`equipItem`). Description by purify state; playtest grant `D_SMOKY_ARMOR_START`.
+
+**Why.** Completes the armor phase. The range-only model + purify sidegrade resolve the long-standing
+"one-way invisibility" balance question (we never grant see-through-your-own-smoke).
+
+**Gas interaction (intended, verified):** the Smoky cloud is low-volume (~21). Real gas clouds are far
+denser (confusion trap 300, dewars 20000, caustic likewise), and the gas-mix rule (Time.c: denser gas
+wins the cell, weaker capped at 3) means a real cloud *overwhelms* your smoke — you lose concealment AND
+take the gas effect. So Smoky grants **no** gas protection (no respiration overlap); gas clouds are a
+natural hard counter to the smoke-assassin. Your smoke only displaces feeble/residual gas (~<21).
+
+**Where.** `Time.c` (`emitSmokyArmorCloud` + call, stealth-range site), `Monsters.c` (noise site),
+`Items.c` (`smokyPurifyStealthBonus`, equip reveal, description), `Rogue.h` (constant + flag + decl),
+`RogueMain.c` (grant).
+
+### 2026-07-02 — Cursed-runics rework, Phase 2 (armor, part 1): Acrophobia + Anchor
+
+**What.** Two of the three armor curses (effects + info-panel descriptions + playtest grants). Both are
+passive/contextual (not the reactive `applyArmorRunicEffect` slot), gated on the shared `runicCurseActive`.
+- **Acrophobia** (`A_ACROPHOBIA`): always-on **fall immunity** (guarded in the fall path, `Time.c`) and
+  **dive-at-will** (suppresses the "Dive into the depths?" prompt for an identified wearer, `Movement.c`,
+  same pattern as `A_RESPIRATION`); while cursed, standing adjacent to a chasm inflicts **vertigo**
+  (per-turn `STATUS_CONFUSED` refresh in `decrementPlayerStatus`). Reveals on the first vertigo or the
+  first cushioned fall. (Its purify reward is simply the fear lifting — fall-immunity is binary, so
+  there's nothing to scale; and there's no player "forced into a chasm" source to guard.)
+- **Anchor** (`A_ANCHOR`): always-on **+defense** (`ANCHOR_DEFENSE_BONUS`, in `recalculateEquipmentBonuses`);
+  while cursed, a **move-only slow** (`ANCHOR_MOVE_SLOW_PCT` extra ticks in the non-attack turn-cost path,
+  `Time.c` — attacks add ticks elsewhere, so attack speed is untouched). Reveals on the first dragging step.
+  **Purify reward — immovable:** immune to knockback (`MA_ATTACKS_STAGGER`, e.g. ogres) and to being seized
+  (`MA_SEIZES`, e.g. bog monsters), gated on purify via `playerHasImmovableAnchor` (`Combat.c`). (We verified
+  these are the *only* things that displace the player — explosion knockback is gated off, and nothing
+  beckons/shoves the player — so beckon / forced-into-chasm immunity were dropped as no-ops.)
+
+Tuning `#defines` in `Rogue.h`. Playtest grants (default 0): `D_ACROPHOBIA_ARMOR_START`,
+`D_ANCHOR_ARMOR_START` (cursed −1 runic leather).
+
+**Why.** Phase 2 of the rework. **Smoky remains** — its concealment is an FOV/smoke-emission problem
+(and the flagged "one open balance question": purify → one-way sight advantage), so it gets a focused pass.
+
+**Where.** `Time.c` (fall immunity, vertigo, move-slow), `Movement.c` (dive prompt), `Items.c`
+(defense bonus, both armor descriptions), `Rogue.h` (constants + grant flags), `RogueMain.c` (grants).
+
 ### 2026-07-02 — Cursed-runics rework, Phase 3 (weapons): item-panel descriptions
 
 **What.** Real info-panel descriptions for the three weapon curses, replacing the Phase-0 `[name]`

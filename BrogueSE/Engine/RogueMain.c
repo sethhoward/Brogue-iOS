@@ -572,6 +572,39 @@ void initializeRogue(uint64_t seed) {
         theItem = addItemToPack(theItem);
     }
 
+    if (D_ACROPHOBIA_ARMOR_START) {
+        // iOS port (Brogue SE): cursed-runics rework playtest grant -- an unidentified, cursed (-1)
+        // Acrophobia armor (fall-immune + dive-at-will always; vertigo/confusion at a chasm's edge while
+        // cursed; purify to conquer the fear). Deterministic/replay-safe.
+        theItem = generateItem(ARMOR, LEATHER_ARMOR);
+        theItem->enchant1 = -1;
+        theItem->enchant2 = A_ACROPHOBIA;
+        theItem->flags |= (ITEM_RUNIC | ITEM_CURSED);
+        theItem = addItemToPack(theItem);
+    }
+
+    if (D_ANCHOR_ARMOR_START) {
+        // iOS port (Brogue SE): cursed-runics rework playtest grant -- an unidentified, cursed (-1)
+        // Anchor armor (+defense always; ponderous move-slow while cursed; purify lifts the drag).
+        // Deterministic/replay-safe.
+        theItem = generateItem(ARMOR, LEATHER_ARMOR);
+        theItem->enchant1 = -1;
+        theItem->enchant2 = A_ANCHOR;
+        theItem->flags |= (ITEM_RUNIC | ITEM_CURSED);
+        theItem = addItemToPack(theItem);
+    }
+
+    if (D_SMOKY_ARMOR_START) {
+        // iOS port (Brogue SE): cursed-runics rework playtest grant -- an unidentified, cursed (-1) Smoky
+        // armor (wreathed in concealing-but-blinding smoke while cursed; purify -> a subtle stealth aura).
+        // Deterministic/replay-safe.
+        theItem = generateItem(ARMOR, LEATHER_ARMOR);
+        theItem->enchant1 = -1;
+        theItem->enchant2 = A_SMOKY;
+        theItem->flags |= (ITEM_RUNIC | ITEM_CURSED);
+        theItem = addItemToPack(theItem);
+    }
+
     if (D_CURSE_TEST_SCROLLS_START) {
         // iOS port (Brogue SE): cursed-runics rework playtest grant -- scrolls to drive the curse loop:
         // enchanting (reach +6 to purify) and remove-curse (eject -> shatter). Deterministic/replay-safe.

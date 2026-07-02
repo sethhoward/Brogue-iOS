@@ -1183,6 +1183,17 @@ boolean runicCurseActive(const item *theItem) {
     return isBadRunic(theItem) && theItem->enchant1 < runicPurifyThreshold(theItem);
 }
 
+// iOS port (Brogue SE): cursed-runics rework -- a PURIFIED Smoky armor refines its smoke into a passive
+// stealth aura. Computed fresh at the consumption sites (stealth range + noise) so it's correct no matter
+// when you purified. 0 while unworn or still cursed (the cursed form conceals via emitted smoke instead).
+short smokyPurifyStealthBonus(void) {
+    if (rogue.armor && (rogue.armor->flags & ITEM_RUNIC) && rogue.armor->enchant2 == A_SMOKY
+        && !runicCurseActive(rogue.armor)) {
+        return SMOKY_STEALTH_BONUS;
+    }
+    return 0;
+}
+
 void checkForDisenchantment(item *theItem) {
     char buf[COLS], buf2[COLS];
 
@@ -2706,13 +2717,28 @@ void itemDetails(char *buf, item *theItem) {
                                 strcpy(buf2, "When worn, it will safely absorb the concussive impact of any explosions (though you may still be burned). ");
                                 break;
                             case A_ANCHOR:
-                                strcpy(buf2, "[anchor: heavy but immovable] ");
+                                // iOS port (Brogue SE): cursed-runics rework -- describe by purify state.
+                                if (theItem->enchant1 < ARMOR_RUNIC_PURIFY_ENCHANT) {
+                                    sprintf(buf2, "Its great weight makes you far harder to wound (a substantial defense bonus), but drags at your legs -- you move ponderously slowly, though your attacks are unhindered. Enchant it to +%i to purify: the drag lifts, and its weight roots you like an anchor against knockback and seizing. ", ARMOR_RUNIC_PURIFY_ENCHANT);
+                                } else {
+                                    strcpy(buf2, "Its great weight makes you far harder to wound (a substantial defense bonus) and roots you like an anchor -- you cannot be knocked back or seized -- yet you have learned to bear it without losing a step. ");
+                                }
                                 break;
                             case A_SMOKY:
-                                strcpy(buf2, "[smoky: concealing smoke] ");
+                                // iOS port (Brogue SE): cursed-runics rework -- describe by purify state.
+                                if (theItem->enchant1 < ARMOR_RUNIC_PURIFY_ENCHANT) {
+                                    sprintf(buf2, "When worn it wreathes you in thick smoke: creatures more than a step away cannot see you -- you move unseen and can strike the unwary -- but your own sight collapses to your immediate surroundings. Enchant it to +%i to purify: the choking smoke refines into a subtle stealth, so you move unseen and unheard while seeing clearly. ", ARMOR_RUNIC_PURIFY_ENCHANT);
+                                } else {
+                                    strcpy(buf2, "When worn you move like smoke -- a subtle stealth that leaves you both harder to see and quieter, with no cost to your own sight. ");
+                                }
                                 break;
                             case A_ACROPHOBIA:
-                                strcpy(buf2, "[acrophobia: fear of heights] ");
+                                // iOS port (Brogue SE): cursed-runics rework -- describe by purify state.
+                                if (theItem->enchant1 < ARMOR_RUNIC_PURIFY_ENCHANT) {
+                                    sprintf(buf2, "When worn you take no damage from falls and may dive into a chasm at will -- but a dreadful vertigo grips you whenever you stand at a chasm's edge, leaving you confused. Enchant it to +%i to conquer the fear, keeping the fearless descent. ", ARMOR_RUNIC_PURIFY_ENCHANT);
+                                } else {
+                                    strcpy(buf2, "When worn you have mastered your fear of heights: you take no damage from falls and may dive into a chasm at will, with no vertigo at the brink. ");
+                                }
                                 break;
                             default:
                                 break;
@@ -10272,6 +10298,11 @@ void recalculateEquipmentBonuses() {
         if (player.info.defense < 0) {
             player.info.defense = 0;
         }
+        // iOS port (Brogue SE): cursed-runics rework -- Anchor grants a flat defense bonus (always on,
+        // even purified); its downside (move-slow while cursed) lives in the per-turn move-cost path.
+        if ((theItem->flags & ITEM_RUNIC) && theItem->enchant2 == A_ANCHOR) {
+            player.info.defense += ANCHOR_DEFENSE_BONUS;
+        }
     }
 }
 
@@ -10394,6 +10425,11 @@ boolean equipItem(item *theItem, boolean force, item *unequipHint) {
                 player.status[STATUS_HALLUCINATING] = max(player.status[STATUS_HALLUCINATING], 2);
                 player.maxStatus[STATUS_HALLUCINATING] = max(player.maxStatus[STATUS_HALLUCINATING], player.status[STATUS_HALLUCINATING]);
             }
+        }
+        // iOS port (Brogue SE): cursed-runics rework -- Smoky's smoke pours out the instant it's donned,
+        // so the runic reveals on equip (the per-turn emit + FOV handle the concealment/blindness).
+        if ((theItem->category & ARMOR) && (theItem->flags & ITEM_RUNIC) && theItem->enchant2 == A_SMOKY) {
+            autoIdentify(theItem);
         }
     }
 

@@ -130,6 +130,12 @@
 // deterministically in initializeRogue, so recording-safe. Flip to 0 to ship.
 #define D_CURSE_TEST_SCROLLS_START      0//(WIZARD_MODE && 0)
 
+// iOS port (Brogue SE): cursed-runics rework -- start with an unidentified, cursed (-1) double-edged
+// runic armor for each implemented armor curse (Phase 2). Same deterministic grant; flip to 0 to ship.
+#define D_ACROPHOBIA_ARMOR_START        0//(WIZARD_MODE && 0)
+#define D_ANCHOR_ARMOR_START            0//(WIZARD_MODE && 0)
+#define D_SMOKY_ARMOR_START             0//(WIZARD_MODE && 0)
+
 // iOS port (Brogue SE): noise system. A monster that takes a self-willed step while the player can't
 // see it emits a perceptible "noise", drawn as a box radiating from its new cell ("you heard
 // something"). Perception is a TWO-STAGE model that deliberately SEPARATES range from probability
@@ -567,7 +573,7 @@ typedef struct windowpos {
 // never stops projectiles and never muffles sound (a screen breaks sight, not pursuit). See
 // IOS_MODIFICATIONS.md. These are playtest tuning dials -- adjust freely.
 #define SMOKE_THICK_VOLUME      15          // gas volume at/above which smoke blocks line of sight and lingers
-#define SMOKE_EMISSION_CHANCE   45          // % chance per turn a burning PLAIN_FIRE tile puffs smoke (substantive RNG)
+#define SMOKE_EMISSION_CHANCE   35          // % chance per turn a burning PLAIN_FIRE tile puffs smoke (substantive RNG)
 
 #define MACHINES_BUFFER_LENGTH  200
 
@@ -1329,6 +1335,11 @@ enum armorEnchants {
 #define RECKLESSNESS_DAMAGE_DEALT_BASE  20  // % damage dealt at +0 (always on, even purified)
 #define RECKLESSNESS_DAMAGE_DEALT_PER_ENCHANT 1 // +% damage dealt per net enchant level
 #define RECKLESSNESS_DAMAGE_TAKEN_PCT   50  // extra % damage taken while cursed (flat)
+
+// iOS port (Brogue SE): cursed-runics rework -- Phase 2 armor-curse tuning.
+#define ANCHOR_DEFENSE_BONUS            30  // +defense (x10 units; +3 displayed) while worn -- always on
+#define ANCHOR_MOVE_SLOW_PCT           100  // extra % move-cost while cursed (100 = double); attacks untouched
+#define SMOKY_STEALTH_BONUS            3   // purified Smoky's passive stealth (spot + noise); ~a +3 ring of stealth
 
 enum wandKind {
     WAND_TELEPORT,
@@ -4118,6 +4129,7 @@ extern "C" {
     char nextAvailableInventoryCharacter(void);
     void checkForDisenchantment(item *theItem);
     boolean runicCurseActive(const item *theItem); // iOS port (Brogue SE): cursed-runics rework -- downside/cursed-mode in force (bad runic below its purify threshold)
+    short smokyPurifyStealthBonus(void); // iOS port (Brogue SE): cursed-runics rework -- SMOKY_STEALTH_BONUS while a purified Smoky armor is worn, else 0
     void updateFloorItems(void);
     void itemKindName(item *theItem, char *kindName);
     void itemRunicName(item *theItem, char *runicName);

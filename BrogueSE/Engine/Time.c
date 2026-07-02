@@ -882,6 +882,7 @@ short currentStealthRange() {
         // Subtract your bonuses from rings of stealth.
         // (Cursed rings of stealth will end up adding here.)
         stealthRange -= rogue.stealthBonus;
+        stealthRange -= smokyPurifyStealthBonus(); // iOS port (Brogue SE): cursed-runics rework -- purified Smoky's stealth aura
 
         // Can't go below 2 unless you just rested.
         if (stealthRange < 2 && !rogue.justRested) {
@@ -1293,7 +1294,13 @@ static void playerFalls() {
         startLevel(rogue.depthLevel - 1, 0);
         damage = randClumpedRange(gameConst->fallDamageMin, gameConst->fallDamageMax, 2);
         boolean killed = false;
-        if (terrainFlags(player.loc) & T_IS_DEEP_WATER) {
+        // iOS port (Brogue SE): cursed-runics rework -- Acrophobia armor negates fall damage (always on,
+        // even while cursed): the chasm becomes a dependable escape hatch / descent tool, and landing
+        // unharmed reveals the runic.
+        if (rogue.armor && (rogue.armor->flags & ITEM_RUNIC) && rogue.armor->enchant2 == A_ACROPHOBIA) {
+            messageWithColor("You alight from the fall, unharmed.", &itemMessageColor, 0);
+            autoIdentify(rogue.armor);
+        } else if (terrainFlags(player.loc) & T_IS_DEEP_WATER) {
             messageWithColor("You fall into deep water, unharmed.", &badMessageColor, 0);
         } else {
             if (cellHasTMFlag(player.loc, TM_ALLOWS_SUBMERGING)) {
@@ -2368,6 +2375,29 @@ static void decrementPlayerStatus() {
         player.maxStatus[STATUS_HALLUCINATING] = max(player.maxStatus[STATUS_HALLUCINATING], player.status[STATUS_HALLUCINATING]);
     }
 
+    // iOS port (Brogue SE): cursed-runics rework -- Acrophobia armor: while cursed, standing next to a
+    // chasm grips you with vertigo (confusion), refreshed each turn you linger at the brink; it fades
+    // once you step away or purify (enchant >= threshold). Fall-immunity + dive-at-will (the upside) are
+    // handled in the fall/movement paths. First vertigo reveals the runic.
+    if (rogue.armor && (rogue.armor->flags & ITEM_RUNIC) && rogue.armor->enchant2 == A_ACROPHOBIA
+        && runicCurseActive(rogue.armor)) {
+        const short chasmDirs[8][2] = {{-1,-1},{0,-1},{1,-1},{-1,0},{1,0},{-1,1},{0,1},{1,1}};
+        boolean nearChasm = false;
+        for (short d = 0; d < 8 && !nearChasm; d++) {
+            short cx = player.loc.x + chasmDirs[d][0], cy = player.loc.y + chasmDirs[d][1];
+            if (coordinatesAreInMap(cx, cy) && cellHasTerrainFlag((pos){ cx, cy }, T_AUTO_DESCENT)) {
+                nearChasm = true;
+            }
+        }
+        if (nearChasm) {
+            if (!(rogue.armor->flags & ITEM_RUNIC_IDENTIFIED)) {
+                autoIdentify(rogue.armor);
+            }
+            player.status[STATUS_CONFUSED] = max(player.status[STATUS_CONFUSED], 2);
+            player.maxStatus[STATUS_CONFUSED] = max(player.maxStatus[STATUS_CONFUSED], player.status[STATUS_CONFUSED]);
+        }
+    }
+
     if (player.status[STATUS_HALLUCINATING] > 0 && !--player.status[STATUS_HALLUCINATING]) {
         displayLevel();
         message("your hallucinations fade.", 0);
@@ -2628,6 +2658,31 @@ static void recordCurrentCreatureHealths() {
 // It hands control over to monsters until they've all expended their accumulated ticks,
 // updating the environment (gas spreading, flames spreading and burning out, etc.) every
 // 100 ticks.
+// iOS port (Brogue SE): cursed-runics rework -- Smoky armor: while cursed, wreathe the player in a
+// radius-1 thick-smoke cloud each turn. The shared getFOVMask then blocks sight both ways -- distant
+// monsters can't see you (sneak past / can't be targeted), and your own view collapses to ~1 tile.
+// Refreshed on the player + 8 neighbors (the minimal cloud that hides you from every non-adjacent
+// monster); cells you leave dissipate into a short trail (escape cover). Never clobbers another gas,
+// skips gas-blocking terrain, draws no RNG (replay-safe). Purify swaps this for a passive stealth aura.
+static void emitSmokyArmorCloud(void) {
+    if (!(rogue.armor && (rogue.armor->flags & ITEM_RUNIC) && rogue.armor->enchant2 == A_SMOKY
+          && runicCurseActive(rogue.armor))) {
+        return;
+    }
+    const short dirs[9][2] = {{0,0},{-1,-1},{0,-1},{1,-1},{-1,0},{1,0},{-1,1},{0,1},{1,1}};
+    for (short d = 0; d < 9; d++) {
+        short cx = player.loc.x + dirs[d][0], cy = player.loc.y + dirs[d][1];
+        if (!coordinatesAreInMap(cx, cy)) continue;
+        if (cellHasTerrainFlag((pos){ cx, cy }, T_OBSTRUCTS_GAS)) continue;
+        if (pmap[cx][cy].layers[GAS] != NOTHING && pmap[cx][cy].layers[GAS] != SMOKE_GAS) continue;
+        pmap[cx][cy].layers[GAS] = SMOKE_GAS;
+        if (pmap[cx][cy].volume < SMOKE_THICK_VOLUME + 6) {
+            pmap[cx][cy].volume = SMOKE_THICK_VOLUME + 6; // comfortably thick; survives a turn of dissipation
+        }
+        refreshDungeonCell((pos){ cx, cy });
+    }
+}
+
 void playerTurnEnded() {
     short soonestTurn, damage, turnsRequiredToShore, turnsToShore;
     char buf[COLS], buf2[COLS];
@@ -2655,6 +2710,7 @@ void playerTurnEnded() {
     monstersFall();
 
     showEmptyBottleCaptureHint(); // iOS port (iBrogue): empty-bottle v2 -- once-per-kind hint naming what the tile underfoot would capture into
+    emitSmokyArmorCloud(); // iOS port (Brogue SE): cursed-runics rework -- refresh the Smoky cloud at the new position before FOV/monster-sight
 
     do {
         if (rogue.gameHasEnded) {
@@ -2753,6 +2809,16 @@ void playerTurnEnded() {
 
         if (player.ticksUntilTurn == 0) { // attacking adds ticks elsewhere
             player.ticksUntilTurn += player.movementSpeed;
+            // iOS port (Brogue SE): cursed-runics rework -- Anchor drags at your legs while cursed: extra
+            // move-cost. This block is the non-attack turn cost (attacks add ticks elsewhere), so attack
+            // speed is untouched. First drag reveals the runic; purify (enchant >= threshold) lifts it.
+            if (rogue.armor && (rogue.armor->flags & ITEM_RUNIC) && rogue.armor->enchant2 == A_ANCHOR
+                && runicCurseActive(rogue.armor)) {
+                player.ticksUntilTurn += player.movementSpeed * ANCHOR_MOVE_SLOW_PCT / 100;
+                if (!(rogue.armor->flags & ITEM_RUNIC_IDENTIFIED)) {
+                    autoIdentify(rogue.armor);
+                }
+            }
         } else if (player.ticksUntilTurn < 0) { // if he gets a free turn
             player.ticksUntilTurn = 0;
         }

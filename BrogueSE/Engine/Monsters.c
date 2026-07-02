@@ -5093,6 +5093,7 @@ short playerNoiseLevel(void) {
         noise += terrainNoiseModifier(player.loc); // crunchy grass +, soft carpet -
     }
     noise -= rogue.stealthBonus * NOISE_PLAYER_STEALTH_RING_SCALE; // ring of stealth muffles
+    noise -= smokyPurifyStealthBonus() * NOISE_PLAYER_STEALTH_RING_SCALE; // iOS port (Brogue SE): cursed-runics rework -- purified Smoky muffles too
     return noise;
 }
 

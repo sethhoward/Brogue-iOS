@@ -466,6 +466,15 @@ static short rateItemStealDesirability(creature *thief, item *theItem) {
     return max(1, score);
 }
 
+// iOS port (Brogue SE): cursed-runics rework -- a PURIFIED Anchor makes the player immovable: immune to
+// knockback (MA_ATTACKS_STAGGER, e.g. an ogre) and to being seized/held (MA_SEIZES, e.g. a bog monster).
+// Gated on purify (enchant >= threshold), so it's the purify reward; a cursed Anchor doesn't get it.
+static boolean playerHasImmovableAnchor(void) {
+    return rogue.armor && (rogue.armor->flags & ITEM_RUNIC)
+        && rogue.armor->enchant2 == A_ANCHOR
+        && rogue.armor->enchant1 >= ARMOR_RUNIC_PURIFY_ENCHANT;
+}
+
 static void specialHit(creature *attacker, creature *defender, short damage) {
     short itemCandidates, randItemIndex, stolenQuantity;
     item *theItem = NULL, *itemFromTopOfStack;
@@ -610,7 +619,8 @@ static void specialHit(creature *attacker, creature *defender, short damage) {
 
         weaken(defender, gameConst->onHitWeakenDuration);
     }
-    if (attacker->info.abilityFlags & MA_ATTACKS_STAGGER) {
+    if (attacker->info.abilityFlags & MA_ATTACKS_STAGGER
+        && !(defender == &player && playerHasImmovableAnchor())) { // purified Anchor: can't be knocked back
         processStaggerHit(attacker, defender);
     }
 }
@@ -1399,7 +1409,8 @@ boolean attack(creature *attacker, creature *defender, boolean lungeAttack) {
     if ((attacker->info.abilityFlags & MA_SEIZES)
         && (!(attacker->bookkeepingFlags & MB_SEIZING) || !(defender->bookkeepingFlags & MB_SEIZED))
         && (distanceBetween(attacker->loc, defender->loc) == 1
-            && !diagonalBlocked(attacker->loc.x, attacker->loc.y, defender->loc.x, defender->loc.y, false))) {
+            && !diagonalBlocked(attacker->loc.x, attacker->loc.y, defender->loc.x, defender->loc.y, false))
+        && !(defender == &player && playerHasImmovableAnchor())) { // purified Anchor: can't be seized/held
 
         attacker->bookkeepingFlags |= MB_SEIZING;
         defender->bookkeepingFlags |= MB_SEIZED;
