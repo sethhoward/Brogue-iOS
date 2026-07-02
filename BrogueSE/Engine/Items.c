@@ -2148,9 +2148,9 @@ void itemDetails(char *buf, item *theItem) {
         "the enemy will be confused",
         "the enemy will be flung",
         "[slaying]", // never used
-        "[delirium]", // never used (passive: +strength)
-        "[recklessness]", // never used (passive: damage in/out)
-        "the enemy may be decapitated"
+        "[delirium]",      // never used -- W_DELIRIUM has a custom description block below
+        "[recklessness]",  // never used -- W_RECKLESSNESS has a custom description block below
+        "[clumsiness]"     // never used -- W_CLUMSINESS has a custom description block below
     };
 
     goodColorEscape[0] = badColorEscape[0] = whiteColorEscape[0] = '\0';
@@ -2470,6 +2470,59 @@ void itemDetails(char *buf, item *theItem) {
                                 sprintf(buf2, "Sometimes, when it hits an enemy, spectral %ss will spring into being with accuracy and attack power equal to your own, and will dissipate shortly thereafter.",
                                         theName);
                             }
+                            strcat(buf, buf2);
+                        } else if (theItem->enchant2 == W_DELIRIUM) {
+                            // iOS port (Brogue SE): cursed-runics rework -- dual-mode; describe by purify state.
+                            boolean known = (theItem->flags & ITEM_IDENTIFIED) || rogue.playbackOmniscience;
+                            if (theItem->enchant1 < WEAPON_RUNIC_PURIFY_ENCHANT) {
+                                strcat(buf, "A maddening delirium bleeds from the blade: while wielded it leaves you permanently hallucinating, so you cannot reliably tell what you face -- beware striking an acid mound blind. ");
+                                if (known) {
+                                    sprintf(buf2, "%i%% of the time it hits, it drowns the enemy in confusion. ", runicWeaponChance(theItem, false, 0));
+                                } else {
+                                    strcpy(buf2, "Sometimes, when it hits, it drowns the enemy in confusion. ");
+                                }
+                                strcat(buf, buf2);
+                                sprintf(buf2, "Enchant it to +%i to purify: the hallucination lifts and its venom becomes a vigor-sapping weakness. ", WEAPON_RUNIC_PURIFY_ENCHANT);
+                                strcat(buf, buf2);
+                            } else {
+                                if (known) {
+                                    sprintf(buf2, "You have learned to see through the illusion, and the blade's venom turns outward: %i%% of the time it hits, it saps the enemy's vigor -- its damage, accuracy and defense. ", runicWeaponChance(theItem, false, 0));
+                                } else {
+                                    strcpy(buf2, "You have learned to see through the illusion, and the blade's venom turns outward: sometimes, when it hits, it saps the enemy's vigor. ");
+                                }
+                                strcat(buf, buf2);
+                            }
+                        } else if (theItem->enchant2 == W_RECKLESSNESS) {
+                            // iOS port (Brogue SE): cursed-runics rework -- passive (not an on-hit proc).
+                            boolean known = (theItem->flags & ITEM_IDENTIFIED) || rogue.playbackOmniscience;
+                            short dealtPct = RECKLESSNESS_DAMAGE_DEALT_BASE + max(0, (short)(enchant / FP_FACTOR)) * RECKLESSNESS_DAMAGE_DEALT_PER_ENCHANT;
+                            if (theItem->enchant1 < WEAPON_RUNIC_PURIFY_ENCHANT) {
+                                if (known) {
+                                    sprintf(buf2, "A reckless fury drives every blow: you deal %i%% more damage, but in your abandon you take %i%% more from every source. ", dealtPct, RECKLESSNESS_DAMAGE_TAKEN_PCT);
+                                } else {
+                                    strcpy(buf2, "A reckless fury drives every blow: you deal more damage, but in your abandon you take more from every source. ");
+                                }
+                                strcat(buf, buf2);
+                                sprintf(buf2, "Enchant it to +%i to purify -- the recklessness hones into pure aggression, keeping the extra damage without the vulnerability. ", WEAPON_RUNIC_PURIFY_ENCHANT);
+                                strcat(buf, buf2);
+                            } else {
+                                if (known) {
+                                    sprintf(buf2, "A honed aggression drives every blow: you deal %i%% more damage, at no cost to your own defense. ", dealtPct);
+                                } else {
+                                    strcpy(buf2, "A honed aggression drives every blow: you deal more damage, at no cost to your own defense. ");
+                                }
+                                strcat(buf, buf2);
+                            }
+                        } else if (theItem->enchant2 == W_CLUMSINESS) {
+                            // iOS port (Brogue SE): cursed-runics rework -- cursed-only (purify -> W_QUIETUS above).
+                            boolean known = (theItem->flags & ITEM_IDENTIFIED) || rogue.playbackOmniscience;
+                            if (known) {
+                                sprintf(buf2, "The blade is treacherously unbalanced: %i%% of the time it hits, a wild swing takes the enemy's head clean off. ", runicWeaponChance(theItem, false, 0));
+                            } else {
+                                strcpy(buf2, "The blade is treacherously unbalanced: sometimes, when it hits, a wild swing takes the enemy's head clean off. ");
+                            }
+                            strcat(buf, buf2);
+                            sprintf(buf2, "But while cursed you sometimes trip over your own strike -- missing and left reeling -- a risk that shrinks as your strength outmatches the weapon. Enchant it to +%i to purify it into a true runic of quietus. ", WEAPON_RUNIC_PURIFY_ENCHANT);
                             strcat(buf, buf2);
                         } else {
                             if ((theItem->flags & ITEM_IDENTIFIED) || rogue.playbackOmniscience) {

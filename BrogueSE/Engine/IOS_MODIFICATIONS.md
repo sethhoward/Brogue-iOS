@@ -32,6 +32,26 @@ See `BrogueCE/Engine/IOS_MODIFICATIONS.md` (faithful CE) and
 
 ## Change log
 
+### 2026-07-02 — Cursed-runics rework, Phase 3 (weapons): item-panel descriptions
+
+**What.** Real info-panel descriptions for the three weapon curses, replacing the Phase-0 `[name]`
+placeholders. Added custom description blocks in `itemDetails` (`Items.c`, alongside the `W_SLAYING`/
+`W_MULTIPLICITY` special cases) because the generic "X% of the time it hits, …" frame doesn't fit them:
+- **Delirium** — described by purify state (cursed: hallucination + acid-mound warning + confusion proc
+  + purify hint; purified: weakness proc, no cost).
+- **Recklessness** — passive, so it bypasses the proc frame entirely (+damage dealt / +damage taken,
+  purify removes the vulnerability).
+- **Clumsiness** — decap proc + the fumble downside + purify→quietus hint (cursed-only; the purified
+  `W_QUIETUS` uses the stock Quietus description).
+
+Precise numbers are gated on `ITEM_IDENTIFIED` (as the generic path does), so an un-ID'd enchant isn't
+leaked via the shown proc %. The `weaponRunicEffectDescriptions[]` table entries for these three are now
+dead (kept as `[name]` fallbacks; the custom blocks handle all display).
+
+**Why.** Phase 3 polish — the panels were showing bracket placeholders now that the curses surface.
+
+**Where.** `Items.c` (`itemDetails` runic-description chain; the effect-descriptions table).
+
 ### 2026-07-02 — Cursed-runics rework, Phase 1: the three weapon-curse effects
 
 **What.** Implemented the effects for the three weapon curses (design: `docs/design/cursed-runics-rework.md`).
