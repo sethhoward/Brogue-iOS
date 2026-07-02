@@ -32,6 +32,54 @@ See `BrogueCE/Engine/IOS_MODIFICATIONS.md` (faithful CE) and
 
 ## Change log
 
+### 2026-07-01 — Altars of Divination replace the deprecated Altars of Insight (new content; save break)
+
+**What.** A new guaranteed reward room — a central **totem** with up to four one-use **altars of divination**
+arranged in a cross (one per cardinal direction, one tile out). Place an unidentified item on an active altar
+and it is **fully identified** (`identify()`); the altar then **arms** (holds the revealed item) and **seals
+shut** when you lift the item (`TM_PROMOTES_ON_ITEM_PICKUP` → `DF_DIVINATION_ALTAR_CLOSE`). "Fire only if it
+helps": a known item is a no-op (lift it back freely), so junk can't defuse the room.
+
+**The push-your-luck loop.** Each identify (room-scoped `rogue.divinationAltarUses`) rolls an escalating
+chance to awaken the totem's single guardian: **0 / 25 / 50 / 75 %** for uses 1/2/3/4 (`DIVINATION_AWAKEN_*`).
+Use 1 is always safe. On an awaken, a tiered monster whose strength scales with *which* use triggered it bursts
+from the totem — **use 2 → Ogre, use 3 → Troll, use 4 → Underworm** (`spawnDivinationGuardian`, Monsters.c) —
+and **every unused altar shatters** (a previously-armed altar still holding a revealed item is spared, so no
+item is destroyed). One guardian per room; the awaken ends it. The monster emerges **"off balance"**: a large
+`ticksUntilTurn` (`DIVINATION_OFFBALANCE_TIER1/2/3` = 200/300/400) delays its first action and surfaces the
+existing derived **"(Off balance)"** sidebar tell ([IO.c](IO.c) `ticksUntilTurn > player.ticksUntilTurn +
+movementSpeed`). Deadlier tier = longer grace; the Underworm is also natively slow, so the scariest guardian is
+the most escapable. Two-channel flavor: the totem escalates each use (*stirs → groans → cracks → shudders
+violently*) with a tail clause reporting the roll (*"…but the totem falls silent."* on a safe pull).
+
+**Placement.** Guaranteed **once per run**, force-built with carry-forward from `DIVINATION_ALTAR_MIN_DEPTH`
+(D9), abandoned past `DIVINATION_ALTAR_MAX_DEPTH` (D22) — the exact mechanism that built the insight altars,
+**retargeted** here (`addMachines`, Architect.c). `roomSize {10,30}`, `BP_IMPREGNABLE` (the guardian can't
+tunnel out). The blueprint builds only the carpeted room; `placeAltarCrossInRoom` (Architect.c) lays the totem
+at the room-center and an altar one tile out in each cardinal direction (falls back to adjacent).
+
+**Deprecation.** The Altars of Insight **no longer generate** — their `addMachines` carry-forward was replaced
+by the divination room. `MT_INSIGHT_ALTAR`, its blueprint, terrain (`INSIGHT_ALTAR_*`), and trigger
+(`performInsightSacrifice`) remain in the tree, unreferenced by generation (marked deprecated). Transfer altars
+stay disabled (freq 0).
+
+**Save break.** Removing insight generation + adding the new room changes level generation, so old input-replay
+saves would desync. Bumped `BROGUE_MINOR` 1 → 2 (recording version "SE 2.1.0" → "SE 2.2.0"), which cleanly
+rejects 0.11.0 saves. The title-screen release string / marketing version / release notes are **not** bumped
+here — that's the separate release-cut step. (No `BROGUE_VERSION_ATLEAST` gates depend on the minor.)
+
+**Where.** `Rogue.h` — 4 tiles (`DIVINATION_ALTAR`/`_ARMED`/`_CLOSED`, `DIVINATION_TOTEM`),
+`DF_DIVINATION_ALTAR_CLOSE`, `TM_DIVINATION_ACTIVATION` (Fl(28)), `MT_DIVINATION_ALTARS`, tuning constants,
+`rogue.divinationAltar{Built,Uses,Awakened}`, the `BROGUE_MINOR` bump, `spawnDivinationGuardian` proto.
+`Globals.c` — the 4 tile defs + the close DF. `GlobalsBrogue.c` — the blueprint. `Architect.c` —
+`placeAltarCrossInRoom` + the retargeted carry-forward. `Items.c` — the `updateFloorItems` trigger block +
+`performDivination`. `Monsters.c` — `spawnDivinationGuardian`. All marked `// iOS port (Brogue SE):`.
+
+**Determinism.** Awaken via substantive `rand_percent`; guardian kind + grace are pure functions of the use
+count; generation/placement use the substantive RNG; all `rogue` fields set deterministically → replay-safe
+(reconstructed by replay, no explicit serialization, as with `insightAltarsBuilt`). SE-only gameplay. Docs:
+`MACHINES_AUDIT.md`, `IDENTIFICATION_AUDIT.md`, `docs/design/altars-of-divination.md`.
+
 ### 2026-07-01 — Noise system: a claimed thrown decoy makes the monster loiter (the "slip by" window)
 
 **What.** A monster investigating a **thrown decoy** used to reach the item, consume it, and immediately

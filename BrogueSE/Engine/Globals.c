@@ -622,6 +622,14 @@ const floorTileType tileCatalog[NUMBER_TILETYPES] = {
     // freezes (T_CAUSES_FREEZE; see applyInstantTileEffectsToCreature), and the cloud douses flame
     // (TM_EXTINGUISHES_FIRE). Not flammable; dissipates quickly like the other potion gases.
  /*FROST_GAS*/                 {' ',       0,                      &lightBlue,         35, 0,  0,0,0,                                          0,  NO_LIGHT,   (T_CAUSES_FREEZE), (TM_STAND_IN_TILE | TM_GAS_DISSIPATES_QUICKLY | TM_EXTINGUISHES_FIRE),     "a cloud of biting frost", "the air is full of stinging, frost-laden mist."},
+
+ // iOS port (Brogue SE): Altars of Divination -- a cross of up to four one-use identify altars around a
+ // central totem (replaces the deprecated altars of insight). Walkable (surface-effects only) like the other
+ // altars; the totem is a solid idol. See performDivination (Items.c) for the identify/awaken behavior.
+ /*DIVINATION_ALTAR*/         {G_ORB_ALTAR,&altarForeColor,      &goldAltarBackColor, 17, 0,  0,0,0,                      0,  CANDLE_LIGHT,   (T_OBSTRUCTS_SURFACE_EFFECTS), (TM_DIVINATION_ACTIVATION | TM_LIST_IN_SIDEBAR | TM_VISUALLY_DISTINCT),                             "an altar of divination", "place an unidentified item here and its nature will be revealed."},
+ /*DIVINATION_ALTAR_ARMED*/  {G_ORB_ALTAR,&altarForeColor,      &goldAltarBackColor, 17, 0,  0,0,DF_DIVINATION_ALTAR_CLOSE,0,CANDLE_LIGHT,  (T_OBSTRUCTS_SURFACE_EFFECTS), (TM_PROMOTES_ON_ITEM_PICKUP | TM_VANISHES_UPON_PROMOTION | TM_LIST_IN_SIDEBAR | TM_VISUALLY_DISTINCT), "a divining altar",       "the revealed item rests here; lift it and the altar will seal shut."},
+ /*DIVINATION_ALTAR_CLOSED*/ {G_ORB_ALTAR,&black,               &goldAltarBackColor, 17, 0,  0,0,0,                      0,  NO_LIGHT,       (T_OBSTRUCTS_SURFACE_EFFECTS), (TM_LIST_IN_SIDEBAR | TM_VISUALLY_DISTINCT),                                                       "a sealed altar",         "the altar has sealed shut, its stone cold and silent."},
+ /*DIVINATION_TOTEM*/        {G_TOTEM,    &altarForeColor,      &goldAltarBackColor, 17, 0,  0,0,0,                      0,  CANDLE_LIGHT,   (T_OBSTRUCTS_PASSABILITY | T_OBSTRUCTS_ITEMS | T_OBSTRUCTS_GAS | T_OBSTRUCTS_SURFACE_EFFECTS), (TM_LIST_IN_SIDEBAR | TM_VISUALLY_DISTINCT), "a divination totem",     "a squat idol of black stone; something coiled seems to slumber within."},
 };
 
 unsigned long terrainFlags(pos p) {
@@ -1019,6 +1027,10 @@ dungeonFeature dungeonFeatureCatalog[NUMBER_DUNGEON_FEATURES] = {
     // iOS port (Brogue SE): companion dry grass for a fire trap. Contained (75/25, vs open DF_DEAD_GRASS's
     // 75/5 sprawl) and chains no dead foliage -- just flammable grass that the trap's flame can ignite.
     {DEAD_GRASS,                SURFACE,    75,     25,     (DFF_BLOCKED_BY_OTHER_LAYERS)},
+
+    // iOS port (Brogue SE): an armed divination altar seals shut (-> DIVINATION_ALTAR_CLOSED) when its
+    // revealed item is lifted. Fired via TM_PROMOTES_ON_ITEM_PICKUP -> promoteTile -> this promoteType DF.
+    {DIVINATION_ALTAR_CLOSED,   DUNGEON,    0,      0,      0},
 };
 
 const dungeonProfile dungeonProfileCatalog[NUMBER_DUNGEON_PROFILES] = {

@@ -1278,6 +1278,8 @@ static boolean performInsightSacrifice(short machineNumber);
 
 // iOS port (iBrogue): the altars-of-transference machine; defined below near performInsightSacrifice.
 static boolean performEnchantTransfer(short machineNumber);
+// iOS port (Brogue SE): the Altars of Divination machine; defined below near performInsightSacrifice.
+static boolean performDivination(short machineNumber);
 
 void updateFloorItems() {
     short x, y;
@@ -1413,6 +1415,23 @@ void updateFloorItems() {
 
                 activateMachine(pmap[x][y].machineNumber, (pos){ x, y });
             }
+        }
+
+        // iOS port (Brogue SE): sibling of the insight/commutation blocks -- the Altars of Divination.
+        // Unlike those, this doesn't wire the machine (no activateMachine): performDivination identifies the
+        // one item placed on an active altar, arms that altar, and rolls the totem's awaken directly.
+        if (cellHasTMFlag((pos){ x, y }, TM_DIVINATION_ACTIVATION)
+            && pmap[x][y].machineNumber) {
+
+            while (nextItem != NULL
+                   && pmap[x][y].machineNumber == pmapAt(nextItem->loc)->machineNumber
+                   && cellHasTMFlag(nextItem->loc, TM_DIVINATION_ACTIVATION)) {
+
+                // Skip other items in this machine so we don't process the same room twice this pass.
+                nextItem = nextItem->nextItem;
+            }
+
+            performDivination(pmap[x][y].machineNumber);
         }
     }
 }
@@ -9272,6 +9291,101 @@ static boolean performInsightSacrifice(short machineNumber) {
     pmap[paymentLoc.x][paymentLoc.y].flags &= ~(HAS_ITEM | ITEM_DETECTED);
     deleteItem(paymentItem);
     refreshDungeonCell(paymentLoc);
+    return true;
+}
+
+// iOS port (Brogue SE): the Altars of Divination machine. When an unidentified item is placed on an active
+// altar, fully identify it, ARM that altar (it now holds the revealed item and seals shut on pickup via
+// TM_PROMOTES_ON_ITEM_PICKUP), and roll the totem's escalating awaken. "Fire only if it helps": an already-
+// known item is a no-op (the altar stays active and the item is lifted freely), so junk can't safely defuse
+// the room and the risk is bound to value actually gained. The Nth identify (room-scoped counter) awakens the
+// totem's single guardian at 0/25/50/75% for uses 1/2/3/4; on an awaken a tiered monster bursts from the totem
+// "off balance" and every UNUSED altar shatters (a previously-armed altar holding your earlier item is spared,
+// as is the one you just used). Substantive rand_percent -> deterministic/replay-safe. See design/environmental
+// -sounds.md's sibling note and PERCEPTION/IDENTIFICATION audits. Returns true if an identification occurred.
+static boolean performDivination(short machineNumber) {
+    // Find the one active altar holding an item (the player places one per turn).
+    item *theItem = NULL;
+    pos altarLoc = INVALID_POS, totemLoc = INVALID_POS;
+    for (short i = 0; i < DCOLS; i++) {
+        for (short j = 0; j < DROWS; j++) {
+            if (pmap[i][j].machineNumber != machineNumber) {
+                continue;
+            }
+            if (pmap[i][j].layers[DUNGEON] == DIVINATION_TOTEM) {
+                totemLoc = (pos){ i, j };
+            } else if (pmap[i][j].layers[DUNGEON] == DIVINATION_ALTAR && theItem == NULL) {
+                // Fire only if it helps: an already-known item is skipped (a no-op; it's lifted back freely),
+                // and -- crucially -- skipping it here means a known item left on one altar can't block an
+                // unknown item waiting on another.
+                item *anItem = itemAtLoc((pos){ i, j });
+                if (anItem != NULL && !itemIdentityFullyKnown(anItem)) {
+                    theItem = anItem;
+                    altarLoc = (pos){ i, j };
+                }
+            }
+        }
+    }
+    if (theItem == NULL) {
+        return false; // no identifiable item on an active altar
+    }
+
+    char theName[COLS * 3], buf[COLS * 3];
+    identify(theItem);
+    tryIdentifyLastItemKinds(theItem->category);
+    itemName(theItem, theName, true, true, NULL);
+    sprintf(buf, "the altar's light washes over the item: it is %s.", theName);
+    messageWithColor(buf, &itemMessageColor, 0);
+
+    // Arm the altar: it now holds the revealed item and will seal shut (DIVINATION_ALTAR_CLOSED) when lifted.
+    pmap[altarLoc.x][altarLoc.y].layers[DUNGEON] = DIVINATION_ALTAR_ARMED;
+    refreshDungeonCell(altarLoc);
+
+    rogue.divinationAltarUses++;
+
+    // Totem escalation flavor (deterministic by use count) -- always fires; the tail reports the roll.
+    static const char *stir[4] = {
+        "The totem stirs faintly.",
+        "The totem groans; something within it shifts.",
+        "Cracks race across the totem's surface.",
+        "The totem shudders violently.",
+    };
+    const short useN = rogue.divinationAltarUses;
+    messageWithColor(stir[clamp(useN, 1, 4) - 1], &flavorTextColor, 0);
+
+    short chance;
+    switch (useN) {
+        case 1:  chance = 0; break;                        // the first pull is always safe
+        case 2:  chance = DIVINATION_AWAKEN_USE2; break;
+        case 3:  chance = DIVINATION_AWAKEN_USE3; break;
+        default: chance = DIVINATION_AWAKEN_USE4; break;   // use 4 and any beyond
+    }
+
+    if (!rogue.divinationAltarAwakened && chance > 0 && rand_percent(chance) && isPosInMap(totemLoc)) {
+        // The guardian awakens: spawn the tiered monster and shatter every UNUSED altar (the just-armed one
+        // and any previously-armed altar still holding an item are spared, so no revealed item is destroyed).
+        rogue.divinationAltarAwakened = true;
+        creature *guardian = spawnDivinationGuardian(totemLoc, useN);
+        for (short i = 0; i < DCOLS; i++) {
+            for (short j = 0; j < DROWS; j++) {
+                if (pmap[i][j].machineNumber == machineNumber
+                    && pmap[i][j].layers[DUNGEON] == DIVINATION_ALTAR) {
+                    pmap[i][j].layers[DUNGEON] = DIVINATION_ALTAR_CLOSED;
+                    refreshDungeonCell((pos){ i, j });
+                }
+            }
+        }
+        if (guardian != NULL) {
+            char mName[COLS * 3];
+            monsterName(mName, guardian, false);
+            sprintf(buf, "the totem splits open and %s heaves itself free, off balance! The other altars crack and go dark.", mName);
+        } else {
+            strcpy(buf, "the totem splits open and something heaves itself free! The other altars crack and go dark.");
+        }
+        messageWithColor(buf, &badMessageColor, REQUIRE_ACKNOWLEDGMENT);
+    } else if (useN > 1) {
+        messageWithColor("...but the totem falls silent.", &flavorTextColor, 0);
+    }
     return true;
 }
 

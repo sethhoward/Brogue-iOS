@@ -42,7 +42,7 @@
 // rejected with the "cannot be opened in version X" dialog instead of loading and going out-of-sync. (A
 // PATCH bump would NOT reject them -- patch bumps are reserved for replay-safe changes.)
 #define BROGUE_MAJOR 2
-#define BROGUE_MINOR 1
+#define BROGUE_MINOR 2
 #define BROGUE_PATCH 0
 
 // Expanding a macro as a string constant requires two levels of macros
@@ -1067,6 +1067,16 @@ enum tileType {
     // the end of the enum (not grouped with the other gases) so it doesn't shift any existing tileType
     // index; its gas-layer behavior comes from the DF that spawns it, not from enum adjacency.
     FROST_GAS,
+
+    // iOS port (Brogue SE): Altars of Divination (replaces the deprecated altars of insight). A cross of up
+    // to four one-use altars around a central totem. Place an unidentified item on an active altar to fully
+    // identify it; the altar then arms (holds the revealed item) and seals shut when you lift the item. Each
+    // identify escalates the totem and may awaken its guardian. See performDivination (Items.c),
+    // placeAltarCrossInRoom + the addMachines carry-forward (Architect.c), spawnDivinationGuardian (Monsters.c).
+    DIVINATION_ALTAR,          // active: place an unID'd item here to identify it
+    DIVINATION_ALTAR_ARMED,    // holds the revealed item; promotes to CLOSED when the item is lifted
+    DIVINATION_ALTAR_CLOSED,   // sealed/inert (a used altar's graceful close, or an unused one shattered on awaken)
+    DIVINATION_TOTEM,          // the central idol; its guardian bursts out beside it on an awaken
 
     NUMBER_TILETYPES,
 };
@@ -2263,6 +2273,10 @@ enum dungeonFeatureTypes {
     // companion DF -- tighter than open-field DF_DEAD_GRASS and, unlike it, chains no dead foliage.
     DF_TRAP_DRY_GRASS,
 
+    // iOS port (Brogue SE): an armed divination altar seals shut when its revealed item is lifted
+    // (promoteType fired by TM_PROMOTES_ON_ITEM_PICKUP -> lays DIVINATION_ALTAR_CLOSED).
+    DF_DIVINATION_ALTAR_CLOSE,
+
     NUMBER_DUNGEON_FEATURES,
 };
 
@@ -2477,6 +2491,7 @@ enum terrainMechanicalFlagCatalog {
     TM_SWAP_ENCHANTS_ACTIVATION     = Fl(25),       // in machine, swap item enchantments when two suitable items are on this terrain, and activate the machine when that happens
     TM_INSIGHT_ACTIVATION           = Fl(26),       // iOS port (iBrogue): in machine, when the insight + payment altars both hold items, reveal the insight item and consume the payment, then activate
     TM_TRANSFER_ENCHANT_ACTIVATION  = Fl(27),       // iOS port (iBrogue): in machine, when the donor + recipient altars both hold items, pour the donor's enchantment into the recipient, consume the donor, then activate
+    TM_DIVINATION_ACTIVATION        = Fl(28),       // iOS port (Brogue SE): an active divination altar -- when it holds an unidentified item, identify it, arm the altar, and roll the totem's awaken (see performDivination)
 
     TM_PROMOTES_ON_STEP             = (TM_PROMOTES_ON_CREATURE | TM_PROMOTES_ON_ITEM),
 };
@@ -3139,7 +3154,10 @@ typedef struct playerCharacter {
     item *lastItemThrown;
     item *lastStaffZapped;              // iOS port (Brogue SE): last staff zapped, for the re-apply (REAPPLY_KEY) command; staves only (never wands/charms). Set deterministically on a confirmed zap, so save replays stay in sync.
     short rewardRoomsGenerated;         // to meter the number of reward machines
-    short insightAltarsBuilt;           // iOS port (iBrogue): guaranteed altars-of-insight built so far this run; obligations carry forward to the next level if a level can't fit the room
+    short insightAltarsBuilt;           // iOS port (iBrogue): guaranteed altars-of-insight built so far this run (DEPRECATED -- insight no longer generates; kept for struct/replay stability)
+    boolean divinationAltarBuilt;       // iOS port (Brogue SE): the Altars of Divination room is built at most once per run (carry-forward from D9)
+    short divinationAltarUses;          // iOS port (Brogue SE): how many altars have been used (fully identified an item) in that room -- drives the 0/25/50/75 awaken curve and the totem-escalation flavor
+    boolean divinationAltarAwakened;    // iOS port (Brogue SE): the totem's guardian has awakened (one per room); remaining altars have shattered
     boolean goldGoblinSpawned;          // iOS port (iBrogue): the gold goblin appears at most once per run
     short machineNumber;                // so each machine on a level gets a unique number
     pos sidebarLocationList[ROWS*2];    // to keep track of which location each line of the sidebar references
@@ -3316,6 +3334,21 @@ typedef struct blueprint {
     machineFeature feature[20];         // the features themselves
 } blueprint;
 
+// iOS port (Brogue SE): Altars of Divination tuning. A guaranteed once-per-run reward room (carry-forward
+// from MIN_DEPTH, abandoned past MAX_DEPTH). Each altar fully identifies one item; the Nth identify rolls an
+// escalating chance to awaken the totem's single guardian (use 1 is always safe). If it awakens, a tiered
+// monster bursts out "off balance" (a high ticksUntilTurn -> the derived "(Off balance)" tell) and the
+// unused altars shatter. Later trigger = deadlier monster + longer flat-footed grace (the scariest is also
+// the most escapable). Awaken rolls use the substantive RNG -> deterministic/replay-safe. See performDivination.
+#define DIVINATION_ALTAR_MIN_DEPTH        5   // TEMP (testing): earliest depth the room tries to build -- RESTORE TO 9 before shipping
+#define DIVINATION_ALTAR_MAX_DEPTH        22  // give up carrying the obligation forward past here
+#define DIVINATION_AWAKEN_USE2            25  // % chance the 2nd identify awakens the totem (1st is always safe)
+#define DIVINATION_AWAKEN_USE3            50  // % on the 3rd identify
+#define DIVINATION_AWAKEN_USE4            75  // % on the 4th identify (cap -- never a certainty)
+#define DIVINATION_OFFBALANCE_TIER1       200 // ticksUntilTurn the use-2 guardian (Ogre) emerges with
+#define DIVINATION_OFFBALANCE_TIER2       300 // use-3 guardian (Troll)
+#define DIVINATION_OFFBALANCE_TIER3       400 // use-4 guardian (Underworm) -- slow + long grace = fleeable
+
 enum machineTypes {
     // Reward rooms:
     MT_REWARD_MULTI_LIBRARY = 1,
@@ -3405,8 +3438,13 @@ enum machineTypes {
     // insight altar in the blueprintCatalog; enters the random reward raffle via BP_REWARD.
     MT_TRANSFER_ALTAR,
 
-    // iOS port (iBrogue): the altars of insight fill this reward slot (force-built at fixed depths in
-    // addMachines).
+    // iOS port (Brogue SE): the Altars of Divination -- force-built once per run (carry-forward from D9 in
+    // addMachines). A genuine new machine index appended after the transfer altar in the blueprintCatalog.
+    MT_DIVINATION_ALTARS,
+
+    // iOS port (iBrogue): the altars of insight fill this reward slot. DEPRECATED (Brogue SE): no longer
+    // generated -- the addMachines carry-forward that built it was retargeted to MT_DIVINATION_ALTARS. The
+    // blueprint/terrain/trigger remain in the tree, unreferenced by generation.
     MT_INSIGHT_ALTAR = MT_REWARD_HEAVY_OR_RUNIC_WEAPON
 };
 
@@ -3918,6 +3956,7 @@ extern "C" {
     void resolvePronounEscapes(char *text, creature *monst);
     short pickHordeType(short depth, enum monsterTypes summonerType, unsigned long forbiddenFlags, unsigned long requiredFlags);
     creature *cloneMonster(creature *monst, boolean announce, boolean placeClone);
+    creature *spawnDivinationGuardian(pos totemLoc, short useNumber); // iOS port (Brogue SE): Altars of Divination
     void empowerMonster(creature *monst);
     unsigned long forbiddenFlagsForMonster(creatureType *monsterType);
     unsigned long avoidedFlagsForMonster(creatureType *monsterType);

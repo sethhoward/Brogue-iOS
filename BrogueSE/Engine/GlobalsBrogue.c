@@ -651,6 +651,16 @@ const blueprint blueprintCatalog_Brogue[] = {
         {0,         CARPET,     DUNGEON,        {0,0},      0,          0,          -1,         0,              0,              0,          0,          (MF_EVERYWHERE)},
         {0,         STATUE_INERT,DUNGEON,       {1,3},      0,          0,          -1,         0,              2,              0,          0,          (MF_TREAT_AS_BLOCKING | MF_BUILD_IN_WALLS | MF_IMPREGNABLE)},
         {0,         0,          0,              {1,1},      1,          0,          0,          0,              2,              0,          0,          (MF_BUILD_AT_ORIGIN | MF_PERMIT_BLOCKING | MF_BUILD_VESTIBULE)}}},
+    // iOS port (Brogue SE): Altars of Divination (MT_DIVINATION_ALTARS) -- guaranteed once per run, force-built
+    // with carry-forward from D9 in addMachines (freq 0, no BP_REWARD, so it never enters the reward raffle).
+    // Like the other altar rooms the blueprint builds ONLY the carpeted room; placeAltarCrossInRoom then lays a
+    // central totem with up to four one-use altars one tile out in each cardinal direction. BP_IMPREGNABLE so the
+    // awakened guardian can't tunnel out (and nothing tunnels in). roomSize {10,30} to fit the cross comfortably.
+    {"Altars of divination -- reveal an item's nature, but each use may rouse the totem's guardian",
+    {DIVINATION_ALTAR_MIN_DEPTH, AMULET_LEVEL},{10, 30},   0,      3,          0,                  (BP_ROOM | BP_PURGE_INTERIOR | BP_SURROUND_WITH_WALLS | BP_OPEN_INTERIOR | BP_IMPREGNABLE), {
+        {0,         CARPET,     DUNGEON,        {0,0},      0,          0,          -1,         0,              0,              0,          0,          (MF_EVERYWHERE)},
+        {0,         STATUE_INERT,DUNGEON,       {1,3},      0,          0,          -1,         0,              2,              0,          0,          (MF_TREAT_AS_BLOCKING | MF_BUILD_IN_WALLS | MF_IMPREGNABLE)},
+        {0,         0,          0,              {1,1},      1,          0,          0,          0,              2,              0,          0,          (MF_BUILD_AT_ORIGIN | MF_PERMIT_BLOCKING | MF_BUILD_VESTIBULE)}}},
 };
 
 // To meter item generation (on level generation):

@@ -818,6 +818,33 @@ creature *cloneMonster(creature *monst, boolean announce, boolean placeClone) {
     return newMonst;
 }
 
+// iOS port (Brogue SE): the Altars of Divination guardian. When a divination altar's identify rolls an
+// awaken (see performDivination in Items.c), the totem looses a SINGLE tiered monster whose strength scales
+// with WHICH use triggered it (later grab = angrier totem = deadlier beast): use 2 -> Ogre, use 3 -> Troll,
+// use 4 (and any beyond) -> Underworm. It emerges beside the totem "off balance" -- a large ticksUntilTurn
+// delays its first action (and shows the derived "(Off balance)" tell), so the player gets a beat to flee or
+// set up; the deadlier the tier, the longer the grace (the Underworm is slow too, so the scariest is the most
+// escapable). Deterministic: monster kind + grace are pure functions of useNumber; generation and placement
+// use the substantive RNG, so a shared seed reproduces the same guardian at the same cell.
+creature *spawnDivinationGuardian(pos totemLoc, short useNumber) {
+    short monsterID, grace;
+    switch (useNumber) {
+        case 2:  monsterID = MK_OGRE;      grace = DIVINATION_OFFBALANCE_TIER1; break;
+        case 3:  monsterID = MK_TROLL;     grace = DIVINATION_OFFBALANCE_TIER2; break;
+        default: monsterID = MK_UNDERWORM; grace = DIVINATION_OFFBALANCE_TIER3; break; // use 4+
+    }
+    creature *monst = generateMonster(monsterID, false, false); // no mutation -- a curated, predictable threat
+    monst->loc = getQualifyingPathLocNear(totemLoc, true,
+                     T_DIVIDES_LEVEL & avoidedFlagsForMonster(&(monst->info)), HAS_PLAYER,
+                     avoidedFlagsForMonster(&(monst->info)), (HAS_PLAYER | HAS_MONSTER | HAS_STAIRS), false);
+    pmapAt(monst->loc)->flags |= HAS_MONSTER;
+    monst->creatureState = MONSTER_TRACKING_SCENT; // it knows you're there -- but staggers before it can strike
+    monst->ticksUntilTurn = grace;                 // "off balance": delayed first action + the derived tell
+    fadeInMonster(monst);
+    refreshDungeonCell(monst->loc);
+    return monst;
+}
+
 unsigned long forbiddenFlagsForMonster(creatureType *monsterType) {
     unsigned long flags;
 
