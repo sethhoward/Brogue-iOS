@@ -225,7 +225,9 @@
 #define NOISE_NEARFIELD_RADIUS          2 //1 - original value // ### <=this cost-distance = "right on top of you, unseen" (corner/
                                             // foliage/dark/blind): flat boost. Kept at 1 so an open-stone
                                             // approach's last tile doesn't auto-ping (stone stays stealthy).
-#define NOISE_NEARFIELD_BONUS           10  // the near-field detection boost
+#define NOISE_NEARFIELD_BONUS           20  // the near-field detection boost (additive %, applies to BOTH ringless
+                                            // and ring-of-awareness listeners, so a bump lifts close-range hearing
+                                            // equally for both -- raised 10->20 to turn up what's heard right on top of you)
 #define NOISE_FALLOFF_PER_TILE          2   // detection lost per effective tile beyond the near field (gentle
                                             // -> flat, directional pings inside the ear; the gate sets range)
 #define NOISE_DOOR_COST                 3   // extra sound-map cost to pass a closed door / foliage / smoke
@@ -252,6 +254,13 @@
 #define NOISE_IMPACT_SCALE              4   // effective loudness per +1 tile of radius
 #define NOISE_IMPACT_MIN_RADIUS         1
 #define NOISE_IMPACT_MAX_RADIUS         10  // kept under full earshot (stealthRange*2): draws a room, not the floor
+// iOS port (Brogue SE): a multi-cell wired machine (a cage-room's altars, a portcullis vault) promotes many
+// cells in one turn, each firing an impact noise + a GENERIC_FLASH_LIGHT flare. The per-cell ripples fight
+// over the latest-wins singleton (so a random one survives), so we COALESCE them into ONE ripple at the
+// activation origin (the altar you took from / the cell that powered the machine). See activateMachine. The
+// flare wash is handled by making impact ripples brighter + longer-lived (NOISE_IMPACT_RIPPLE_STRENGTH +
+// CE_RIPPLE_IMPACT_EXPAND_FRAMES), NOT a start-delay -- the animator only ticks while input-idle, so a step
+// followed by another step starves a delayed ripple before it ever appears. Cosmetic (no RNG, nothing saved).
 // Item impact loudness (mass of the thrown thing)
 #define NOISE_IMPACT_PAPER              0   // scroll -- a fluttering sheet of parchment, the quietest throw
 #define NOISE_IMPACT_LIGHT              4   // dart, incendiary dart, food
@@ -285,6 +294,8 @@
 #define NOISE_RIPPLE_RADIUS             3   // tiles a monster "heard something" box radiates out
 #define NOISE_AGGRAVATE_RIPPLE_RADIUS   16  // tiles the level-wide aggravate (alarm trap / aggravate scroll) box radiates -- much larger than any other ripple, so it reads as the loudest event on screen
 #define NOISE_RIPPLE_MAX_STRENGTH       60  // hilite strength of the innermost ring (fades outward)
+#define NOISE_IMPACT_RIPPLE_STRENGTH    82  // iOS port (Brogue SE): impact ripples (trap/altar/machine) hit harder than the default so the amber reads THROUGH a simultaneous tile flare -- the cosmetic animator only ticks while input-idle, so an impact ripple often gets only a few frames before the next step; it has to land bright and fast. Per-kind (see IO.c render) so it doesn't touch the dimmed player ripple.
+#define NOISE_PACK_ROUSE_EARSHOT        16  // iOS port (Brogue SE): when a creature rouses its packmates (wakeUp), the player gets a "you hear a rallying cry" tell if the crier is within this sound cost-distance (soundDistanceAt) but out of sight -- a loud howl carries ~2x a footstep's earshot. Visible criers get a named message instead; farther than this, silent.
 // Ripple TIMING + interruption now live in the cosmetic animation layer (IO.c: CE_RIPPLE_*, advanced on the
 // platform idle tick, uninterruptible). The old blocking-pause pre-roll / held-key suppression -- and the
 // platform key-repeat-timing contract it required -- are gone. See docs/guides/cosmetic-animation-layer.md.
@@ -361,6 +372,9 @@
 // tick that drives water/hallucination (shuffleTerrainColors(_, true) from the platform bridge while
 // colorsDance is on). This is the half-cycle in idle frames: glyph for N frames, '?' for N frames.
 #define NOISE_INVESTIGATE_BLINK_FRAMES  30  // ~0.5s per half at 60Hz (a slow, readable blink)
+#define NOISE_HASTE_TRAIL_FRAMES        16  // iOS port (Brogue SE): lifetime (frames) of a hasted creature's fading "blink dash" contrail
+#define NOISE_HASTE_TRAIL_STRENGTH      70  // iOS port (Brogue SE): peak brightness (0-100) of the contrail, just behind the creature
+#define NOISE_HASTE_TRAIL_MAX_DIST      8   // iOS port (Brogue SE): skip the trail past this Chebyshev jump (not an ordinary walk -- avoids a map-spanning streak)
 // When a VISIBLE monster locks onto you (hears you loud / spots you), a reddish '!' rides its glyph -- the
 // alert counterpart to the investigate '?'. Unlike the '?' (which lives as long as MB_INVESTIGATING), the
 // '!' is bounded: it follows the monster for this many player-turns, then fades. Adjustable; baseline 2.
@@ -511,6 +525,16 @@ typedef struct windowpos {
 
 #define VISIBILITY_THRESHOLD    50          // how bright cumulative light has to be before the cell is marked visible
 
+// iOS port (Brogue SE): smoke. A non-flammable gas emitted by burning terrain (PLAIN_FIRE) that
+// obscures vision. One threshold defines smoke's whole identity: below SMOKE_THICK_VOLUME it only
+// dims (via SMOKE_LIGHT's gentle negative light) and dissipates fast; at/above it smoke also blocks
+// line of sight (gated in the FOV scan + monster LOS) and dissipates slowly, so a real blaze walls
+// off an area for a handful of turns. Sight-only: smoke does NOT carry T_OBSTRUCTS_VISION, so it
+// never stops projectiles and never muffles sound (a screen breaks sight, not pursuit). See
+// IOS_MODIFICATIONS.md. These are playtest tuning dials -- adjust freely.
+#define SMOKE_THICK_VOLUME      15          // gas volume at/above which smoke blocks line of sight and lingers
+#define SMOKE_EMISSION_CHANCE   45          // % chance per turn a burning PLAIN_FIRE tile puffs smoke (substantive RNG)
+
 #define MACHINES_BUFFER_LENGTH  200
 
 #define INPUT_RECORD_BUFFER     1000        // the threshold size before flushing the record buffer to disk
@@ -526,8 +550,6 @@ typedef struct windowpos {
 // variants supported in this code base
 enum gameVariant {
     VARIANT_BROGUE,
-    VARIANT_RAPID_BROGUE,
-    VARIANT_BULLET_BROGUE,
     NUMBER_VARIANTS
 };
 
@@ -664,7 +686,11 @@ enum displayGlyph {
     G_PIPES,
     G_SAC_ALTAR,
     G_ORB_ALTAR,
-    G_LEFT_TRIANGLE
+    G_LEFT_TRIANGLE,
+    G_STUN_STAR, // iOS port (Brogue SE): a true star glyph for the paralyzed/stunned status-blink overlay (was an ASCII '*', which collided with the gold-pile glyph). Cosmetic-only and appended at the enum tail, so it is never recorded and stays save-safe.
+    G_INVERTED_QUESTION, // iOS port (Brogue SE): an inverted '¿' for the confused status-blink overlay, so its shape (not just its purple tint) differs from the white noise-system investigate '?'. Cosmetic-only, appended at the enum tail -> save-safe.
+    G_HEART, // iOS port (Brogue SE): a '♥' for the healing status-blink overlay (creature being healed, or standing in bloodwort spores). Cosmetic-only, appended at the enum tail -> save-safe. Like G_STUN_STAR, not in Monaco -> rendered via ArialUnicodeMS.
+    G_SHIELD_CREST // iOS port (Brogue SE): a '◈' crest for the protected (STATUS_SHIELDED) status-blink overlay. Cosmetic-only, appended at the enum tail -> save-safe. Not in Monaco -> rendered via ArialUnicodeMS.
 };
 
 enum graphicsModes {
@@ -947,6 +973,7 @@ enum tileType {
     STEAM,
     DARKNESS_CLOUD,
     HEALING_CLOUD,
+    SMOKE_GAS,                  // iOS port (Brogue SE): smoke emitted by burning terrain; obscures vision
 
     BLOODFLOWER_STALK,
     BLOODFLOWER_POD,
@@ -1086,6 +1113,7 @@ enum lightType {
     SACRED_GLYPH_LIGHT,
     DESCENT_LIGHT,
     DEMONIC_STATUE_LIGHT,
+    SMOKE_LIGHT,                // iOS port (Brogue SE): gentle negative light that dims smoked cells
     NUMBER_LIGHT_KINDS
 };
 
@@ -1168,6 +1196,7 @@ enum potionKind {
     POTION_STEAM,           // capture: steam. Thrown/uncorked: scalding steam cloud
     POTION_ICE,             // capture: ice. Thrown: freezes the struck creature (mirrors the frost staff)
     POTION_WATER,           // capture: deep/shallow water. Thrown/uncorked: a large flood puddle
+    POTION_SMOKE,           // capture: smoke. Thrown/uncorked: a vision-obscuring smoke screen (sight only)
 };
 
 enum weaponKind {
@@ -1506,8 +1535,13 @@ enum tileFlags {
 
 // iOS port (Brogue SE): Lone Wolf solo-progression tuning (see playerCharacter.loneWolfXP).
 #define LONE_WOLF_MIN_DEPTH                 6    // accrue solo XPXP only at this depth or deeper
-#define LONE_WOLF_XP_PER_TIER               1500 // solo XPXP per tier (~2 levels of solo exploration each); tier N reached at N * this
 #define LONE_WOLF_MAX_TIER                  5    // tier cap -- grants +1 effective strength per tier, so +5 at the cap
+// Cumulative solo XPXP required for tiers 0..LONE_WOLF_MAX_TIER. Front-loaded (cheap tier I, pricier tier V)
+// so a full-clear run paces ~one tier every 3-4 levels across the whole descent -- calibrated against real
+// exploration data (Documents/se/exploration-stats.csv) to land I~D6, II~D9, III~D12-13, IV~D16, V~D20.
+// Replaced the old flat LONE_WOLF_XP_PER_TIER (1500) divisor, which maxed a full-clear run at ~D15. Must be
+// monotonically increasing; index 0 is the tier-0 floor. Consumed by handleLoneWolf (Time.c).
+#define LONE_WOLF_TIER_THRESHOLDS           { 0, 800, 3000, 5600, 8400, 11700 }
                                                  // (compensation for solo play, which is much harder than running with allies)
 
 #define ROOM_MIN_WIDTH                      4
@@ -1633,6 +1667,7 @@ unsigned long terrainFlags(pos loc);
 unsigned long terrainMechFlags(pos loc);
 
 boolean cellHasTerrainFlag(pos loc, unsigned long flagMask);
+boolean cellHasThickSmoke(pos loc); // iOS port (Brogue SE): thick smoke blocks line of sight (sight only)
 boolean cellHasTMFlag(pos loc, unsigned long flagMask);
 
 boolean cellHasTerrainType(pos loc, enum tileType terrain);
@@ -1761,7 +1796,7 @@ enum itemFlags {
     ITEM_EQUIPPED           = Fl(1),
     ITEM_CURSED             = Fl(2),
     ITEM_PROTECTED          = Fl(3),
-    // unused               = Fl(4),
+    ITEM_SLOW_RECOVERY      = Fl(4),    // war pike: long/heavy, takes an extra turn to recover (no knockback)
     ITEM_RUNIC              = Fl(5),
     ITEM_RUNIC_HINTED       = Fl(6),
     ITEM_RUNIC_IDENTIFIED   = Fl(7),
@@ -1917,6 +1952,7 @@ enum dungeonFeatureTypes {
     DF_ROT_GAS_PUFF,
     DF_STEAM_PUFF,
     DF_STEAM_ACCUMULATION,
+    DF_SMOKE_ACCUMULATION,      // iOS port (Brogue SE): per-turn smoke puff from a burning PLAIN_FIRE tile
     DF_METHANE_GAS_PUFF,
     DF_SALAMANDER_FLAME,
     DF_URINE,
@@ -2035,6 +2071,7 @@ enum dungeonFeatureTypes {
     DF_CONFUSION_GAS_CLOUD_POTION,
     DF_INCINERATION_POTION,
     DF_DARKNESS_POTION,
+    DF_SMOKE_POTION,            // iOS port (Brogue SE): thrown/uncorked captured-smoke screen
     DF_HOLE_POTION,
     DF_LICHEN_PLANTED,
 
@@ -2196,6 +2233,15 @@ enum dungeonFeatureTypes {
     // iOS port (iBrogue): empty-bottle v2 potion of ice -- the freezing cloud (spawns FROST_GAS)
     DF_FREEZING_CLOUD_POTION,
 
+    // iOS port (Brogue SE): a jackal pack's den -- a core of dense foliage (the vision-blocking cover
+    // that makes the den an ambush/stealth zone) chained to a softer grass apron at its edge.
+    DF_JACKAL_DEN_FOLIAGE,
+    DF_JACKAL_DEN_GRASS,
+
+    // iOS port (Brogue SE): a contained patch of dry (flammable) grass laid near a fire trap as a
+    // companion DF -- tighter than open-field DF_DEAD_GRASS and, unlike it, chains no dead foliage.
+    DF_TRAP_DRY_GRASS,
+
     NUMBER_DUNGEON_FEATURES,
 };
 
@@ -2292,6 +2338,10 @@ typedef struct bolt {
     short targetDF;
     unsigned long forbiddenMonsterFlags;
     unsigned long flags;
+    // iOS port (Brogue SE): staff "glow-up". The effective net-enchant LEVEL of the staff that fired this
+    // bolt, when >= 5 (else 0). Gates + ramps the high-enchant upgrades (lightning: brief stun + chain;
+    // firebolt: incineration bloom). Set at zap time; catalog entries default it to 0.
+    short empowerment;
 } bolt;
 
 // Level profiles, affecting what rooms get chosen and how they're connected:
@@ -2441,6 +2491,7 @@ enum statusEffects {
     STATUS_REGENERATING, // iOS port (iBrogue): honey potion's heal-over-time
     STATUS_EMBOLDENED, // iOS port (iBrogue): ally standing in the light of a worn ring of light
     STATUS_FROZEN, // iOS port (iBrogue): staff of frost — encased in ice (acts like paralysis); thaws into STATUS_SLOWED
+    STATUS_FIERY_DOUSED, // iOS port (Brogue SE): staff of frost SUPPRESSED a fiery creature's aura; its fire rekindles when this lapses
     NUMBER_OF_STATUS_EFFECTS,
 };
 
@@ -2594,9 +2645,13 @@ enum monsterBookkeepingFlags {
     MB_DOES_NOT_RESURRECT       = Fl(26),   // resurrection altars don't revive monsters summoned by allies
     MB_INVESTIGATING            = Fl(27),   // iOS port (Brogue SE): noise system -- heading to a heard-noise
                                             // cell (monst->investigateLoc) to look, NOT hunting; see noise-system.md
-    MB_RETURNING_HOME           = Fl(28)    // iOS port (Brogue SE): noise system -- a sleeper roused by noise that
+    MB_RETURNING_HOME           = Fl(28),   // iOS port (Brogue SE): noise system -- a sleeper roused by noise that
                                             // investigated and found nothing is trudging back to its bed
                                             // (monst->slumberLoc) to doze off again; see PERCEPTION_AUDIT.md
+    MB_HEARD_DURING_AUTOMATION  = Fl(29)    // iOS port (Brogue SE): noise system -- this monster's '!'/'?' wake tell
+                                            // was suppressed because it fired mid-travel/auto-explore (the cosmetic
+                                            // animator is dormant during automation); re-emitted once at the
+                                            // automation-end seam by flushAutomationHeardTells(). See PERCEPTION_AUDIT.md
 };
 
 // Defines all creatures, which include monsters and the player:
@@ -2772,6 +2827,11 @@ typedef struct hordeType {
     short machine;
 
     enum hordeFlags flags;
+
+    // iOS port (Brogue SE): a horde may dress its spawn site with a dungeon feature at level
+    // generation -- a "lair." Set per catalog row; 0 = none. The jackal pack uses it for a den of
+    // dense foliage. Reusable: any future lair monster is a catalog value, not new code.
+    enum dungeonFeatureTypes spawnDF;
 } hordeType;
 
 typedef struct monsterClass {
@@ -2862,7 +2922,6 @@ enum NGCommands {
     NG_FLYOUT_PLAY,
     NG_FLYOUT_VIEW,
     NG_FLYOUT_OPTIONS,
-    NG_GAME_VARIANT,
     NG_GAME_MODE,
     NG_NEW_GAME,
     NG_NEW_GAME_WITH_SEED,
@@ -3029,8 +3088,8 @@ typedef struct playerCharacter {
     short xpxpThisTurn;                 // how many squares the player explored this turn
     // iOS port (Brogue SE): "Lone Wolf" -- a solo-play fallback progression driven by the player's own
     // exploration XPXP. Accrues only while the player has zero living allies anywhere and is at depth >= 6.
-    // Each tier (every LONE_WOLF_XP_PER_TIER, up to LONE_WOLF_MAX_TIER = 5) grants +1 effective strength (a
-    // removable aura, so +5 at the cap) and, on runs where the player has NEVER had an ally, a one-shot
+    // Each tier (thresholds in LONE_WOLF_TIER_THRESHOLDS, up to LONE_WOLF_MAX_TIER = 5) grants +1 effective
+    // strength (a removable aura, so +5 at the cap) and, on runs where the player has NEVER had an ally, a one-shot
     // polarity reveal (compensating for the per-rescue tells in captiveReactToPack that a pure-solo player
     // forgoes). Gaining any ally zeroes the ENTIRE track and strips the strength aura (re-grindable from zero
     // once that ally dies); hasEverHadAlly latches for the run (kills polarity).
@@ -3318,15 +3377,12 @@ enum machineTypes {
     // Variant-specific machines
     MT_REWARD_HEAVY_OR_RUNIC_WEAPON,
 
-    // iOS port (iBrogue): the altars of transference (Brogue only). A genuine new machine index that
-    // exists only in Brogue's blueprintCatalog (appended after the insight altar); the Bullet/Rapid
-    // catalogs stop at MT_REWARD_HEAVY_OR_RUNIC_WEAPON, so their reward raffle never reaches this index
-    // and it is never force-built outside Brogue. Enters Brogue's random reward raffle via BP_REWARD.
+    // iOS port (iBrogue): the altars of transference. A genuine new machine index appended after the
+    // insight altar in the blueprintCatalog; enters the random reward raffle via BP_REWARD.
     MT_TRANSFER_ALTAR,
 
-    // iOS port (iBrogue): Brogue fills this variant-specific reward slot with the altars of insight
-    // (force-built at fixed depths in addMachines; never collides with the Bullet weapon vault, which
-    // occupies the same index only in BulletBrogue's catalog).
+    // iOS port (iBrogue): the altars of insight fill this reward slot (force-built at fixed depths in
+    // addMachines).
     MT_INSIGHT_ALTAR = MT_REWARD_HEAVY_OR_RUNIC_WEAPON
 };
 
@@ -3348,6 +3404,12 @@ typedef struct autoGenerator {
     short minNumberIntercept; // actually intercept * 100
     short minNumberSlope; // actually slope * 100
     short maxNumber;
+
+    // iOS port (Brogue SE): optional thematic "companion" terrain laid NEAR (not on) the spawn site --
+    // e.g. a fire trap ringed with dry grass, a caustic trap amid bones. companionChance% of the time, a
+    // patch of companionDF spreads from a cell offset off the foundation. 0 = none (every other row).
+    enum dungeonFeatureTypes companionDF;
+    short companionChance;
 } autoGenerator;
 
 #define FEAT_NAME_LENGTH 15
@@ -3659,12 +3721,18 @@ extern "C" {
     void cosmeticTickAlertBlinks(void);         // iOS port (Brogue SE): cosmetic layer -- per-turn '!' follow + countdown/expire
     void cosmeticSpawnRippleMonster(pos loc);   // iOS port (Brogue SE): cosmetic layer -- monster "heard something" ripple
     void cosmeticSpawnRipplePlayer(short radius);// iOS port (Brogue SE): cosmetic layer -- player's sound-footprint ripple
-    void cosmeticSpawnRippleImpact(pos source, short radius); // iOS port (Brogue SE): cosmetic layer -- environmental-sound impact ripple
+    void cosmeticSpawnRippleImpact(pos source, short radius); // iOS port (Brogue SE): cosmetic layer -- environmental-sound impact ripple (brighter + longer-lived so it reads through a tile flare)
+    void beginCoalescedImpactRipples(void); // iOS port (Brogue SE): suppress per-cell impact ripples during a multi-cell machine activation
+    void endCoalescedImpactRipples(pos origin); // iOS port (Brogue SE): emit ONE coalesced, flare-delayed impact ripple if any were suppressed
     void cosmeticSpawnRippleAggravate(pos source, short radius); // iOS port (Brogue SE): cosmetic layer -- level-wide aggravate ripple (alarm trap / aggravate scroll)
     void cosmeticRefreshInvestigateBlinks(void); // iOS port (Brogue SE): cosmetic layer -- per-turn '?' blink rebuild
+    void cosmeticRefreshStatusBlinks(void); // iOS port (Brogue SE): cosmetic layer -- per-turn confused/burning/stun/healing blink rebuild
+    void cosmeticMarkHealed(const creature *monst); // iOS port (Brogue SE): cosmetic layer -- flag a creature as just-healed so the '♥' tell blinks for a couple turns
     void advanceCosmeticAnimations(void);   // iOS port (Brogue SE): cosmetic layer -- one tick (from the platform idle loop)
     void clearCosmeticAnimations(void);     // iOS port (Brogue SE): cosmetic layer -- drop all (level/playback reset)
     void recordPlayerNoiseRippleIfNeeded(void); // iOS port (Brogue SE): spawn the player ripple iff a visible unaware enemy is near earshot
+    void flushAutomationHeardTells(void); // iOS port (Brogue SE): re-emit '!'/'?' wake tells captured (MB_HEARD_DURING_AUTOMATION) during travel/auto-explore
+    void cosmeticClearPlayerRipple(void); // iOS port (Brogue SE): retire a stale single-turn player-footprint ripple so it can't replay late
     void printString(const char *theString, short x, short y, const color *foreColor, const color* backColor, screenDisplayBuffer *dbuf);
     short wrapText(char *to, const char *sourceText, short width);
     short printStringWithWrapping(const char *theString, short x, short y, short width, const color *foreColor,
@@ -3889,9 +3957,14 @@ extern "C" {
     short hitProbability(creature *attacker, creature *defender);
     boolean attackHit(creature *attacker, creature *defender);
     void pushFrozenCreature(creature *defender, short dx, short dy); // iOS port (iBrogue): staff of frost — bump-to-push
+    boolean knockCreatureFromExplosion(creature *monst, short cx, short cy); // iOS port (Brogue SE): explosion knockback
     void applyArmorRunicEffect(char returnString[DCOLS], creature *attacker, short *damage, boolean melee);
     void processStaggerHit(creature *attacker, creature *defender);
     boolean attack(creature *attacker, creature *defender, boolean lungeAttack);
+    // Per-hit damage scale for the player's weapon, in percent (100 = normal). Set transiently around
+    // specific hits and reset to 100: the flail pass-attack balance nerf (Movement.c) and, in the sim
+    // build, the pike penetrate/reach modeling (sim.c). Read in attack()'s damage roll (Combat.c).
+    extern short gWeaponDamageScalePct;
     void inflictLethalDamage(creature *attacker, creature *defender);
     boolean inflictDamage(creature *attacker, creature *defender,
                           short damage, const color *flashColor, boolean ignoresProtectionShield);
@@ -4055,7 +4128,7 @@ extern "C" {
     int itemMagicPolarity(item *theItem);
     void gainPolarityInsightFromRest(void);
     void gainScrollInsightFromEating(void);
-    void senseFloorPolarityFromAwareness(void); // iOS port (Brogue SE): ring of awareness senses floor item polarity on first arrival
+    void senseFloorPolarityFromClairvoyance(void); // iOS port (Brogue SE): ring of clairvoyance senses floor item polarity on first arrival
     item *itemAtLoc(pos loc);
     item *dropItem(item *theItem);
     itemTable *tableForItemCategory(enum itemCategory theCat);
@@ -4089,7 +4162,7 @@ extern "C" {
     boolean revealPolarityOnFieryDestruction(item *theItem); // iOS port (iBrogue): scroll fire-erasure polarity tell
     void captiveReactToPack(creature *freed); // iOS port (iBrogue): freed captive senses a pack item's polarity
     void loneWolfRevealPolarity(void); // iOS port (Brogue SE): Lone Wolf tier-up polarity tell (pure-solo runs only)
-    void activateMachine(short machineNumber);
+    void activateMachine(short machineNumber, pos activationOrigin); // iOS port (Brogue SE): activationOrigin anchors the coalesced impact ripple (the cell that powered the machine)
     boolean circuitBreakersPreventActivation(short machineNumber);
     void promoteTile(short x, short y, enum dungeonLayers layer, boolean useFireDF);
     void autoPlayLevel(boolean fastForward);
@@ -4136,6 +4209,10 @@ extern "C" {
     short staffEntrancementDuration(fixpt enchant);
     short staffFreezeDuration(fixpt enchant); // iOS port (iBrogue): staff of frost — hard-freeze turns
     short staffFreezeSlowDuration(fixpt enchant); // iOS port (iBrogue): staff of frost — slow tail on thaw
+    short staffLightningStunDuration(short level); // iOS port (Brogue SE): glow-up — brief stun turns
+    short staffLightningChainCount(short level); // iOS port (Brogue SE): glow-up — chain jumps
+    short staffLightningChainRange(short level); // iOS port (Brogue SE): glow-up — chain arc range
+    short staffFireboltBloomDecrement(short level); // iOS port (Brogue SE): glow-up — bloom spread decrement
     fixpt ringWisdomMultiplier(fixpt enchant);
     short charmHealing(fixpt enchant);
     int charmProtection(fixpt enchant);

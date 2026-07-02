@@ -685,6 +685,7 @@ boolean handleWhipAttacks(creature *attacker, enum directions dir, boolean *abor
     defender = monsterAtLoc(strikeLoc);
     if (defender
         && (attacker != &player || canSeeMonster(defender))
+        && !defender->status[STATUS_FROZEN] // iOS port (Brogue SE): staff of frost -- a frozen creature is a block to be pushed, not a target to be damaged; fall through so the push guard in playerMoves handles it.
         && !monsterIsHidden(defender, attacker)
         && monsterWillAttackTarget(attacker, defender)) {
 
@@ -750,6 +751,7 @@ boolean handleSpearAttacks(creature *attacker, enum directions dir, boolean *abo
         trigger the attack. */
         defender = monsterAtLoc(targetLoc);
         if (defender
+            && !defender->status[STATUS_FROZEN] // iOS port (Brogue SE): staff of frost -- a frozen creature can't be speared for damage; skip it so the bumped block is pushed (playerMoves) rather than dispatched.
             && (!cellHasTerrainFlag(targetLoc, T_OBSTRUCTS_PASSABILITY)
                 || (defender->info.flags & MONST_ATTACKABLE_THRU_WALLS))
             && monsterWillAttackTarget(attacker, defender)) {
@@ -830,6 +832,7 @@ static void buildFlailHitList(const short x, const short y, const short newX, co
             && canSeeMonster(monst)
             && monstersAreEnemies(&player, monst)
             && monst->creatureState != MONSTER_ALLY
+            && !monst->status[STATUS_FROZEN] // iOS port (Brogue SE): staff of frost -- a flail pass-attack skips a frozen creature; it takes no damage (frozen creatures are pushed, not struck).
             && !(monst->bookkeepingFlags & MB_IS_DYING)
             && (!cellHasTerrainFlag(monst->loc, T_OBSTRUCTS_PASSABILITY) || (monst->info.flags & MONST_ATTACKABLE_THRU_WALLS))) {
 
@@ -1263,6 +1266,11 @@ boolean playerMoves(short direction) {
             moveEntrancedMonsters(direction);
 
             // Perform a lunge or flail attack if appropriate.
+            // Balance pass: flail pass-attacks deal 50% damage (its multi-hit while moving is its power).
+            // Scoped to this loop only -- the rapier lunge that shares it is left at full damage.
+            if (rogue.weapon && (rogue.weapon->flags & ITEM_PASS_ATTACKS)) {
+                gWeaponDamageScalePct = 50;
+            }
             for (i=0; i<16; i++) {
                 if (hitList[i]) {
                     if (attack(&player, hitList[i], (rogue.weapon && (rogue.weapon->flags & ITEM_LUNGE_ATTACKS)))) {
@@ -1270,6 +1278,7 @@ boolean playerMoves(short direction) {
                     }
                 }
             }
+            gWeaponDamageScalePct = 100;
             if (hitList[0]) {
                 playerRecoversFromAttacking(anyAttackHit);
             }
@@ -1612,6 +1621,34 @@ static void displayRoute(short **distanceMap, boolean removeRoute) {
     } while (advanced);
 }
 
+#if NOISE_SYSTEM_ENABLED
+// iOS port (Brogue SE): noise system -- multi-step travel runs with rogue.automationActive set, and
+// the cosmetic animator (advanceCosmeticAnimations) only ticks in the input-idle loop, so the whole
+// cosmetic layer is dormant for the duration of a travel. We re-emit the noise tells once here, at
+// the travel-end seam -- the first moment control returns toward that idle loop and the animator wakes:
+//   (1) Player sound-footprint ripple: recompute this turn's step loudness for the final cell and fire
+//       it once. recordPlayerNoiseRippleIfNeeded() still self-gates on a visible, still-unaware enemy
+//       within earshot, so it only shows when meaningful.
+//   (2) '?' investigate blinks: rebuild from the CURRENT set of visible MB_INVESTIGATING monsters, so a
+//       creature still searching for you shows its '?' the instant travel stops instead of one action
+//       later. State-driven (reads MB_INVESTIGATING), so this is a faithful snapshot, not a replay.
+// Cosmetic only -- nothing is recorded and no RNG is drawn; monster awareness already consumed every
+// step's noise. (The event-edge '!' / off-screen '?' tells, which fire mid-travel while the animator is
+// asleep, are restored separately via a capture flag -- they can't be reconstructed from current state.)
+static void showTravelEndNoiseFeedback(void) {
+    playerEmitNoise(0);
+    recordPlayerNoiseRippleIfNeeded();
+    rogue.playerNoise = NOISE_PLAYER_SILENT;
+    cosmeticRefreshInvestigateBlinks();
+    cosmeticRefreshStatusBlinks();
+    //   (3) Event-edge wake tells ('!' / off-screen '?') captured per-monster during the suppressed steps,
+    //       re-emitted once by current state, with a single condensed haptic.
+    flushAutomationHeardTells();
+}
+#else
+static void showTravelEndNoiseFeedback(void) {}
+#endif
+
 void travelRoute(pos path[1000], short steps) {
     short i, j;
     short dir;
@@ -1654,6 +1691,7 @@ void travelRoute(pos path[1000], short steps) {
     }
     rogue.disturbed = true;
     rogue.automationActive = false;
+    showTravelEndNoiseFeedback();
     updateFlavorText();
 }
 
@@ -1662,11 +1700,16 @@ static void travelMap(short **distanceMap) {
     boolean advanced;
 
     rogue.disturbed = false;
-    rogue.automationActive = true;
 
     if (distanceMap[player.loc.x][player.loc.y] < 0 || distanceMap[player.loc.x][player.loc.y] == 30000) {
         return;
     }
+    // iOS port (Brogue SE): set automationActive only AFTER the no-path guard. The original set sat
+    // before the early return, so a negative player-cell distance (which slips past travel()'s
+    // `< 30000` gate) left the flag stuck true on bail. Harmless upstream, but SE gates the whole
+    // cosmetic layer (noise/impact ripples, ?/! blinks) on this flag, so a stuck-true silently
+    // killed all of it until the next successful travel reset it. No path == no steps run anyway.
+    rogue.automationActive = true;
     do {
         advanced = false;
         for (dir = 7; dir >= 0; dir--) {
@@ -1692,6 +1735,7 @@ static void travelMap(short **distanceMap) {
     } while (advanced && !rogue.disturbed);
     rogue.disturbed = true;
     rogue.automationActive = false;
+    showTravelEndNoiseFeedback();
     updateFlavorText();
 }
 
@@ -2082,6 +2126,9 @@ boolean explore(short frameDelay) {
     } while (!rogue.disturbed);
     //clearCursorPath();
     rogue.automationActive = false;
+    // iOS port (Brogue SE): auto-explore suppresses the noise tells the same way travel does (animator dormant),
+    // so re-emit them at this seam too. Self-gates for AI autoplay (autoPlayingLevel) via the cosmetic guards.
+    showTravelEndNoiseFeedback();
     refreshSideBar(-1, -1, false);
     freeGrid(distanceMap);
     return madeProgress;
@@ -2472,8 +2519,12 @@ void scanOctantFOV(char grid[DCOLS][DROWS], short xLoc, short yLoc, short octant
     x = loc.x + columnsRightFromOrigin;
     y = loc.y + iStart;
     betweenOctant1andN(&x, &y, loc.x, loc.y, octant);
+    // iOS port (Brogue SE): smoke. When this scan is a vision query (forbiddenTerrain includes
+    // T_OBSTRUCTS_VISION -- player FOV, monster FOV, light propagation), thick smoke blocks sight too.
+    // Passability-only scans are unaffected, and smoke carries no terrain flag, so projectiles/sound pass through.
     boolean currentlyLit = coordinatesAreInMap(x, y) && !(cellHasTerrainFlag((pos){ x, y }, forbiddenTerrain) ||
-                                                          (pmap[x][y].flags & forbiddenFlags));
+                                                          (pmap[x][y].flags & forbiddenFlags) ||
+                                                          ((forbiddenTerrain & T_OBSTRUCTS_VISION) && cellHasThickSmoke((pos){ x, y })));
     for (i = iStart; i <= iEnd; i++) {
         x = loc.x + columnsRightFromOrigin;
         y = loc.y + i;
@@ -2482,7 +2533,8 @@ void scanOctantFOV(char grid[DCOLS][DROWS], short xLoc, short yLoc, short octant
             // We're off the map -- here there be memory corruption.
             continue;
         }
-        cellObstructed = (cellHasTerrainFlag((pos){ x, y }, forbiddenTerrain) || (pmap[x][y].flags & forbiddenFlags));
+        cellObstructed = (cellHasTerrainFlag((pos){ x, y }, forbiddenTerrain) || (pmap[x][y].flags & forbiddenFlags)
+                          || ((forbiddenTerrain & T_OBSTRUCTS_VISION) && cellHasThickSmoke((pos){ x, y }))); // iOS port (Brogue SE): thick smoke blocks sight
         // if we're cautious on walls and this is a wall:
         if (cautiousOnWalls && cellObstructed) {
             // (x2, y2) is the tile one space closer to the origin from the tile we're on:

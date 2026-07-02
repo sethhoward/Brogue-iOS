@@ -88,7 +88,7 @@ extension UIDevice {
     }
 }
 
-fileprivate func getCellCoords(at point: CGPoint, viewport: SKViewPort?) -> CGPoint {
+@MainActor fileprivate func getCellCoords(at point: CGPoint, viewport: SKViewPort?) -> CGPoint {
     let screenH = UIScreen.main.bounds.size.height
     let screenW = UIScreen.main.bounds.size.width
     // When the dungeon map is pinch-zoomed, invert the zoom transform so a
@@ -649,6 +649,16 @@ final class BrogueViewController: UIViewController {
     /// so the first finger of a pinch/pan can't leak a tap/travel that would
     /// snap the view via auto-follow.
     private var multiTouchGestureActive = false
+    /// iOS port (iBrogue): the screen zone where the current single-finger gesture
+    /// began, latched on touch-down and used to route the WHOLE gesture (see
+    /// `gestureOriginZone`). A gesture commits only when it lifts in the same zone it
+    /// started in — so a swipe up from the bottom band (or the home-indicator strip)
+    /// can't leak into a play-field travel/move as the finger crosses into the grid.
+    private enum GestureOriginZone { case playArea, band, sidebar, other }
+    /// The latched origin zone for the active single-finger gesture, or nil when idle.
+    /// Set at the top of `touchesBegan` for a fresh primary touch (so a second finger /
+    /// pinch never overwrites it); cleared once all fingers lift.
+    private var gestureOriginZone: GestureOriginZone?
     /// True once the player two-finger-drags to look around; cleared on the next
     /// real player move, which re-centers (auto-follow).
     private var manualPanActive = false
@@ -670,6 +680,15 @@ final class BrogueViewController: UIViewController {
     private weak var zoomPan: UIPanGestureRecognizer?
     /// Two-finger double-tap "zoom out / back" toggle, kept for enable/disable.
     private weak var zoomToggle: UITapGestureRecognizer?
+    /// iOS port (iBrogue): hover-to-examine for an attached trackpad/mouse. Free pointer
+    /// movement (no button) is delivered as hover, not touches, so the only way to reach the
+    /// engine's examine path (MOUSE_ENTERED_CELL) used to be a click-drag — whose release is a
+    /// MOUSE_UP that commits a move. This recognizer restores the desktop behavior: hover
+    /// examines (and moves the targeting reticle) without committing; a click still moves.
+    private weak var hoverGesture: UIHoverGestureRecognizer?
+    /// Last map/sidebar cell a hover emitted, to mimic sdl2-platform.c: only feed a new
+    /// MOUSE_ENTERED_CELL when the pointer crosses into a different cell. (-1,-1) = none yet.
+    private var lastHoverCell = CGPoint(x: -1, y: -1)
     /// The zoom (scale + origin) to return to when a two-finger double-tap toggles
     /// back in. Captured at the moment of toggling out; restoring the origin directly
     /// means the restore doesn't depend on a live auto-follow cell (which can be nil).
@@ -810,6 +829,7 @@ final class BrogueViewController: UIViewController {
         dContainerView.alpha = 0.3
 
         setupZoomGestures()
+        setupHoverGesture()
 
         // Storyboard positions these for iPad. On iPhone (much less screen
         // real estate, landscape-only) push the esc button tighter into the
@@ -897,6 +917,18 @@ final class BrogueViewController: UIViewController {
         // Run after viewDidAppear so we definitely have it.
         applyNotchInsets()
         updateDpadNotchAvoidance()
+        applyMacWindowSizeRestrictionsIfNeeded()
+    }
+
+    /// iOS port (iBrogue): Mac Catalyst only — stop the window from being resized so small the
+    /// dungeon grid becomes illegible / the layout collapses. No-op on iOS/iPadOS (a touch device's
+    /// window isn't user-resizable, and `windowScene.sizeRestrictions` is nil there). Idempotent —
+    /// safe to re-run on every appearance. Default/last window size is left to scene state restoration.
+    private func applyMacWindowSizeRestrictionsIfNeeded() {
+        #if targetEnvironment(macCatalyst)
+        guard let restrictions = view.window?.windowScene?.sizeRestrictions else { return }
+        restrictions.minimumSize = CGSize(width: 1024, height: 640)
+        #endif
     }
 
     /// Best-available safe-area insets. SwiftUI's `.ignoresSafeArea()` zeroes
@@ -2329,6 +2361,49 @@ extension BrogueViewController: UIGestureRecognizerDelegate {
         zoomToggle = toggle
     }
 
+    /// iOS port (iBrogue): installs the hover-to-examine recognizer. Inert without a hardware
+    /// pointer (a finger never produces hover callbacks), so it's safe on every idiom — including
+    /// Mac Catalyst, where GCKeyboard reports the Mac keyboard and the screen is already in
+    /// "desktop mode" (d-pad/ESC hidden, magnifier suppressed). Attached to the root view so its
+    /// locations share the touch coordinate space (location(in: view)).
+    private func setupHoverGesture() {
+        let hover = UIHoverGestureRecognizer(target: self, action: #selector(handleHover(_:)))
+        hover.name = "examineHover"
+        view.addGestureRecognizer(hover)
+        hoverGesture = hover
+    }
+
+    /// Translates pointer hover into the engine's non-committal examine event. Pure platform
+    /// layer: enqueues a synthetic `.moved` touch, which every bridge already maps to
+    /// MOUSE_ENTERED_CELL — so no engine/bridge/protocol change, and all three engines benefit.
+    /// Hover never enters the recording stream (only committed clicks/keystrokes are recorded),
+    /// so there is no determinism or replay impact.
+    @objc private func handleHover(_ g: UIHoverGestureRecognizer) {
+        // Pointer left the view: forget the last cell so re-entry re-emits.
+        guard g.state == .began || g.state == .changed else {
+            lastHoverCell = CGPoint(x: -1, y: -1)
+            return
+        }
+        // Examine is meaningful only while the map cursor is live: normal play (sidebar +
+        // map describe) and targeting (reticle follows the pointer). Never in menus.
+        guard gameplayControlsActive || isTargeting else { return }
+        // Don't examine through an in-progress pinch/pan, the on-screen d-pad, or the bottom
+        // band. These chrome guards are no-ops once a keyboard hides the controls (the common
+        // case) and still protect the rare keyboardless-mouse case.
+        guard !multiTouchGestureActive else { return }
+        let location = g.location(in: view)
+        if isBandTouch(location) { return }
+        if dContainerView.hitTest(g.location(in: dContainerView), with: nil) != nil { return }
+
+        // Mimic sdl2-platform.c: only emit when the pointer crosses into a new cell. getCellCoords
+        // applies the pinch-zoom inverse for the comparison; the event itself carries the raw
+        // location, leaving the bridge's unzoomedPoint transform to resolve the cell (as for touches).
+        let cell = getCellCoords(at: location, viewport: skViewPort)
+        if cell == lastHoverCell { return }
+        lastHoverCell = cell
+        addHoverEvent(event: UIBrogueTouchEvent(phase: .moved, location: location))
+    }
+
     // Pinch + two-finger pan + the two-finger double-tap toggle must run together,
     // but not alongside unrelated recognizers (e.g. the dpad's drag).
     func gestureRecognizer(_ g: UIGestureRecognizer,
@@ -2793,6 +2868,10 @@ extension BrogueViewController {
         // then hide it.
         if (event?.allTouches?.count ?? touches.count) <= 1 {
             multiTouchGestureActive = false
+            // Latch where this gesture began so the whole gesture routes by its origin
+            // zone (see `gestureOriginZone`). Captured here, before the pinch/band
+            // early-returns, and only for the primary finger so a pinch can't clobber it.
+            gestureOriginZone = originZone(for: touches.first!.location(in: view))
         }
 
         // iPhone (zoom on): a second finger means a pinch / two-finger pan is
@@ -2807,8 +2886,9 @@ extension BrogueViewController {
         }
         // Bottom tap-band: handled on release; swallow the down (before the dpad
         // guard, so the dpad container can't eat band taps) so it never becomes a
-        // map-move or pops the magnifier.
-        if isBandTouch(touches.first!.location(in: view)) {
+        // map-move or pops the magnifier. Keyed on the latched origin zone so a swipe
+        // that starts in the band stays swallowed even after it crosses into the grid.
+        if gestureOriginZone == .band {
             hideMagnifier()
             return
         }
@@ -2841,7 +2921,21 @@ extension BrogueViewController {
             hideMagnifier()
             return
         }
-        if isBandTouch(touches.first!.location(in: view)) {
+        // Band-origin gesture: swallow for its whole life (it can only ever fire a
+        // button, on release, and only if it lifts back in the band).
+        if gestureOriginZone == .band {
+            hideMagnifier()
+            return
+        }
+        // Off-grid feed clamp (active play only): a play-area / other-origin drag must
+        // not feed an off-grid coordinate (the finger wandered into the band or
+        // sidebar) — drop it so lastTouchLocation (the commit cell) stays at the last
+        // in-grid cell. A sidebar-origin gesture is exempt: its in-sidebar moves are
+        // examine hovers. Gated on gameplayControlsActive so it never touches menu /
+        // inventory interaction, where item rows sit above the play area (rows <= 3)
+        // and must stay selectable by tap or drag.
+        if gameplayControlsActive, gestureOriginZone != .sidebar,
+           !pointIsInPlayArea(point: touches.first!.location(in: view)) {
             hideMagnifier()
             return
         }
@@ -2860,20 +2954,27 @@ extension BrogueViewController {
     override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
         super.touchesEnded(touches, with: event)
 
+        // Release the latched origin zone once every finger has lifted, on every path.
+        let allFingersUp = activeTouchCount(event) == 0
+        defer { if allFingersUp { gestureOriginZone = nil } }
+
         // A multi-touch gesture (pinch / two-finger pan) was in progress: never
         // commit a tap on release — that's what produced the view "snap." Reset
         // once every finger has lifted.
         if multiTouchGestureActive {
             clearTouchEvents()
             hideMagnifier()
-            if activeTouchCount(event) == 0 { multiTouchGestureActive = false }
+            if allFingersUp { multiTouchGestureActive = false }
             return
         }
 
-        // Bottom tap-band takes priority over the dpad container and normal
-        // routing, so a tap at the very bottom always fires a button.
-        if let loc = touches.first?.location(in: view), isBandTouch(loc) {
-            handleBandTap(loc)
+        // Band-origin gesture: fire the nearest bottom button ONLY if it also lifts in
+        // the band. A band-origin swipe that lifts in the grid/sidebar (the home-
+        // indicator swipe-up) commits nothing — it never leaks a play-field move.
+        if gestureOriginZone == .band {
+            if let loc = touches.first?.location(in: view), isBandTouch(loc) {
+                handleBandTap(loc)
+            }
             hideMagnifier()
             return
         }
@@ -2894,7 +2995,12 @@ extension BrogueViewController {
             // and never the MOUSE_UP that activates a button — so the first tap did
             // nothing and the player had to tap again. Treat sidebar-column taps as
             // ordinary clicks whenever we're not in active play.
-            if pointIsInSideBar(point: location) && gameplayControlsActive {
+            if gestureOriginZone == .sidebar && gameplayControlsActive && !pointIsInSideBar(point: location) {
+                // Sidebar-origin gesture that lifted outside the sidebar (dragged into
+                // the grid / band): commit nothing — just disarm the pending examine.
+                examineArmDebounce?.cancel()
+                examineArmed = false
+            } else if gestureOriginZone == .sidebar && gameplayControlsActive {
                 // side bar
                 if touch.tapCount >= 2 {
                     // Double-tap acts on the entity (attack / run toward) — not an examine.
@@ -2936,7 +3042,10 @@ extension BrogueViewController {
         super.touchesCancelled(touches, with: event)
         clearTouchEvents()
         hideMagnifier()
-        if activeTouchCount(event) == 0 { multiTouchGestureActive = false }
+        if activeTouchCount(event) == 0 {
+            multiTouchGestureActive = false
+            gestureOriginZone = nil
+        }
     }
 
     /// Touches still down (not ended/cancelled) in this event.
@@ -2961,6 +3070,18 @@ extension BrogueViewController {
 
         return false
     }
+
+    /// iOS port (iBrogue): classify a touch-down location into the zone that owns the
+    /// gesture. `isBandTouch` is checked first because it already carries the
+    /// `gameplayControlsActive` guard — so `.band` is only ever latched during active
+    /// play; outside play the bottom area falls through to `.playArea`/`.other` and
+    /// keeps its existing routing.
+    private func originZone(for point: CGPoint) -> GestureOriginZone {
+        if isBandTouch(point) { return .band }
+        if pointIsInSideBar(point: point) { return .sidebar }
+        if pointIsInPlayArea(point: point) { return .playArea }
+        return .other
+    }
     
     private func addTouchEvent(event: UIBrogueTouchEvent) {
         lastTouchLocation = event.location
@@ -2970,6 +3091,20 @@ extension BrogueViewController {
                 _ = touchEvents.removeLast()
             }
 
+            touchEvents.append(event)
+        }
+    }
+
+    /// iOS port (iBrogue): enqueue a hover-derived examine event. Identical to addTouchEvent's
+    /// dedup+append, but deliberately does NOT write `lastTouchLocation` — that field is the
+    /// commit coordinate for a tap's synthesized MOUSE_UP, and hover must never influence where a
+    /// click commits (desktop keeps hover and click fully independent). Keeping the write out makes
+    /// that independence hold by construction rather than relying on touchesBegan event ordering.
+    private func addHoverEvent(event: UIBrogueTouchEvent) {
+        synchronized {
+            if let lastEvent = touchEvents.last, lastEvent.phase == .moved, !touchEvents.isEmpty {
+                _ = touchEvents.removeLast()
+            }
             touchEvents.append(event)
         }
     }
@@ -3300,16 +3435,26 @@ extension BrogueViewController {
     // its own image's hook (Classic's setHardwareKeyboardConnected(); CE/SE's
     // ce_/se_setHardwareKeyboardConnected()) so the setting is correct whichever engine is active.
     private func updateHardwareKeyboardState(_ connected: Bool) {
-        hardwareKeyboardConnected = connected
-        setHardwareKeyboardConnected(connected ? 1 : 0)
-        ce_setHardwareKeyboardConnected(connected ? 1 : 0)
-        se_setHardwareKeyboardConnected(connected ? 1 : 0)
+        // iOS port (iBrogue): a Mac always has a keyboard, and GameController's GCKeyboard discovery can
+        // lag app launch — long enough that the engine's one-time welcome() can print before the flag
+        // flips, dropping the "Press <?> for help" hint and briefly showing the d-pad on Mac. Force the
+        // flag true under Catalyst so desktop mode (hidden d-pad/ESC + the help hint) is correct from the
+        // first frame, independent of GCKeyboard timing. iOS/iPadOS keep the real connect/disconnect state.
+        #if targetEnvironment(macCatalyst)
+        let isConnected = true
+        #else
+        let isConnected = connected
+        #endif
+        hardwareKeyboardConnected = isConnected
+        setHardwareKeyboardConnected(isConnected ? 1 : 0)
+        ce_setHardwareKeyboardConnected(isConnected ? 1 : 0)
+        se_setHardwareKeyboardConnected(isConnected ? 1 : 0)
         DispatchQueue.main.async { [weak self] in
             self?.refreshDirectionPadVisibility()
             self?.refreshEscButtonVisibility()
             // Drop any touch loupe still on screen when a keyboard is plugged in
             // mid-play — canShowMagnifier now refuses to re-show it.
-            if connected { self?.hideMagnifier() }
+            if isConnected { self?.hideMagnifier() }
         }
     }
 

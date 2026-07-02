@@ -366,6 +366,13 @@ void applyInstantTileEffectsToCreature(creature *monst) {
                 gameOver(buf, true);
                 return;
             }
+            // iOS port (Brogue SE): the blast's concussive force flings a surviving player away from the
+            // flame front (into a wall, another creature, or a hazard -- everything caught is hurled). If
+            // actually relocated, skip the rest of this (old) cell's tile effects -- they applied at the
+            // destination via setMonsterLocation.
+            if (knockCreatureFromExplosion(&player, *x, *y)) {
+                return;
+            }
         } else { // it's a monster
             if (monst->creatureState == MONSTER_SLEEPING) {
                 monst->creatureState = MONSTER_TRACKING_SCENT;
@@ -388,6 +395,11 @@ void applyInstantTileEffectsToCreature(creature *monst) {
                 sprintf(buf2, "%s engulfs %s.",
                         tileCatalog[pmap[*x][*y].layers[layerWithFlag(*x, *y, T_CAUSES_EXPLOSIVE_DAMAGE)]].description, buf);
                 messageWithColor(buf2, messageColorFromVictim(monst), 0);
+                // iOS port (Brogue SE): a surviving monster is flung away from the blast. If relocated,
+                // skip the rest of this (old) cell's tile effects (applied at the destination instead).
+                if (knockCreatureFromExplosion(monst, *x, *y)) {
+                    return;
+                }
             }
         }
     }
@@ -1198,11 +1210,14 @@ static void handleLoneWolf() {
 
     rogue.loneWolfXP += rogue.xpxpThisTurn;
 
-    // Linear track: tier N at N * LONE_WOLF_XP_PER_TIER, capped at LONE_WOLF_MAX_TIER. Recomputed every turn,
-    // so it re-derives (and replays) from loneWolfXP alone -- a single threshold check generalizes to any cap.
-    short newTier = (short)(rogue.loneWolfXP / LONE_WOLF_XP_PER_TIER);
-    if (newTier > LONE_WOLF_MAX_TIER) {
-        newTier = LONE_WOLF_MAX_TIER;
+    // Front-loaded track: tier N reached at loneWolfTierThresholds[N] cumulative solo XPXP (see
+    // LONE_WOLF_TIER_THRESHOLDS in Rogue.h), capped at LONE_WOLF_MAX_TIER. Recomputed every turn, so it
+    // re-derives (and replays) from loneWolfXP alone. Walk the ascending table to find the highest tier whose
+    // threshold is met -- a plain table lookup generalizes to any (monotonic) curve without per-tier code.
+    static const long loneWolfTierThresholds[LONE_WOLF_MAX_TIER + 1] = LONE_WOLF_TIER_THRESHOLDS;
+    short newTier = 0;
+    while (newTier < LONE_WOLF_MAX_TIER && rogue.loneWolfXP >= loneWolfTierThresholds[newTier + 1]) {
+        newTier++;
     }
 
     while (rogue.loneWolfTier < newTier) {
@@ -1305,13 +1320,20 @@ static void playerFalls() {
 
 
 
-void activateMachine(short machineNumber) {
+void activateMachine(short machineNumber, pos activationOrigin) {
     short i, j, x, y, layer, sRows[DROWS], sCols[DCOLS], monsterCount, maxMonsters;
 
     fillSequentialList(sCols, DCOLS);
     shuffleList(sCols, DCOLS);
     fillSequentialList(sRows, DROWS);
     shuffleList(sRows, DROWS);
+
+#if NOISE_SYSTEM_ENABLED
+    // iOS port (Brogue SE): the wired-promotion loop below can fire many environmental noises in one turn
+    // (one per cage/portcullis cell), each also flaring. Coalesce their ripples into a single, flare-delayed
+    // one anchored at the activation origin so a random survivor doesn't get washed out by the room-wide flash.
+    beginCoalescedImpactRipples();
+#endif
 
     for (i=0; i<DCOLS; i++) {
         for (j=0; j<DROWS; j++) {
@@ -1331,6 +1353,13 @@ void activateMachine(short machineNumber) {
             }
         }
     }
+
+#if NOISE_SYSTEM_ENABLED
+    // Wired promotions done: emit the one coalesced ripple at the origin, BEFORE the guardian loop so any
+    // per-step guardian footfall ripple below naturally supersedes it (the footfalls are the salient event
+    // in a guardian vault; in a cage room there are no guardians, so this grind ripple is the survivor).
+    endCoalescedImpactRipples(activationOrigin);
+#endif
 
     monsterCount = maxMonsters = 0;
     creature **activatedMonsterList = NULL;
@@ -1420,7 +1449,7 @@ void promoteTile(short x, short y, enum dungeonLayers layer, boolean useFireDF) 
         // and on any such cell, promote each terrain layer that is T_IS_WIRED.
         // Note that machines need not be contiguous.
         pmap[x][y].flags |= IS_POWERED;
-        activateMachine(pmap[x][y].machineNumber); // It lives!!!
+        activateMachine(pmap[x][y].machineNumber, (pos){ x, y }); // It lives!!!  (origin = the cell that powered it)
 
         // Power fades from the map immediately after we finish.
         for (i=0; i<DCOLS; i++) {
@@ -1592,7 +1621,18 @@ static void updateVolumetricMedia() {
                     refreshDungeonCell((pos){ i, j });
                 }
                 if (pmap[i][j].volume > 0) {
-                    if (tileCatalog[pmap[i][j].layers[GAS]].mechFlags & TM_GAS_DISSIPATES_QUICKLY) {
+                    // iOS port (Brogue SE): smoke dissipates by volume rather than by a fixed flag. Thin smoke
+                    // (wisps, fringe, the tail of a thinning cloud) clears fast like steam; thick smoke -- a real
+                    // sight-blocking screen -- lingers, so the dense core holds for a handful of turns and then
+                    // crumbles quickly once it drops below the threshold. One number (SMOKE_THICK_VOLUME) governs
+                    // both opacity (the FOV sight block) and persistence here. rand_percent keeps it deterministic.
+                    if (pmap[i][j].layers[GAS] == SMOKE_GAS) {
+                        if (newGasVolume[i][j] >= SMOKE_THICK_VOLUME) {
+                            newGasVolume[i][j] -= (rand_percent(35) ? 1 : 0);
+                        } else {
+                            newGasVolume[i][j] -= (rand_percent(75) ? 1 : 0);
+                        }
+                    } else if (tileCatalog[pmap[i][j].layers[GAS]].mechFlags & TM_GAS_DISSIPATES_QUICKLY) {
                         newGasVolume[i][j] -= (rand_percent(50) ? 1 : 0);
                     } else if (tileCatalog[pmap[i][j].layers[GAS]].mechFlags & TM_GAS_DISSIPATES) {
                         newGasVolume[i][j] -= (rand_percent(20) ? 1 : 0);
@@ -1823,6 +1863,14 @@ void updateEnvironment() {
         for (j=0; j<DROWS; j++) {
             if (cellHasTerrainFlag((pos){ i, j }, T_IS_FIRE) && !(pmap[i][j].flags & CAUGHT_FIRE_THIS_TURN)) {
                 exposeTileToFire(i, j, false);
+                // iOS port (Brogue SE): smoke. A burning PLAIN_FIRE tile (ordinary burning terrain -- not gas-fire
+                // flashes, brimstone, or explosions) puffs a little smoke into the gas layer each turn. The volumetric
+                // system pools puffs from many burning tiles, so a bigger blaze makes more smoke ("additive"); smoke is
+                // non-flammable so it just hangs over the fire and drifts outward, lingering after the flames die.
+                // rand_percent is substantive RNG, so the emission replays deterministically from saved input.
+                if (pmap[i][j].layers[SURFACE] == PLAIN_FIRE && rand_percent(SMOKE_EMISSION_CHANCE)) {
+                    spawnDungeonFeature(i, j, &(dungeonFeatureCatalog[DF_SMOKE_ACCUMULATION]), true, false);
+                }
                 for (direction=0; direction<4; direction++) {
                     newX = i + nbDirs[direction][0];
                     newY = j + nbDirs[direction][1];
@@ -2546,8 +2594,8 @@ void synchronizePlayerTimeState() {
 void playerRecoversFromAttacking(boolean anAttackHit) {
     if (player.ticksUntilTurn >= 0) {
         // Don't do this if the player's weapon of speed just fired.
-        if (rogue.weapon && (rogue.weapon->flags & ITEM_ATTACKS_STAGGER) && anAttackHit) {
-            player.ticksUntilTurn += 2 * player.attackSpeed;
+        if (rogue.weapon && (rogue.weapon->flags & (ITEM_ATTACKS_STAGGER | ITEM_SLOW_RECOVERY)) && anAttackHit) {
+            player.ticksUntilTurn += 2 * player.attackSpeed; // stagger and war-pike slow-recovery: extra turn to recover
         } else if (rogue.weapon && (rogue.weapon->flags & ITEM_ATTACKS_QUICKLY)) {
             player.ticksUntilTurn += player.attackSpeed / 2;
         } else {
@@ -2947,7 +2995,15 @@ void playerTurnEnded() {
 
         if (player.status[STATUS_PARALYZED] || player.status[STATUS_FROZEN]) { // iOS port (iBrogue): frozen loses turns like paralysis
             if (!fastForward) {
-                fastForward = rogue.playbackFastForward || pauseAnimation(25, PAUSE_BEHAVIOR_DEFAULT);
+                // iOS port (Brogue SE): the cosmetic idle clock is frozen during this forced-turn lockout, so
+                // the player's own status tell ('*' stunned / flame / '?' confused) would never animate while
+                // you watch helplessly. Spawn it and tick the cosmetic layer across the watch-pause (a few
+                // short sub-pauses instead of one dead 25-frame pause) so it actually blinks.
+                cosmeticRefreshStatusBlinks();
+                for (short ticks = 0; ticks < 5 && !fastForward; ticks++) {
+                    advanceCosmeticAnimations();
+                    fastForward = rogue.playbackFastForward || pauseAnimation(5, PAUSE_BEHAVIOR_DEFAULT);
+                }
             }
         }
 
@@ -2997,8 +3053,17 @@ void playerTurnEnded() {
     // (3) rebuild the '?' investigate-blink effects to match this turn's visible investigators (the blink
     // is a cosmetic-layer effect now; this is its per-turn lifecycle -- spawn/follow/despawn).
     cosmeticRefreshInvestigateBlinks();
+    // (3b) rebuild the confused/on-fire/stunned status-blink overlays (player + visible monsters).
+    cosmeticRefreshStatusBlinks();
     // (4) advance the '!' alert-blinks: follow each to its monster's new cell and count down its turn life.
     cosmeticTickAlertBlinks();
+    // (5) safety net for the automation wake-tell capture (MB_HEARD_DURING_AUTOMATION): travel/auto-explore
+    // drain it at their own end seams, but if any automation path leaves a flag stranded, flush it on the next
+    // live turn so a captured tell shows one action late rather than never. Guarded to live turns only -- during
+    // an automation step automationActive is true and the flags set THIS step must survive to the end-seam drain.
+    if (!rogue.automationActive) {
+        flushAutomationHeardTells();
+    }
 #endif
     updateFlavorText();
 

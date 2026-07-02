@@ -25,8 +25,6 @@
 #include "GlobalsBase.h"
 #include "Globals.h"
 #include "GlobalsBrogue.h"
-#include "GlobalsRapidBrogue.h"
-#include "GlobalsBulletBrogue.h"
 
 #include <time.h>
 
@@ -40,8 +38,6 @@ int rogueMain() {
 
 void printBrogueVersion() {
     printf("Brogue version: %s\n", brogueVersion);
-    printf("Supports variant (rapid_brogue): %s\n", rapidBrogueVersion);
-    printf("Supports variant (bullet_brogue): %s\n", bulletBrogueVersion);
 }
 
 void executeEvent(rogueEvent *theEvent) {
@@ -178,17 +174,7 @@ static void welcome() {
 }
 
 void initializeGameVariant() {
-
-    switch (gameVariant) {
-        case VARIANT_RAPID_BROGUE:
-            initializeGameVariantRapidBrogue();
-            break;
-        case VARIANT_BULLET_BROGUE:
-            initializeGameVariantBulletBrogue();
-            break;
-        default:
-            initializeGameVariantBrogue();
-    }
+    initializeGameVariantBrogue();
 }
 
 // Seed is used as the dungeon seed unless it's zero, in which case generate a new one.
@@ -875,10 +861,10 @@ void startLevel(short oldLevelNumber, short stairDirection) {
             messageWithColor("you sense that something of significance lies hidden on this level.", &backgroundMessageColor, 0);
         }
 
-        // iOS port (Brogue SE): ring of awareness -- on first arriving at a level, also sense the good/bad
+        // iOS port (Brogue SE): ring of clairvoyance -- on first arriving at a level, sense the good/bad
         // polarity of magic items lying on the floor (secret rooms included). Self-gated on wearing the ring,
-        // and rolled here on the gameplay RNG stream so it stays deterministic. See senseFloorPolarityFromAwareness.
-        senseFloorPolarityFromAwareness();
+        // and rolled here on the gameplay RNG stream so it stays deterministic. See senseFloorPolarityFromClairvoyance.
+        senseFloorPolarityFromClairvoyance();
 
         //logLevel();
 
@@ -1208,7 +1194,7 @@ void freeEverything() {
 // is output-only — it draws no RNG and mutates no game state, so recordings/determinism are unaffected.
 extern void seRecordRestStats(const char *header, const char *row);
 // iOS port (Brogue SE): debug exploration calibration. At the end of a live run we emit one CSV row of the
-// per-level explorable-floor ceiling (passable cells) and the xpxp actually accrued, so LONE_WOLF_XP_PER_TIER
+// per-level explorable-floor ceiling (passable cells) and the xpxp actually accrued, so LONE_WOLF_TIER_THRESHOLDS
 // can be tuned against real generated levels. The host (SEBridge.mm) appends it to Documents/se/exploration-
 // stats.csv (Debug builds only) and owns the leading wall-clock "time" column. Output-only: no RNG, no game
 // state mutated, so recordings/determinism are unaffected.
@@ -1268,7 +1254,7 @@ static void recordRestStatsRow(const char *outcome, const char *killedBy) {
 // iOS port (Brogue SE): build and emit the exploration-stats CSV row for a finished run. Per-level columns:
 // p{d} = the level's full-exploration xpxp ceiling (passable cells, counted at first visit), x{d} = xpxp the
 // player actually accrued there. Summary columns include the totals and the mean ceiling per visited level --
-// the figure that calibrates LONE_WOLF_XP_PER_TIER. Header/row kept in lock-step; skipped during playback.
+// the figure that calibrates LONE_WOLF_TIER_THRESHOLDS. Header/row kept in lock-step; skipped during playback.
 static void recordExplorationStatsRow(const char *outcome, const char *killedBy) {
     if (rogue.playbackMode) {
         return; // never log while replaying a recording

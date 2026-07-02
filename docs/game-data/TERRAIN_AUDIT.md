@@ -137,6 +137,7 @@ flammables; the water itself extinguishes via `TM_EXTINGUISHES_FIRE`.
 | `STEAM` | 521 | `T_CAUSES_DAMAGE` | quickly |
 | `DARKNESS_CLOUD` | 522 | — (light effect) | does not dissipate via flag (managed elsewhere) |
 | `HEALING_CLOUD` | 523 | `T_CAUSES_HEALING` | quickly |
+| `SMOKE_GAS` (iOS port) | ~524 | — (no flag; `SMOKE_LIGHT` dims; thick smoke blocks **sight only** via volume-gated `cellHasThickSmoke()` in `scanOctantFOV`, not a terrain flag) | **volume-keyed** (not flag-driven): thin ~75%/turn, thick (≥ `SMOKE_THICK_VOLUME`) ~35%/turn. Emitted per-turn by burning `PLAIN_FIRE` (`updateEnvironment`). See IOS_MODIFICATIONS.md 2026-06-27. |
 
 (Row line numbers approximate within the catalog block; the gas tiles are contiguous around
 `Globals.c:515-523`. The authoritative effect comes from the `T_*` flags, applied in §5.)
@@ -230,6 +231,34 @@ fills a spawn map radially from `startProbability` down by `probabilityDecrement
   (bog); `DF_BLOODFLOWER_POD_BURST` → `HEALING_CLOUD`.
 - **Surfaces:** the blood family (see §7), `DF_WEB_SMALL` / `DF_WEB_LARGE`, `DF_ANCIENT_SPIRIT_VINES`,
   `DF_TRAMPLED_FOLIAGE` / `DF_FOLIAGE_REGROW`, `DF_VOMIT` / `DF_URINE` / `DF_UNICORN_POOP`.
+- **SE — lair dressing:** `DF_JACKAL_DEN_FOLIAGE` (a tighter-than-open-field `FOLIAGE` core, `100/40`)
+  chains `subsequentDF` → `DF_JACKAL_DEN_GRASS` (a contained `GRASS` apron, `75/20`). `FOLIAGE` outranks
+  `GRASS` in draw priority, so the apron fills *around* the core without erasing it. A horde drops this at
+  its spawn site via the `hordeType.spawnDF` catalog field (the jackal pack is the only consumer; see
+  [MONSTERS_AUDIT.md §7.2](MONSTERS_AUDIT.md)). The core+apron is pure catalog data — no bespoke helper.
+- **SE — trap companion terrain:** an `autoGenerator` row may carry `companionDF` + `companionChance`
+  ([GlobalsBrogue.c](../../BrogueSE/Engine/GlobalsBrogue.c)). `runAutogenerators` rolls the chance and spreads
+  the DF from a cell *offset* off the foundation (the foundation is blocked as the origin), so it's never a
+  pinpoint marker. Consumers: fire traps → `DF_TRAP_DRY_GRASS` (a contained `DEAD_GRASS` patch, `75/25`, no
+  dead-foliage chain — flammable, so a triggered fire trap can ignite it); caustic traps → stock `DF_BONES`.
+  ~40% on both revealed and hidden variants; a soft search cue, not a tell (it doesn't touch the trap cell and
+  blends with naturally-occurring patches). Grass/bones aren't vision-blocking, so the §6.1 trap guard ignores
+  them and they don't hide the trap.
+
+### 6.1 SE — foliage never paves a trap (BrogueCE [#832](https://github.com/tmewett/BrogueCE/issues/832))
+
+A trap (`T_IS_DF_TRAP`, `DUNGEON` layer) and a vision-blocking surface tile could previously share a cell.
+The foliage then **hid the trap** (drawn over the trap glyph) and **stopped a thrown dart from settling on
+the trigger**, so the trap couldn't be sprung remotely. Two-part SE fix:
+
+- **Generation (primary):** `fillSpawnMap` (`Architect.c`) refuses to paint a `T_OBSTRUCTS_VISION` tile onto
+  a `T_IS_DF_TRAP` cell. Engine-wide — covers autogenerator foliage, the jackal den, and runtime regrowth.
+- **Projectile (net):** `throwItem` (`Items.c`) lands a thrown item *on* a passable vision-only obstruction
+  (foliage) instead of backing it up one cell, so an item reaching a trap under runtime-grown foliage still
+  triggers it. A solid wall (`T_OBSTRUCTS_PASSABILITY`) still stops the projectile short.
+
+Both are SE-only for now and flagged as a cherry-pick candidate for CE/Classic/upstream (see
+[`BrogueSE/Engine/IOS_MODIFICATIONS.md`](../../BrogueSE/Engine/IOS_MODIFICATIONS.md)).
 
 ---
 
@@ -287,6 +316,7 @@ drink path (`Items.c:8948`). Gas on the tile (`volume > 0`) takes priority; othe
 | `ROT_GAS` | lichen |
 | `DARKNESS_CLOUD` | darkness |
 | `HEALING_CLOUD` | wort |
+| `SMOKE_GAS` (iOS port) | smoke (capture-only `POTION_SMOKE`; thrown/uncorked → a short-lived sight-blocking screen via `DF_SMOKE_POTION`) |
 | deep water (`T_IS_DEEP_WATER`, while **not** levitating) | fire immunity |
 
 If nothing is capturable: *"the bottle is empty, and there is nothing here to capture."* — no turn
@@ -322,6 +352,10 @@ The bottle's own flavor text promises *"stepping into a gas **or hazard you can 
 through**."* In v1 code, "hazard you can walk through" is **only deep water**; everything else
 routes through the GAS layer. So a number of walkable liquids/surfaces and several gases were
 **unaccounted for** (v2 addresses these):
+
+> **Note (iOS port, 2026-06-27):** the new `SMOKE_GAS` (emitted by burning `PLAIN_FIRE`) **is**
+> capturable, as the capture-only `POTION_SMOKE` (thrown/uncorked → a short-lived sight-blocking
+> screen). So it is *not* a gap — see §8.1 and IOS_MODIFICATIONS.md 2026-06-27.
 
 **Gases that exist but aren't capturable:**
 

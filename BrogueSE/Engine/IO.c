@@ -268,8 +268,8 @@ static short actionMenu(short x, boolean playingBack) {
             buttons[buttonCount].hotkey[0] = AUTO_REST_KEY;
             buttonCount++;
 
-            // iOS port (Brogue SE): 'A' is re-apply-last-staff under the modern scheme (autopilot is
-            // keyless there) and autopilot under classic, so this menu entry tracks the active scheme.
+            // iOS port (Brogue SE): under the modern scheme physical 'A' is re-apply-last-staff
+            // (REAPPLY_KEY), so it gets its own menu entry; under classic there is no such command.
             if (rogueKeyboardScheme == KEYBOARD_SCHEME_MODERN) {
                 if (KEYBOARD_LABELS) {
                     sprintf(buttons[buttonCount].text, "  %sA: %sRe-apply staff  ",          yellowColorEscape, whiteColorEscape);
@@ -277,14 +277,21 @@ static short actionMenu(short x, boolean playingBack) {
                     strcpy(buttons[buttonCount].text, "  Re-apply staff  ");
                 }
                 buttons[buttonCount].hotkey[0] = REAPPLY_KEY;
-            } else {
-                if (KEYBOARD_LABELS) {
-                    sprintf(buttons[buttonCount].text, "  %sA: %sAutopilot  ",              yellowColorEscape, whiteColorEscape);
-                } else {
-                    strcpy(buttons[buttonCount].text, "  Autopilot  ");
-                }
-                buttons[buttonCount].hotkey[0] = AUTOPLAY_KEY;
+                buttonCount++;
             }
+
+            // iOS port (Brogue SE): autopilot is always selectable from this menu. We only removed its
+            // *keystroke* under modern (where 'A' is re-apply), not the menu option. It advertises the
+            // 'A' hotkey only under classic (where 'A' == AUTOPLAY_KEY); under modern it is keyless but
+            // still fires on tap -- hotkey[0] stays AUTOPLAY_KEY so the tap returns it, and physical 'A'
+            // is remapped to REAPPLY_KEY before menu key-matching, so there is no collision (mirrors the
+            // keyless Quit button below).
+            if (KEYBOARD_LABELS && rogueKeyboardScheme != KEYBOARD_SCHEME_MODERN) {
+                sprintf(buttons[buttonCount].text, "  %sA: %sAutopilot  ",              yellowColorEscape, whiteColorEscape);
+            } else {
+                strcpy(buttons[buttonCount].text, "  Autopilot  ");
+            }
+            buttons[buttonCount].hotkey[0] = AUTOPLAY_KEY;
             buttonCount++;
 
             if (KEYBOARD_LABELS) {
@@ -2192,10 +2199,11 @@ void colorFlash(const color *theColor, unsigned long reqTerrainFlags,
 #define CE_ALERT_FLICKER_FRAMES     6     // idle ticks per on/off half of the '!' flicker (~0.1s at 60Hz)
 #define CE_ALERT_LIFE_FRAMES        (4 * CE_ALERT_FLICKER_FRAMES) // two on/off cycles, then expire
 #define CE_RIPPLE_EXPAND_FRAMES     5     // idle ticks a ripple wavefront holds before expanding one tile (~0.08s)
+#define CE_RIPPLE_IMPACT_EXPAND_FRAMES 9  // iOS port (Brogue SE): impact ripples expand slower so each ring lingers -- the animator only ticks while input-idle, so a slower wavefront is far likelier to land a visible ring in the brief gap before your next step (and reads through a tile flare). Per-kind; other ripples keep the default rate.
 
 static const color cosmeticAlertColor = {100, 18, 18, 0, 0, 0, 0, false}; // reddish '!' -- "there you are!"
 static const color cosmeticNoiseColor = {85, 85, 100, 0, 0, 0, 0, false}; // pale grey -- monster "heard something"
-static const color cosmeticPlayerColor = {35, 60, 100, 0, 0, 0, 0, false}; // cool blue -- the player's own noise
+static const color cosmeticPlayerColor = {12, 38, 67, 0, 0, 0, 0, false}; // cool blue -- the player's own noise (dimmed ~28% so it reads as a subtle footprint, not a beacon)
 static const color cosmeticImpactColor = {100, 85, 30, 0, 0, 0, 0, false}; // warm amber -- an environmental impact (thrown item)
 static const color cosmeticAggravateColor = {100, 25, 20, 0, 0, 0, 0, false}; // hot alarm red -- a level-wide aggravate (alarm trap / aggravate scroll)
 
@@ -2205,7 +2213,17 @@ static const char gCosmeticImpactRippleChannel = 0;
 
 // Effect kinds hosted by the layer. RIPPLE_* paint via hiliteCell (color overlay); ALERT/BLINK via a
 // glyph (plotCharWithColor). (File-local; promote to Rogue.h if a spawner ever needs a kind parameter.)
-enum cosmeticEffectKind { CE_ALERT_GLYPH, CE_RIPPLE_MONSTER, CE_RIPPLE_PLAYER, CE_RIPPLE_IMPACT, CE_RIPPLE_AGGRAVATE, CE_INVESTIGATE_BLINK, CE_ALERT_BLINK };
+enum cosmeticEffectKind { CE_ALERT_GLYPH, CE_RIPPLE_MONSTER, CE_RIPPLE_PLAYER, CE_RIPPLE_IMPACT, CE_RIPPLE_AGGRAVATE, CE_INVESTIGATE_BLINK, CE_ALERT_BLINK, CE_STATUS_BLINK, CE_SPEED_TRAIL };
+
+// iOS port (Brogue SE): tints for the status-blink overlays (a glyph that rides a confused/burning/stunned
+// creature, the player included). Flame = fireForeColor's warm flicker; stun = dazed yellow "stars";
+// confused = psychotropic purple (distinct from the white investigate '?').
+static const color cosmeticBurnColor     = {70, 20,  0, 15, 10,  0, 0, true}; // flame (matches fireForeColor)
+static const color cosmeticStunColor     = {90, 85, 30, 25, 25,  0, 0, true}; // seeing-stars yellow
+static const color cosmeticConfusedColor = {60, 25, 75, 35, 15, 45, 0, true}; // psychotropic purple
+static const color cosmeticHasteColor    = {30, 90, 100, 20, 10, 0, 0, true}; // electric cyan -- the hasted "blink dash" contrail
+static const color cosmeticHealColor     = {100, 40, 60, 0, 20, 20, 0, true}; // bright rose-pink -- warm/wort family but far lighter + pinker than the dim darkRed {50,0,0} healing cloud, so the heart separates from the spores it sits in
+static const color cosmeticShieldColor   = {20, 85, 40, 15, 20, 15, 0, true}; // protective green (STATUS_SHIELDED)
 
 typedef struct {
     boolean active;
@@ -2234,6 +2252,124 @@ static short cosmeticFreeSlot(void) {
         }
     }
     return -1; // pool full -- drop (a missed cosmetic flash is harmless)
+}
+
+// iOS port (Brogue SE): "just healed" markers for the '♥' status-blink. A discrete heal (heal(), NOT passive
+// regen) records the creature pointer + the absolute turn it happened on; statusBlinkGlyphFor reads it so the
+// heart rides the same per-turn rebuild as the other tells (one-tell-at-a-time priority). DEBOUNCE: visibility is
+// a window on the turn NUMBER, not a per-refresh countdown -- cosmeticRefreshStatusBlinks runs several times in
+// some turns (the paralysis watch sub-loop, travel), so a countdown would burn off in a fraction of a turn and
+// the heart would flash; a turn window is stable, and rapid re-heals in one turn just re-stamp the same turn (no
+// flicker). Cosmetic-only, pointer-keyed (never dereferenced), so it adds nothing to game state or saves.
+// (Standing in bloodwort spores is detected live from terrain instead, so it needs no marker.)
+#define HEAL_BLINK_TURNS 2  // player-turns the heart stays up after a discrete heal
+static struct { const void *c; unsigned long turn; } gHealMarks[MAX_COSMETIC_EFFECTS];
+
+static boolean healMarkExpired(short i) { // empty slot, or its turn window has passed -- free to reuse
+    return gHealMarks[i].c == NULL
+        || rogue.absoluteTurnNumber - gHealMarks[i].turn >= (unsigned long)HEAL_BLINK_TURNS;
+}
+
+void cosmeticMarkHealed(const creature *monst) {
+    short i, free = -1;
+    if (monst == NULL || rogue.automationActive || rogue.autoPlayingLevel || rogue.playbackFastForward) {
+        return;
+    }
+    for (i = 0; i < MAX_COSMETIC_EFFECTS; i++) {
+        if (gHealMarks[i].c == (const void *)monst) {
+            gHealMarks[i].turn = rogue.absoluteTurnNumber; // re-stamp (debounced: same turn => no flicker)
+            return;
+        }
+        if (free < 0 && healMarkExpired(i)) {
+            free = i;
+        }
+    }
+    if (free >= 0) {
+        gHealMarks[free].c = (const void *)monst;
+        gHealMarks[free].turn = rogue.absoluteTurnNumber;
+    } // table full -- a missed heart is harmless
+}
+
+static boolean cosmeticRecentlyHealed(const creature *monst) {
+    for (short i = 0; i < MAX_COSMETIC_EFFECTS; i++) {
+        if (gHealMarks[i].c == (const void *)monst
+            && rogue.absoluteTurnNumber - gHealMarks[i].turn < (unsigned long)HEAL_BLINK_TURNS) {
+            return true;
+        }
+    }
+    return false;
+}
+
+// iOS port (Brogue SE): last-known position of each visible hasted creature, so the per-turn rebuild can detect
+// movement and spawn a "blink dash" contrail along the path it just took. Pointer-keyed (never dereferenced);
+// `seen` is reset each rebuild so an entry whose creature is gone/no-longer-hasted is dropped. Cosmetic-only.
+static struct { const void *c; pos last; boolean seen; } gHasteTrack[MAX_COSMETIC_EFFECTS];
+
+// iOS port (Brogue SE): spawn a single fading after-image of `glyph` on `leftCell` -- the tile a hasted creature
+// just vacated. As it keeps moving, each step drops another ghost, so a little fading train trails it (motion
+// without a full streak). A transient (frameLife-aged) cosmetic effect; cyan tint.
+static void cosmeticSpawnSpeedTrail(pos leftCell, enum displayGlyph glyph) {
+    const short i = cosmeticFreeSlot();
+    if (i < 0) {
+        return; // pool full -- a missed trail is harmless
+    }
+    gCosmeticEffects[i].active = true;
+    gCosmeticEffects[i].kind = CE_SPEED_TRAIL;
+    gCosmeticEffects[i].origin = leftCell; // the tile just left -- the after-image fades here
+    gCosmeticEffects[i].glyph = glyph;
+    gCosmeticEffects[i].tint = &cosmeticHasteColor;
+    gCosmeticEffects[i].maxRadius = 0;
+    gCosmeticEffects[i].channel = NULL;  // not creature-keyed; a static ghost that fades in place
+    gCosmeticEffects[i].frameAge = 0;
+    gCosmeticEffects[i].frameLife = NOISE_HASTE_TRAIL_FRAMES; // ages out on its own
+    gCosmeticEffects[i].turnsLeft = 0;
+}
+
+// iOS port (Brogue SE): process one hasted creature -- if it moved since the last rebuild, leave a fading dash
+// contrail; first sighting just records the position. Marks/creates its tracking slot (sweep drops the rest).
+static void cosmeticHasteTrackOne(creature *m) {
+    short i, slot = -1, free = -1;
+    if (m->status[STATUS_HASTED] <= 0 || !((m == &player) || canSeeMonster(m))) {
+        return;
+    }
+    for (i = 0; i < MAX_COSMETIC_EFFECTS; i++) {
+        if (gHasteTrack[i].c == (const void *)m) { slot = i; break; }
+        if (free < 0 && gHasteTrack[i].c == NULL) { free = i; }
+    }
+    if (slot < 0) { // first sighting this stretch -- record, no trail yet
+        if (free >= 0) {
+            gHasteTrack[free].c = (const void *)m;
+            gHasteTrack[free].last = m->loc;
+            gHasteTrack[free].seen = true;
+        }
+        return;
+    }
+    gHasteTrack[slot].seen = true;
+    const pos was = gHasteTrack[slot].last;
+    if ((was.x != m->loc.x || was.y != m->loc.y)
+        && distanceBetween(was, m->loc) <= NOISE_HASTE_TRAIL_MAX_DIST) {
+        cosmeticSpawnSpeedTrail(was, m->info.displayChar); // single after-image on the tile just left
+    }
+    gHasteTrack[slot].last = m->loc;
+}
+
+// iOS port (Brogue SE): per-turn -- leave dash contrails for every VISIBLE hasted creature (player included)
+// that moved. Entries for creatures no longer visible+hasted are dropped (seen-flag sweep). Called from
+// cosmeticRefreshStatusBlinks.
+static void cosmeticTrackHasteTrails(void) {
+    short i;
+    for (i = 0; i < MAX_COSMETIC_EFFECTS; i++) {
+        gHasteTrack[i].seen = false;
+    }
+    cosmeticHasteTrackOne(&player);
+    for (creatureIterator it = iterateCreatures(monsters); hasNextCreature(it);) {
+        cosmeticHasteTrackOne(nextCreature(&it));
+    }
+    for (i = 0; i < MAX_COSMETIC_EFFECTS; i++) {
+        if (!gHasteTrack[i].seen) {
+            gHasteTrack[i].c = NULL; // creature gone, no longer visible, or no longer hasted
+        }
+    }
 }
 
 // iOS port (Brogue SE): spawn a one-shot glyph flicker (the off-screen '?' tell) over a cell. Cosmetic;
@@ -2318,9 +2454,27 @@ void cosmeticSpawnRipplePlayer(short radius) {
     gCosmeticEffects[i].frameLife = radius * CE_RIPPLE_EXPAND_FRAMES;
 }
 
+// iOS port (Brogue SE): retire any in-flight player sound-footprint ripple. The ripple is a single-turn
+// footprint, but recordPlayerNoiseRippleIfNeeded only ever spawns one -- so a ripple lives out its frame
+// life. The cosmetic animator ticks only in the idle loop, so a ripple spawned right before a burst of
+// input (e.g. walking up to an unaware monster, then hammering clicks to melee it) freezes mid-expansion,
+// survives the whole fight, and only finishes animating once input stops -- surfacing seconds late, after
+// the monster is already dead, looking like noise from nowhere. Calling this on any turn that doesn't
+// itself warrant a ripple keeps the footprint tied to its turn. Cosmetic only; no RNG, nothing recorded.
+void cosmeticClearPlayerRipple(void) {
+    for (short j = 0; j < MAX_COSMETIC_EFFECTS; j++) {
+        if (gCosmeticEffects[j].active && gCosmeticEffects[j].kind == CE_RIPPLE_PLAYER) {
+            gCosmeticEffects[j].active = false;
+        }
+    }
+}
+
 // iOS port (Brogue SE): the environmental-sound impact ripple -- an amber wavefront expanding from `source`
 // along the impact sound map out to `radius`. SINGLETON (latest impact wins): a fresh throw supersedes a
-// stale ripple. Cosmetic; see docs/design/environmental-sounds.md.
+// stale ripple. Rendered brighter (NOISE_IMPACT_RIPPLE_STRENGTH) and slower/longer-lived
+// (CE_RIPPLE_IMPACT_EXPAND_FRAMES) than other ripples so it reads THROUGH a simultaneous tile flare without
+// any start-delay (the animator only ticks while input-idle, so a delayed ripple gets starved by the next
+// step). Cosmetic; see docs/design/environmental-sounds.md.
 void cosmeticSpawnRippleImpact(pos source, short radius) {
     if (radius < 1 || rogue.automationActive || rogue.autoPlayingLevel || rogue.playbackFastForward) {
         return;
@@ -2346,7 +2500,7 @@ void cosmeticSpawnRippleImpact(pos source, short radius) {
     gCosmeticEffects[i].maxRadius = radius;
     gCosmeticEffects[i].channel = &gCosmeticImpactRippleChannel;
     gCosmeticEffects[i].frameAge = 0;
-    gCosmeticEffects[i].frameLife = radius * CE_RIPPLE_EXPAND_FRAMES;
+    gCosmeticEffects[i].frameLife = radius * CE_RIPPLE_IMPACT_EXPAND_FRAMES; // slower expand rate => longer on-screen life
 }
 
 // iOS port (Brogue SE): the level-wide aggravate ripple -- a hot-red box wavefront expanding from `source`
@@ -2420,6 +2574,12 @@ void cosmeticRefreshInvestigateBlinks(void) {
     // Spawn for visible investigators that don't have a blink yet.
     for (creatureIterator it = iterateCreatures(monsters); hasNextCreature(it);) {
         creature *m = nextCreature(&it);
+        // DESIGN INVARIANT -- DO NOT add an MB_SUBMERGED guard here. The '?' investigate-blink is the
+        // deliberate, intended tell for a submerged-but-investigating creature (eel/kraken): its body is
+        // dimmed (getCellAppearance ~L1321) yet the '?' still reveals that *something* is searching that
+        // cell. We silence a submerged creature's audible/ripple noise elsewhere (announcePackRouse,
+        // monsterEmitMovementNoise), but the visual '?' must survive -- it is the player's only cue that a
+        // hidden hunter is on to them. Gate only on investigating + visible, never on submersion.
         if (!(m->bookkeepingFlags & MB_INVESTIGATING) || !canSeeMonster(m)) {
             continue;
         }
@@ -2449,6 +2609,153 @@ void cosmeticRefreshInvestigateBlinks(void) {
         gCosmeticEffects[i].frameLife = 0; // persistent; this rebuild manages its lifetime
         gCosmeticEffects[i].turnsLeft = 0; // unused for the investigate blink
     }
+}
+
+// iOS port (Brogue SE): pick the status-blink glyph + tint for a creature, by priority (one tell at a time):
+// on fire (NOT the MONST_FIERY trait -- only a real STATUS_BURNING, matching the light/extinguish systems) >
+// paralyzed/stunned > confused > shielded > healing. Returns false if the creature has no tell-worthy status.
+// (Buffs rank below threats/afflictions; among buffs, shielded -- "my damage is absorbed" -- outranks healing
+// -- "it's topping up".)
+static boolean statusBlinkGlyphFor(const creature *m, enum displayGlyph *glyph, const color **tint) {
+    if (m->status[STATUS_BURNING] > 0 && !(m->info.flags & MONST_FIERY)) {
+        *glyph = G_FIRE;
+        *tint = &cosmeticBurnColor;
+        return true;
+    }
+    if (m->status[STATUS_PARALYZED] > 0) {
+        *glyph = G_STUN_STAR; // a true star (ArialUnicodeMS), not an ASCII '*' -- the asterisk read as a gold pile.
+        *tint = &cosmeticStunColor;
+        return true;
+    }
+    if (m->status[STATUS_CONFUSED] > 0) {
+        *glyph = G_INVERTED_QUESTION; // inverted '¿' + purple tint -- distinct in BOTH shape and color from the white investigate '?'
+        *tint = &cosmeticConfusedColor;
+        return true;
+    }
+    if (m->status[STATUS_SHIELDED] > 0) {
+        *glyph = G_SHIELD_CREST; // '◈' crest + protective green -- ranked above healing (your damage being absorbed is the more actionable read)
+        *tint = &cosmeticShieldColor;
+        return true;
+    }
+    // Healing. Two triggers: a discrete heal just landed (heal(), not passive regen -- shown briefly even if it
+    // topped the creature off), or it is actively gaining HP from bloodwort spores underfoot (shown only while
+    // below max, so a full-HP creature loitering in spores doesn't wear a permanent heart).
+    if (!(m->info.flags & MONST_INANIMATE)
+        && !(m->bookkeepingFlags & MB_SUBMERGED)
+        && (cosmeticRecentlyHealed(m)
+            || (m->currentHP < m->info.maxHP && cellHasTerrainFlag(m->loc, T_CAUSES_HEALING)))) {
+        *glyph = G_HEART;
+        *tint = &cosmeticHealColor;
+        return true;
+    }
+    return false;
+}
+
+// iOS port (Brogue SE): resolve a status-blink channel (creature pointer) to a live creature -- the player or
+// a current monster -- else NULL. Pointer is only compared, never dereferenced for a freed creature.
+static creature *cosmeticCreatureForChannel(const void *ch) {
+    if (ch == (const void *)&player) {
+        return &player;
+    }
+    for (creatureIterator it = iterateCreatures(monsters); hasNextCreature(it);) {
+        creature *m = nextCreature(&it);
+        if ((const void *)m == ch) {
+            return m;
+        }
+    }
+    return NULL;
+}
+
+// iOS port (Brogue SE): ensure a visible creature with a tell-worthy status has exactly one status-blink.
+// (Existing blinks are followed/refreshed by the lifecycle pass below; this only spawns missing ones.)
+static void cosmeticEnsureStatusBlink(creature *m) {
+    enum displayGlyph glyph;
+    const color *tint;
+    short i;
+
+    if (!((m == &player) || canSeeMonster(m))
+        || !statusBlinkGlyphFor(m, &glyph, &tint)) {
+        return;
+    }
+    for (i = 0; i < MAX_COSMETIC_EFFECTS; i++) {
+        if (gCosmeticEffects[i].active && gCosmeticEffects[i].kind == CE_STATUS_BLINK
+            && gCosmeticEffects[i].channel == (const void *)m) {
+            return; // already has one (lifecycle pass kept its glyph/origin current)
+        }
+    }
+    i = cosmeticFreeSlot();
+    if (i < 0) {
+        return; // pool full -- a missed cosmetic tell is harmless
+    }
+    gCosmeticEffects[i].active = true;
+    gCosmeticEffects[i].kind = CE_STATUS_BLINK;
+    gCosmeticEffects[i].origin = m->loc;
+    gCosmeticEffects[i].glyph = glyph;
+    gCosmeticEffects[i].tint = tint;
+    gCosmeticEffects[i].maxRadius = 0;
+    gCosmeticEffects[i].channel = (const void *)m;
+    gCosmeticEffects[i].frameAge = 0;
+    gCosmeticEffects[i].frameLife = 0; // persistent; this rebuild manages its lifetime
+    gCosmeticEffects[i].turnsLeft = 0;
+}
+
+// iOS port (Brogue SE): rebuild the status-blink overlays -- a glyph that rides any VISIBLE creature (the
+// player included) carrying a confused / on-fire / paralyzed / ... status (one tell at a time, by priority).
+// Sibling to cosmeticRefreshInvestigateBlinks: called once per turn, blinks in the same global unison phase,
+// keyed by creature pointer. The lifecycle pass follows each blink to its creature's new cell and refreshes its
+// glyph (status may have changed), dropping it when the creature is gone, no longer visible, or no longer
+// afflicted.
+//
+// The tells STAY UP during interactive automation (rest / travel / auto-explore) -- resting to heal is exactly
+// when you want to see the '♥' pulse -- and the cosmetic animator is pumped through that stretch from the
+// platform's pauseForMilliseconds (the idle blink clock doesn't run during automation). Only fast replay
+// hard-suppresses them.
+void cosmeticRefreshStatusBlinks(void) {
+    short i;
+    if (rogue.playbackFastForward) {
+        for (i = 0; i < MAX_COSMETIC_EFFECTS; i++) {
+            if (gCosmeticEffects[i].active && gCosmeticEffects[i].kind == CE_STATUS_BLINK) {
+                gCosmeticEffects[i].active = false;
+            }
+            gHealMarks[i].c = NULL;
+            gHasteTrack[i].c = NULL;
+        }
+        return;
+    }
+    if (rogue.automationActive || rogue.autoPlayingLevel) {
+        // Dash trails are interactive-only: while automating, the player can jump many cells between rebuilds,
+        // which would spawn a bogus map-spanning streak. Skip tracking and reset the table (the status-blink
+        // rebuild below still runs, so the tells stay up).
+        for (i = 0; i < MAX_COSMETIC_EFFECTS; i++) {
+            gHasteTrack[i].c = NULL;
+        }
+    } else {
+        cosmeticTrackHasteTrails(); // spawn dash contrails for hasted creatures that moved this turn
+    }
+    // Lifecycle: follow + refresh valid blinks; drop the rest.
+    for (i = 0; i < MAX_COSMETIC_EFFECTS; i++) {
+        cosmeticEffect *e = &gCosmeticEffects[i];
+        if (!e->active || e->kind != CE_STATUS_BLINK) {
+            continue;
+        }
+        creature *c = cosmeticCreatureForChannel(e->channel);
+        enum displayGlyph glyph;
+        const color *tint;
+        if (c && ((c == &player) || canSeeMonster(c)) && statusBlinkGlyphFor(c, &glyph, &tint)) {
+            e->origin = c->loc;
+            e->glyph = glyph;   // status may have changed (e.g. doused, now confused)
+            e->tint = tint;
+        } else {
+            e->active = false;
+        }
+    }
+    // Spawn for the player and any visible monster newly carrying a status.
+    cosmeticEnsureStatusBlink(&player);
+    for (creatureIterator it = iterateCreatures(monsters); hasNextCreature(it);) {
+        cosmeticEnsureStatusBlink(nextCreature(&it));
+    }
+    // (No heal-marker decrement here: the heart's lifetime is a window on absoluteTurnNumber, debounced against
+    // this function running several times per turn -- see gHealMarks / cosmeticRecentlyHealed.)
 }
 
 // iOS port (Brogue SE): spawn (or refresh) the persistent '!' alert-blink for a VISIBLE monster that has just
@@ -2540,6 +2847,8 @@ static boolean cosmeticMarkCell(pos p, short nowIdx) {
 void clearCosmeticAnimations(void) {
     for (short i = 0; i < MAX_COSMETIC_EFFECTS; i++) {
         gCosmeticEffects[i].active = false;
+        gHealMarks[i].c = NULL; // drop stale "just healed" markers (pointers from the old level are invalid)
+        gHasteTrack[i].c = NULL;  // drop stale haste-trail tracking (same reason)
     }
     gCosmeticCellCount[0] = gCosmeticCellCount[1] = 0;
     gCosmeticCur = 0;
@@ -2587,8 +2896,13 @@ void advanceCosmeticAnimations(void) {
             || e->maxRadius < 1) {
             continue;
         }
-        const short waveR = e->frameAge / CE_RIPPLE_EXPAND_FRAMES + 1; // current wavefront radius
-        const short strength = NOISE_RIPPLE_MAX_STRENGTH * (e->maxRadius - waveR + 1) / e->maxRadius;
+        // iOS port (Brogue SE): impact ripples expand slower and hit brighter than other kinds, so they read
+        // through a simultaneous tile flare in the few frames the input-idle animator gives them.
+        const boolean isImpact = (e->kind == CE_RIPPLE_IMPACT);
+        const short expandFrames = isImpact ? CE_RIPPLE_IMPACT_EXPAND_FRAMES : CE_RIPPLE_EXPAND_FRAMES;
+        const short maxStrength = isImpact ? NOISE_IMPACT_RIPPLE_STRENGTH : NOISE_RIPPLE_MAX_STRENGTH;
+        const short waveR = e->frameAge / expandFrames + 1; // current wavefront radius
+        const short strength = maxStrength * (e->maxRadius - waveR + 1) / e->maxRadius;
         if (e->kind == CE_RIPPLE_MONSTER || e->kind == CE_RIPPLE_AGGRAVATE) { // hollow Chebyshev box (through walls)
             short dx, dy; // hollow Chebyshev wavefront at radius waveR around the monster's cell
             for (dx = -waveR; dx <= waveR; dx++) {
@@ -2624,6 +2938,26 @@ void advanceCosmeticAnimations(void) {
         }
     }
 
+    // 2a'. haste after-images: a single fading ghost of the creature's glyph on the tile it just left, dimming
+    // as it ages out. A fast mover drops one each step, so a short train of ghosts trails it -- motion, no streak.
+    for (i = 0; i < MAX_COSMETIC_EFFECTS; i++) {
+        cosmeticEffect *e = &gCosmeticEffects[i];
+        if (!e->active || e->kind != CE_SPEED_TRAIL) {
+            continue;
+        }
+        const short strength = NOISE_HASTE_TRAIL_STRENGTH * (e->frameLife - e->frameAge) / e->frameLife;
+        if (strength <= 0 || !coordinatesAreInMap(e->origin.x, e->origin.y) || !cosmeticMarkCell(e->origin, nowIdx)) {
+            continue;
+        }
+        enum displayGlyph dchar; color fc, bc;
+        getCellAppearance(e->origin, &dchar, &fc, &bc);
+        bakeColor(&bc);
+        color ghost = cosmeticHasteColor;
+        applyColorAverage(&ghost, &bc, 100 - strength); // fade the cyan toward the cell's own background as it ages
+        bakeColor(&ghost);
+        plotCharWithColor(e->glyph, mapToWindow(e->origin), &ghost, &bc);
+    }
+
     // 2b. glyph kinds second (plotChar; override any hilite on the same cell)
     for (i = 0; i < MAX_COSMETIC_EFFECTS; i++) {
         cosmeticEffect *e = &gCosmeticEffects[i];
@@ -2639,6 +2973,23 @@ void advanceCosmeticAnimations(void) {
         if (show && coordinatesAreInMap(e->origin.x, e->origin.y)) {
             enum displayGlyph dchar; color fc, bc;
             cosmeticMarkCell(e->origin, nowIdx); // ensure tracked (idempotent if a ripple already marked it)
+            getCellAppearance(e->origin, &dchar, &fc, &bc);
+            bakeColor(&fc);
+            bakeColor(&bc);
+            plotCharWithColor(e->glyph, mapToWindow(e->origin), e->tint ? e->tint : &fc, &bc);
+        }
+    }
+
+    // 2c. status blinks last (confused/on-fire/stunned), so a status tell paints OVER any investigate '?' or
+    // alert '!' sharing the cell -- a creature's affliction is the more important read.
+    for (i = 0; i < MAX_COSMETIC_EFFECTS; i++) {
+        cosmeticEffect *e = &gCosmeticEffects[i];
+        if (!e->active || e->kind != CE_STATUS_BLINK || !blinkOn) {
+            continue;
+        }
+        if (coordinatesAreInMap(e->origin.x, e->origin.y)) {
+            enum displayGlyph dchar; color fc, bc;
+            cosmeticMarkCell(e->origin, nowIdx);
             getCellAppearance(e->origin, &dchar, &fc, &bc);
             bakeColor(&fc);
             bakeColor(&bc);
@@ -5300,13 +5651,18 @@ short printMonsterInfo(creature *monst, short y, boolean dim, boolean highlight)
         upperCase(monstName);
 
         if (monst == &player) {
-            // iOS port (Brogue SE): while the Lone Wolf solo aura is active, title the player "Lone Wolf"
-            // in place of "YOU". The (lit)/(dark) illumination tag (with its leading space) is preserved
-            // -- both fit the 20-col sidebar; only the longer "(invisible)" tag is suppressed on the rare
+            // iOS port (Brogue SE): while the Lone Wolf solo aura is active, title the player "Lone Wolf <N>"
+            // (Roman tier, 1..LONE_WOLF_MAX_TIER) in place of "YOU", so the current tier is legible at a
+            // glance. "Lone Wolf IV" is 12 cols; the (lit)/(dark) illumination tag (with its leading space)
+            // still fits the 20-col sidebar -- only the longer "(invisible)" tag is suppressed on the rare
             // invisible turn so nothing is cut off.
             const boolean loneWolf = (rogue.loneWolfTier > 0);
             if (loneWolf) {
-                strcpy(monstName, "Lone Wolf");
+                static const char *loneWolfTierNumerals[LONE_WOLF_MAX_TIER + 1] = {
+                    "", "I", "II", "III", "IV", "V",
+                };
+                const short tier = clamp(rogue.loneWolfTier, 1, LONE_WOLF_MAX_TIER);
+                sprintf(monstName, "Lone Wolf %s", loneWolfTierNumerals[tier]);
             }
             strcat(monstName, " xxxx");
             encodeMessageColor(monstName, strlen(monstName) - 4, &monstForeColor);

@@ -295,7 +295,7 @@ Source: `GlobalsBrogue.c:796` (`hordeCatalog_Brogue`). `brogueGameConst.numberHo
 | rat | — | 1–5 | 150 | |
 | kobold | — | 1–6 | 150 | |
 | jackal | — | 1–3 | 100 | |
-| jackal ×1 | jackal (1–3) | 3–7 | 50 | |
+| jackal ×1 | jackal (1–3) | 3–7 | 50 | **den: dense foliage** (SE) ¹ |
 | eel | — | 2–17 | 100 | DEEP_WATER |
 | monkey | — | 2–9 | 50 | |
 | bloat | — | 2–13 | 30 | |
@@ -357,6 +357,14 @@ Source: `GlobalsBrogue.c:796` (`hordeCatalog_Brogue`). `brogueGameConst.numberHo
 | kraken ×1 | kraken (5–10, clump 2) | 30–deepest−1 | 100 | DEEP_WATER |
 | tentacle horror ×2 | tentacle horror (1–3), revenant (2–4) | 32–deepest−1 | 20 | |
 | dragon ×1 | dragon (3–5) | 34–deepest−1 | 20 | |
+
+> ¹ **SE — jackal-pack den.** The `Terrain` column normally lists a horde's `spawnsIn` requirement. The jackal
+> *pack* row instead carries a `hordeType.spawnDF` value (SE-only field): at **level generation** `spawnHorde`
+> lays `DF_JACKAL_DEN_FOLIAGE` at the leader's cell — a vision-blocking dense-foliage core with a grass apron,
+> so the den is an ambush/stealth zone. The lone-jackal row (depths 1–3) has no den. Wandering packs that spawn
+> mid-game get no foliage (gated on `!levels[…].visited`). A trap can't end up buried under the den — see the
+> "foliage never on a trap" rule in [TERRAIN_AUDIT.md](TERRAIN_AUDIT.md). Reusable: any future lair monster is
+> one `spawnDF` catalog value.
 
 ### 7.3 Summon hordes (`HORDE_IS_SUMMONED`)
 

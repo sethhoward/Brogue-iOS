@@ -49,8 +49,15 @@ class SKViewPort: SKView {
 
     /// Height of the playable area in points, accounting for whether padding is currently
     /// applied. Used by touch→cell math in both Swift and Obj-C.
+    ///
+    /// iOS port (iBrogue): sized from the view's own `bounds`, NOT `UIScreen.main.bounds`. On
+    /// iOS the app is always full-screen so the two agreed, but under Mac Catalyst (and iPad
+    /// Split View / Stage Manager) the window is smaller than — and resizable independently of —
+    /// the display. Keying hit-testing off the screen while the content fills the window put the
+    /// examine cursor several tiles off (worse the more window and display diverged); the view
+    /// bounds are the rectangle the scene actually renders into, so point→cell now matches.
     @objc public var effectiveHeightPoints: CGFloat {
-        let h = UIScreen.main.bounds.size.height
+        let h = boundsSizeSnapshot.height
         return rogueScene.paddingEnabled ? h - SKViewPort.bottomReservePoints : h
     }
 
@@ -58,7 +65,7 @@ class SKViewPort: SKView {
     /// dynamic-island safe-area insets, but only when padding is enabled
     /// (i.e. during gameplay — title and menu screens fill the full width).
     @objc public var effectiveWidthPoints: CGFloat {
-        return UIScreen.main.bounds.size.width - leftInsetPoints - rightInsetPoints
+        return boundsSizeSnapshot.width - leftInsetPoints - rightInsetPoints
     }
 
     /// Leading inset in points. Returns 0 outside of gameplay so the title /
@@ -79,6 +86,19 @@ class SKViewPort: SKView {
     var rogueScene: RogueScene!
     var hWindow = UIScreen.main.bounds.size.width
     var vWindow = UIScreen.main.bounds.size.height
+
+    /// iOS port (iBrogue): main-thread snapshot of `bounds.size`. `UIView.bounds` is a
+    /// main-thread-only API, but the engine reads `effectiveWidthPoints`/`effectiveHeightPoints`
+    /// from its background thread (via the ObjC bridges + host protocol), which tripped the
+    /// Main Thread Checker. We refresh this snapshot in `layoutSubviews` (always on the main
+    /// thread) and serve the geometry accessors from it, so they touch no UIView API off-main.
+    /// Seeded with the full screen size for the window between init and the first layout pass.
+    private var boundsSizeSnapshot: CGSize = UIScreen.main.bounds.size
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        boundsSizeSnapshot = bounds.size
+    }
 
     required init?(coder aDecoder: NSCoder) {
         let rect = UIScreen.main.bounds

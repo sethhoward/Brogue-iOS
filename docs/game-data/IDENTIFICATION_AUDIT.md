@@ -229,22 +229,28 @@ category and `WEAPON(1)`/`ARMOR(2)` precede the consumables, an unsensed good/ba
 first thing a captive points at. No RNG. Also fires for tunnel-freed captives
 (`freeCaptivesEmbeddedAt` → `freeCaptive`), but not for clone-made allies.
 
-### 5h. Ring of awareness — arrival floor sense **[iOS]**
-`senseFloorPolarityFromAwareness()` ([Items.c](../../BrogueSE/Engine/Items.c), after
+### 5h. Ring of clairvoyance — arrival floor sense **[iOS]**
+`senseFloorPolarityFromClairvoyance()` ([Items.c](../../BrogueSE/Engine/Items.c), after
 `throwDetectMagicOnFloor`), called once from `startLevel()` on **first arrival** at a level (the
-`!visited` branch, beside the room-machine sense). A worn ring of awareness senses the polarity of
+`!visited` branch, beside the room-machine sense). A worn ring of clairvoyance senses the polarity of
 items lying on the **floor** of the new level — *secret rooms included* — lighting each one's map aura
 (`ITEM_DETECTED` cell flag) and recording it via `detectMagicOnItem` (kind-level for consumables, so it
-feeds §3a/§3b). It's the passive, per-floor twin of §5b: **identical eligibility** (`CAN_BE_DETECTED`,
-undiscovered, non-neutral) and recording, but a *standing* radar rather than a thrown consumable.
-- **Scales with the ring**, gated on `awarenessBonus > 0` (no ring / cursed → senses nothing, no RNG).
-  `enchant = awarenessBonus / 20`; per-item chance = `min(90, 10 + 10·(enchant+1))` (+1 = 30% … **+7 =
-  90% cap**); rolls = `1 + max(0, enchant − 7)` (+8 → 2 rolls, +9 → 3, …). Each *successful* roll reveals
-  one more distinct random hidden item (partial Fisher-Yates; failed rolls waste none).
+feeds §3a/§3b). **Polarity only — not a full `identify()`:** a floor potion/scroll's exact *kind* stays
+hidden, and gear shows its good/bad aura, never the enchant number. *(Moved 2026-06-28 off the ring of
+awareness.)* The pool is **every non-neutral magical floor item** (`CAN_BE_DETECTED`, non-neutral) —
+*including* ones whose polarity you already know (identified kind, or `ITEM_MAGIC_DETECTED`): a known item
+teaches nothing, but lighting its map aura is a location / secret-room breadcrumb. Still-unknown items are
+**prioritized** (stable-partitioned to the front, drawn first to learn their polarity); the N only spills onto
+already-known items (location mark only) once the unknowns run out. It's a *standing* radar twin of §5b.
+- **Count scales directly with the ring**, gated on `clairvoyance > 0` (no ring / cursed → senses nothing,
+  no RNG). It senses **exactly N = `rogue.clairvoyance` items, guaranteed** (no per-item chance) — `enchant`
+  is the raw net enchant, **not** ×20 like `awarenessBonus`. **Uncapped** beyond floor contents: if fewer
+  than N eligible items exist, all are sensed; if more, N are chosen at **random** (partial Fisher-Yates).
+  This is the old awareness sense "but better" — the ring level *is* the number of auras revealed.
 - **First arrival only** (closes the stair-bounce re-roll exploit, same as the machine sense). **No
   visibility filter** — it runs before the player is positioned, and detecting a soon-to-be-visible item
-  still records its polarity for the pack, so eligibility matches §5b exactly. Action-triggered RNG on
-  the gameplay stream, replay-stable. See IOS_MODIFICATIONS.md (2026-06-15).
+  still records its polarity for the pack. Action-triggered RNG on the gameplay stream, replay-stable. See
+  IOS_MODIFICATIONS.md (2026-06-28; supersedes 2026-06-15).
 
 ---
 
@@ -336,8 +342,7 @@ One place for every scalar, so balancing doesn't mean spelunking ten files.
 | Ring of wisdom speedup | −10% threshold per ring level; clamped (max 80% faster, max 2× slower) | [Items.c:8366–8369](../../BrogueSE/Engine/Items.c) |
 | Detect magic spread (drink & throw) | `rand_range(1, 2 + wisdomBonus)` items | [Items.c:8458,8512](../../BrogueSE/Engine/Items.c) |
 | Eating insight gate | no creature in `MONSTER_TRACKING_SCENT` | [Items.c:8409](../../BrogueSE/Engine/Items.c) |
-| Awareness floor-sense chance (§5h) | `min(90, 10 + 10·(enchant+1))` per item; enchant = `awarenessBonus/20` | [Items.c](../../BrogueSE/Engine/Items.c) `senseFloorPolarityFromAwareness` |
-| Awareness floor-sense rolls (§5h) | `1 + max(0, enchant − 7)` (each success = 1 item) | [Items.c](../../BrogueSE/Engine/Items.c) `senseFloorPolarityFromAwareness` |
+| Clairvoyance floor-sense count (§5h) | `N = rogue.clairvoyance`, **guaranteed** (uncapped, ≤ eligible floor items); N random picks, polarity only | [Items.c](../../BrogueSE/Engine/Items.c) `senseFloorPolarityFromClairvoyance` |
 
 ### Theft desirability ([Combat.c:398](../../BrogueSE/Engine/Combat.c) `rateItemStealDesirability`; per-thief weights are now component data in the catalog `steal` field — see [reusable-components.md](../guides/reusable-components.md))
 | Thief | Bonuses (over base 10, additive) | Random pick |

@@ -157,7 +157,13 @@ Rolled with a **substantive `rand_percent`** (it changes monster behavior).
 [Monsters.c:1928](../../BrogueSE/Engine/Monsters.c). On a hit, *how* it's heard:
 
 - **LOUD** (`playerLoudness >= NOISE_HEAR_AGGRO_LOUDNESS(20)` **or** `soundDist <= 1`) → `wakeUp()`:
-  full hunt **and** rouses the nearby horde. Most melee is this tier — **except a clean hit with a
+  full hunt **and** rouses the nearby horde. When that broadcast actually flips ≥1 dormant packmate to
+  hunting, the crier emits a **rallying-cry tell** (`announcePackRouse`): the amber impact ripple from its
+  cell + a message — named if visible (`"the jackal rouses its companions!"`), generic `"you hear a rallying
+  cry …"` if only within earshot (`soundDistanceAt <= NOISE_PACK_ROUSE_EARSHOT(16)`), silent beyond. Fires
+  once per genuine pack-awakening (self-dedupes: an already-hunting pack rouses no one), across *every*
+  `wakeUp` trigger (sound, sight-while-sleeping, melee-on-a-sleeper), enemy criers only. Cosmetic + message;
+  no RNG/state. Most melee is this tier — **except a clean hit with a
   LIGHT-tier weapon** (dagger/rapier/whip/unarmed, spike 12), which falls below 20 and so reaches distant
   bystanders only as FAINT (§3.2.1). The monster you actually strike wakes from damage regardless; the
   tier governs the *bystanders*. A LIGHT-weapon **miss** (12 + 10 penalty = 22) crosses back to LOUD.
@@ -234,7 +240,7 @@ if (soundDist > audibleRadius || sealed off) -> no roll, inaudible
 
 // (2) PROBABILITY — within the ear, how likely is THIS step heard?
 ambient = NOISE_BASE_PERCEPTION(8) + awarenessEnchant*NOISE_AWARENESS_PER_ENCHANT(2)
-        + distanceModifier         // sound map: near-field(d<=1) +10, else -2/tile
+        + distanceModifier         // sound map: near-field(d<=2) +20, else -2/tile
         + terrainNoiseModifier     // emission, §3.4
         + (playerAdjacentToClosedDoor ? NOISE_DOOR_LISTEN_BONUS(8) : 0)
         + (justRested ? NOISE_REST_PERCEPTION_BONUS(6) : 0)
@@ -469,6 +475,14 @@ point, not a guarantee.)
 - **`(Investigating)`** appears in the monster's sidebar status while `MB_INVESTIGATING`.
 - **`?` blink** — an investigating monster's glyph ambient-blinks with `?` (slow, ~0.5s/half), riding
   the cosmetic animation layer's idle tick. It lives as long as the monster holds `MB_INVESTIGATING`.
+  **Design invariant — the `?` survives submersion.** A submerged-but-investigating creature (eel, bog
+  monster, kraken) still shows the `?` even though its body is rendered dimmed (`getCellAppearance`). We
+  deliberately silence a submerged creature's *audible/ripple* noise — the movement "heard something"
+  ripple (`monsterEmitMovementNoise`) and the rallying-cry (`announcePackRouse`) both hard-skip
+  `MB_SUBMERGED` — so the `?` blink is the player's **only** cue that a hidden hunter is on to them.
+  `cosmeticRefreshInvestigateBlinks` (IO.c) therefore gates the blink **only** on investigating + visible
+  and must **never** add an `MB_SUBMERGED` guard; the spawn site carries a `DESIGN INVARIANT` code comment
+  saying so. (Removing the `?` for submergers would make them an undetectable noise-suppression exploit.)
 - **`!` blink** — when a **visible** monster *locks onto* you (hears you loud / spots you), a reddish
   `!` rides its glyph the same way the `?` does, blinking in unison. Unlike the `?` it is **turn-bounded**:
   it follows the monster for `NOISE_ALERT_BLINK_TURNS` player-turns (baseline **2**, adjustable in
@@ -507,6 +521,23 @@ point, not a guarantee.)
 The `?`/`!`/ripple tells are drawn on the **cosmetic animation layer** — see
 [../guides/cosmetic-animation-layer.md](../guides/cosmetic-animation-layer.md). The haptics cross to the
 platform via the `playDetectionHaptic:` host hook (`BrogueCEHost` → `SEBridge.mm` → `BrogueViewController`).
+
+**Tells during automated movement (travel / auto-explore).** All of the above are drawn on the cosmetic
+layer, whose animator (`advanceCosmeticAnimations`) ticks **only in the bridge idle loop** — so it is dormant
+for the whole duration of a multi-step travel (`travelMap`/`travelRoute`) or auto-explore (`explore`), which
+hold `rogue.automationActive` until they finish. Tells that would fire mid-sequence are therefore dropped at
+the moment they'd occur (single-step keyboard moves are unaffected — each returns to the idle loop). To keep
+fast movement from hiding what you woke, the tells are **re-emitted once at the automation-end seam** (the
+first moment the animator wakes), in `showTravelEndNoiseFeedback()`: the player ripple is recomputed for the
+final cell; the `?` investigate blinks are rebuilt from the current visible `MB_INVESTIGATING` set; and the
+event-edge `!` / off-screen `?` — which fire at the *instant* of hearing, with no live state to rebuild — are
+captured per-monster via `MB_HEARD_DURING_AUTOMATION` (`Fl(29)`) at the `checkPlayerHeard` sites and drained
+by `flushAutomationHeardTells()`, re-emitted by current state (visible+hunting → `!`, off-screen → `?`) with a
+single condensed haptic. The "Something nearby stirs" message isn't re-emitted (it isn't gated, so it already
+fired live and self-coalesces). Note the **player footprint ripple is a single-turn effect**:
+`recordPlayerNoiseRippleIfNeeded()` retires any stale one (`cosmeticClearPlayerRipple()`) on every turn that
+doesn't itself warrant a ripple, so one spawned just before a burst of input (e.g. walking up to a monster via
+travel, then click-meleeing it) can't freeze and replay seconds later, after the fight.
 
 `D_NOISE_DEBUG` ([Rogue.h](../../BrogueSE/Engine/Rogue.h), **default 0**) prints a raw developer log line per
 detection channel ("a monster hears something" / "has heard you" / "has spotted you"). Off by default now

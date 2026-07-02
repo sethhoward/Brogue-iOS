@@ -130,22 +130,22 @@ const autoGenerator autoGeneratorCatalog_Brogue[] = {
     {TORCH_WALL,                DUNGEON,0,                          0,                          WALL,       NOTHING,    6,      DEEPEST_LEVEL-1,5,      -200,   70,         12},
 
     // Pre-revealed traps
-    {GAS_TRAP_POISON,           DUNGEON,0,                          0,                          FLOOR,      NOTHING,    2,      4,              20,     0,      0,          1},
+    {GAS_TRAP_POISON,           DUNGEON,0,                          0,                          FLOOR,      NOTHING,    2,      4,              20,     0,      0,          1,      DF_BONES,           40}, // iOS port (Brogue SE): caustic trap amid bones
     {NET_TRAP,                  DUNGEON,0,                          0,                          FLOOR,      NOTHING,    2,      5,              20,     0,      0,          1},
     {0,                         0,      0,                          MT_PARALYSIS_TRAP_AREA,     FLOOR,      NOTHING,    2,      6,              20,     0,      0,          1},
     {ALARM_TRAP,                DUNGEON,0,                          0,                          FLOOR,      NOTHING,    4,      7,              20,     0,      0,          1},
     {GAS_TRAP_CONFUSION,        DUNGEON,0,                          0,                          FLOOR,      NOTHING,    2,      10,             20,     0,      0,          1},
-    {FLAMETHROWER,              DUNGEON,0,                          0,                          FLOOR,      NOTHING,    4,      12,             20,     0,      0,          1},
+    {FLAMETHROWER,              DUNGEON,0,                          0,                          FLOOR,      NOTHING,    4,      12,             20,     0,      0,          1,      DF_TRAP_DRY_GRASS,  40}, // iOS port (Brogue SE): fire trap ringed with dry grass
     {FLOOD_TRAP,                DUNGEON,0,                          0,                          FLOOR,      NOTHING,    10,     14,             20,     0,      0,          1},
 
     // Hidden traps
-    {GAS_TRAP_POISON_HIDDEN,    DUNGEON,0,                          0,                          FLOOR,      NOTHING,    5,      DEEPEST_LEVEL-1,20,     100,    0,          3},
+    {GAS_TRAP_POISON_HIDDEN,    DUNGEON,0,                          0,                          FLOOR,      NOTHING,    5,      DEEPEST_LEVEL-1,20,     100,    0,          3,      DF_BONES,           40}, // iOS port (Brogue SE): caustic trap amid bones
     {NET_TRAP_HIDDEN,           DUNGEON,0,                          0,                          FLOOR,      NOTHING,    6,      DEEPEST_LEVEL-1,20,     100,    0,          3},
     {0,                         0,      0,                          MT_PARALYSIS_TRAP_HIDDEN_AREA, FLOOR,   NOTHING,    7,      DEEPEST_LEVEL-1,20,     100,    0,          3},
     {ALARM_TRAP_HIDDEN,         DUNGEON,0,                          0,                          FLOOR,      NOTHING,    8,      DEEPEST_LEVEL-1,20,     100,    0,          2},
     {TRAP_DOOR_HIDDEN,          DUNGEON,0,                          0,                          FLOOR,      NOTHING,    9,      DEEPEST_LEVEL-1,20,     100,    0,          2},
     {GAS_TRAP_CONFUSION_HIDDEN, DUNGEON,0,                          0,                          FLOOR,      NOTHING,    11,     DEEPEST_LEVEL-1,20,     100,    0,          3},
-    {FLAMETHROWER_HIDDEN,       DUNGEON,0,                          0,                          FLOOR,      NOTHING,    13,     DEEPEST_LEVEL-1,20,     100,    0,          3},
+    {FLAMETHROWER_HIDDEN,       DUNGEON,0,                          0,                          FLOOR,      NOTHING,    13,     DEEPEST_LEVEL-1,20,     100,    0,          3,      DF_TRAP_DRY_GRASS,  40}, // iOS port (Brogue SE): fire trap ringed with dry grass
     {FLOOD_TRAP_HIDDEN,         DUNGEON,0,                          0,                          FLOOR,      NOTHING,    15,     DEEPEST_LEVEL-1,20,     100,    0,          3},
     {0,                         0,      0,                          MT_SWAMP_AREA,              FLOOR,      NOTHING,    1,      DEEPEST_LEVEL-1,30,     0,      0,          2},
     {0,                         0,      DF_SUNLIGHT,                0,                          FLOOR,      NOTHING,    0,      5,              15,     500,    -150,       10},
@@ -626,7 +626,7 @@ const blueprint blueprintCatalog_Brogue[] = {
     {1,DEEPEST_LEVEL}, {40, 40},   0,      2,          0,                  (BP_NO_INTERIOR_FLAG), {
         {0,         STATUE_INERT,DUNGEON,       {3, 3},     3,          0,          -1,         MK_SENTINEL,    2,              0,          0,          (MF_NOT_IN_HALLWAY | MF_TREAT_AS_BLOCKING | MF_IN_VIEW_OF_ORIGIN)},
         {DF_ASH,    0,          0,              {2, 3},     0,          0,          -1,         0,              0,              0,          0,          0}}},
-    // iOS port (iBrogue): altars of insight -- force-built at depths 5 and 15 (see addMachines); occupies
+    // iOS port (iBrogue): altars of insight -- force-built at depths 6 and 12 (see addMachines); occupies
     // the variant-specific reward slot (index 72 = MT_INSIGHT_ALTAR). Force-only: no BP_REWARD, freq 0, so
     // it never enters the random reward raffle. The blueprint builds ONLY the carpeted room; the two altars
     // are then placed in addMachines in a fixed "s . o" arrangement (payment west, one-tile gap, insight
@@ -736,6 +736,7 @@ itemTable potionTable_Brogue[] = {
     {"steam",               itemColors[13], "", 0,  300,    0, 0, {0,0,0}, false, false, -1, false, "Scalding vapor strains against the stopper. Released, it boils outward into a searing cloud that burns anything caught within it."},
     {"ice",                 itemColors[12], "", 0,  300,    0, 0, {5,5,0}, false, false, -1, false, "Aching cold radiates through the glass. Hurled at a creature it encases the victim in ice, frozen helpless before thawing into a sluggish chill; uncorked in hand, it freezes you instead."},
     {"water",               itemColors[5],  "", 0,  300,    0, 0, {0,0,0}, false, false, 1,  false, "Plain captured water, heavier than it looks. Drunk, it douses flames and flushes away the fog of confusion, hallucination, and nausea. Dashed against the ground instead, it floods the area into a wide pool -- treacherous footing that conducts a lightning bolt's shock and washes away the scent you leave behind."},
+    {"smoke",               itemColors[13], "", 0,  300,    0, 0, {0,0,0}, false, false, -1, false, "Captured smoke roils behind the glass. Hurled, it bursts into a thick, drifting screen that blinds everyone caught inside -- you and your pursuers alike -- though sound still carries through it. The dense core soon thins and clears on its own."},
 };
 
 itemTable scrollTable_Brogue[] = {
@@ -803,7 +804,7 @@ const hordeType hordeCatalog_Brogue[] = {
     {MK_RAT,            0,      {0},                                    {{0}},                          1,      5,      150},
     {MK_KOBOLD,         0,      {0},                                    {{0}},                          1,      6,      150},
     {MK_JACKAL,         0,      {0},                                    {{0}},                          1,      3,      100},
-    {MK_JACKAL,         1,      {MK_JACKAL},                            {{1, 3, 1}},                    3,      7,      50},
+    {MK_JACKAL,         1,      {MK_JACKAL},                            {{1, 3, 1}},                    3,      7,      50,     .spawnDF = DF_JACKAL_DEN_FOLIAGE}, // iOS port (Brogue SE): pack dens in dense foliage
     {MK_EEL,            0,      {0},                                    {{0}},                          2,      17,     100,        DEEP_WATER},
     {MK_MONKEY,         0,      {0},                                    {{0}},                          2,      9,      50},
     {MK_BLOAT,          0,      {0},                                    {{0}},                          2,      13,     30},

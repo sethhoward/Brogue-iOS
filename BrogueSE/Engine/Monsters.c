@@ -1077,6 +1077,16 @@ creature *spawnHorde(short hordeID, pos loc, unsigned long forbiddenFlags, unsig
 
     spawnMinions(hordeID, leader, false, true);
 
+    // iOS port (Brogue SE): a horde with a spawnDF dresses its den at level generation -- e.g. a jackal
+    // pack lays a core of dense foliage (vision-blocking cover, so the den is an ambush/stealth zone) with
+    // a grass apron. Gated to generation only (the level isn't "visited" until the player arrives), so a
+    // pack that *wanders in* mid-game doesn't make grass materialize in already-explored dungeon. The
+    // spread runs on the substantive RNG (spawnMapDF's rand_percent), so it replays deterministically from
+    // the seed. The "no foliage on a trap" rule lives in fillSpawnMap, so a den can't bury a trap (BrogueCE #832).
+    if (theHorde->spawnDF && !levels[rogue.depthLevel - 1].visited) {
+        spawnDungeonFeature(loc.x, loc.y, &dungeonFeatureCatalog[theHorde->spawnDF], false, true);
+    }
+
     return leader;
 }
 
@@ -1802,7 +1812,36 @@ void alertMonster(creature *monst) {
 #endif
 }
 
+// iOS port (Brogue SE): a creature that just roused dormant packmates lets out a rallying cry -- reuse the
+// (bright/slow) amber impact ripple from its cell, plus a one-line tell: named if you can see it, a generic
+// "you hear ..." if it's only within earshot (soundDistanceAt), nothing if out of both. Cosmetic + message
+// only -- the actual rousing already happened in wakeUp; no RNG, no state change, so save/replay-safe.
+static short impactRippleRadius(short strength); // defined beside emitEnvironmentalNoise, below
+static void announcePackRouse(creature *monst) {
+    if (monst->bookkeepingFlags & MB_SUBMERGED) {
+        return; // a submerged crier (eel/kraken) rouses its pack unseen and silent -- matches
+                // monsterEmitMovementNoise; the splash on emerge is the real tell, not a rallying cry
+    }
+    const boolean seen = canSeeMonster(monst);
+    const boolean heard = !seen
+                          && soundDistanceAt(monst->loc) <= NOISE_PACK_ROUSE_EARSHOT; // < 30000 implied by the bound
+    if (!seen && !heard) {
+        return; // out of sight and earshot -- the player perceives nothing
+    }
+    recomputeImpactSoundMap(monst->loc); // the amber ripple bends around walls from the crier's cell
+    cosmeticSpawnRippleImpact(monst->loc, impactRippleRadius(NOISE_ALTAR_GRIND));
+    if (seen) {
+        char buf[DCOLS * 3], monstName[COLS];
+        monsterName(monstName, monst, true);
+        sprintf(buf, "%s rouses its companions!", monstName); // first letter auto-capitalized on display
+        messageWithColor(buf, &badMessageColor, 0);
+    } else {
+        messageWithColor("you hear a rallying cry echo through the dungeon.", &badMessageColor, 0);
+    }
+}
+
 void wakeUp(creature *monst) {
+    short rousedCount = 0; // iOS port (Brogue SE): dormant packmates this call actually flips to hunting
     if (monst->creatureState != MONSTER_ALLY) {
         alertMonster(monst);
     }
@@ -1810,17 +1849,32 @@ void wakeUp(creature *monst) {
     for (creatureIterator it = iterateCreatures(monsters); hasNextCreature(it);) {
         creature *teammate = nextCreature(&it);
         if (monst != teammate && monstersAreTeammates(monst, teammate) && teammate->creatureMode == MODE_NORMAL) {
-            if (teammate->creatureState == MONSTER_SLEEPING
-                || teammate->creatureState == MONSTER_WANDERING) {
+            const boolean wasDormant = (teammate->creatureState == MONSTER_SLEEPING
+                                        || teammate->creatureState == MONSTER_WANDERING);
+            if (wasDormant) {
                 teammate->ticksUntilTurn = max(100, teammate->ticksUntilTurn);
             }
             if (monst->creatureState != MONSTER_ALLY) {
                 teammate->creatureState =
                 (teammate->creatureMode == MODE_PERM_FLEEING ? MONSTER_FLEEING : MONSTER_TRACKING_SCENT);
                 updateMonsterState(teammate);
+                if (wasDormant) {
+                    rousedCount++; // genuinely roused (was asleep/wandering), not already hunting
+                }
             }
         }
     }
+#if NOISE_SYSTEM_ENABLED
+    // Telegraph a genuine pack-awakening: at least one dormant packmate just started hunting, and the crier
+    // is a live enemy (not an ally/captive whose "wakeUp" is the freeing/summon path). Deduplicates naturally
+    // -- a second loud noise that turn finds them already hunting (rousedCount == 0), so no repeat cry.
+    if (rousedCount > 0
+        && monst->creatureState != MONSTER_ALLY
+        && !(monst->bookkeepingFlags & MB_CAPTIVE)
+        && monstersAreEnemies(&player, monst)) {
+        announcePackRouse(monst);
+    }
+#endif
 }
 
 static boolean monsterCanShootWebs(creature *monst) {
@@ -1990,8 +2044,16 @@ static enum monsterHearing checkPlayerHeard(creature *monst) {
         const boolean newlyAlerted = (monst->creatureState != MONSTER_TRACKING_SCENT);
         wakeUp(monst); // full hunt + alert nearby horde-mates (alertMonster + ticks, like being spotted)
         if (canSeeMonster(monst)) {
-            cosmeticSpawnAlertBlink(monst); // '!' rides the visible monster for NOISE_ALERT_BLINK_TURNS turns
+            cosmeticSpawnAlertBlink(monst); // '!' rides the visible monster for NOISE_ALERT_BLINK_TURNS turns (no-ops mid-automation)
+            // iOS port (Brogue SE): mid-travel/auto-explore the animator is dormant so the '!' was dropped --
+            // flag the monster so flushAutomationHeardTells() re-emits the tell once travel ends. See PERCEPTION_AUDIT.md.
+            if (rogue.automationActive) {
+                monst->bookkeepingFlags |= MB_HEARD_DURING_AUTOMATION;
+            }
         } else if (newlyAlerted) {
+            if (rogue.automationActive) {
+                monst->bookkeepingFlags |= MB_HEARD_DURING_AUTOMATION; // off-screen loud reaction, deferred to travel-end
+            }
             // iOS port (Brogue SE): off-screen tell. You can't see what you alerted, only that something
             // around a corner (out of FOV) reacted to your noise -- compensating feedback for the fact that
             // monsters hear you without line of sight. A '?' at its cell: you don't know if it's merely
@@ -2042,9 +2104,44 @@ static enum monsterHearing checkPlayerHeard(creature *monst) {
             cosmeticSpawnAlertGlyph(monst->loc, (enum displayGlyph)'?');
             message("Something nearby stirs at the noise.", 0); // flavor: an unseen creature has heard you
             noiseDetectionHaptic(0);                             // iPhone: one short, sharp tap
+            // iOS port (Brogue SE): mid-automation the glyph + haptic were dropped (animator dormant); the
+            // message fired live (it isn't gated). Flag for the condensed travel-end re-emit. See PERCEPTION_AUDIT.md.
+            if (rogue.automationActive) {
+                monst->bookkeepingFlags |= MB_HEARD_DURING_AUTOMATION;
+            }
         }
     }
     return heard;
+}
+
+// iOS port (Brogue SE): the cost-radius an environmental sound of `strength` reaches (shared by the
+// substantive investigate gate below and the cosmetic ripple's extent).
+static short impactRippleRadius(short strength) {
+    return clamp(NOISE_IMPACT_BASE_RADIUS + strength / NOISE_IMPACT_SCALE,
+                 NOISE_IMPACT_MIN_RADIUS, NOISE_IMPACT_MAX_RADIUS);
+}
+
+// iOS port (Brogue SE): coalescing state for a multi-cell wired machine activation. While `gSuppressImpactRipple`
+// is set (see beginCoalescedImpactRipples), emitEnvironmentalNoise still wakes/diverts monsters per cell but
+// skips the per-cell cosmetic ripple, recording that at least one fired in `gCoalescedImpactRippleFired`.
+// endCoalescedImpactRipples then emits ONE flare-delayed ripple at the activation origin. Cosmetic bookkeeping
+// only; never touches game state or RNG.
+static boolean gSuppressImpactRipple = false;
+static boolean gCoalescedImpactRippleFired = false;
+
+void beginCoalescedImpactRipples(void) {
+    gSuppressImpactRipple = true;
+    gCoalescedImpactRippleFired = false;
+}
+
+void endCoalescedImpactRipples(pos origin) {
+    gSuppressImpactRipple = false;
+    if (gCoalescedImpactRippleFired) {
+        // One clean ripple anchored at the cell that powered the machine (the per-cell ones were suppressed).
+        // It reads through the room-wide flare via the impact ripple's brighter/slower render, not a delay.
+        recomputeImpactSoundMap(origin);
+        cosmeticSpawnRippleImpact(origin, impactRippleRadius(NOISE_ALTAR_GRIND));
+    }
 }
 
 // iOS port (Brogue SE): emit an environmental sound of `strength` at `source` (a thrown item's impact, a
@@ -2054,8 +2151,7 @@ static enum monsterHearing checkPlayerHeard(creature *monst) {
 // investigator off a loud impact; hunters aren't diverted (design principle #3). Spawns the singleton
 // impact ripple. SUBSTANTIVE (changes monster state). See docs/design/environmental-sounds.md.
 void emitEnvironmentalNoise(pos source, short strength, item *sourceItem) {
-    const short radius = clamp(NOISE_IMPACT_BASE_RADIUS + strength / NOISE_IMPACT_SCALE,
-                               NOISE_IMPACT_MIN_RADIUS, NOISE_IMPACT_MAX_RADIUS);
+    const short radius = impactRippleRadius(strength);
     (void)sourceItem; // consume-on-arrival keys on the item's ITEM_THROWN_DISTRACTION tag (set by the thrower)
     recomputeImpactSoundMap(source);
     for (creatureIterator it = iterateCreatures(monsters); hasNextCreature(it);) {
@@ -2090,7 +2186,11 @@ void emitEnvironmentalNoise(pos source, short strength, item *sourceItem) {
             noiseDetectionHaptic(0);
         }
     }
-    cosmeticSpawnRippleImpact(source, radius);
+    if (gSuppressImpactRipple) {
+        gCoalescedImpactRippleFired = true; // a real noise fired during a machine activation; one ripple is emitted at the end
+    } else {
+        cosmeticSpawnRippleImpact(source, radius); // a trap click, a thrown impact, or a single-cell promotion
+    }
 }
 
 // iOS port (Brogue SE): Phase 2 feel/test aid -- if the player made noise this turn and a VISIBLE,
@@ -2101,10 +2201,12 @@ void emitEnvironmentalNoise(pos source, short strength, item *sourceItem) {
 void recordPlayerNoiseRippleIfNeeded(void) {
     short r;
     if (rogue.hidePlayerNoiseRipple) {
+        cosmeticClearPlayerRipple(); // opted out: make sure none is left in flight
         return; // iOS port (Brogue SE): player opted out of their own sound-footprint animation (menu toggle); other noise animations are unaffected
     }
     if (rogue.playerNoise <= NOISE_PLAYER_SILENT) {
-        return; // silent this turn -- no footprint to show
+        cosmeticClearPlayerRipple(); // silent this turn -- no footprint; retire any stale ripple so it can't replay later
+        return;
     }
     // The audible radius: the cost-distance at which hearChance is still > 0 for this loudness (mirror of
     // monsterHearsNoise), capped by the earshot gate and a sane animation bound.
@@ -2123,9 +2225,49 @@ void recordPlayerNoiseRippleIfNeeded(void) {
             return;
         }
     }
+    // Made noise, but no visible unaware enemy is in earshot -- no footprint this turn. Retire any ripple
+    // left over from a previous turn so a starved-animator ripple can't surface late (e.g. after a melee).
+    cosmeticClearPlayerRipple();
 }
 #else
 void recordPlayerNoiseRippleIfNeeded(void) {}
+#endif
+
+#if NOISE_SYSTEM_ENABLED
+// iOS port (Brogue SE): drain the wake tells captured during an automated move sequence (travel /
+// auto-explore). Those '!'/'?' glyphs and the detection haptic fire from checkPlayerHeard at the moment a
+// monster hears you -- but mid-automation the cosmetic animator is dormant (see showTravelEndNoiseFeedback),
+// so they were dropped and the monster was flagged MB_HEARD_DURING_AUTOMATION instead. Called once at the
+// automation-end seam (animator awake again), we re-emit each by CURRENT state: a visible hunter gets its
+// '!'; an off-screen reactor gets a '?' at its cell. Visible investigators are NOT flagged here -- their '?'
+// comes from the cosmeticRefreshInvestigateBlinks rebuild. One condensed haptic for the whole sequence (the
+// per-event haptics were suppressed; N buzzes would feel broken). The "Something nearby stirs" message is
+// deliberately NOT re-emitted: it isn't gated, so it already fired live and self-coalesces. Cosmetic only --
+// nothing recorded, no RNG. Self-gates for AI autoplay/playback via the cosmeticSpawn* / haptic guards.
+void flushAutomationHeardTells(void) {
+    boolean anyWoke = false;
+    for (creatureIterator it = iterateCreatures(monsters); hasNextCreature(it);) {
+        creature *monst = nextCreature(&it);
+        if (!(monst->bookkeepingFlags & MB_HEARD_DURING_AUTOMATION)) {
+            continue;
+        }
+        monst->bookkeepingFlags &= ~MB_HEARD_DURING_AUTOMATION;
+        anyWoke = true;
+        if (canSeeMonster(monst)) {
+            if (monst->creatureState == MONSTER_TRACKING_SCENT) {
+                cosmeticSpawnAlertBlink(monst); // '!' -- you can now see it, and it's hunting you
+            }
+            // visible + investigating: covered by the '?' investigate-blink rebuild, not here.
+        } else {
+            cosmeticSpawnAlertGlyph(monst->loc, (enum displayGlyph)'?'); // unseen reactor: "something over there stirred"
+        }
+    }
+    if (anyWoke) {
+        noiseDetectionHaptic(0); // one buzz for the whole travel, not one per woken monster
+    }
+}
+#else
+void flushAutomationHeardTells(void) {}
 #endif
 
 // iOS port (iBrogue): base % chance to sense a pursuer giving up the chase; the ring of awareness
@@ -2225,11 +2367,15 @@ void updateMonsterState(creature *monst) {
         // if tracking scent, but the scent is weaker than the scent detection threshold, begin wandering.
         // iOS port (iBrogue): when a pursuer gives up the chase, you get an awareness-scaled chance to
         // sense it -- no line of sight required. Chance is SENSE_LOST_TRAIL_BASE_CHANCE plus
-        // rogue.awarenessBonus (ring of awareness, +20/enchant), clamped to [0,100]. The base is set
-        // low so a submerging pursuer (an eel cycling this transition while you stand in water) doesn't
-        // spam the message; the ring is what makes a high-awareness character notice reliably. Rolled
-        // only here, at the hunting->wandering transition.
-        if (rand_percent(clamp(SENSE_LOST_TRAIL_BASE_CHANCE + rogue.awarenessBonus, 0, 100))) {
+        // rogue.awarenessBonus (ring of awareness, +20/enchant), clamped to [0,100]. Rolled only here,
+        // at the hunting->wandering transition.
+        // iOS port (Brogue SE): a submerged pursuer gives the player no sense-tell -- an eel cycling this
+        // transition while you stand in water would otherwise spam "has lost your trail" every time it
+        // submerges (matches the other submerged-silencing guards: monsterEmitMovementNoise,
+        // announcePackRouse). The rand_percent draw is SUBSTANTIVE, so it stays unconditional to keep the
+        // RNG stream identical (save/replay- and seed-safe); only the message is gated on !MB_SUBMERGED.
+        if (rand_percent(clamp(SENSE_LOST_TRAIL_BASE_CHANCE + rogue.awarenessBonus, 0, 100))
+            && !(monst->bookkeepingFlags & MB_SUBMERGED)) {
             char theMonsterName[COLS], senseBuf[COLS * 2];
             monsterName(theMonsterName, monst, true);
             sprintf(senseBuf, "you sense that %s has lost your trail.", theMonsterName);
@@ -2362,6 +2508,22 @@ void decrementMonsterStatus(creature *monst) {
                     }
                     if (monst->status[i] <= 0) {
                         extinguishFireOnCreature(monst);
+                    }
+                }
+                break;
+            case STATUS_FIERY_DOUSED:
+                // iOS port (Brogue SE): the staff of frost only SUPPRESSES a fiery creature's aura
+                // (water bottle, which strips MONST_FIERY, is the permanent answer). When the
+                // suppression lapses, rekindle the fire -- but only if the creature is still fiery
+                // (a water bottle may have stripped the flag meanwhile) and not already burning.
+                if (monst->status[i] && !--monst->status[i]) {
+                    if ((monst->info.flags & MONST_FIERY) && !monst->status[STATUS_BURNING]) {
+                        monst->status[STATUS_BURNING] = monst->maxStatus[STATUS_BURNING] = 1000;
+                        if (canSeeMonster(monst)) {
+                            monsterName(buf, monst, true);
+                            sprintf(buf2, "%s flares back to life.", buf);
+                            messageWithColor(buf2, &orange, 0);
+                        }
                     }
                 }
                 break;
