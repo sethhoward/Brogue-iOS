@@ -1912,9 +1912,12 @@ final class BrogueViewController: UIViewController {
         ]
     }
 
-    /// Brogue SE release notes — player-facing highlights for the current release.
+    /// Brogue SE release notes — player-facing highlights for the current release,
+    /// followed by every prior release archived under a "📦 Previous Release —" heading.
     /// Curated for the info panel; the full technical log lives in
-    /// BrogueSE/Engine/IOS_MODIFICATIONS.md. Keep in sync with new content.
+    /// BrogueSE/Engine/IOS_MODIFICATIONS.md. When shipping a new release, PREPEND the new
+    /// section and DEMOTE the current one to a Previous Release block — never delete an old
+    /// release; the full history is intentionally kept here. Keep in sync with new content.
     private static func seInfoBlocks() -> [InfoBlock] {
         return [
             .link("Support", "https://github.com/sethhoward/Brogue-iPad"),
@@ -1928,12 +1931,17 @@ final class BrogueViewController: UIViewController {
             ]),
             .heading("🗿 Altars of Divination"),
             .bullets([
-                "Reveal your unknowns — A new shrine, watched over by a looming statue, fully identifies any unidentified item you set on one of its altars — and the first one is always safe.",
-                "Press your luck — Each further item you reveal risks waking the statue's guardian, and the greedier you get the deadlier it is: an ogre, then a troll, then an underworm tears free — off balance, giving you a heartbeat to fight or flee. Take what you dare.",
+                "Reveal your unknowns — A new shrine replaces the Altar of Insight, watched over by a looming statue, fully identifies any unidentified item you set on one of its altars — and the first one is always safe.",
+                "Press your luck — Each further item you reveal risks waking the statue's guardian, and the greedier you get the deadlier it is: Take what you dare.",
             ]),
             .heading("🎣 Cleaner Distractions"),
             .bullets([
                 "Thrown lures buy real time — A monster that goes to investigate a thrown item now lingers over it for a few turns before losing interest, opening a genuine window to slip past.",
+            ]),
+            .heading("🎮 Quality of Life"),
+            .bullets([
+                "Fire no longer rattles you — Catching fire used to throw you into a brief panic; now that disorientation strikes only monsters. It still burns — but your wits, and your next move, stay yours.",
+                "Study a scroll even while hunted — Sitting down to a meal always lets you puzzle out an unidentified scroll now, even with something on your trail; the old \"only when nothing's hunting you\" restriction is gone.",
             ]),
             .heading("📦 Previous Release — 0.11.0 \"B is for Balance\""),
             .note("Retuned the arsenal — heavier trade-offs on weapons, staffs, and rings, with clearer status tells to read the fight at a glance:"),
@@ -1957,6 +1965,66 @@ final class BrogueViewController: UIViewController {
                 "Read the battlefield — A small glyph now blinks over any creature (and you) that's confused, burning, stunned, protected, hasted, or healing, so you can size up the situation.",
                 "Clairvoyance reads the floor — On arriving at a new depth, a worn Ring of Clairvoyance senses whether items on the level are helpful or harmful — as many as the ring's enchant level.",
                 "A sharper ear — The noise system is clearer: a pack raises a rallying cry when one of them rouses the others, submerged creatures fall silent, and close threats are easier to hear.",
+            ]),
+            .heading("📦 Previous Release — 0.10.0 \"A Is For AAaAH!\""),
+            .note("The sound update — the dungeon learned to hear you, and you learned to hear it:"),
+            .heading("🔊 The Dungeon Can Hear You"),
+            .bullets([
+                "Make noise, get noticed — Footsteps, fighting, and the terrain you cross all send sound rippling through the dungeon. It bends around corners and muffles through closed doors, so unseen monsters can now hear you coming and slip away to investigate the racket.",
+                "Every weapon has a voice — A dagger is nearly silent; a war hammer is a clamor. Light armor and wading keep you quiet, while heavy armor and crunching over rubble give you away.",
+                "Hear what you can't see — When something stirs off-screen, a ripple shows roughly where it was, and a \"?\" marks a creature that heard you and is closing in. Stay still and it may pass; bolt and you'll draw a crowd.",
+                "A louder world — Traps click, reward-room cages slam and machinery grinds, stone guardians boom with every step, and an alarm trap's shriek now echoes across the entire floor.",
+                "Throw to distract — Hurl an item to lure investigating monsters to where it lands. The catch: the distraction is consumed when they arrive, so every diversion costs you the item.",
+                "The Ring of Awareness now hears, too — Once just a sense for traps, secret doors, and hidden levers, it now also sharpens your ears: you catch unseen creatures stirring nearby, and the more powerful the ring, the farther off — and more reliably — you hear them. (Cursed rings dull your hearing instead.)",
+            ]),
+            .heading("🐺 Lone Wolf"),
+            .bullets([
+                "Go it alone — Adventuring with no allies builds Lone Wolf tiers (up to five), each hardening you with extra effective strength. Take on a single companion and the bond breaks, resetting the track — the dungeon rewards the truly solitary.",
+            ]),
+            .heading("🎮 Quality of Life"),
+            .bullets([
+                "Re-zap your last staff — Press \"A\" (modern keyboard layout) or set it to a quick action button to re-apply the staff you used last, mirroring re-throw.",
+                "Quiet, please — A new menu toggle hides your own sound-ripple animation while leaving every other noise effect intact.",
+                "OS-proof saves — If iOS kills the app while it's in the background, your run reloads right where you left off.",
+                "iPhone haptics — Feel a pulse when something hears you, and a heavier thump when a loud event goes off.",
+                "Refined identification — Detect magic and resting now surface the items you still haven't figured out first before fully identifying ones you already know polarity, and a worn Ring of Wisdom learns your armor and rings faster.",
+            ]),
+            .heading("📦 Previous Release — 0.9.0 \"Alphabet-a Soup\""),
+            .note("The first Brogue SE release, which introduced original items, monsters, and mechanics:"),
+            .heading("🧪 New Items"),
+            .bullets([
+                "The Empty Bottle — Carry it and the world fills it: step into a gas or pool to bottle it, drift over lava or a chasm while levitating to skim it, or set it down and zap it with a bolt. Each capture becomes a real, identified potion.",
+                "Captured potions — Acid, webbing, steam, ice, and water can only be obtained by capturing hazards with the empty bottle. Each one re-creates its hazard when thrown.",
+                "Staff of Frost — Freeze enemies solid, slow them, freeze water into walkable ice bridges, turn foliage into brittle frozen walls, and shove foes back moving them out of your way and damaging enemies in their path.",
+            ]),
+            .heading("👹 Monsters & Allies"),
+            .bullets([
+                "The Gold Goblin — A skittish treasure-hoarder that flees toward the stairs, scattering a trail of gold. Chase it down and corner it before it escapes to the next floor.",
+                "Cleverer thieves — Monkeys and imps now target the items they actually covet, not just whatever's handy.",
+                "Better allies — Allies keep a safe distance from invulnerable monsters, and the Ring of Light can rally and embolden the companions fighting beside you.",
+            ]),
+            .heading("🔍 A New Way to Identify Items"),
+            .bullets([
+                "Rest to learn — Resting gradually reveals whether your unidentified items are helpful or harmful.",
+                "Clues add up — Gather enough hints about an item — or rule out enough of the alternatives — and the dungeon puts it together for you, identifying it outright.",
+                "Detect magic, reined in — The potion of detect magic now only hints at the good-or-bad nature of couple of items instead of all, and turns up less often than before. But pair it with a Ring of Wisdom and the potion becomes stronger.",
+                "Altars of Insight — Sacrifice one item to reveal the nature of another.",
+                "Everyday tells — Eating a meal, watching a scroll burn, shattering a potion with a thrown weapon or a bolt, freeing a captive, and the rings of awareness and wisdom all quietly reveal clues about what you're carrying.",
+            ]),
+            .heading("🌊 The Living Dungeon"),
+            .bullets([
+                "Electrified water — A lightning bolt striking a pool now shocks the entire connected body of water. Mind where you stand.",
+                "Water has uses — Wading washes away the scent trail you leave for hunters and douses flames.",
+                "Fire spreads consequences — Catching fire sends you into a brief panic; food rations caught in fire cook into edible \"cooked food.\"",
+                "Read the chase — You can now sense when a pursuing monster has lost your trail.",
+            ]),
+            .heading("🎮 Quality of Life"),
+            .bullets([
+                "Potions float away when thrown into deep water",
+                "Pick your controls — Choose between Classic and Modern keyboard layouts; the game adapts when a hardware keyboard is attached.",
+                "Pick up where you left off — Your last-played seed is remembered across launches.",
+                "Smoother and more stable — Numerous community bug fixes, from dungeon-generation quirks to combat, stealth, and identification edge cases (#766, #805, #812, #816, #831, #837, #841).",
+                "..and so much more",
             ]),
         ]
     }
