@@ -1480,7 +1480,7 @@ void updateFloorItems() {
 
         // iOS port (Brogue SE): sibling of the insight/commutation blocks -- the Altars of Divination.
         // Unlike those, this doesn't wire the machine (no activateMachine): performDivination identifies the
-        // one item placed on an active altar, arms that altar, and rolls the totem's awaken directly.
+        // one item placed on an active altar, arms that altar, and rolls the statue's awaken directly.
         if (cellHasTMFlag((pos){ x, y }, TM_DIVINATION_ACTIVATION)
             && pmap[x][y].machineNumber) {
 
@@ -9107,19 +9107,13 @@ void gainPolarityInsightFromRest(void) {
     rogue.disturbed = true; // interrupt any auto-rest so the discovery is noticed
 }
 
-// iOS port (iBrogue): eating a meal with nothing hunting you is a calm moment to study a SCROLL — it
-// reveals the good/bad polarity of a random still-unknown scroll, or fully identifies a random scroll
-// whose polarity you already know (scrolls only; see applyPolarityInsightToRandomItem). Gated on no
-// creature in the (Hunting) state. The random pick is action-triggered (called from eat() on a successful
-// meal), reconstructed identically on replay.
+// iOS port (iBrogue): eating a meal is a moment to study a SCROLL — it reveals the good/bad polarity of a
+// random still-unknown scroll, or fully identifies a random scroll whose polarity you already know
+// (scrolls only; see applyPolarityInsightToRandomItem). Always fires on a successful meal, regardless of
+// whether a monster is aware of / hunting you (the old "no creature in the Hunting state" gate was removed
+// 2026-07-02). The random pick is action-triggered (called from eat() on a successful meal), reconstructed
+// identically on replay.
 void gainScrollInsightFromEating(void) {
-    // Only when nothing is hunting you — you need a calm moment to study.
-    for (creatureIterator it = iterateCreatures(monsters); hasNextCreature(it);) {
-        if (nextCreature(&it)->creatureState == MONSTER_TRACKING_SCENT) {
-            return;
-        }
-    }
-
     boolean fullID = false;
     item *target = applyPolarityInsightToRandomItem(SCROLL, false /* scrolls only, no potion favoring */, &fullID);
     if (target == NULL) {
@@ -9448,24 +9442,24 @@ static boolean performInsightSacrifice(short machineNumber) {
 
 // iOS port (Brogue SE): the Altars of Divination machine. When an unidentified item is placed on an active
 // altar, fully identify it, ARM that altar (it now holds the revealed item and seals shut on pickup via
-// TM_PROMOTES_ON_ITEM_PICKUP), and roll the totem's escalating awaken. "Fire only if it helps": an already-
+// TM_PROMOTES_ON_ITEM_PICKUP), and roll the statue's escalating awaken. "Fire only if it helps": an already-
 // known item is a no-op (the altar stays active and the item is lifted freely), so junk can't safely defuse
 // the room and the risk is bound to value actually gained. The Nth identify (room-scoped counter) awakens the
-// totem's single guardian at 0/25/50/75% for uses 1/2/3/4; on an awaken a tiered monster bursts from the totem
+// statue's single guardian at 0/25/50/75% for uses 1/2/3/4; on an awaken a tiered monster bursts from the statue
 // "off balance" and every UNUSED altar shatters (a previously-armed altar holding your earlier item is spared,
 // as is the one you just used). Substantive rand_percent -> deterministic/replay-safe. See design/environmental
 // -sounds.md's sibling note and PERCEPTION/IDENTIFICATION audits. Returns true if an identification occurred.
 static boolean performDivination(short machineNumber) {
     // Find the one active altar holding an item (the player places one per turn).
     item *theItem = NULL;
-    pos altarLoc = INVALID_POS, totemLoc = INVALID_POS;
+    pos altarLoc = INVALID_POS, statueLoc = INVALID_POS;
     for (short i = 0; i < DCOLS; i++) {
         for (short j = 0; j < DROWS; j++) {
             if (pmap[i][j].machineNumber != machineNumber) {
                 continue;
             }
-            if (pmap[i][j].layers[DUNGEON] == DIVINATION_TOTEM) {
-                totemLoc = (pos){ i, j };
+            if (pmap[i][j].layers[DUNGEON] == DIVINATION_STATUE) {
+                statueLoc = (pos){ i, j };
             } else if (pmap[i][j].layers[DUNGEON] == DIVINATION_ALTAR && theItem == NULL) {
                 // Fire only if it helps: an already-known item is skipped (a no-op; it's lifted back freely),
                 // and -- crucially -- skipping it here means a known item left on one altar can't block an
@@ -9497,10 +9491,10 @@ static boolean performDivination(short machineNumber) {
 
     // Totem escalation flavor (deterministic by use count) -- always fires; the tail reports the roll.
     static const char *stir[4] = {
-        "The totem stirs faintly.",
-        "The totem groans; something within it shifts.",
-        "Cracks race across the totem's surface.",
-        "The totem shudders violently.",
+        "The statue stirs faintly.",
+        "The statue groans; something within it shifts.",
+        "Cracks race across the statue's surface.",
+        "The statue shudders violently.",
     };
     const short useN = rogue.divinationAltarUses;
     messageWithColor(stir[clamp(useN, 1, 4) - 1], &flavorTextColor, 0);
@@ -9513,11 +9507,11 @@ static boolean performDivination(short machineNumber) {
         default: chance = DIVINATION_AWAKEN_USE4; break;   // use 4 and any beyond
     }
 
-    if (!rogue.divinationAltarAwakened && chance > 0 && rand_percent(chance) && isPosInMap(totemLoc)) {
+    if (!rogue.divinationAltarAwakened && chance > 0 && rand_percent(chance) && isPosInMap(statueLoc)) {
         // The guardian awakens: spawn the tiered monster and shatter every UNUSED altar (the just-armed one
         // and any previously-armed altar still holding an item are spared, so no revealed item is destroyed).
         rogue.divinationAltarAwakened = true;
-        creature *guardian = spawnDivinationGuardian(totemLoc, useN);
+        creature *guardian = spawnDivinationGuardian(statueLoc, useN);
         for (short i = 0; i < DCOLS; i++) {
             for (short j = 0; j < DROWS; j++) {
                 if (pmap[i][j].machineNumber == machineNumber
@@ -9530,13 +9524,13 @@ static boolean performDivination(short machineNumber) {
         if (guardian != NULL) {
             char mName[COLS * 3];
             monsterName(mName, guardian, false);
-            sprintf(buf, "the totem splits open and %s heaves itself free, off balance! The other altars crack and go dark.", mName);
+            sprintf(buf, "the statue cracks open and %s heaves itself free, off balance! The other altars crack and go dark.", mName);
         } else {
-            strcpy(buf, "the totem splits open and something heaves itself free! The other altars crack and go dark.");
+            strcpy(buf, "the statue cracks open and something heaves itself free! The other altars crack and go dark.");
         }
         messageWithColor(buf, &badMessageColor, REQUIRE_ACKNOWLEDGMENT);
     } else if (useN > 1) {
-        messageWithColor("...but the totem falls silent.", &flavorTextColor, 0);
+        messageWithColor("...but the statue falls silent.", &flavorTextColor, 0);
     }
     return true;
 }
@@ -10463,7 +10457,7 @@ boolean unequipItem(item *theItem, boolean force) {
         && theItem->enchant1 < runicPurifyThreshold(theItem);
     if (shatterOnRemoval) {
         itemName(theItem, buf2, false, false, NULL);
-        sprintf(buf, "Taking off your %s will shatter its runes in a burst that pierces the nearby walls. Proceed?", buf2);
+        sprintf(buf, "Taking off your %s will shatter its runes. Proceed?", buf2);
         if (!confirm(buf, false)) {
             return false;
         }

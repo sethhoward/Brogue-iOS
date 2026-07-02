@@ -189,11 +189,11 @@ isn't a bolt and can't capture.
 
 ### 5e′. Altars of divination **[Brogue SE]** — the live altar ID channel
 `performDivination()` ([Items.c](../../BrogueSE/Engine/Items.c)). The current altar identify channel (replaces
-§5e). A guaranteed once-per-run reward room: a central totem with up to four one-use **divination altars**.
+§5e). A guaranteed once-per-run reward room: a central statue with up to four one-use **divination altars**.
 Place an unidentified item on an active altar → it is fully `identify()`d (no offering/payment — unlike insight)
 → the altar arms (holds the revealed item) and seals shut when the item is lifted. "Fire only if it helps": a
 known item is a no-op. **Cost = a push-your-luck threat, not a sacrificed item:** each identify (room-scoped
-`rogue.divinationAltarUses`) rolls **0/25/50/75%** to awaken the totem's single tiered guardian (Ogre→Troll→
+`rogue.divinationAltarUses`) rolls **0/25/50/75%** to awaken the statue's single tiered guardian (Ogre→Troll→
 Underworm by trigger-use); on an awaken the unused altars shatter. **Substantive** (`rand_percent`) — unlike the
 RNG-free insight altar, this channel touches the seed. See MACHINES_AUDIT §7f and `docs/design/altars-of-
 divination.md`.

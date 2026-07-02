@@ -32,6 +32,38 @@ See `BrogueCE/Engine/IOS_MODIFICATIONS.md` (faithful CE) and
 
 ## Change log
 
+### 2026-07-02 — Brogue SE 0.12.0 "C is for Curses": release cut (version + release notes)
+
+**What.** Cut the 0.12.0 release. Headline features since 0.11.0: the **cursed-runics rework** (double-edged
+runics — an always-on upside welded to a downside you either *purify* away with enchant scrolls or *eject*
+early with remove-curse; six curses: Delirium / Recklessness / Clumsiness→Quietus on weapons, Anchor / Smoky /
+Acrophobia on armor) and the **Altars of Divination** reward room, plus the thrown-decoy dwell.
+
+- **Title string:** `BROGUE_VERSION_STRING` → `"C is for Curses 0.12.0 "` (GlobalsBrogue.c).
+- **Release notes** (`seInfoBlocks`, BrogueViewController.swift): new intro + three sections — Cursed Runics,
+  Altars of Divination, Cleaner Distractions. Demoted 0.11.0 "B is for Balance" to the lone Previous Release
+  block (kept its Balance Pass / Smoke & Terrain / Tells & Legibility sections); dropped 0.10.0 "A Is For AAaAH!".
+- **Saves/replay:** recording version is already `"SE 2.2.0"` (`BROGUE_MINOR` 1→2 landed with the divination
+  save break), so 0.11.0 ("SE 2.1.0") saves are cleanly rejected. No further bump; `BROGUE_PATCH` stays 0. No
+  `BROGUE_VERSION_ATLEAST` gates depend on the minor.
+- **Marketing version:** `MARKETING_VERSION` (Xcode app targets) — confirm the App Store version before archiving.
+
+### 2026-07-02 — Cursed-runics rework: Smoky blindness bugfix + curse-test identify scrolls
+
+**What.** (1) Fixed Smoky's self-blind not applying (playtest: "I can see fine, so it's all upside"). The
+per-turn `emitSmokyArmorCloud` ran once at the top of `playerTurnEnded`, but the do-loop then runs
+`updateEnvironment` (two `updateVolumetricMedia` passes that *average* the concentrated cloud below
+`SMOKE_THICK_VOLUME`) **before** the final, player-facing `updateVision(true)` — so the FOV was recomputed
+against thinned smoke and never collapsed. Fix: re-assert the cloud a second time right before that final
+vision pass (the top-of-loop emit still drives monster-awareness concealment). (2) `D_CURSE_TEST_SCROLLS_START`
+now also grants 5 scrolls of identify, alongside the enchanting + remove-curse it already gave.
+
+**Why.** The bug made Smoky pure upside (concealment without the blindness cost). Concealment worked because
+the *intermediate* vision pass (which drives monster awareness) still saw the fresh thick smoke.
+
+**Where.** `Time.c` (second `emitSmokyArmorCloud` before the end-of-loop `updateVision`), `RogueMain.c`
+(identify scrolls in the grant).
+
 ### 2026-07-02 — Cursed-runics rework, Phase 2 (armor, part 2): Smoky (armor phase complete)
 
 **What.** The third armor curse (design finalized via a `/grill-me` pass; all Q's landed on the default).
@@ -251,28 +283,30 @@ weld and still roll −1…−3; only the runic identities changed.
 
 ### 2026-07-01 — Altars of Divination replace the deprecated Altars of Insight (new content; save break)
 
-**What.** A new guaranteed reward room — a central **totem** with up to four one-use **altars of divination**
+**What.** A new guaranteed reward room — a central **statue** with up to four one-use **altars of divination**
 arranged in a cross (one per cardinal direction, one tile out). Place an unidentified item on an active altar
 and it is **fully identified** (`identify()`); the altar then **arms** (holds the revealed item) and **seals
 shut** when you lift the item (`TM_PROMOTES_ON_ITEM_PICKUP` → `DF_DIVINATION_ALTAR_CLOSE`). "Fire only if it
 helps": a known item is a no-op (lift it back freely), so junk can't defuse the room.
 
 **The push-your-luck loop.** Each identify (room-scoped `rogue.divinationAltarUses`) rolls an escalating
-chance to awaken the totem's single guardian: **0 / 25 / 50 / 75 %** for uses 1/2/3/4 (`DIVINATION_AWAKEN_*`).
-Use 1 is always safe. On an awaken, a tiered monster whose strength scales with *which* use triggered it bursts
-from the totem — **use 2 → Ogre, use 3 → Troll, use 4 → Underworm** (`spawnDivinationGuardian`, Monsters.c) —
-and **every unused altar shatters** (a previously-armed altar still holding a revealed item is spared, so no
-item is destroyed). One guardian per room; the awaken ends it. The monster emerges **"off balance"**: a large
+chance to awaken the statue's single guardian: **0 / 25 / 50 / 75 %** for uses 1/2/3/4 (`DIVINATION_AWAKEN_*`).
+Use 1 is always safe. On an awaken, a tiered monster whose strength scales with *which* use triggered it
+**replaces the statue** — **use 2 → Ogre, use 3 → Troll, use 4 → Underworm** (`spawnDivinationGuardian`,
+Monsters.c) — the statue cell is cleared and the guardian stands where it stood, emulating the vanilla
+`STATUE_DORMANT` shatter (we runtime-spawn rather than activate a pre-placed dormant monster because the kind
+depends on the trigger use). **Every unused altar shatters** (a previously-armed altar still holding a revealed
+item is spared, so no item is destroyed). One guardian per room; the awaken ends it. The monster emerges **"off balance"**: a large
 `ticksUntilTurn` (`DIVINATION_OFFBALANCE_TIER1/2/3` = 200/300/400) delays its first action and surfaces the
 existing derived **"(Off balance)"** sidebar tell ([IO.c](IO.c) `ticksUntilTurn > player.ticksUntilTurn +
 movementSpeed`). Deadlier tier = longer grace; the Underworm is also natively slow, so the scariest guardian is
-the most escapable. Two-channel flavor: the totem escalates each use (*stirs → groans → cracks → shudders
-violently*) with a tail clause reporting the roll (*"…but the totem falls silent."* on a safe pull).
+the most escapable. Two-channel flavor: the statue escalates each use (*stirs → groans → cracks → shudders
+violently*) with a tail clause reporting the roll (*"…but the statue falls silent."* on a safe pull).
 
 **Placement.** Guaranteed **once per run**, force-built with carry-forward from `DIVINATION_ALTAR_MIN_DEPTH`
-(D9), abandoned past `DIVINATION_ALTAR_MAX_DEPTH` (D22) — the exact mechanism that built the insight altars,
+(D7), abandoned past `DIVINATION_ALTAR_MAX_DEPTH` (D22) — the exact mechanism that built the insight altars,
 **retargeted** here (`addMachines`, Architect.c). `roomSize {10,30}`, `BP_IMPREGNABLE` (the guardian can't
-tunnel out). The blueprint builds only the carpeted room; `placeAltarCrossInRoom` (Architect.c) lays the totem
+tunnel out). The blueprint builds only the carpeted room; `placeAltarCrossInRoom` (Architect.c) lays the statue
 at the room-center and an altar one tile out in each cardinal direction (falls back to adjacent).
 
 **Deprecation.** The Altars of Insight **no longer generate** — their `addMachines` carry-forward was replaced
@@ -285,7 +319,7 @@ saves would desync. Bumped `BROGUE_MINOR` 1 → 2 (recording version "SE 2.1.0" 
 rejects 0.11.0 saves. The title-screen release string / marketing version / release notes are **not** bumped
 here — that's the separate release-cut step. (No `BROGUE_VERSION_ATLEAST` gates depend on the minor.)
 
-**Where.** `Rogue.h` — 4 tiles (`DIVINATION_ALTAR`/`_ARMED`/`_CLOSED`, `DIVINATION_TOTEM`),
+**Where.** `Rogue.h` — 4 tiles (`DIVINATION_ALTAR`/`_ARMED`/`_CLOSED`, `DIVINATION_STATUE`),
 `DF_DIVINATION_ALTAR_CLOSE`, `TM_DIVINATION_ACTIVATION` (Fl(28)), `MT_DIVINATION_ALTARS`, tuning constants,
 `rogue.divinationAltar{Built,Uses,Awakened}`, the `BROGUE_MINOR` bump, `spawnDivinationGuardian` proto.
 `Globals.c` — the 4 tile defs + the close DF. `GlobalsBrogue.c` — the blueprint. `Architect.c` —
@@ -2852,6 +2886,15 @@ ignition message and the `STATUS_CONFUSED`-expiry message (in `playerTurnEnded`)
 `STATUS_CONFUSED` special case in the sidebar status loop renders "Panic" when burning. No RNG drawn;
 deterministic, no save/replay impact. CE-only.
 
+**Player exempted (2026-07-02).** Fire-panic is now **monster-only** — catching fire no longer confuses
+the player. The `STATUS_CONFUSED` assignment in `exposeCreatureToFire` is guarded by `monst != &player`,
+so the hero still catches fire and burns but is not disoriented (fleeing to water stays under the
+player's control). Follow-on cleanups: the ignition message reverts to plain "you catch fire" (no
+"panic"); the `STATUS_CONFUSED`-expiry message in `playerTurnEnded` reverts to the plain "you no longer
+feel confused." (the player can now only be confused by other sources, never fire); and the `IO.c`
+"Panic" sidebar label is scoped to `monst != &player` so a player confused by gas/trap *while* burning
+still reads "Confused". Monsters are unchanged — they still panic on ignition and show "Panic".
+
 ### 2026-06-11 — Subtle progress bars behind inventory rows (new content)
 
 **What.** Each inventory row can now show a faint progress bar tinted into the cells *behind* the
@@ -3684,20 +3727,25 @@ untouched.
 > `applyPolarityInsightToRandomItem(SCROLL, …)` helper. The selection now consumes RNG (action-triggered,
 > replay-safe) — no longer "no RNG" as originally described below.
 
-**What.** Eating a meal (`eat` returning true) while **nothing is hunting you** reveals the polarity
-(benevolent/malevolent) of the first still-unknown scroll in your pack, with a colored message
-("you study a scroll intently while eating; it radiates a … aura."). Polarity only, never a full ID. One
-scroll per safe meal; if something is hunting you (any creature in the `MONSTER_TRACKING_SCENT` /
-"(Hunting)" state) or you hold no unknown scroll, the meal proceeds normally with no reveal.
+**What.** Eating a meal (`eat` returning true) reveals the polarity (benevolent/malevolent) of a
+still-unknown scroll in your pack, with a colored message ("you study a scroll intently while eating; it
+radiates a … aura."). Polarity only (or a full ID of an already-sensed scroll — see the 2026-06-11 update
+above). One scroll per meal; if you hold no eligible scroll, the meal proceeds normally with no reveal.
+
+> **Updated 2026-07-02 — no longer safety-gated.** The old "nothing is hunting you" requirement was
+> removed: eating now **always** polarity-checks a scroll if one is available, regardless of whether any
+> monster is aware of / hunting you. The `MONSTER_TRACKING_SCENT` scan at the top of
+> `gainScrollInsightFromEating` is gone. The `Globals.c` `foodTable` flavor text was updated to match
+> (dropped "with nothing on the hunt for you" / "when eaten undisturbed"); the reward is a plain "any
+> meal" effect now.
 
 **Why.** Companion to the rest-insight feature: a calm moment to study a scroll while you eat. Meals are
 scarce and the reward is safety-gated, so it eases scroll identification without removing the gamble.
 
 **Where.** `Items.c` — a new `void gainScrollInsightFromEating(void)` defined just after
-`gainPolarityInsightFromRest` (iterates `monsters` for the Hunting gate, then the pack for the first
-unknown-polarity scroll; reuses `detectMagicOnItem` + `tryIdentifyLastItemKinds(SCROLL)` + `itemMagicPolarity`
-+ `itemMagicPolarityIsKnown`), called from `eat()` just before its `return true`. Prototype in `Rogue.h`.
-All vanilla symbols.
+`gainPolarityInsightFromRest` (as of 2026-07-02 it no longer scans `monsters`; it goes straight to
+`applyPolarityInsightToRandomItem(SCROLL, …)`), called from `eat()` just before its `return true`.
+Prototype in `Rogue.h`. All vanilla symbols.
 
 **Flavor (added 2026-06-10).** Both `foodTable` descriptions in `Globals.c` (the shared catalog — the
 feature is not variant-gated, so the hint is accurate in every variant) now hint at this: the ration of

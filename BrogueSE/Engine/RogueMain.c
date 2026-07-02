@@ -606,10 +606,15 @@ void initializeRogue(uint64_t seed) {
     }
 
     if (D_CURSE_TEST_SCROLLS_START) {
-        // iOS port (Brogue SE): cursed-runics rework playtest grant -- scrolls to drive the curse loop:
-        // enchanting (reach +6 to purify) and remove-curse (eject -> shatter). Deterministic/replay-safe.
+        // iOS port (Brogue SE): cursed-runics rework playtest grant -- scrolls to drive the whole curse
+        // loop: identify (reveal the runic), enchanting (reach +6 to purify), and remove-curse (eject ->
+        // shatter). Deterministic/replay-safe.
         theItem = generateItem(SCROLL, SCROLL_ENCHANTING);
         theItem->quantity = 12;
+        identify(theItem);
+        theItem = addItemToPack(theItem);
+        theItem = generateItem(SCROLL, SCROLL_IDENTIFY);
+        theItem->quantity = 5;
         identify(theItem);
         theItem = addItemToPack(theItem);
         theItem = generateItem(SCROLL, SCROLL_REMOVE_CURSE);

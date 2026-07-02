@@ -1843,9 +1843,9 @@ static void placeAltarPairInRoom(short minMachineNumber, enum tileType westAltar
     }
 }
 
-// iOS port (Brogue SE): place the Altars of Divination in a cross -- a central totem with up to four one-use
-// altars one tile out in each cardinal direction (a gap of open carpet sits between the totem and each altar,
-// so the guardian that bursts from the totem has a buffer). Modeled on placeAltarPairInRoom: the generic
+// iOS port (Brogue SE): place the Altars of Divination in a cross -- a central statue with up to four one-use
+// altars one tile out in each cardinal direction (a gap of open carpet sits between the statue and each altar,
+// so the guardian that bursts from the statue has a buffer). Modeled on placeAltarPairInRoom: the generic
 // builder scatters features and can't produce this ordered layout, so we lay it here. Deterministic (no RNG).
 // minMachineNumber is rogue.machineNumber captured before the build, so any cell with a greater machineNumber
 // belongs to the room we just built.
@@ -1866,7 +1866,7 @@ static void placeAltarCrossInRoom(short minMachineNumber) {
     cx /= count;
     cy /= count;
 
-    // Center the totem on the open interior cell nearest the centroid.
+    // Center the statue on the open interior cell nearest the centroid.
     short centerX = -1, centerY = -1;
     int bestDist = -1;
     for (short i = 0; i < DCOLS; i++) {
@@ -1884,10 +1884,10 @@ static void placeAltarCrossInRoom(short minMachineNumber) {
     if (centerX < 0) {
         return;
     }
-    pmap[centerX][centerY].layers[DUNGEON] = DIVINATION_TOTEM;
+    pmap[centerX][centerY].layers[DUNGEON] = DIVINATION_STATUE;
     refreshDungeonCell((pos){ centerX, centerY });
 
-    // One altar per cardinal direction: prefer one tile out (a readable gap from the totem); fall back to
+    // One altar per cardinal direction: prefer one tile out (a readable gap from the statue); fall back to
     // adjacent if the spaced cell isn't open interior. A direction is skipped only if neither cell qualifies
     // (roomSize {10,30} makes at least the adjacent ring available, so all four normally place).
     static const short dirX[4] = {0, 0, -1, 1};
@@ -1935,7 +1935,7 @@ static void addMachines() {
         for (failsafe = 50; failsafe; failsafe--) {
             const short preDivinationMachineNumber = rogue.machineNumber;
             if (buildAMachine(MT_DIVINATION_ALTARS, -1, -1, 0, NULL, NULL, NULL)) {
-                // The blueprint built only the carpeted room; lay the totem + altar cross here (the generic
+                // The blueprint built only the carpeted room; lay the statue + altar cross here (the generic
                 // builder won't produce an ordered cross layout itself).
                 placeAltarCrossInRoom(preDivinationMachineNumber);
                 rogue.divinationAltarBuilt = true;

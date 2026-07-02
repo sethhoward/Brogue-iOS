@@ -47,19 +47,20 @@ void exposeCreatureToFire(creature *monst) {
             player.info.foreColor = &torchLightColor;
             refreshDungeonCell(player.loc);
             //updateVision(); // this screws up the firebolt visual effect by erasing it while a message is displayed
-            // iOS port (iBrogue): the message names the panic so the "Panic" status bar (and its
-            // expiry message below) has an on-screen cause; the shock confuses for FIRE_CONFUSION_DURATION.
-            combatMessage("you catch fire and panic", &badMessageColor);
+            combatMessage("you catch fire", &badMessageColor);
         } else if (canDirectlySeeMonster(monst)) {
             monsterName(buf, monst, true);
             sprintf(buf2, "%s catches fire", buf);
             combatMessage(buf2, messageColorFromVictim(monst));
         }
-        // iOS port (iBrogue): the shock of catching fire confuses for FIRE_CONFUSION_DURATION turns.
-        // Inside the "initially set on fire" branch, so it applies once on ignition (not every burning
-        // turn), to the player too. Same status path as the confusion weapon runic.
-        monst->status[STATUS_CONFUSED] = monst->maxStatus[STATUS_CONFUSED] =
-            max(monst->status[STATUS_CONFUSED], FIRE_CONFUSION_DURATION);
+        // iOS port (iBrogue): the shock of catching fire panics a monster (STATUS_CONFUSED, surfaced as
+        // "Panic" while it burns) for FIRE_CONFUSION_DURATION turns. Inside the "initially set on fire"
+        // branch, so it applies once on ignition, not every burning turn. The player is exempt -- fire
+        // hurts but does not disorient the hero (removed 2026-07-02); monsters still panic.
+        if (monst != &player) {
+            monst->status[STATUS_CONFUSED] = monst->maxStatus[STATUS_CONFUSED] =
+                max(monst->status[STATUS_CONFUSED], FIRE_CONFUSION_DURATION);
+        }
     }
     monst->status[STATUS_BURNING] = monst->maxStatus[STATUS_BURNING] = max(monst->status[STATUS_BURNING], 7);
 }
@@ -2408,11 +2409,9 @@ static void decrementPlayerStatus() {
     }
 
     if (player.status[STATUS_CONFUSED] > 0 && !--player.status[STATUS_CONFUSED]) {
-        // iOS port (iBrogue): catching fire inflicts STATUS_CONFUSED but reads as "Panic" while still
-        // burning (see exposeCreatureToFire and the sidebar in IO.c). Mirror that label on expiry so the
-        // recovery message matches the status the player was watching. Panic (3 turns) always ends while
-        // burning (7 turns) is still active, so this reliably distinguishes fire-panic from real confusion.
-        message(player.status[STATUS_BURNING] > 0 ? "you regain your composure." : "you no longer feel confused.", 0);
+        // iOS port (iBrogue): the player no longer panics from catching fire (fire-panic is monster-only;
+        // see exposeCreatureToFire), so the player's confusion is always ordinary confusion here.
+        message("you no longer feel confused.", 0);
     }
 
     if (player.status[STATUS_NAUSEOUS] > 0 && !--player.status[STATUS_NAUSEOUS]) {
@@ -2990,6 +2989,12 @@ void playerTurnEnded() {
         // DEBUG displayLevel();
         //checkForDungeonErrors();
 
+        // iOS port (Brogue SE): cursed-runics rework -- re-assert the Smoky cloud AFTER updateEnvironment
+        // (which averages gas twice, thinning the concentrated cloud below the thick threshold) and just
+        // before this final, player-facing vision pass -- otherwise the FOV is recomputed against the
+        // thinned smoke and never collapses (the bug: "I can see fine, so it's all upside"). The earlier
+        // pass at the top of the loop keeps monster-awareness concealment; this one restores your blindness.
+        emitSmokyArmorCloud();
         updateVision(true);
         rogue.stealthRange = currentStealthRange();
         if (rogue.displayStealthRangeMode) {
