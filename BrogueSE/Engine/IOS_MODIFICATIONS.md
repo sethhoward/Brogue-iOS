@@ -32,6 +32,86 @@ See `BrogueCE/Engine/IOS_MODIFICATIONS.md` (faithful CE) and
 
 ## Change log
 
+### 2026-07-02 — Cursed-runics rework, Phase 1: the three weapon-curse effects
+
+**What.** Implemented the effects for the three weapon curses (design: `docs/design/cursed-runics-rework.md`).
+Shared helper `runicCurseActive(item)` (`Items.c`, declared in `Rogue.h`) = "bad runic below its purify
+threshold" — the single gate for all cursed-phase behavior. **All three effects scale with enchant** (so
+purifying-and-enchanting is a real upgrade, matching how good runics scale). Tuning constants in `Rogue.h`:
+`DELIRIUM_PROC_FLOOR` (8) + `DELIRIUM_PROC_PER_ENCHANT` (3); `CLUMSINESS_DECAP_PCT` (4, flat cursed decap
+AND the purified-Quietus floor); `CLUMSINESS_FUMBLE_PCT`/`_STR_RELIEF`/`_STUN_TURNS`;
+`RECKLESSNESS_DAMAGE_DEALT_BASE` (20) + `_PER_ENCHANT` (1); `RECKLESSNESS_DAMAGE_TAKEN_PCT` (50, flat).
+- **Delirium** (`W_DELIRIUM`): dual-mode on-hit proc in `magicWeaponHit` keyed on `runicCurseActive` —
+  **confusion** while cursed (the "venom", reuses `weaponConfusionDuration`), **weakness** once purified
+  (`weaken()`). Downside: while cursed, a per-turn refresh in `decrementPlayerStatus` keeps
+  `STATUS_HALLUCINATING` topped up (permanent hallucination while wielded). Reveals on equip
+  (`autoIdentify` + hallucination start in `equipItem`). The "real curse" (blind acid-mound corrosion)
+  falls out for free from the existing `degradesAttackerWeapon` path; protect-weapon counters it.
+- **Recklessness** (`W_RECKLESSNESS`): passive, no on-hit proc (`runicWeaponChance` returns 0 for it).
+  +`RECKLESSNESS_DAMAGE_DEALT_PCT`% damage dealt (always, even purified) in `attack()`; +`…_TAKEN_PCT`%
+  damage taken while cursed in `inflictDamage` (all sources). Reveals on first connecting attack.
+- **Clumsiness** (`W_CLUMSINESS`): on-hit **decapitate** (`CLUMSINESS_DECAP_PCT` via `runicWeaponChance`;
+  mirrors `W_QUIETUS` lethal path) in `magicWeaponHit`; while cursed, a pre-hit **fumble** in `attack()`
+  (auto-miss + `STATUS_PARALYZED` self-stun, chance reduced by strength over the weapon's requirement).
+  Reveals on first proc. (Purify → `W_QUIETUS` already handled in Phase 0b.)
+
+**Why.** Phase 1 of the rework: the sim-able combat curses, ready for Fight-Simulator tuning of the
+constants above.
+
+**Where.** `Rogue.h` (constants + `runicCurseActive` decl), `Items.c` (`runicCurseActive` def, `equipItem`
+Delirium reveal), `Combat.c` (`magicWeaponHit` Delirium/Clumsiness, `attack()` fumble + Recklessness-dealt,
+`inflictDamage` Recklessness-taken, the Clumsiness decap flare), `PowerTables.c` (`runicWeaponChance`
+per-runic), `Time.c` (`decrementPlayerStatus` hallucination refresh).
+
+**Notes.** No `STATUS_STUNNED` exists in this engine — the fumble uses `STATUS_PARALYZED` (the engine's
+stun, as water-shock does); the constant is raw (the end-of-turn decrement eats 1 → ~1 lost turn). All
+rolls use `rand_percent`/`rand_range` (deterministic, replay-safe). Armor curses (Anchor/Smoky/Acrophobia)
+remain Phase 2.
+
+**Effect scaling (post-sim decision).** All three effects scale with enchant (parity with how good runics
+scale, so purifying-and-enchanting is a real upgrade): Delirium proc `= DELIRIUM_PROC_FLOOR + max(0,e)*_PER_ENCHANT`;
+Recklessness dealt `= _DEALT_BASE + max(0,e)*_PER_ENCHANT`; Clumsiness's cursed decap stays flat 4% but its
+purified `W_QUIETUS` scales via the runic table and is floored at 4%. Verified with the fightsim `--cursecurve`
+mode: cursed phases are a survivable handicap (Clumsiness harshest via the fumble), purify is a clean step-up,
+nothing degenerate.
+
+**Playtest grants (`RogueMain.c`, flags in `Rogue.h`, default 0).** `D_DELIRIUM_WEAPON_START` /
+`D_RECKLESSNESS_WEAPON_START` / `D_CLUMSINESS_WEAPON_START` each grant an unidentified, cursed −1 runic sword;
+`D_CURSE_TEST_SCROLLS_START` grants 12 enchanting + 3 remove-curse to drive the purify/shatter loop. Same
+deterministic-grant pattern as the other `D_*_START` flags.
+
+### 2026-07-01 — Cursed-runics rework, Phase 0 follow-ups: deferred shatter-on-unequip; array fix
+
+**What.** The eject consequence for a cursed double-edged runic (design finalized via a grilling pass;
+Q-decisions in `docs/design/cursed-runics-rework.md`):
+- **Cleansing lifts the weld, it does not destroy** (`uncurse()`): remove-curse / protect clear
+  `ITEM_CURSED` on an *equipped* bad runic only (remove-curse's pack sweep leaves unworn cursed runics
+  alone). The item drops into a "pending shatter" state (bad runic, unwelded, below purify threshold).
+- **Shatter fires on any player-initiated unequip** (`unequipItem`, `force == false` — explicit
+  unequip, swap, drop, throw), behind a `confirm()` that warns it shatters the runes *and* pierces the
+  nearby walls. Engine-forced unequips never shatter. On confirm: strip the runic, then `crystalize(9)`
+  (full wall-breach — opens walls, kills wall-embedded monsters, frees captives) + a `NOISE_BOOMING`
+  environmental noise.
+- **Noise gap fixed:** scroll of shattering and charm of shattering were silent (`crystalize` emits no
+  noise, and scroll-reads emit no player-noise spike). Added `emitEnvironmentalNoise(.., NOISE_BOOMING)`
+  at all three shatter sources (eject + scroll + charm), at the call sites — `crystalize()` stays a
+  pure terrain function (it is NOT used by staff of obstruction; its only callers are these three).
+- Fixed `effectColors[NUMBER_WEAPON_RUNIC_KINDS]` in `magicWeaponHit` (10 initializers for the now-11
+  element array left the `W_CLUMSINESS` slot NULL).
+
+**Why.** Accidental scroll reads are common; making eject destructive-on-read would punish a blind
+read. Deferring the shatter to the deliberate unequip (with a confirm) keeps an accidental cleanse
+harmless while still closing the "remove-curse, shelve, hoard scrolls, re-equip clean" abuse — purity
+must be earned by *wearing* the curse to threshold. Residual (accepted): identify-in-pack then
+shelf-enchant, self-gated by the extra identify scroll.
+
+**Where.** `Items.c` (`uncurse()`, `unequipItem()`, `SCROLL_SHATTERING`, `CHARM_SHATTERING`),
+`Combat.c` (`effectColors`).
+
+**Notes.** Purify never routes through `uncurse()` (it uses `purifyRunicIfReady`), so enchanting toward
+threshold never shatters. Swap-to-a-better-item can trigger the shatter confirm (declining aborts the
+swap). Rings keep vanilla uncurse (lift unconditionally).
+
 ### 2026-07-01 — Cursed-runics rework, Phase 0b/0c: weld lifecycle + generation (save break)
 
 **What.** Decoupled the weld from enchant sign and reworked cursed weapon/armor generation.

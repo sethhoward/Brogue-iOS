@@ -538,6 +538,53 @@ void initializeRogue(uint64_t seed) {
         theItem = addItemToPack(theItem);
     }
 
+    if (D_DELIRIUM_WEAPON_START) {
+        // iOS port (Brogue SE): cursed-runics rework playtest grant -- an unidentified, cursed (-1)
+        // Delirium sword. Equip to test the weld + on-equip reveal + hallucination + confusion venom;
+        // enchant to +6 to purify (hallucination lifts, proc switches to weakness); remove-curse then
+        // unequip to shatter. Deterministic here (not a recorded input), so it reconstructs on replay.
+        theItem = generateItem(WEAPON, SWORD);
+        theItem->enchant1 = -1;
+        theItem->enchant2 = W_DELIRIUM;
+        theItem->flags |= (ITEM_RUNIC | ITEM_CURSED);
+        theItem = addItemToPack(theItem);
+    }
+
+    if (D_RECKLESSNESS_WEAPON_START) {
+        // iOS port (Brogue SE): cursed-runics rework playtest grant -- an unidentified, cursed (-1)
+        // Recklessness sword (+damage dealt always; +damage taken while cursed; purify drops the
+        // vulnerability). Deterministic/replay-safe.
+        theItem = generateItem(WEAPON, SWORD);
+        theItem->enchant1 = -1;
+        theItem->enchant2 = W_RECKLESSNESS;
+        theItem->flags |= (ITEM_RUNIC | ITEM_CURSED);
+        theItem = addItemToPack(theItem);
+    }
+
+    if (D_CLUMSINESS_WEAPON_START) {
+        // iOS port (Brogue SE): cursed-runics rework playtest grant -- an unidentified, cursed (-1)
+        // Clumsiness sword (decap + fumble while cursed; purify transforms it into a runic of quietus).
+        // Deterministic/replay-safe.
+        theItem = generateItem(WEAPON, SWORD);
+        theItem->enchant1 = -1;
+        theItem->enchant2 = W_CLUMSINESS;
+        theItem->flags |= (ITEM_RUNIC | ITEM_CURSED);
+        theItem = addItemToPack(theItem);
+    }
+
+    if (D_CURSE_TEST_SCROLLS_START) {
+        // iOS port (Brogue SE): cursed-runics rework playtest grant -- scrolls to drive the curse loop:
+        // enchanting (reach +6 to purify) and remove-curse (eject -> shatter). Deterministic/replay-safe.
+        theItem = generateItem(SCROLL, SCROLL_ENCHANTING);
+        theItem->quantity = 12;
+        identify(theItem);
+        theItem = addItemToPack(theItem);
+        theItem = generateItem(SCROLL, SCROLL_REMOVE_CURSE);
+        theItem->quantity = 3;
+        identify(theItem);
+        theItem = addItemToPack(theItem);
+    }
+
     DEBUG {
         theItem = generateItem(RING, RING_CLAIRVOYANCE);
         theItem->enchant1 = max(DROWS, DCOLS);

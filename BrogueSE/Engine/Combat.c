@@ -879,7 +879,7 @@ void magicWeaponHit(creature *defender, item *theItem, boolean backstabbed) {
     char buf[DCOLS*3], monstName[DCOLS], theItemName[DCOLS];
 
     const color *effectColors[NUMBER_WEAPON_RUNIC_KINDS] = {&white, &black,
-        &yellow, &pink, &green, &confusionGasColor, NULL, NULL, &darkRed, &rainbow};
+        &yellow, &pink, &green, &confusionGasColor, NULL, NULL, &darkRed, &rainbow, &white};
     //  W_SPEED, W_QUIETUS, W_PARALYSIS, W_MULTIPLICITY, W_SLOWING, W_CONFUSION, W_FORCE, W_SLAYING, W_DELIRIUM, W_RECKLESSNESS, W_CLUMSINESS
     short chance, i;
     fixpt enchant;
@@ -914,6 +914,7 @@ void magicWeaponHit(creature *defender, item *theItem, boolean backstabbed) {
                     createFlare(player.loc.x, player.loc.y, SCROLL_ENCHANTMENT_LIGHT);
                     break;
                 case W_QUIETUS:
+                case W_CLUMSINESS: // iOS port (Brogue SE): a decapitation deserves the quietus flare
                     createFlare(defender->loc.x, defender->loc.y, QUIETUS_FLARE_LIGHT);
                     break;
                 case W_SLAYING:
@@ -1048,14 +1049,41 @@ void magicWeaponHit(creature *defender, item *theItem, boolean backstabbed) {
             case W_FORCE:
                 autoID = forceWeaponHit(defender, theItem);
                 break;
-            // iOS port (Brogue SE): cursed-runics rework. Delirium (+STR) and Recklessness (damage
-            // in/out) are passive, applied at equip / via damage hooks -- nothing to do on-hit here.
-            // Clumsiness's on-hit decapitate/fumble arrives in Phase 1.
+            // iOS port (Brogue SE): cursed-runics rework, Phase 1.
             case W_DELIRIUM:
+                if (runicCurseActive(theItem)) {
+                    // cursed: the venom -- drive the foe into delirium (confusion)
+                    defender->status[STATUS_CONFUSED] = max(defender->status[STATUS_CONFUSED], weaponConfusionDuration(enchant));
+                    defender->maxStatus[STATUS_CONFUSED] = max(defender->maxStatus[STATUS_CONFUSED], defender->status[STATUS_CONFUSED]);
+                    if (canDirectlySeeMonster(defender)) {
+                        sprintf(buf, "%s reels in a sudden delirium", monstName);
+                        buf[DCOLS] = '\0';
+                        combatMessage(buf, messageColorFromVictim(defender));
+                    }
+                } else {
+                    // purified: the mastered blade saps its victim's vigor
+                    weaken(defender, gameConst->onHitWeakenDuration);
+                    if (canDirectlySeeMonster(defender)) {
+                        sprintf(buf, "%s sags as its vigor drains away", monstName);
+                        buf[DCOLS] = '\0';
+                        combatMessage(buf, messageColorFromVictim(defender));
+                    }
+                }
+                autoID = true;
+                break;
             case W_RECKLESSNESS:
+                // passive: damage dealt/taken handled in attack()/inflictDamage; nothing on-hit.
                 break;
             case W_CLUMSINESS:
-                // TODO Phase 1: ~4% decapitate (reuse W_QUIETUS kill path) + ~15% fumble + self-stun.
+                // cursed clumsiness: a wild, lucky swing decapitates. (Purified -> W_QUIETUS is the clean form.)
+                inflictLethalDamage(&player, defender);
+                sprintf(buf, "a wild, lucky swing %s %s",
+                        (defender->info.flags & MONST_INANIMATE) ? "shatters" : "decapitates",
+                        monstName);
+                buf[DCOLS] = '\0';
+                combatMessage(buf, messageColorFromVictim(defender));
+                killCreature(defender, false);
+                autoID = true;
                 break;
             default:
                 break;
@@ -1401,7 +1429,19 @@ boolean attack(creature *attacker, creature *defender, boolean lungeAttack) {
         cosmeticSpawnRippleMonster(noiseSource->loc);
     }
 
-    boolean attackLanded = (sneakAttack || defenderWasAsleep || defenderWasParalyzed || lungeAttack || attackHit(attacker, defender));
+    // iOS port (Brogue SE): cursed-runics rework -- Clumsiness (unpurified) fumble: a chance to trip on
+    // your own swing (auto-miss + self-stun), lessened by strength above the weapon's requirement. A
+    // purified clumsiness blade (now W_QUIETUS) never fumbles.
+    boolean clumsyFumble = false;
+    if (attacker == &player && rogue.weapon && (rogue.weapon->flags & ITEM_RUNIC)
+        && rogue.weapon->enchant2 == W_CLUMSINESS && runicCurseActive(rogue.weapon)) {
+        short fumbleChance = CLUMSINESS_FUMBLE_PCT
+            - max(0, (rogue.strength - player.weaknessAmount) - rogue.weapon->strengthRequired) * CLUMSINESS_FUMBLE_STR_RELIEF;
+        clumsyFumble = (fumbleChance > 0 && rand_percent(fumbleChance));
+    }
+
+    boolean attackLanded = !clumsyFumble
+        && (sneakAttack || defenderWasAsleep || defenderWasParalyzed || lungeAttack || attackHit(attacker, defender));
 
     if (attacker == &player) {
         // iOS port (Brogue SE): noise system -- emit the player's melee loudness AFTER the hit/miss roll
@@ -1420,6 +1460,16 @@ boolean attack(creature *attacker, creature *defender, boolean lungeAttack) {
         // its hits (Movement.c); the sim build also uses it to model pike penetrate/reach. Player only.
         if (attacker == &player && gWeaponDamageScalePct != 100) {
             damage = damage * gWeaponDamageScalePct / 100;
+        }
+
+        // iOS port (Brogue SE): cursed-runics rework -- Recklessness: +damage dealt (always on, even
+        // purified). Its downside (+damage taken) lives in inflictDamage, gated on the curse being active.
+        if (attacker == &player && rogue.weapon && (rogue.weapon->flags & ITEM_RUNIC)
+            && rogue.weapon->enchant2 == W_RECKLESSNESS) {
+            short recklessPct = RECKLESSNESS_DAMAGE_DEALT_BASE
+                + max(0, (short)(netEnchant(rogue.weapon) / FP_FACTOR)) * RECKLESSNESS_DAMAGE_DEALT_PER_ENCHANT;
+            damage = damage * (100 + recklessPct) / 100;
+            autoIdentify(rogue.weapon); // reveal on the first connecting attack
         }
 
         if (sneakAttack || defenderWasAsleep || defenderWasParalyzed) {
@@ -1584,6 +1634,13 @@ boolean attack(creature *attacker, creature *defender, boolean lungeAttack) {
         }
 
         return true;
+    } else if (clumsyFumble) { // iOS port (Brogue SE): cursed-runics rework -- the clumsiness fumble
+        player.status[STATUS_PARALYZED] = max(player.status[STATUS_PARALYZED], CLUMSINESS_FUMBLE_STUN_TURNS);
+        player.maxStatus[STATUS_PARALYZED] = max(player.maxStatus[STATUS_PARALYZED], player.status[STATUS_PARALYZED]);
+        message("you stumble over your own strike and reel, momentarily helpless!", 0);
+        autoIdentify(rogue.weapon);
+        rogue.disturbed = true;
+        return false;
     } else { // if the attack missed
         if (!rogue.blockCombatText) {
             if (sightUnseen) {
@@ -1930,6 +1987,14 @@ boolean inflictDamage(creature *attacker, creature *defender,
         || (defender->info.flags & MONST_INVULNERABLE)) {
 
         return false;
+    }
+
+    // iOS port (Brogue SE): cursed-runics rework -- Recklessness (unpurified) makes you reckless:
+    // +damage taken, from all sources. Purifying it removes the vulnerability (keeps the +damage dealt).
+    if (defender == &player && damage > 0 && rogue.weapon
+        && (rogue.weapon->flags & ITEM_RUNIC) && rogue.weapon->enchant2 == W_RECKLESSNESS
+        && runicCurseActive(rogue.weapon)) {
+        damage = damage * (100 + RECKLESSNESS_DAMAGE_TAKEN_PCT) / 100;
     }
 
     if (!ignoresProtectionShield

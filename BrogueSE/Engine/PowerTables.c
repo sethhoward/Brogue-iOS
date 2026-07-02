@@ -322,14 +322,29 @@ short runicWeaponChance(item *theItem, boolean customEnchantLevel, fixpt enchant
     short runicType = theItem->enchant2;
     short chance, adjustedBaseDamage, tableIndex;
 
+    if (!customEnchantLevel) {
+        enchantLevel = netEnchant(theItem);
+    }
+    const short enchantLevelInt = (short)(enchantLevel / FP_FACTOR);
+
     if (runicType == W_SLAYING) {
         return 0;
     }
-    if (runicType >= NUMBER_GOOD_WEAPON_ENCHANT_KINDS) { // bad runic
-        return 15;
+    // iOS port (Brogue SE): cursed-runics rework -- per-runic on-hit proc chances. Delirium scales
+    // (floor + per-enchant), so its confusion(cursed)/weakness(purified) venom climbs as you enchant;
+    // Clumsiness procs a flat cursed decapitate (its purified W_QUIETUS scales via the table below);
+    // Recklessness is passive (damage hooks live in attack()/inflictDamage), so it never procs here.
+    if (runicType == W_DELIRIUM) {
+        return DELIRIUM_PROC_FLOOR + max(0, enchantLevelInt) * DELIRIUM_PROC_PER_ENCHANT;
     }
-    if (!customEnchantLevel) {
-        enchantLevel = netEnchant(theItem);
+    if (runicType == W_CLUMSINESS) {
+        return CLUMSINESS_DECAP_PCT;
+    }
+    if (runicType == W_RECKLESSNESS) {
+        return 0;
+    }
+    if (runicType >= NUMBER_GOOD_WEAPON_ENCHANT_KINDS) { // bad runic (fallback)
+        return 15;
     }
 
     // Innately high-damage weapon types are less likely to trigger runic effects.
@@ -365,6 +380,12 @@ short runicWeaponChance(item *theItem, boolean customEnchantLevel, fixpt enchant
     // The lowest percent change that a weapon will ever have is its enchantment level (if greater than 0).
     // That is so that even really heavy weapons will improve at least 1% per enchantment.
     chance = clamp(chance, max(1, (short) (enchantLevel / FP_FACTOR)), 100);
+
+    // iOS port (Brogue SE): cursed-runics rework -- a purified Clumsiness (now Quietus) never decaps
+    // rarer than its cursed 4% (only bites if a purified blade is later corroded below its threshold).
+    if (runicType == W_QUIETUS) {
+        chance = max(CLUMSINESS_DECAP_PCT, chance);
+    }
 
     return chance;
 }

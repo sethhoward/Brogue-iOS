@@ -117,6 +117,19 @@
 // Flip to 0 to ship.
 #define D_INVISIBILITY_POTION_START     0//(WIZARD_MODE && 0)
 
+// iOS port (Brogue SE): cursed-runics rework -- start with an unidentified, cursed (-1) double-edged
+// runic sword for each weapon curse, to playtest the full loop: equip (weld + reveal + cursed effect),
+// enchant toward +6 (purify), or remove-curse then unequip (shatter). Granted deterministically in
+// initializeRogue, so recording-safe. Flip to 0 to ship.
+#define D_DELIRIUM_WEAPON_START         0//(WIZARD_MODE && 0)
+#define D_RECKLESSNESS_WEAPON_START     0//(WIZARD_MODE && 0)
+#define D_CLUMSINESS_WEAPON_START       0//(WIZARD_MODE && 0)
+
+// iOS port (Brogue SE): cursed-runics rework -- start with a stack of scrolls to drive the curse loop:
+// enchanting (to reach purify at +6) and remove-curse (to trigger the eject/shatter). Granted
+// deterministically in initializeRogue, so recording-safe. Flip to 0 to ship.
+#define D_CURSE_TEST_SCROLLS_START      0//(WIZARD_MODE && 0)
+
 // iOS port (Brogue SE): noise system. A monster that takes a self-willed step while the player can't
 // see it emits a perceptible "noise", drawn as a box radiating from its new cell ("you heard
 // something"). Perception is a TWO-STAGE model that deliberately SEPARATES range from probability
@@ -1305,6 +1318,17 @@ enum armorEnchants {
 // effect code) falls away, and W_CLUMSINESS tempers into W_QUIETUS. Weapons cost more than armor.
 #define WEAPON_RUNIC_PURIFY_ENCHANT     6
 #define ARMOR_RUNIC_PURIFY_ENCHANT      4
+
+// iOS port (Brogue SE): cursed-runics rework -- Phase 1 weapon-curse tuning (Fight-Simulator knobs).
+#define DELIRIUM_PROC_FLOOR             8   // on-hit proc floor (confusion cursed / weakness purified); never below this
+#define DELIRIUM_PROC_PER_ENCHANT       3   // proc % added per net enchant level (purify + further enchanting climb it)
+#define CLUMSINESS_DECAP_PCT            4   // flat cursed decapitate chance; ALSO the floor on the purified Quietus proc
+#define CLUMSINESS_FUMBLE_PCT           15  // base fumble chance (miss + self-stun) while cursed
+#define CLUMSINESS_FUMBLE_STR_RELIEF    2   // fumble % shed per point of strength above the weapon's requirement
+#define CLUMSINESS_FUMBLE_STUN_TURNS    2   // fumble self-stun (STATUS_PARALYZED); raw value -- end-of-turn decrement eats 1, so ~1 lost turn
+#define RECKLESSNESS_DAMAGE_DEALT_BASE  20  // % damage dealt at +0 (always on, even purified)
+#define RECKLESSNESS_DAMAGE_DEALT_PER_ENCHANT 1 // +% damage dealt per net enchant level
+#define RECKLESSNESS_DAMAGE_TAKEN_PCT   50  // extra % damage taken while cursed (flat)
 
 enum wandKind {
     WAND_TELEPORT,
@@ -4093,6 +4117,7 @@ extern "C" {
     short numberOfItemsInPack(void);
     char nextAvailableInventoryCharacter(void);
     void checkForDisenchantment(item *theItem);
+    boolean runicCurseActive(const item *theItem); // iOS port (Brogue SE): cursed-runics rework -- downside/cursed-mode in force (bad runic below its purify threshold)
     void updateFloorItems(void);
     void itemKindName(item *theItem, char *kindName);
     void itemRunicName(item *theItem, char *runicName);

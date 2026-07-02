@@ -2359,6 +2359,15 @@ static void decrementPlayerStatus() {
         }
     }
 
+    // iOS port (Brogue SE): cursed-runics rework -- a wielded, unpurified Delirium keeps you
+    // permanently hallucinating: top it up so the decrement below never expires it while in hand.
+    // (Unequip or purify stops the refresh, and it fades naturally.)
+    if (rogue.weapon && (rogue.weapon->flags & ITEM_RUNIC) && rogue.weapon->enchant2 == W_DELIRIUM
+        && runicCurseActive(rogue.weapon)) {
+        player.status[STATUS_HALLUCINATING] = max(player.status[STATUS_HALLUCINATING], 2);
+        player.maxStatus[STATUS_HALLUCINATING] = max(player.maxStatus[STATUS_HALLUCINATING], player.status[STATUS_HALLUCINATING]);
+    }
+
     if (player.status[STATUS_HALLUCINATING] > 0 && !--player.status[STATUS_HALLUCINATING]) {
         displayLevel();
         message("your hallucinations fade.", 0);

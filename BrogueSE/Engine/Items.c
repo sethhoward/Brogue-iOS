@@ -1176,6 +1176,13 @@ static boolean purifyRunicIfReady(item *theItem) {
     return true;
 }
 
+// iOS port (Brogue SE): cursed-runics rework. True while a double-edged runic's downside is in force
+// -- a bad runic not yet enchanted to its purify threshold. The effect code keys cursed-phase behavior
+// on this (Delirium's hallucination + confusion, Clumsiness's fumble, Recklessness's +damage-taken).
+boolean runicCurseActive(const item *theItem) {
+    return isBadRunic(theItem) && theItem->enchant1 < runicPurifyThreshold(theItem);
+}
+
 void checkForDisenchantment(item *theItem) {
     char buf[COLS], buf2[COLS];
 
@@ -8243,6 +8250,7 @@ static boolean useCharm(item *theItem) {
         case CHARM_SHATTERING:
             messageWithColor("your charm emits a wave of turquoise light that pierces the nearby walls!", &itemMessageColor, 0);
             crystalize(charmShattering(enchant));
+            emitEnvironmentalNoise(player.loc, NOISE_BOOMING, NULL); // iOS port (Brogue SE): a wall-breach is deafening
             break;
         case CHARM_GUARDIAN:
             messageWithColor("your charm flashes and the form of a mythical guardian coalesces!", &itemMessageColor, 0);
@@ -8423,11 +8431,21 @@ static void magicMapCell(short x, short y) {
 }
 
 static boolean uncurse( item *theItem ) {
-    if (theItem->flags & ITEM_CURSED) {
-        theItem->flags &= ~ITEM_CURSED;
-        return true;
+    if (!(theItem->flags & ITEM_CURSED)) {
+        return false;
     }
-    return false;
+    // iOS port (Brogue SE): cursed-runics rework. Cleansing (remove-curse / protect) only lifts the
+    // weld on an *equipped* double-edged runic -- remove-curse's pack sweep leaves unworn cursed
+    // runics alone. Lifting the weld does NOT destroy the runic: the item drops into a "pending
+    // shatter" state (bad runic, no longer welded, still below its purify threshold). It shatters
+    // only if the player then deliberately unequips it (see unequipItem) -- so an accidental scroll
+    // read is harmless; the destructive act is the choice to take it off. Rings/non-runic cursed
+    // items lift unconditionally, as before.
+    if (isBadRunic(theItem) && !(theItem->flags & ITEM_EQUIPPED)) {
+        return false;
+    }
+    theItem->flags &= ~ITEM_CURSED;
+    return true;
 }
 
 boolean readScroll(item *theItem) {
@@ -8700,6 +8718,7 @@ boolean readScroll(item *theItem) {
         case SCROLL_SHATTERING:
             messageWithColor("the scroll emits a wave of turquoise light that pierces the nearby walls!", &itemMessageColor, 0);
             crystalize(9);
+            emitEnvironmentalNoise(player.loc, NOISE_BOOMING, NULL); // iOS port (Brogue SE): a wall-breach is deafening
             break;
         case SCROLL_DISCORD:
             discordBlast("the scroll", DCOLS);
@@ -10312,6 +10331,17 @@ boolean equipItem(item *theItem, boolean force, item *unequipHint) {
             }
             messageWithColor(buf1, &itemMessageColor, 0);
         }
+
+        // iOS port (Brogue SE): cursed-runics rework -- Delirium's hallucination is unmistakable the
+        // instant you grip it: reveal the runic on equip, and (while still cursed) start the
+        // hallucination now; decrementPlayerStatus refreshes it each turn while wielded.
+        if ((theItem->category & WEAPON) && (theItem->flags & ITEM_RUNIC) && theItem->enchant2 == W_DELIRIUM) {
+            autoIdentify(theItem);
+            if (runicCurseActive(theItem)) {
+                player.status[STATUS_HALLUCINATING] = max(player.status[STATUS_HALLUCINATING], 2);
+                player.maxStatus[STATUS_HALLUCINATING] = max(player.maxStatus[STATUS_HALLUCINATING], player.status[STATUS_HALLUCINATING]);
+            }
+        }
     }
 
     return true;
@@ -10332,6 +10362,22 @@ boolean unequipItem(item *theItem, boolean force) {
         confirmMessages();
         messageWithColor(buf, &itemMessageColor, 0);
         return false;
+    }
+    // iOS port (Brogue SE): cursed-runics rework. A double-edged runic whose weld was lifted by
+    // cleansing (remove-curse / protect) but not yet purified shatters when the player deliberately
+    // takes it off -- rejecting the bargain. Any player-initiated removal counts (explicit unequip,
+    // swap, drop, throw: all force == false); engine-forced unequips never shatter. Confirm first
+    // because it's destructive AND detonates a wall-piercing burst.
+    const boolean shatterOnRemoval = !force
+        && isBadRunic(theItem)
+        && !(theItem->flags & ITEM_CURSED)
+        && theItem->enchant1 < runicPurifyThreshold(theItem);
+    if (shatterOnRemoval) {
+        itemName(theItem, buf2, false, false, NULL);
+        sprintf(buf, "Taking off your %s will shatter its runes in a burst that pierces the nearby walls. Proceed?", buf2);
+        if (!confirm(buf, false)) {
+            return false;
+        }
     }
     theItem->flags &= ~ITEM_EQUIPPED;
     if (theItem->category & WEAPON) {
@@ -10360,6 +10406,19 @@ boolean unequipItem(item *theItem, boolean force) {
         }
     }
     updateEncumbrance();
+    // iOS port (Brogue SE): cursed-runics rework. Now that the runic is off, reject the bargain: strip
+    // the runic (leaving a plain inferior item) and detonate a shattering burst -- crystalize breaches
+    // the nearby walls (killing wall-embedded monsters, freeing captives), and it rings out at booming
+    // volume (see Q-decisions in docs/design/cursed-runics-rework.md).
+    if (shatterOnRemoval) {
+        theItem->enchant2 = 0;
+        theItem->flags &= ~(ITEM_RUNIC | ITEM_RUNIC_HINTED | ITEM_RUNIC_IDENTIFIED);
+        itemName(theItem, buf2, false, false, NULL);
+        sprintf(buf, "the runes shatter from your %s, and a wave of turquoise light pierces the nearby walls!", buf2);
+        messageWithColor(buf, &itemMessageColor, 0);
+        crystalize(9);
+        emitEnvironmentalNoise(player.loc, NOISE_BOOMING, NULL);
+    }
     return true;
 }
 
