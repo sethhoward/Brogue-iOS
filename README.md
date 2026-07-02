@@ -3,9 +3,9 @@ Brogue-iOS
 
 Welcome to the Dungeons of Doom!
 
-This is an iOS port of Brian Walker's amazing roguelike Brogue which can be found @https://sites.google.com/site/broguegame/
+This is an iOS/macOS port of Brian Walker's amazing roguelike Brogue which can be found @https://sites.google.com/site/broguegame/
 
-Brogue for iPad can be downloaded for free on the [App Store](https://apps.apple.com/us/app/brogue/id613921309)
+Brogue for iOS and macOS can be downloaded for free on the [App Store](https://apps.apple.com/us/app/brogue/id613921309)
 
 This application is a graphical wrapper, I/O handler, and app launcher for:
 
