@@ -35,9 +35,15 @@
 #define USE_UNICODE
 
 // Brogue version number (for main engine)
+// iOS port (Brogue SE): the recording/save version is "SE <MAJOR>.<MINOR>.<PATCH>" (separate from the
+// user-facing release name, e.g. "0.12.0"). A MINOR bump makes the patch-pattern match fail, so old saves
+// are cleanly rejected with the "cannot be opened in version X" dialog instead of loading and going
+// out-of-sync; a PATCH bump does NOT reject them (reserved for replay-safe changes). Bump MINOR whenever a
+// release changes how a seed+inputs evolve. 0.12.0 "C is for Curses" is "SE 2.2.0": MINOR 1->2 (cursed-runics
+// + the Altars of Divination change level generation), rejecting 0.11.0 "B is for Balance" ("SE 2.1.0") saves.
 #define BROGUE_MAJOR 2
-#define BROGUE_MINOR 0
-#define BROGUE_PATCH 1
+#define BROGUE_MINOR 2
+#define BROGUE_PATCH 0
 
 // Expanding a macro as a string constant requires two levels of macros
 #define _str(x) #x
@@ -111,6 +117,25 @@
 // Flip to 0 to ship.
 #define D_INVISIBILITY_POTION_START     0//(WIZARD_MODE && 0)
 
+// iOS port (Brogue SE): cursed-runics rework -- start with an unidentified, cursed (-1) double-edged
+// runic sword for each weapon curse, to playtest the full loop: equip (weld + reveal + cursed effect),
+// enchant toward +6 (purify), or remove-curse then unequip (shatter). Granted deterministically in
+// initializeRogue, so recording-safe. Flip to 0 to ship.
+#define D_DELIRIUM_WEAPON_START         0//(WIZARD_MODE && 0)
+#define D_RECKLESSNESS_WEAPON_START     0//(WIZARD_MODE && 0)
+#define D_CLUMSINESS_WEAPON_START       0//(WIZARD_MODE && 0)
+
+// iOS port (Brogue SE): cursed-runics rework -- start with a stack of scrolls to drive the curse loop:
+// enchanting (to reach purify at +6) and remove-curse (to trigger the eject/shatter). Granted
+// deterministically in initializeRogue, so recording-safe. Flip to 0 to ship.
+#define D_CURSE_TEST_SCROLLS_START      0//(WIZARD_MODE && 0)
+
+// iOS port (Brogue SE): cursed-runics rework -- start with an unidentified, cursed (-1) double-edged
+// runic armor for each implemented armor curse (Phase 2). Same deterministic grant; flip to 0 to ship.
+#define D_ACROPHOBIA_ARMOR_START        0//(WIZARD_MODE && 0)
+#define D_ANCHOR_ARMOR_START            0//(WIZARD_MODE && 0)
+#define D_SMOKY_ARMOR_START             0//(WIZARD_MODE && 0)
+
 // iOS port (Brogue SE): noise system. A monster that takes a self-willed step while the player can't
 // see it emits a perceptible "noise", drawn as a box radiating from its new cell ("you heard
 // something"). Perception is a TWO-STAGE model that deliberately SEPARATES range from probability
@@ -145,6 +170,11 @@
 // unaffected. PROMOTE TO SUBSTANTIVE only if/when "hearing" starts driving gameplay (e.g. interrupts
 // travel/rest, or feeds monster awareness). See docs/design/noise-system.md and PERCEPTION_AUDIT.md.
 #define NOISE_SYSTEM_ENABLED            1   // single kill switch / pre-ship knob (flip to 0 to disable)
+// iOS port (Brogue SE): explosion knockback kill switch. Gated OFF for the 0.11.0 "B is for Balance"
+// release -- the feature (knockCreatureFromExplosion) ships disabled; flip to 1 to re-enable in a future
+// release. Kept as a knob rather than a revert so the code stays intact. A feature that never fires can't
+// perturb the substantive RNG stream, so leaving it off does not affect seeds, saves, or replays.
+#define SE_EXPLOSION_KNOCKBACK          0   // single kill switch / pre-ship knob (flip to 1 to enable)
 // Per-monster noisiness tiers (the signed modifier noiseLevelForMonsterMove returns). Assigned per
 // monster in that chokepoint; mirrored in docs/game-data/MONSTERS_AUDIT.md's Noise column.
 #define NOISE_NORMAL                    0   // default -- most grounded medium creatures
@@ -334,6 +364,16 @@
 #define INVESTIGATE_SPOT_ADJACENT_CHANCE 95  // spot chance/turn when point-blank (1 tile)
 #define INVESTIGATE_SPOT_FALLOFF         20  // spot chance lost per tile of distance
 #define INVESTIGATE_SPOT_FLOOR           25  // never below the vanilla passive-wanderer baseline (continuity)
+// Thrown-decoy DWELL. A monster that reaches a thrown distraction item, claims it (consume-on-arrival),
+// then LOITERS on the spot for a few turns -- absorbed by the curious object -- before losing interest and
+// resuming its give-up (return-home / wander). While dwelling it stays put, keeps the '?' blink, and drops
+// from the proximity spot curve back to the flat 25% ambient roll (it's examining the thing, not scanning
+// for you). This is the "slip by" window: the decoy pins the monster at the wrong place. Scoped to thrown
+// decoy items ONLY (a fixation needs an object) -- player-made noise / traps / shattered potions never
+// dwell. Seeded (rand_range) so it's organic yet deterministic/replay-safe. See awareOfTarget, the WANDERING
+// arrival block in monstersTurn, and docs/design/environmental-sounds.md.
+#define NOISE_INVESTIGATE_DWELL_MIN      4   // fewest turns a monster loiters on a claimed decoy
+#define NOISE_INVESTIGATE_DWELL_MAX      8   // most turns it loiters (rand_range span averages ~6)
 // Player loudness (playerNoiseLevel() base + an action spike). A NEW quantity, NOT currentStealthRange
 // (which bakes in darkness/shadow -- visual, irrelevant to sound -- and lacks terrain/action/levitation).
 #define NOISE_PLAYER_SILENT             (-30000) // sentinel: player made no noise this turn -> no sound check
@@ -533,7 +573,7 @@ typedef struct windowpos {
 // never stops projectiles and never muffles sound (a screen breaks sight, not pursuit). See
 // IOS_MODIFICATIONS.md. These are playtest tuning dials -- adjust freely.
 #define SMOKE_THICK_VOLUME      15          // gas volume at/above which smoke blocks line of sight and lingers
-#define SMOKE_EMISSION_CHANCE   45          // % chance per turn a burning PLAIN_FIRE tile puffs smoke (substantive RNG)
+#define SMOKE_EMISSION_CHANCE   35          // % chance per turn a burning PLAIN_FIRE tile puffs smoke (substantive RNG)
 
 #define MACHINES_BUFFER_LENGTH  200
 
@@ -1047,6 +1087,16 @@ enum tileType {
     // index; its gas-layer behavior comes from the DF that spawns it, not from enum adjacency.
     FROST_GAS,
 
+    // iOS port (Brogue SE): Altars of Divination (replaces the deprecated altars of insight). A cross of up
+    // to four one-use altars around a central statue. Place an unidentified item on an active altar to fully
+    // identify it; the altar then arms (holds the revealed item) and seals shut when you lift the item. Each
+    // identify escalates the statue and may awaken its guardian. See performDivination (Items.c),
+    // placeAltarCrossInRoom + the addMachines carry-forward (Architect.c), spawnDivinationGuardian (Monsters.c).
+    DIVINATION_ALTAR,          // active: place an unID'd item here to identify it
+    DIVINATION_ALTAR_ARMED,    // holds the revealed item; promotes to CLOSED when the item is lifted
+    DIVINATION_ALTAR_CLOSED,   // sealed/inert (a used altar's graceful close, or an unused one shattered on awaken)
+    DIVINATION_STATUE,         // the central statue; its guardian bursts out beside it on an awaken
+
     NUMBER_TILETYPES,
 };
 
@@ -1232,9 +1282,12 @@ enum weaponEnchants {
     W_CONFUSION,
     W_FORCE,
     W_SLAYING,
-    W_MERCY,
-    NUMBER_GOOD_WEAPON_ENCHANT_KINDS = W_MERCY,
-    W_PLENTY,
+    // iOS port (Brogue SE): cursed-runics rework — the malevolent tail is now double-edged
+    // (always-on upside + a downside you purify away). Replaces W_MERCY/W_PLENTY.
+    W_DELIRIUM,
+    NUMBER_GOOD_WEAPON_ENCHANT_KINDS = W_DELIRIUM,
+    W_RECKLESSNESS,
+    W_CLUMSINESS,
     NUMBER_WEAPON_RUNIC_KINDS
 };
 
@@ -1257,12 +1310,36 @@ enum armorEnchants {
     A_REFLECTION,
     A_RESPIRATION,
     A_DAMPENING,
-    A_BURDEN,
-    NUMBER_GOOD_ARMOR_ENCHANT_KINDS = A_BURDEN,
-    A_VULNERABILITY,
-    A_IMMOLATION,
+    // iOS port (Brogue SE): cursed-runics rework — double-edged armor curses. Replaces
+    // A_BURDEN/A_VULNERABILITY/A_IMMOLATION.
+    A_ANCHOR,
+    NUMBER_GOOD_ARMOR_ENCHANT_KINDS = A_ANCHOR,
+    A_SMOKY,
+    A_ACROPHOBIA,
     NUMBER_ARMOR_ENCHANT_KINDS,
 };
+
+// iOS port (Brogue SE): cursed-runics rework. A double-edged runic welds on until enchanted to its
+// purify threshold, at which point the weld lifts, the downside (gated on enchant level in the
+// effect code) falls away, and W_CLUMSINESS tempers into W_QUIETUS. Weapons cost more than armor.
+#define WEAPON_RUNIC_PURIFY_ENCHANT     6
+#define ARMOR_RUNIC_PURIFY_ENCHANT      4
+
+// iOS port (Brogue SE): cursed-runics rework -- Phase 1 weapon-curse tuning (Fight-Simulator knobs).
+#define DELIRIUM_PROC_FLOOR             8   // on-hit proc floor (confusion cursed / weakness purified); never below this
+#define DELIRIUM_PROC_PER_ENCHANT       3   // proc % added per net enchant level (purify + further enchanting climb it)
+#define CLUMSINESS_DECAP_PCT            4   // flat cursed decapitate chance; ALSO the floor on the purified Quietus proc
+#define CLUMSINESS_FUMBLE_PCT           15  // base fumble chance (miss + self-stun) while cursed
+#define CLUMSINESS_FUMBLE_STR_RELIEF    2   // fumble % shed per point of strength above the weapon's requirement
+#define CLUMSINESS_FUMBLE_STUN_TURNS    2   // fumble self-stun (STATUS_PARALYZED); raw value -- end-of-turn decrement eats 1, so ~1 lost turn
+#define RECKLESSNESS_DAMAGE_DEALT_BASE  20  // % damage dealt at +0 (always on, even purified)
+#define RECKLESSNESS_DAMAGE_DEALT_PER_ENCHANT 1 // +% damage dealt per net enchant level
+#define RECKLESSNESS_DAMAGE_TAKEN_PCT   50  // extra % damage taken while cursed (flat)
+
+// iOS port (Brogue SE): cursed-runics rework -- Phase 2 armor-curse tuning.
+#define ANCHOR_DEFENSE_BONUS            30  // +defense (x10 units; +3 displayed) while worn -- always on
+#define ANCHOR_MOVE_SLOW_PCT           100  // extra % move-cost while cursed (100 = double); attacks untouched
+#define SMOKY_STEALTH_BONUS            3   // purified Smoky's passive stealth (spot + noise); ~a +3 ring of stealth
 
 enum wandKind {
     WAND_TELEPORT,
@@ -2242,6 +2319,10 @@ enum dungeonFeatureTypes {
     // companion DF -- tighter than open-field DF_DEAD_GRASS and, unlike it, chains no dead foliage.
     DF_TRAP_DRY_GRASS,
 
+    // iOS port (Brogue SE): an armed divination altar seals shut when its revealed item is lifted
+    // (promoteType fired by TM_PROMOTES_ON_ITEM_PICKUP -> lays DIVINATION_ALTAR_CLOSED).
+    DF_DIVINATION_ALTAR_CLOSE,
+
     NUMBER_DUNGEON_FEATURES,
 };
 
@@ -2456,6 +2537,7 @@ enum terrainMechanicalFlagCatalog {
     TM_SWAP_ENCHANTS_ACTIVATION     = Fl(25),       // in machine, swap item enchantments when two suitable items are on this terrain, and activate the machine when that happens
     TM_INSIGHT_ACTIVATION           = Fl(26),       // iOS port (iBrogue): in machine, when the insight + payment altars both hold items, reveal the insight item and consume the payment, then activate
     TM_TRANSFER_ENCHANT_ACTIVATION  = Fl(27),       // iOS port (iBrogue): in machine, when the donor + recipient altars both hold items, pour the donor's enchantment into the recipient, consume the donor, then activate
+    TM_DIVINATION_ACTIVATION        = Fl(28),       // iOS port (Brogue SE): an active divination altar -- when it holds an unidentified item, identify it, arm the altar, and roll the statue's awaken (see performDivination)
 
     TM_PROMOTES_ON_STEP             = (TM_PROMOTES_ON_CREATURE | TM_PROMOTES_ON_ITEM),
 };
@@ -2868,6 +2950,9 @@ typedef struct creature {
                                    // so it can return there and doze off again (valid only while MB_RETURNING_HOME).
     short investigateStrength;     // iOS port (Brogue SE): noise system -- the distance-adjusted heard-strength that
                                    // set the current investigateLoc; a new noise re-targets only if louder/closer.
+    short investigateDwell;        // iOS port (Brogue SE): noise system -- turns left LOITERING on a claimed thrown
+                                   // decoy (>0 => arrived + absorbed by the object: stays put, '?' blinks, spot roll
+                                   // drops to ambient 25%). Set on claim via rand_range; 0 = en route or not investigating.
     char targetCorpseName[30];          // name of the deceased monster that we're approaching to gain its abilities
     unsigned long absorptionFlags;      // ability/behavior flags that the monster will gain when absorption is complete
     boolean absorbBehavior;             // above flag is behavior instead of ability (ignored if absorptionBolt is set)
@@ -3115,7 +3200,10 @@ typedef struct playerCharacter {
     item *lastItemThrown;
     item *lastStaffZapped;              // iOS port (Brogue SE): last staff zapped, for the re-apply (REAPPLY_KEY) command; staves only (never wands/charms). Set deterministically on a confirmed zap, so save replays stay in sync.
     short rewardRoomsGenerated;         // to meter the number of reward machines
-    short insightAltarsBuilt;           // iOS port (iBrogue): guaranteed altars-of-insight built so far this run; obligations carry forward to the next level if a level can't fit the room
+    short insightAltarsBuilt;           // iOS port (iBrogue): guaranteed altars-of-insight built so far this run (DEPRECATED -- insight no longer generates; kept for struct/replay stability)
+    boolean divinationAltarBuilt;       // iOS port (Brogue SE): the Altars of Divination room is built at most once per run (carry-forward from D9)
+    short divinationAltarUses;          // iOS port (Brogue SE): how many altars have been used (fully identified an item) in that room -- drives the 0/25/50/75 awaken curve and the statue-escalation flavor
+    boolean divinationAltarAwakened;    // iOS port (Brogue SE): the statue's guardian has awakened (one per room); remaining altars have shattered
     boolean goldGoblinSpawned;          // iOS port (iBrogue): the gold goblin appears at most once per run
     short machineNumber;                // so each machine on a level gets a unique number
     pos sidebarLocationList[ROWS*2];    // to keep track of which location each line of the sidebar references
@@ -3292,6 +3380,21 @@ typedef struct blueprint {
     machineFeature feature[20];         // the features themselves
 } blueprint;
 
+// iOS port (Brogue SE): Altars of Divination tuning. A guaranteed once-per-run reward room (carry-forward
+// from MIN_DEPTH, abandoned past MAX_DEPTH). Each altar fully identifies one item; the Nth identify rolls an
+// escalating chance to awaken the statue's single guardian (use 1 is always safe). If it awakens, a tiered
+// monster bursts out "off balance" (a high ticksUntilTurn -> the derived "(Off balance)" tell) and the
+// unused altars shatter. Later trigger = deadlier monster + longer flat-footed grace (the scariest is also
+// the most escapable). Awaken rolls use the substantive RNG -> deterministic/replay-safe. See performDivination.
+#define DIVINATION_ALTAR_MIN_DEPTH        7   // earliest depth the room tries to build (was grilled at 9; moved to 7)
+#define DIVINATION_ALTAR_MAX_DEPTH        22  // give up carrying the obligation forward past here
+#define DIVINATION_AWAKEN_USE2            25  // % chance the 2nd identify awakens the statue (1st is always safe)
+#define DIVINATION_AWAKEN_USE3            50  // % on the 3rd identify
+#define DIVINATION_AWAKEN_USE4            75  // % on the 4th identify (cap -- never a certainty)
+#define DIVINATION_OFFBALANCE_TIER1       200 // ticksUntilTurn the use-2 guardian (Ogre) emerges with
+#define DIVINATION_OFFBALANCE_TIER2       300 // use-3 guardian (Troll)
+#define DIVINATION_OFFBALANCE_TIER3       400 // use-4 guardian (Underworm) -- slow + long grace = fleeable
+
 enum machineTypes {
     // Reward rooms:
     MT_REWARD_MULTI_LIBRARY = 1,
@@ -3381,8 +3484,13 @@ enum machineTypes {
     // insight altar in the blueprintCatalog; enters the random reward raffle via BP_REWARD.
     MT_TRANSFER_ALTAR,
 
-    // iOS port (iBrogue): the altars of insight fill this reward slot (force-built at fixed depths in
-    // addMachines).
+    // iOS port (Brogue SE): the Altars of Divination -- force-built once per run (carry-forward from D9 in
+    // addMachines). A genuine new machine index appended after the transfer altar in the blueprintCatalog.
+    MT_DIVINATION_ALTARS,
+
+    // iOS port (iBrogue): the altars of insight fill this reward slot. DEPRECATED (Brogue SE): no longer
+    // generated -- the addMachines carry-forward that built it was retargeted to MT_DIVINATION_ALTARS. The
+    // blueprint/terrain/trigger remain in the tree, unreferenced by generation.
     MT_INSIGHT_ALTAR = MT_REWARD_HEAVY_OR_RUNIC_WEAPON
 };
 
@@ -3894,6 +4002,7 @@ extern "C" {
     void resolvePronounEscapes(char *text, creature *monst);
     short pickHordeType(short depth, enum monsterTypes summonerType, unsigned long forbiddenFlags, unsigned long requiredFlags);
     creature *cloneMonster(creature *monst, boolean announce, boolean placeClone);
+    creature *spawnDivinationGuardian(pos statueLoc, short useNumber); // iOS port (Brogue SE): Altars of Divination
     void empowerMonster(creature *monst);
     unsigned long forbiddenFlagsForMonster(creatureType *monsterType);
     unsigned long avoidedFlagsForMonster(creatureType *monsterType);
@@ -4019,6 +4128,8 @@ extern "C" {
     short numberOfItemsInPack(void);
     char nextAvailableInventoryCharacter(void);
     void checkForDisenchantment(item *theItem);
+    boolean runicCurseActive(const item *theItem); // iOS port (Brogue SE): cursed-runics rework -- downside/cursed-mode in force (bad runic below its purify threshold)
+    short smokyPurifyStealthBonus(void); // iOS port (Brogue SE): cursed-runics rework -- SMOKY_STEALTH_BONUS while a purified Smoky armor is worn, else 0
     void updateFloorItems(void);
     void itemKindName(item *theItem, char *kindName);
     void itemRunicName(item *theItem, char *runicName);

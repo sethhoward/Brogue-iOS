@@ -946,6 +946,63 @@ static void enchantCurve(int trials) {
     gBalance = saved;
 }
 
+// iOS port (Brogue SE): cursed-runics rework -- walk each weapon curse across the enchant ramp
+// (cursed below +6, purified at/above) against a plain-sword baseline. Answers the two reads:
+// (1) is the cursed phase a death sentence? -- watch win%/HP at -1..+5; (2) is purity an auto-win?
+// -- compare the +6..+10 cells to baseline. Each cell = win%/meanHPlost.
+static void curseCurve(int trials) {
+    const int depth = 12;                              // mid-game: find a curse, grind it toward purity
+    const int ench[] = {-1, 0, 2, 4, 5, 6, 8, 10};    // '|' boundary at the +6 purify threshold
+    const int NE = (int)(sizeof ench / sizeof ench[0]);
+    fs_buildBudgetTable(depth, 8);
+    DepthBudget bud = fs_budgetAt(depth);
+    int strength = 12 + (int)(bud.strengthPotions + 0.5);
+    int hp = 30 + 10 * (int)(bud.lifePotions + 0.5);
+    balanceConfig saved = gBalance;
+    gBalance = FIGHTSIM_TUNED_DEFAULTS;
+
+    printf("# CURSE CURVE @ depth %d (str %d, HP %d) -- SWORD base, mean over 5 archetypes. Purify at +%d.\n",
+           depth, strength, hp, WEAPON_RUNIC_PURIFY_ENCHANT);
+    printf("# each cell = win%%/meanHPlost. NOTE: sim uses straight-line monster choreography, so\n");
+    printf("# Delirium's confusion (and its hallucination) are undervalued -- this reads Recklessness,\n");
+    printf("# Clumsiness, and Delirium's purified weakness faithfully; confusion/hallucination = playtest.\n");
+    printf("curse");
+    for (int i = 0; i < NE; i++) printf(",%s%+d", (ench[i] == WEAPON_RUNIC_PURIFY_ENCHANT ? "|" : ""), ench[i]);
+    printf("\n");
+
+    struct { const char *label; short cursedRunic; short purifiedRunic; } rows[] = {
+        {"baseline",     -1,             -1},
+        {"delirium",     W_DELIRIUM,     W_DELIRIUM},
+        {"recklessness", W_RECKLESSNESS, W_RECKLESSNESS},
+        {"clumsiness",   W_CLUMSINESS,   W_QUIETUS},   // purify transforms the runic to quietus
+    };
+    const int NR = (int)(sizeof rows / sizeof rows[0]);
+    for (int rIdx = 0; rIdx < NR; rIdx++) {
+        printf("%s", rows[rIdx].label);
+        for (int i = 0; i < NE; i++) {
+            int e = ench[i];
+            gFightsimWeaponRunic = (e >= WEAPON_RUNIC_PURIFY_ENCHANT) ? rows[rIdx].purifiedRunic
+                                                                      : rows[rIdx].cursedRunic;
+            BuildSpec b = { rows[rIdx].label, SWORD, LEATHER_ARMOR, NONE, NONE, (short)e, 0, 0, 0 };
+            Stat wS = {0}, hpS = {0};
+            for (Archetype a = 0; a < ARCH_COUNT; a++) {
+                int n = (a == ARCH_LONE_TANK) ? 1 : 4;
+                for (int t = 0; t < trials; t++) {
+                    EncounterResult r = fs_run(&b, a, hp, MK_OGRE, n, (uint64_t)t + 1, 0, -1, strength, depth);
+                    statAdd(&wS, r.won);
+                    statAdd(&hpS, r.hpLost);
+                }
+            }
+            gFightsimWeaponRunic = -1;
+            printf(",%.0f/%.0f", 100 * statMean(&wS), statMean(&hpS));
+        }
+        printf("\n");
+        fflush(stdout);
+    }
+    gFightsimWeaponRunic = -1;
+    gBalance = saved;
+}
+
 int main(int argc, char **argv) {
     gameVariant = VARIANT_BROGUE;
     initializeGameVariant();
@@ -999,6 +1056,11 @@ int main(int argc, char **argv) {
     if (strcmp(mode, "--enchantcurve") == 0) {
         int trials = (argc > 2) ? atoi(argv[2]) : 40;
         enchantCurve(trials);
+        return 0;
+    }
+    if (strcmp(mode, "--cursecurve") == 0) { // iOS port (Brogue SE): cursed-runics rework
+        int trials = (argc > 2) ? atoi(argv[2]) : 200;
+        curseCurve(trials);
         return 0;
     }
     if (strcmp(mode, "--progression") == 0) {

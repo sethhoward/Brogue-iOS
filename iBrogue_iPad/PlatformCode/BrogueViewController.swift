@@ -1912,13 +1912,62 @@ final class BrogueViewController: UIViewController {
         ]
     }
 
-    /// Brogue SE release notes — player-facing highlights for the current release.
+    /// Brogue SE release notes — player-facing highlights for the current release,
+    /// followed by every prior release archived under a "📦 Previous Release —" heading.
     /// Curated for the info panel; the full technical log lives in
-    /// BrogueSE/Engine/IOS_MODIFICATIONS.md. Keep in sync with new content.
+    /// BrogueSE/Engine/IOS_MODIFICATIONS.md. When shipping a new release, PREPEND the new
+    /// section and DEMOTE the current one to a Previous Release block — never delete an old
+    /// release; the full history is intentionally kept here. Keep in sync with new content.
     private static func seInfoBlocks() -> [InfoBlock] {
         return [
             .link("Support", "https://github.com/sethhoward/Brogue-iPad"),
-            .note("Brogue SE — an experimental fork of BrogueCE with original items, monsters, and mechanics. Release 0.10.0, \"A Is For AAaAH!\", is all about sound: the dungeon can finally hear you — and you can hear it. Here's what's new:"),
+            .note("Brogue SE — an experimental fork of BrogueCE with original items, monsters, and mechanics. Release 0.12.0, \"C is for Curses\", turns cursed gear from a dead end into a decision — a cursed runic now pairs a real, always-on power with its bite — and adds a shrine that will identify your pack, if you dare wake what guards it. Here's what's new:"),
+            .heading("🔮 Cursed Runics, Reworked"),
+            .bullets([
+                "A curse is a bargain, not a trap — A cursed runic now grants a genuine, always-on power alongside its drawback, welded to you until you deal with it. Every downside has a counter you can lean into, so keeping a cursed item can be the smart play.",
+                "Two ways to break the weld — Pour enchant scrolls in to the purify threshold and the drawback burns away while the power stays (weapons at +6, armor at +4); or read remove-curse to pry it off early, drawback and all.",
+                "Maddening, reckless, and clumsy blades — Delirium confounds what you strike but leaves you hallucinating; Recklessness trades the damage you take for the damage you deal; a Clumsy blade fumbles and stuns you — until you purify it into a true executioner's blade.",
+                "Anchor, Smoky, and Acrophobia armor — Anchor steels your defense but drags your step (purify to stand immovable); Smoky armor wraps you in concealing haze at the cost of your own sight (purify for a quiet stealth aura); Acrophobia makes you fearless of pits but dizzy at their edge.",
+            ]),
+            .heading("🗿 Altars of Divination"),
+            .bullets([
+                "Reveal your unknowns — A new shrine replaces the Altar of Insight, watched over by a looming statue, fully identifies any unidentified item you set on one of its altars — and the first one is always safe.",
+                "Press your luck — Each further item you reveal risks waking the statue's guardian, and the greedier you get the deadlier it is: Take what you dare.",
+            ]),
+            .heading("🎣 Cleaner Distractions"),
+            .bullets([
+                "Thrown lures buy real time — A monster that goes to investigate a thrown item now lingers over it for a few turns before losing interest, opening a genuine window to slip past.",
+            ]),
+            .heading("🎮 Quality of Life"),
+            .bullets([
+                "Fire no longer rattles you — Catching fire used to throw you into a brief panic; now that disorientation strikes only monsters. It still burns — but your wits, and your next move, stay yours.",
+                "Study a scroll even while hunted — Sitting down to a meal always lets you puzzle out an unidentified scroll now, even with something on your trail; the old \"only when nothing's hunting you\" restriction is gone.",
+            ]),
+            .heading("📦 Previous Release — 0.11.0 \"B is for Balance\""),
+            .note("Retuned the arsenal — heavier trade-offs on weapons, staffs, and rings, with clearer status tells to read the fight at a glance:"),
+            .heading("⚖️ Balance Pass"),
+            .bullets([
+                "Broadsword & war axe, soft-capped — The two late-game staples no longer scale forever: enchanting pays full value only through +10, and each point beyond returns about a quarter of its old kick. Still top-tier, no longer an automatic win.",
+                "War pike, slowed — The pike's strength was always its throughput — reach-2 and a thrust that pierces a whole line — so it now takes twice as long to recover after each attack. Trade tempo for that reach.",
+                "Flail, less of a lawnmower — The flail's signature hits on enemies you sweep past while moving now land for half damage, so wading through a crowd isn't free.",
+                "Bare-knuckle scaling — Unarmed attacks now grow with your strength, so being caught between weapons isn't hopeless.",
+                "Staffs come into their own — Lightning and firebolt get a real power bump once enchanted to +5 and beyond, rewarding committing to a single staff or a hybrid heavy weapon and stave approach.",
+                "Ring of Transference, reworked — It now drains life from whatever you strike and bleeds a share of your own harmful afflictions onto the target — turning your suffering against your enemy.",
+            ]),
+            .heading("💨 Smoke & Terrain"),
+            .bullets([
+                "Where there's fire, there's smoke — Burning terrain now breathes a vision-obscuring haze that drifts and thins over time, so a blaze can blind as much as it burns.",
+                "Traps suit their surroundings — Fire traps nestle in dry grass, caustic traps among scattered bones — the dungeon hints at what's waiting.",
+                "Douse the burning — Fiery creatures are snuffed out by water or frost, so the right element can put out a walking bonfire.",
+            ]),
+            .heading("👁️ Tells & Legibility"),
+            .bullets([
+                "Read the battlefield — A small glyph now blinks over any creature (and you) that's confused, burning, stunned, protected, hasted, or healing, so you can size up the situation.",
+                "Clairvoyance reads the floor — On arriving at a new depth, a worn Ring of Clairvoyance senses whether items on the level are helpful or harmful — as many as the ring's enchant level.",
+                "A sharper ear — The noise system is clearer: a pack raises a rallying cry when one of them rouses the others, submerged creatures fall silent, and close threats are easier to hear.",
+            ]),
+            .heading("📦 Previous Release — 0.10.0 \"A Is For AAaAH!\""),
+            .note("The sound update — the dungeon learned to hear you, and you learned to hear it:"),
             .heading("🔊 The Dungeon Can Hear You"),
             .bullets([
                 "Make noise, get noticed — Footsteps, fighting, and the terrain you cross all send sound rippling through the dungeon. It bends around corners and muffles through closed doors, so unseen monsters can now hear you coming and slip away to investigate the racket.",
@@ -1951,7 +2000,7 @@ final class BrogueViewController: UIViewController {
             .heading("👹 Monsters & Allies"),
             .bullets([
                 "The Gold Goblin — A skittish treasure-hoarder that flees toward the stairs, scattering a trail of gold. Chase it down and corner it before it escapes to the next floor.",
-                "Cleverer thieves — Monkeys and imps now target the items they actually covet, not just whatever's handy. #849 gimballock",
+                "Cleverer thieves — Monkeys and imps now target the items they actually covet, not just whatever's handy.",
                 "Better allies — Allies keep a safe distance from invulnerable monsters, and the Ring of Light can rally and embolden the companions fighting beside you.",
             ]),
             .heading("🔍 A New Way to Identify Items"),

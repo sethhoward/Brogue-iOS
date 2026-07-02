@@ -221,6 +221,30 @@ for continuity. Rationale: a creature that walked over to look should reliably a
 and slip away. **Only investigators get this; passive wanderers keep flat 25%, so the stealth radius
 keeps its meaning.**
 
+#### 3.2.7 Decoy dwell — the "slip by" window (thrown items only)
+The proximity roll above applies to an investigator **en route**. But a **thrown decoy** is different once
+the monster *arrives*: on claiming the item (consume-on-arrival, [Monsters.c, WANDERING arrival
+block](../../BrogueSE/Engine/Monsters.c)) the creature **loiters on the cell** for a seeded
+`rand_range(NOISE_INVESTIGATE_DWELL_MIN..MAX)` (4–8, ~6 turns), stored in the new `investigateDwell` field.
+While dwelling it:
+
+- **holds position** (pinned at the wrong place — the window to slip through the space it vacated);
+- **drops from the proximity curve to the flat 25% ambient roll** — `awareOfTarget` gates the proximity
+  branch on `investigateDwell == 0`, so a dwelling monster falls through to the same 25% as a passive
+  wanderer (absorbed by the object, not scanning for you; point-blank still bites, so a decoy at your feet
+  isn't a free freeze);
+- **keeps `MB_INVESTIGATING`** → the `?` blink and `(Investigating)` sidebar persist (the loitering is legible).
+
+This exists because, without it, a monster reaching the decoy would still re-orient onto a nearby player on the
+**arrival turn** (still `MB_INVESTIGATING` = proximity curve, ~50–65% at 3–4 tiles) before turning back —
+reaching the wrong place but grabbing you anyway. **Scoped to thrown decoys** (the dwell keys on a claimed
+`ITEM_THROWN_DISTRACTION` — a fixation needs a physical object): a **player-made-noise** investigate targets
+an empty cell (`investigateLoc = player.loc`), finds nothing, and gives up at once, unchanged. That object-vs-
+empty-cell distinction *is* the divergence between investigating a thrown item and investigating a noise you
+made. Interruptible by a LOUD hear / spot / damage / a louder-closer new noise (each resets `investigateDwell`
+at the arbitration sites); chaining decoys to keep a monster pinned costs one item per dwell. Substantive
+(`rand_range`), deterministic, save-safe. See `docs/design/environmental-sounds.md` §3.5.1.
+
 ### 3.3 Player hears the monster (COSMETIC — the feedback)
 
 The forward direction: an off-screen monster's move you can't see but can "hear" as a ripple.
@@ -573,6 +597,7 @@ that player-facing flavor + the off-screen `?` cover it; flip to 1 for dev traci
 | `NOISE_MELEE_MISS_PENALTY` | 10 | added to a missed swing ("accuracy = stealth") |
 | `NOISE_PLAYER_ARMOR_SCALE / STEALTH_RING_SCALE` | 2 / 3 | armor / ring contribution to loudness |
 | `INVESTIGATE_SPOT_ADJACENT_CHANCE / FALLOFF / FLOOR` | 95 / 15 / 25 | investigate→hunt proximity curve (§3.2.5) |
+| `NOISE_INVESTIGATE_DWELL_MIN / MAX` | 4 / 8 | turns a monster loiters on a claimed thrown decoy, dropping to the 25% ambient roll (§3.2.7) |
 | **Player hears monster (cosmetic) — two-stage, §3.3** | | |
 | `NOISE_PERCEPTION_SCALE` | 100 | **A/B master 1** — global ×% on final detect% (loudness/step; <100 lucky-roll, >100 generous) |
 | `NOISE_RING_RANGE_SCALE` | 100 | **A/B master 2** — global ×% on the ring's range contribution (how far the bigger ears reach) |

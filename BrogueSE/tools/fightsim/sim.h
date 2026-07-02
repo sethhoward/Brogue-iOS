@@ -12,6 +12,12 @@ typedef struct {
     short weaponEnchant, armorEnchant, staffEnchant, ringEnchant;
 } BuildSpec;
 
+// iOS port (Brogue SE): cursed-runics rework. When >= 0, the player weapon under test is given this
+// runic (enchant2 + ITEM_RUNIC); -1 = no runic (default). A global rather than a BuildSpec field so the
+// curse modes set it per-run without touching every existing initializer. runicCurseActive() keys
+// cursed-vs-purified off enchant1 vs the purify threshold, so sweep enchant to walk the ramp.
+extern short gFightsimWeaponRunic;
+
 // Encounter geometry (Phase 3). Each places real monsters on a stub grid and uses
 // straight-line-toward-player choreography; what differs is room shape + placement.
 typedef enum {

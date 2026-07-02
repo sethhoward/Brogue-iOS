@@ -334,8 +334,17 @@ These have `freq 0` for the reward raffle — they're pulled in to host the key 
 ### 7f. iOS-port additions
 | Blueprint | depth | roomSize | freq | placement | line |
 |---|---|---|---|---|---|
-| **Altars of insight** | 5–AL | **6–25** | 0 | force-built at 6 & 11 (§8) | :637 |
-| **Altars of transference** | 11–AL | 10–30 | 30 | reward raffle (`BP_REWARD`) | :647 |
+| **Altars of insight** | 5–AL | **6–25** | 0 | **DEPRECATED (Brogue SE): no longer generated** (§8) | :637 |
+| **Altars of transference** | 11–AL | 10–30 | 0 | reward raffle (`BP_REWARD`), currently disabled | :647 |
+| **Altars of divination** | 7–AL | 10–30 | 0 | force-built once per run, carry-forward D7→D22 (§8) | :653 |
+
+**Altars of Divination (Brogue SE)** — replaces the insight altars. `placeAltarCrossInRoom` (Architect.c) lays
+a central **statue** (a solid idol) with up to four one-use **divination altars** one tile out in each cardinal
+direction. Place an unID'd item on an active altar → full `identify()` → the altar **arms** (holds the item)
+and **seals shut on pickup** (`TM_PROMOTES_ON_ITEM_PICKUP` → `DF_DIVINATION_ALTAR_CLOSE`). Each identify (room-
+scoped `rogue.divinationAltarUses`) rolls an escalating **0/25/50/75%** awaken (`performDivination`, Items.c);
+on an awaken a tiered guardian (Ogre→Troll→Underworm by trigger-use) bursts from the statue "off balance" and
+the unused altars shatter. See IDENTIFICATION_AUDIT §5e and `docs/design/altars-of-divination.md`.
 
 ---
 
@@ -373,7 +382,12 @@ Observations:
   pair is placed by `placeAltarPairInRoom` which needs only **two open interior cells** (three
   fallback tiers, Architect.c:1774). A larger claimed pocket just yields a roomier carpeted shrine.
 
-### The guaranteed-placement pattern (insight altars)
+### The guaranteed-placement pattern (insight altars → divination altars)
+
+> **Brogue SE update:** this carry-forward now builds the **Altars of Divination** (once per run, from D7,
+> capped at `DIVINATION_ALTAR_MAX_DEPTH = 22`), not the insight altars. The `rogue.divinationAltarBuilt` flag
+> replaces the `insightAltarsBuilt` counter; the mechanism below is otherwise unchanged. The insight-altar
+> description is retained as the historical reference for the pattern.
 
 Because a single level can fail to offer a qualifying pocket, the insight altars don't rely on a
 one-shot best-effort like the amulet vault. `addMachines` ([Architect.c:1871](../../BrogueSE/Engine/Architect.c)) instead tracks

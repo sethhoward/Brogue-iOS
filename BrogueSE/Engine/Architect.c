@@ -1843,6 +1843,68 @@ static void placeAltarPairInRoom(short minMachineNumber, enum tileType westAltar
     }
 }
 
+// iOS port (Brogue SE): place the Altars of Divination in a cross -- a central statue with up to four one-use
+// altars one tile out in each cardinal direction (a gap of open carpet sits between the statue and each altar,
+// so the guardian that bursts from the statue has a buffer). Modeled on placeAltarPairInRoom: the generic
+// builder scatters features and can't produce this ordered layout, so we lay it here. Deterministic (no RNG).
+// minMachineNumber is rogue.machineNumber captured before the build, so any cell with a greater machineNumber
+// belongs to the room we just built.
+static void placeAltarCrossInRoom(short minMachineNumber) {
+    int cx = 0, cy = 0, count = 0;
+    for (short i = 0; i < DCOLS; i++) {
+        for (short j = 0; j < DROWS; j++) {
+            if (altarPairCellIsOpen(i, j, minMachineNumber)) {
+                cx += i;
+                cy += j;
+                count++;
+            }
+        }
+    }
+    if (count == 0) {
+        return; // no interior found (shouldn't happen); leave the room rather than corrupt it
+    }
+    cx /= count;
+    cy /= count;
+
+    // Center the statue on the open interior cell nearest the centroid.
+    short centerX = -1, centerY = -1;
+    int bestDist = -1;
+    for (short i = 0; i < DCOLS; i++) {
+        for (short j = 0; j < DROWS; j++) {
+            if (altarPairCellIsOpen(i, j, minMachineNumber)) {
+                const int dist = abs(i - cx) + abs(j - cy);
+                if (bestDist < 0 || dist < bestDist) {
+                    bestDist = dist;
+                    centerX = i;
+                    centerY = j;
+                }
+            }
+        }
+    }
+    if (centerX < 0) {
+        return;
+    }
+    pmap[centerX][centerY].layers[DUNGEON] = DIVINATION_STATUE;
+    refreshDungeonCell((pos){ centerX, centerY });
+
+    // One altar per cardinal direction: prefer one tile out (a readable gap from the statue); fall back to
+    // adjacent if the spaced cell isn't open interior. A direction is skipped only if neither cell qualifies
+    // (roomSize {10,30} makes at least the adjacent ring available, so all four normally place).
+    static const short dirX[4] = {0, 0, -1, 1};
+    static const short dirY[4] = {-1, 1, 0, 0};
+    for (int d = 0; d < 4; d++) {
+        const short farX = centerX + dirX[d] * 2, farY = centerY + dirY[d] * 2;
+        const short nearX = centerX + dirX[d], nearY = centerY + dirY[d];
+        if (altarPairCellIsOpen(farX, farY, minMachineNumber)) {
+            pmap[farX][farY].layers[DUNGEON] = DIVINATION_ALTAR;
+            refreshDungeonCell((pos){ farX, farY });
+        } else if (altarPairCellIsOpen(nearX, nearY, minMachineNumber)) {
+            pmap[nearX][nearY].layers[DUNGEON] = DIVINATION_ALTAR;
+            refreshDungeonCell((pos){ nearX, nearY });
+        }
+    }
+}
+
 // add machines to the dungeon.
 static void addMachines() {
     short machineCount, failsafe;
@@ -1859,38 +1921,25 @@ static void addMachines() {
         }
     }
 
-    // iOS port (iBrogue): guaranteed altars-of-insight reward rooms at depths 6 and 12.
-    // The blueprint is a BP_ROOM machine and needs a gate site whose interior choke-size lands in the
-    // {7,14} range; a level with no qualifying room can't fit it. Rather than silently skip (as the
-    // amulet vault does), we track how many altars are *due* by the current depth and how many have
-    // actually been built, and carry any unmet obligation forward: if depth 6 has no room we retry on
-    // 7, 8, ... until one is placed, and likewise for the depth-12 altar. The carry-forward is bounded: if
-    // an altar still hasn't found a room by INSIGHT_ALTAR_MAX_DEPTH (20), the obligation is abandoned rather
-    // than chased into the late dungeon. Deterministic (depth-driven, buildAMachine uses the substantive
-    // RNG) and save-safe.
-    static const short insightAltarDepths[] = {6, 12};
-    const int insightAltarCount = sizeof(insightAltarDepths) / sizeof(insightAltarDepths[0]);
-    const short INSIGHT_ALTAR_MAX_DEPTH = 20;
-    if (rogue.depthLevel <= INSIGHT_ALTAR_MAX_DEPTH
-        && rogue.insightAltarsBuilt < insightAltarCount) {
-        short insightAltarsDue = 0;
-        for (int i = 0; i < insightAltarCount; i++) {
-            if (rogue.depthLevel >= insightAltarDepths[i]) {
-                insightAltarsDue++;
-            }
-        }
-        if (rogue.insightAltarsBuilt < insightAltarsDue) {
-            // Owe at least one altar; try to place a single one on this level (any shortfall carries
-            // forward to the next level).
-            for (failsafe = 50; failsafe; failsafe--) {
-                const short preInsightMachineNumber = rogue.machineNumber;
-                if (buildAMachine(MT_INSIGHT_ALTAR, -1, -1, 0, NULL, NULL, NULL)) {
-                    // iOS port (iBrogue): the blueprint built only the room; place the altar pair here in a
-                    // fixed s . o layout (the builder won't do ordered/adjacent placement itself).
-                    placeAltarPairInRoom(preInsightMachineNumber, INSIGHT_ALTAR_PAYMENT, INSIGHT_ALTAR_INSIGHT, false);
-                    rogue.insightAltarsBuilt++;
-                    break;
-                }
+    // iOS port (Brogue SE): guaranteed Altars of Divination reward room -- once per run, carry-forward from
+    // DIVINATION_ALTAR_MIN_DEPTH. The blueprint is a BP_ROOM machine and needs a gate site whose interior
+    // choke-size lands in its roomSize window; a level with no qualifying room can't fit it, so if this level
+    // can't we simply retry on the next until one is placed, or the obligation lapses past
+    // DIVINATION_ALTAR_MAX_DEPTH (abandoned rather than chased into the endgame). This REPLACES the deprecated
+    // altars of insight, which no longer generate (their carry-forward here was retargeted to this machine;
+    // MT_INSIGHT_ALTAR + its blueprint/terrain/trigger remain in the tree, unreferenced by generation).
+    // Deterministic (depth-driven; buildAMachine uses the substantive RNG) and save-safe.
+    if (!rogue.divinationAltarBuilt
+        && rogue.depthLevel >= DIVINATION_ALTAR_MIN_DEPTH
+        && rogue.depthLevel <= DIVINATION_ALTAR_MAX_DEPTH) {
+        for (failsafe = 50; failsafe; failsafe--) {
+            const short preDivinationMachineNumber = rogue.machineNumber;
+            if (buildAMachine(MT_DIVINATION_ALTARS, -1, -1, 0, NULL, NULL, NULL)) {
+                // The blueprint built only the carpeted room; lay the statue + altar cross here (the generic
+                // builder won't produce an ordered cross layout itself).
+                placeAltarCrossInRoom(preDivinationMachineNumber);
+                rogue.divinationAltarBuilt = true;
+                break;
             }
         }
     }

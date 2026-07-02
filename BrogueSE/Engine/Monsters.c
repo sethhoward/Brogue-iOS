@@ -127,6 +127,7 @@ void initializeMonster(creature *monst, boolean itemPossible) {
     monst->investigateLoc = INVALID_POS; // iOS port (Brogue SE): noise system -- no heard noise to investigate yet
     monst->slumberLoc = INVALID_POS;     // iOS port (Brogue SE): noise system -- no bed to return to yet
     monst->investigateStrength = 0;      // iOS port (Brogue SE): noise system -- louder/closer arbitration baseline
+    monst->investigateDwell = 0;         // iOS port (Brogue SE): noise system -- not loitering on a decoy yet
     monst->targetWaypointIndex = -1;
     for (int i=0; i < MAX_WAYPOINT_COUNT; i++) {
         monst->waypointAlreadyVisited[i] = rand_range(0, 1);
@@ -815,6 +816,44 @@ creature *cloneMonster(creature *monst, boolean announce, boolean placeClone) {
         }
     }
     return newMonst;
+}
+
+// iOS port (Brogue SE): the Altars of Divination guardian. When a divination altar's identify rolls an
+// awaken (see performDivination in Items.c), the statue looses a SINGLE tiered monster whose strength scales
+// with WHICH use triggered it (later grab = angrier statue = deadlier beast): use 2 -> Ogre, use 3 -> Troll,
+// use 4 (and any beyond) -> Underworm. It emerges beside the statue "off balance" -- a large ticksUntilTurn
+// delays its first action (and shows the derived "(Off balance)" tell), so the player gets a beat to flee or
+// set up; the deadlier the tier, the longer the grace (the Underworm is slow too, so the scariest is the most
+// escapable). Deterministic: monster kind + grace are pure functions of useNumber; generation and placement
+// use the substantive RNG, so a shared seed reproduces the same guardian at the same cell.
+creature *spawnDivinationGuardian(pos statueLoc, short useNumber) {
+    short monsterID, grace;
+    switch (useNumber) {
+        case 2:  monsterID = MK_OGRE;      grace = DIVINATION_OFFBALANCE_TIER1; break;
+        case 3:  monsterID = MK_TROLL;     grace = DIVINATION_OFFBALANCE_TIER2; break;
+        default: monsterID = MK_UNDERWORM; grace = DIVINATION_OFFBALANCE_TIER3; break; // use 4+
+    }
+    creature *monst = generateMonster(monsterID, false, false); // no mutation -- a curated, predictable threat
+    // Emulate the vanilla dormant-statue shatter: the creature REPLACES the statue -- clear the statue tile
+    // (back to the room's carpet, dropping its impassable flags) and stand the guardian where it stood. (We
+    // can't reuse DFF_ACTIVATE_DORMANT_MONSTER directly because that activates a *pre-placed* dormant monster,
+    // and our guardian's kind isn't known until the player triggers it.) The statue cell is always free -- it
+    // was impassable, so no creature/item could occupy it -- but guard with a fallback just in case.
+    pos loc = statueLoc;
+    if (pmapAt(loc)->flags & (HAS_MONSTER | HAS_PLAYER)) {
+        loc = getQualifyingPathLocNear(statueLoc, true,
+                  T_DIVIDES_LEVEL & avoidedFlagsForMonster(&(monst->info)), HAS_PLAYER,
+                  avoidedFlagsForMonster(&(monst->info)), (HAS_PLAYER | HAS_MONSTER | HAS_STAIRS), false);
+    }
+    pmap[statueLoc.x][statueLoc.y].layers[DUNGEON] = CARPET; // the statue is gone -- the room floor remains
+    monst->loc = loc;
+    pmapAt(loc)->flags |= HAS_MONSTER;
+    monst->creatureState = MONSTER_TRACKING_SCENT; // it knows you're there -- but staggers before it can strike
+    monst->ticksUntilTurn = grace;                 // "off balance": delayed first action + the derived tell
+    fadeInMonster(monst);
+    refreshDungeonCell(statueLoc);
+    refreshDungeonCell(loc);
+    return monst;
 }
 
 unsigned long forbiddenFlagsForMonster(creatureType *monsterType) {
@@ -1805,6 +1844,7 @@ void alertMonster(creature *monst) {
     monst->bookkeepingFlags &= ~MB_RETURNING_HOME; // iOS port (Brogue SE): hunting the player abandons the bed
     monst->slumberLoc = INVALID_POS;
     monst->investigateStrength = 0;                // iOS port (Brogue SE): clear louder/closer arbitration state
+    monst->investigateDwell = 0;                   // iOS port (Brogue SE): a hunt ends any decoy loitering
 #if NOISE_SYSTEM_ENABLED
     if (wasInvestigating) {
         noiseDetectionHaptic(1);
@@ -1956,10 +1996,10 @@ static boolean awareOfTarget(creature *observer, creature *target) {
                ) {
         // within range but currently unaware
 #if NOISE_SYSTEM_ENABLED
-        if (observer->bookkeepingFlags & MB_INVESTIGATING) {
-            // iOS port (Brogue SE): Phase 2 -- an actively-investigating monster (it heard you and walked
-            // over to look) acquires by proximity, not the flat 25%: near-certain point-blank, decaying to
-            // the vanilla baseline at range. awarenessDistance returns ~2x tiles, so halve it for the curve.
+        if ((observer->bookkeepingFlags & MB_INVESTIGATING) && observer->investigateDwell == 0) {
+            // iOS port (Brogue SE): Phase 2 -- an actively-investigating monster EN ROUTE (it heard you and is
+            // walking over to look) acquires by proximity, not the flat 25%: near-certain point-blank, decaying
+            // to the vanilla baseline at range. awarenessDistance returns ~2x tiles, so halve it for the curve.
             const short tilesAway = perceivedDistance / 2;
             const short chance = clamp(INVESTIGATE_SPOT_ADJACENT_CHANCE - (tilesAway - 1) * INVESTIGATE_SPOT_FALLOFF,
                                        INVESTIGATE_SPOT_FLOOR, INVESTIGATE_SPOT_ADJACENT_CHANCE);
@@ -1967,6 +2007,10 @@ static boolean awareOfTarget(creature *observer, creature *target) {
         } else
 #endif
         {
+            // Passive wanderer -- OR a monster DWELLING on a claimed decoy (investigateDwell > 0): it's absorbed
+            // by the object, not scanning for you, so it drops from the proximity curve back to the ambient roll.
+            // This is what makes the dwell a "slip by" window rather than a stationary threat. See the arrival
+            // block in monstersTurn (WANDERING) and NOISE_INVESTIGATE_DWELL_* in Rogue.h.
             retval = rand_percent(25);
         }
     } else {
@@ -2092,6 +2136,7 @@ static enum monsterHearing checkPlayerHeard(creature *monst) {
         }
         monst->investigateLoc = player.loc;
         monst->investigateStrength = effective;
+        monst->investigateDwell = 0; // a fresh noise pulls it off any decoy it was loitering on -> re-path to look
         monst->bookkeepingFlags |= MB_INVESTIGATING;
         // The '?' "searching" tell is pulsed every turn while investigating (in the WANDERING nav below),
         // not once here -- so a visible investigator's glyph visibly cycles with '?' until it gives up or hunts.
@@ -2180,6 +2225,7 @@ void emitEnvironmentalNoise(pos source, short strength, item *sourceItem) {
         }
         monst->investigateLoc = source;
         monst->investigateStrength = effective;
+        monst->investigateDwell = 0; // a louder/closer noise pulls it off any decoy it was loitering on -> re-path
         monst->bookkeepingFlags |= MB_INVESTIGATING;
         if (!already && !canSeeMonster(monst)) {
             cosmeticSpawnAlertGlyph(monst->loc, (enum displayGlyph)'?'); // unseen reaction tell
@@ -4772,31 +4818,51 @@ void monstersTurn(creature *monst) {
                     // each turn in cosmeticRefreshInvestigateBlinks -- not a per-turn pulse here.)
                     return; // stepped toward the noise
                 }
-                // Arrived (or blocked) -> found nothing. If we actually reached the cell and a thrown
-                // distraction item lies here, the investigator claims it (consume-on-arrival): for now it is
-                // disturbed and lost forever -- the cost that stops throw-and-retrieve from being free, infinite
-                // crowd-control (CLAUDE.md principle #3). (Thieves carrying it off is slice 2.)
-                if (posEq(monst->loc, monst->investigateLoc)
-                    && (pmap[monst->loc.x][monst->loc.y].flags & HAS_ITEM)) {
-                    item *claimed = itemAtLoc(monst->loc);
-                    if (claimed && (claimed->flags & ITEM_THROWN_DISTRACTION)) {
-                        if (playerCanSee(monst->loc.x, monst->loc.y)) {
-                            char cbuf[COLS*3], cinm[COLS*3], cmnm[COLS*3];
-                            itemName(claimed, cinm, false, true, NULL);
-                            monsterName(cmnm, monst, true);
-                            sprintf(cbuf, "%s disturbs %s, and it is lost.", cmnm, cinm);
-                            message(cbuf, 0);
+                if (posEq(monst->loc, monst->investigateLoc)) {
+                    // Reached the noise cell. If a thrown distraction item lies here and we haven't begun
+                    // loitering yet, claim it (consume-on-arrival): it is disturbed and lost forever -- the cost
+                    // that stops throw-and-retrieve from being free, infinite crowd-control (CLAUDE.md principle
+                    // #3) -- and we begin DWELLING on it. While dwelling we hold this cell (keeping MB_INVESTIGATING
+                    // so the '?' keeps blinking) and awareOfTarget drops us from the proximity curve to the flat
+                    // 25% ambient roll: absorbed by the curious object, not scanning for you. That is the "slip by"
+                    // window the decoy buys -- the monster is pinned at the wrong place for a few turns. Scoped to
+                    // thrown decoys (a fixation needs an object): a player-made-noise investigate finds an empty
+                    // cell and gives up at once, unchanged. See NOISE_INVESTIGATE_DWELL_* + environmental-sounds.md.
+                    if (monst->investigateDwell == 0
+                        && (pmap[monst->loc.x][monst->loc.y].flags & HAS_ITEM)) {
+                        item *claimed = itemAtLoc(monst->loc);
+                        if (claimed && (claimed->flags & ITEM_THROWN_DISTRACTION)) {
+                            if (playerCanSee(monst->loc.x, monst->loc.y)) {
+                                char cbuf[COLS*3], cinm[COLS*3], cmnm[COLS*3];
+                                itemName(claimed, cinm, false, true, NULL);
+                                monsterName(cmnm, monst, true);
+                                sprintf(cbuf, "%s disturbs %s, and it is lost.", cmnm, cinm);
+                                message(cbuf, 0);
+                            }
+                            removeItemFromChain(claimed, floorItems);
+                            pmap[monst->loc.x][monst->loc.y].flags &= ~(HAS_ITEM | ITEM_DETECTED);
+                            refreshDungeonCell(monst->loc);
+                            deleteItem(claimed);
+                            // Seeded (substantive rand_range) -> organic yet deterministic/replay-safe.
+                            monst->investigateDwell = rand_range(NOISE_INVESTIGATE_DWELL_MIN, NOISE_INVESTIGATE_DWELL_MAX);
                         }
-                        removeItemFromChain(claimed, floorItems);
-                        pmap[monst->loc.x][monst->loc.y].flags &= ~(HAS_ITEM | ITEM_DETECTED);
-                        refreshDungeonCell(monst->loc);
-                        deleteItem(claimed);
+                    }
+                    // Loiter: hold position until the dwell runs out, then fall through to give up. (A LOUD hear,
+                    // a spot, damage, or a louder/closer new noise all clear investigateDwell elsewhere and end
+                    // it early.)
+                    if (monst->investigateDwell > 0) {
+                        monst->investigateDwell--;
+                        if (monst->investigateDwell > 0) {
+                            return; // still absorbed by the object -- stay put
+                        }
                     }
                 }
-                // Stop investigating; if we were roused from a bed, head back to it (falls through to the
-                // MB_RETURNING_HOME block just below) instead of wandering off.
+                // Arrived and done loitering (or the path was blocked) -> found nothing. Stop investigating; if we
+                // were roused from a bed, head back to it (falls through to the MB_RETURNING_HOME block just below)
+                // instead of wandering off.
                 monst->bookkeepingFlags &= ~MB_INVESTIGATING;
                 monst->investigateLoc = INVALID_POS;
+                monst->investigateDwell = 0;
                 if (isPosInMap(monst->slumberLoc)) {
                     monst->bookkeepingFlags |= MB_RETURNING_HOME;
                 }
@@ -5038,6 +5104,7 @@ short playerNoiseLevel(void) {
         noise += terrainNoiseModifier(player.loc); // crunchy grass +, soft carpet -
     }
     noise -= rogue.stealthBonus * NOISE_PLAYER_STEALTH_RING_SCALE; // ring of stealth muffles
+    noise -= smokyPurifyStealthBonus() * NOISE_PLAYER_STEALTH_RING_SCALE; // iOS port (Brogue SE): cursed-runics rework -- purified Smoky muffles too
     return noise;
 }
 
