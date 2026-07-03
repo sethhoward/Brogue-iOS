@@ -1340,6 +1340,7 @@ enum armorEnchants {
 #define ANCHOR_DEFENSE_BONUS            30  // +defense (x10 units; +3 displayed) while worn -- always on
 #define ANCHOR_MOVE_SLOW_PCT           100  // extra % move-cost while cursed (100 = double); attacks untouched
 #define SMOKY_STEALTH_BONUS            3   // purified Smoky's passive stealth (spot + noise); ~a +3 ring of stealth
+#define SMOKY_DITHER_THIN_VOLUME      10  // cleared-lane smoke volume while cursed: below SMOKE_THICK_VOLUME, so it dims but doesn't block sight (progressive per-enchant sight)
 
 enum wandKind {
     WAND_TELEPORT,
