@@ -111,6 +111,14 @@ final class CEHost: NSObject, BrogueCEHost {
         viewController?.setExamining(examining)
     }
 
+    func setExamineBox(_ x: Int, y: Int, width: Int, height: Int) {
+        viewController?.setExamineBox(x, y: y, width: width, height: height)
+    }
+
+    func shouldSuppressExamineBox() -> Bool {
+        viewController?.shouldSuppressExamineBox() ?? false
+    }
+
     func setPlayerWindowX(_ x: Int16, y: Int16) {
         viewController?.setPlayerWindowX(Int(x), y: Int(y))
     }

@@ -610,10 +610,17 @@ final class BrogueViewController: UIViewController {
             if !examineBoxShown {
                 examineArmDebounce?.cancel()                  // box gone → drop a pending arm
                 examineArmed = false                          // …and require a fresh sidebar tap
+                examineBox = nil                              // …and forget its rect
             }
             isExamining = examineBoxShown && examineArmed
         }
     }
+    /// The window-cell rect of the on-screen examine description box, reported by SE just
+    /// before `setExamining:true` (see setExamineBox). Lets the examine zoom fit the box
+    /// rather than dropping all the way to 1×. nil when no box is shown or the engine didn't
+    /// report one (CE / Classic) — those keep the 1× zoom-out.
+    private struct ExamineBox { let x: Int; let y: Int; let w: Int; let h: Int }
+    private var examineBox: ExamineBox?
     /// Set only by a sidebar single-tap; gates the zoom-suspend so deliberate sidebar
     /// selections suspend but auto-appearing boxes (auto-explore stopping on an item, a
     /// tap-to-move over a monster) do not. Cleared when the box ends and on competing inputs.
@@ -644,6 +651,10 @@ final class BrogueViewController: UIViewController {
     private static let zoomMinScale: CGFloat = 1.0
     private static let zoomMaxScale: CGFloat = 2.5
     private static let zoomRubberBandFloor: CGFloat = 0.8
+    /// Cap for the examine fit-zoom (see examineFitZoom). Below zoomMaxScale so a small
+    /// description box doesn't blow up to full magnification (which read as "too far") —
+    /// it keeps the box legible while leaving surrounding map context. Tunable.
+    private static let examineMaxScale: CGFloat = 1.8
     /// Fractional finger-spread change required before a pinch starts zooming.
     /// Below this, a two-finger drag is treated as a pure pan (Photos-style).
     private static let zoomActivationThreshold: CGFloat = 0.20   // 10%
@@ -1477,6 +1488,16 @@ final class BrogueViewController: UIViewController {
     @objc func setExamining(_ examining: Bool) {
         DispatchQueue.main.async { [weak self] in
             self?.examineBoxShown = examining
+        }
+    }
+
+    /// SE reports the examine description box's window-cell rect here, just before
+    /// `setExamining:true` (main-queue FIFO keeps it ahead of the isExamining flip). Stored
+    /// for the iPhone fit-zoom in updateZoomForGameState. No effect on iPad (that path is
+    /// phone-gated) or on CE/Classic (which never call this → 1× zoom-out).
+    @objc func setExamineBox(_ x: Int, y: Int, width: Int, height: Int) {
+        DispatchQueue.main.async { [weak self] in
+            self?.examineBox = ExamineBox(x: x, y: y, w: width, h: height)
         }
     }
 
@@ -2661,9 +2682,11 @@ extension BrogueViewController: UIGestureRecognizerDelegate {
     }
 
     /// Clamps the origin so the magnified map always fully covers the dungeon
-    /// frame (no empty gutters). Below 1× there's nothing to clamp.
+    /// frame (no empty gutters). At ≤ 1× the map fills the frame, so the origin is pinned
+    /// to .zero — there's nothing to pan, and this prevents a stray pinch-out origin from
+    /// leaving the map shifted at "fully zoomed out".
     private func clampedOrigin(_ origin: CGPoint, scale: CGFloat) -> CGPoint {
-        guard scale > 1.0 else { return origin }
+        guard scale > 1.0 else { return .zero }
         let f = dungeonFramePoints()
         let xLo = f.maxX * (1 - scale), xHi = f.minX * (1 - scale)
         let yLo = f.maxY * (1 - scale), yHi = f.minY * (1 - scale)
@@ -2696,6 +2719,76 @@ extension BrogueViewController: UIGestureRecognizerDelegate {
         let py = (playerCell.y + 0.5) * ch
         // Want player at frame center: f.mid = scale·p + origin.
         return CGPoint(x: f.midX - zoomScale * px, y: f.midY - zoomScale * py)
+    }
+
+    /// Scale + origin that fit the on-screen examine description box within the viewport
+    /// (with a small margin), centered like auto-follow — so examining zooms only as far as
+    /// needed to show the box instead of dropping to 1×, keeping the box text as large as
+    /// legibly fits. Never zooms in past the current zoom, never below 1×. Returns nil when
+    /// no box rect was reported (CE / Classic) or the box needs a full 1× zoom-out anyway,
+    /// so the caller falls back to the plain 1× behavior.
+    private func examineFitZoom() -> (scale: CGFloat, origin: CGPoint)? {
+        guard let box = examineBox, box.w > 0, box.h > 0 else { return nil }
+        // If the box starts left of the dungeon (window col 21 = mapToWindowX(0)), part of
+        // it is drawn in the sidebar cells, which don't live in the zoom container and stay
+        // 1× — magnifying would tear the box. Fall back to a plain 1× zoom-out instead.
+        guard box.x >= 21 else { return nil }
+        let w = skViewPort.effectiveWidthPoints
+        let h = skViewPort.effectiveHeightPoints
+        guard w > 0, h > 0 else { return nil }
+        let cw = w / CGFloat(COLS)
+        let ch = h / CGFloat(ROWS)
+        let li = skViewPort.leftInsetPoints
+        let boxW = CGFloat(box.w) * cw
+        let boxH = CGFloat(box.h) * ch
+        let f = dungeonFramePoints()   // the dungeon rect: rows 3–31, cols 21–99
+        // Fit within the DUNGEON rect (not the whole screen), so the magnified box can't
+        // spill up into the message log or down into the flavor / button rows. Centring on
+        // f.mid then keeps it inside those bounds.
+        let margin: CGFloat = 10       // TWEAK ME: gap kept around the box
+        let fitThatFits = min((f.width - 2 * margin) / boxW, (f.height - 2 * margin) / boxH)
+        // Cap below full zoom so a small box doesn't blow up (felt "too far").
+        let scale = max(1.0, min(zoomScale, BrogueViewController.examineMaxScale, fitThatFits))
+        guard scale > 1.0 else { return nil }   // fits only at ~1× → let the plain 1× path run
+        // Box centre in 1× view points; centre it in the dungeon frame (f.mid = scale·c + origin).
+        let boxCenterX = li + (CGFloat(box.x) + CGFloat(box.w) / 2) * cw
+        let boxCenterY = (CGFloat(box.y) + CGFloat(box.h) / 2) * ch
+        return (scale, CGPoint(x: f.midX - scale * boxCenterX, y: f.midY - scale * boxCenterY))
+    }
+
+    /// Whether the examine box is already fully on-screen at the *current* displayed
+    /// transform — in which case examine leaves the view exactly as-is (no pan, no zoom).
+    /// At ≤1× the box renders at its designed 1× position, which the engine already fit on
+    /// screen, so it's always visible there — fully/low zoom gets no bells & whistles. When
+    /// zoomed in, maps the box's 1× rect through the applied transform (p = u·scale + origin)
+    /// and checks it's inside the play viewport, so a box that's clipped off-screen still
+    /// gets fitted.
+    private func examineBoxFullyVisible(_ box: ExamineBox) -> Bool {
+        guard appliedScale > 1.0 else { return true }
+        let w = skViewPort.effectiveWidthPoints
+        let h = skViewPort.effectiveHeightPoints
+        guard w > 0, h > 0 else { return true }
+        let cw = w / CGFloat(COLS)
+        let ch = h / CGFloat(ROWS)
+        let li = skViewPort.leftInsetPoints
+        let s = appliedScale, o = appliedOrigin
+        let left   = (li + CGFloat(box.x) * cw) * s + o.x
+        let right  = (li + CGFloat(box.x + box.w) * cw) * s + o.x
+        let top    = (CGFloat(box.y) * ch) * s + o.y
+        let bottom = (CGFloat(box.y + box.h) * ch) * s + o.y
+        return left >= li && right <= li + w && top >= 0 && bottom <= h
+    }
+
+    /// Whether the engine should skip drawing the examine description box for the *current*
+    /// cursor examine. True only when zoomed in on screen AND the examine came from a
+    /// play-field drag-hold (gesture origin .playArea) — where the box, drawn into the
+    /// magnified dungeon cells, would tear against the 1× sidebar/chrome. A sidebar tap
+    /// (origin .sidebar, or a lingering box after the finger lifts → origin nil) is NOT
+    /// suppressed: it zooms out to show the box readably. Queried by all three engines'
+    /// examine loops via the bridge. iPhone-only (nothing is magnified elsewhere).
+    /// Presentational only — a one-frame stale cross-thread read is harmless.
+    @objc func shouldSuppressExamineBox() -> Bool {
+        return isPhoneIdiom && appliedScale > 1.0 && gestureOriginZone == .playArea
     }
 
     /// Centers the player's window cell in the dungeon frame (auto-follow), instantly.
@@ -2763,9 +2856,23 @@ extension BrogueViewController: UIGestureRecognizerDelegate {
         // description box is treated like an overlay — suspend to 1× so it isn't clipped.
         let onMap = (gameplayControlsActive || isTargeting) && !isExamining
         guard onMap, zoomScale > 1.0 else {
-            // Overlay up (or not zoomed): animate the displayed map to 1×. The stored
-            // zoomScale / zoomOriginPt are deliberately left untouched. (While a launch
-            // zoom is still pending the display is already 1×, so this is a no-op.)
+            // Examining a description box: if it's already fully on-screen at the current
+            // zoom (always true at ≤1×), leave the view exactly as-is — no pan, no zoom.
+            // Fully / lightly zoomed views get no bells & whistles (iPad/macOS-like). If the
+            // box is clipped, fit it (zoom only as far as needed, keeping the text as large
+            // as legibly fits); a box that can't fit magnified (too big, or spanning the
+            // sidebar) drops to 1× via the fall-through. The stored zoom is left untouched,
+            // so ending the examine restores the player-centered zoom.
+            if isExamining, let box = examineBox {
+                if examineBoxFullyVisible(box) { return }
+                if let fit = examineFitZoom() {
+                    animateZoom(toScale: fit.scale, toOrigin: fit.origin)
+                    return
+                }
+            }
+            // Overlay/menu, or an examine box that must drop to 1×: settle the display to 1×,
+            // but only if something is actually magnified — never pan an already-1× view.
+            guard appliedScale > 1.0 || zoomScale > 1.0 else { return }
             animateZoom(toScale: 1.0, toOrigin: .zero)
             return
         }
@@ -3838,6 +3945,12 @@ final class SKMagView: SKView {
     /// same-placement tracking sets are suppressed so they don't yank the animation. The
     /// first show after being hidden always sets directly, so the loupe appears in place.
     private func setLoupeCenter(_ newCenter: CGPoint, placement: LoupePlacement) {
+        // iPad keeps its original snap-to-position magnifier untouched; the glide-on-
+        // reposition (paired with the iPhone lift placement) is an iPhone-only nicety.
+        guard UIDevice.current.userInterfaceIdiom == .phone else {
+            center = newCenter
+            return
+        }
         let firstShow = isHidden
         let now = CACurrentMediaTime()
         if !firstShow && placement != lastPlacement {

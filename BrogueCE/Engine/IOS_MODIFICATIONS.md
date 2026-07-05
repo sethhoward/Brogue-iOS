@@ -28,6 +28,22 @@ covers the separate Classic engine that ships in the app target).
 
 ## Change log
 
+### 2026-07-05 — Examine description box: report its rect (fit-zoom) + suppress it for zoomed play-field examines
+
+**What.** iPhone examine-box hooks, identical to SE's (see `BrogueSE/Engine/IOS_MODIFICATIONS.md` for the
+full rationale). (1) `printTextBox` stashes its rect (`x2, y2, width, lineCount + padLines`) in file-static
+`gLastTextBox{X,Y,Width,Height}`; the cursor/examine loop reports it via a new `ceSetExamineBox(x,y,w,h)`
+extern just before `ceSetExamining` so the host can zoom to *fit* the box instead of dropping to 1×.
+(2) The loop gates `printMonsterDetails`/`printFloorItemDetails` on `!ceShouldSuppressExamineBox()` so a
+box triggered by a zoomed play-field drag-hold (which would tear against the 1× sidebar) is skipped — the
+sidebar highlight + one-line flavor still show.
+
+- **Bridge:** `CEBridge.mm` defines `ceSetExamineBox` (→ `[gHost setExamineBox:…]`) and
+  `ceShouldSuppressExamineBox` (→ `[gHost shouldSuppressExamineBox]`); both were added to the shared
+  `BrogueCEHost` protocol and implemented in `CEHost.swift`.
+- **Scope:** pure presentation; no gameplay/RNG/save impact. iPhone-only in effect (host consumers are
+  phone-gated). Kept identical across CE / SE / Classic so it stays cherry-pickable.
+
 ### 2026-06-19 — File management: debug "Import" button (CE/SE)
 
 **What.** The Manage Files screen gains an "Import" button (left bar, beside Edit) that opens the

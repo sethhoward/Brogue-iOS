@@ -32,7 +32,30 @@ See `BrogueCE/Engine/IOS_MODIFICATIONS.md` (faithful CE) and
 
 ## Change log
 
-### 2026-07-02 — Brogue SE 0.12.0 "C is for Curses": release cut (version + release notes)
+### 2026-07-05 — Examine description box: report its rect (fit-zoom) + suppress it for zoomed play-field examines
+
+**What.** Two iPhone examine-box hooks (identical hooks added to CE and Classic — see their
+IOS_MODIFICATIONS). (1) *Fit-zoom:* the "zoom out on examine" nicety used to drop the magnified map all the
+way to 1× whenever a description box appeared, shrinking the box text (it's drawn in the magnified dungeon
+cells); the engine now reports the box's window-cell rect so the host can zoom only as far as needed to
+*fit* it. (2) *Suppress:* a description box triggered by a **play-field drag-hold while zoomed** tore
+against the 1× sidebar/chrome (only the dungeon columns magnify); the engine now asks the host and skips
+drawing the box in that case (the sidebar still highlights the entity, and the one-line flavor still shows).
+
+- **`IO.c` `printTextBox`:** after shading the box, stash its rect (`x2, y2, width, lineCount + padLines`)
+  in file-static `gLastTextBox{X,Y,Width,Height}`.
+- **`IO.c` cursor/examine loop (`mainInputLoop`):**
+  - Gate `printMonsterDetails`/`printFloorItemDetails` on `!ceShouldSuppressExamineBox()` (the sidebar
+    `refreshSideBar` highlight still runs before the gate).
+  - Just before `ceSetExamining(textDisplayed)`, when `textDisplayed`, call `ceSetExamineBox(x,y,w,h)` with
+    the stashed rect. Safe because only `printLocationDescription` → `flavorMessage` (a one-line
+    `printString`, not a `printTextBox`) runs between the box and here, so it can't clobber the rect.
+- **Bridge:** `SEBridge.mm` defines `ceSetExamineBox` → `[gHost setExamineBox:y:width:height:]` and
+  `ceShouldSuppressExamineBox` → `[gHost shouldSuppressExamineBox]`; both host methods were added to the
+  shared `BrogueCEHost` protocol and implemented in `CEHost.swift`.
+- **Scope:** applied to all three engines (this file, CE, Classic). Pure presentation; no gameplay/RNG/save
+  impact. iPhone-only in effect (the host consumers are phone-gated); the host suppresses only for a zoomed
+  play-field examine (`gestureOriginZone == .playArea`), never a sidebar tap.
 
 **What.** Cut the 0.12.0 release. Headline features since 0.11.0: the **cursed-runics rework** (double-edged
 runics — an always-on upside welded to a downside you either *purify* away with enchant scrolls or *eject*

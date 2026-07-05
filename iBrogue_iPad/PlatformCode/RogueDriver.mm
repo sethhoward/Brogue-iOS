@@ -297,6 +297,20 @@ extern "C" void setBrogueExamining(boolean examining) {
     [brogueViewController setExamining:(BOOL)examining];
 }
 
+// iOS port (iBrogue): reports the examine description box's window rect so the iPhone host
+// can zoom to fit it rather than all the way to 1×. Emitted only when a box is shown.
+// Mirrors CE/SE's ceSetExamineBox.
+extern "C" void setBrogueExamineBox(short x, short y, short width, short height) {
+    [brogueViewController setExamineBox:(NSInteger)x y:(NSInteger)y width:(NSInteger)width height:(NSInteger)height];
+}
+
+// iOS port (iBrogue): the examine loop asks this before drawing a description box; YES means
+// skip it (zoomed-in play-field examine, where the box would tear against the 1× sidebar).
+// Mirrors CE/SE's ceShouldSuppressExamineBox.
+extern "C" boolean brogueShouldSuppressExamineBox(void) {
+    return (boolean)[brogueViewController shouldSuppressExamineBox];
+}
+
 // iOS port (iBrogue): chooseTarget calls this as the aiming loop begins/ends so the
 // host can show the on-screen ESC button (Classic has no uiMode==ShowEscape event;
 // CE drives the button that way). Deduped since chooseTarget has several exit points.

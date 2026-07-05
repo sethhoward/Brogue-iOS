@@ -23,6 +23,21 @@ future maintainers (human or AI) don't mistake an intentional port change for a 
 
 ## Change log
 
+### 2026-07-05 — Examine description box: report its rect (fit-zoom) + suppress it for zoomed play-field examines
+
+**What.** iPhone examine-box hooks, identical to CE/SE's (see `BrogueSE/Engine/IOS_MODIFICATIONS.md` for the
+full rationale), using Classic's `setBrogue*` naming. (1) `printTextBox` stashes its rect (`x2, y2, width,
+lineCount + padLines`) in file-static `gLastTextBox{X,Y,Width,Height}`; the cursor/examine loop reports it
+via a new `setBrogueExamineBox(x,y,w,h)` extern just before `setBrogueExamining` so the host can zoom to
+*fit* the box instead of dropping to 1×. (2) The loop gates `printMonsterDetails`/`printFloorItemDetails`
+(Classic's `(monst, rbuf)` / `(theItem, rbuf)` signatures) on `!brogueShouldSuppressExamineBox()` so a box
+triggered by a zoomed play-field drag-hold is skipped — the sidebar highlight + one-line flavor still show.
+
+- **Bridge:** `RogueDriver.mm` defines `setBrogueExamineBox` (→ `[brogueViewController setExamineBox:…]`)
+  and `brogueShouldSuppressExamineBox` (→ `[brogueViewController shouldSuppressExamineBox]`).
+- **Scope:** pure presentation; no gameplay/RNG/save impact. iPhone-only in effect (host consumers are
+  phone-gated). Kept identical across Classic / CE / SE.
+
 ### 2026-06-16 — On-screen ESC button during targeting (parity with CE/SE)
 
 **What.** While aiming a throw/zap, Classic now shows the on-screen ESC button so a touch player can
