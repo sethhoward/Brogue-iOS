@@ -377,27 +377,29 @@ extension RogueScene {
         }
     }
 
-    /// The crop-mask rectangle (rows 3…31) in scene pixels, derived from the live cell
-    /// layout so it tracks rotations / inset changes. Normally spans the dungeon columns
-    /// (window cols 21…99); while the "map under sidebar" reveal is active it widens to the
-    /// full grid width (cols 0…99) so the magnified map shows under the translucent sidebar.
-    /// The auto-follow pan clamp (BrogueViewController.dungeonFramePoints) is unaffected and
-    /// stays on cols 21…99, so the framing/centering is unchanged — the extra columns are a
-    /// bonus reveal that shows black only hard against the map's left edge.
+    /// Bottom row of the reveal: the flavor-text line (ROWS-2). The button bar (ROWS-1)
+    /// stays opaque chrome below the reveal, so a reach drag can't stray onto it.
+    private var revealRowMax: Int { gridSize.rows - 2 }
+
+    /// The crop-mask rectangle in scene pixels, derived from the live cell layout so it
+    /// tracks rotations / inset changes. Normally spans just the dungeon (window cols 21…99,
+    /// rows 3…31). While the "map behind the interface" reveal is active it widens to the
+    /// full HUD frame — cols 0…99, rows 0…(ROWS-2) — so the magnified map shows under the
+    /// translucent sidebar, the message log (top), and the flavor line (bottom); only the
+    /// button row is excluded. The auto-follow pan clamp (BrogueViewController.dungeonFrame
+    /// Points) is unaffected and stays on the dungeon rect, so framing/centering is unchanged
+    /// — the extra rows/cols are a bonus reveal that shows black only hard against a map edge.
     private func dungeonFrameInScene() -> CGRect {
         let layout = currentLayout()
-        let rows = CGFloat(RogueScene.zoomRowMax - RogueScene.zoomRowMin + 1) // 29
-        // Bottom edge of the lowest zoomed row, measured bottom-up.
-        let minY = layout.yOffset
-            + CGFloat(gridSize.rows - RogueScene.zoomRowMax - 1) * layout.cell.height
-        let height = rows * layout.cell.height
-        if sidebarRevealActive {
-            let width = CGFloat(gridSize.cols) * layout.cell.width // cols 0…99
-            return CGRect(x: layout.xOffset, y: minY, width: width, height: height)
-        }
-        let cols = CGFloat(RogueScene.zoomColMax - RogueScene.zoomColMin + 1) // 79
-        let minX = layout.xOffset + CGFloat(RogueScene.zoomColMin) * layout.cell.width
-        return CGRect(x: minX, y: minY, width: cols * layout.cell.width, height: height)
+        let colMin = sidebarRevealActive ? 0 : RogueScene.zoomColMin
+        let rowMin = sidebarRevealActive ? 0 : RogueScene.zoomRowMin
+        let rowMax = sidebarRevealActive ? revealRowMax : RogueScene.zoomRowMax
+        let minX = layout.xOffset + CGFloat(colMin) * layout.cell.width
+        // Bottom edge of the lowest revealed row, measured bottom-up.
+        let minY = layout.yOffset + CGFloat(gridSize.rows - rowMax - 1) * layout.cell.height
+        let width = CGFloat(RogueScene.zoomColMax - colMin + 1) * layout.cell.width
+        let height = CGFloat(rowMax - rowMin + 1) * layout.cell.height
+        return CGRect(x: minX, y: minY, width: width, height: height)
     }
 
     /// Builds the crop + container once, before cells are parented (didMove).
@@ -500,17 +502,23 @@ extension RogueScene {
         applySidebarWash(active)
     }
 
-    /// Fade the sidebar cell backgrounds (window cols 0…20, dungeon rows 3…31) so the
+    /// Fade every HUD-chrome cell background inside the reveal frame — the sidebar (cols
+    /// 0…20), the message log (rows 0…2), and the flavor line (row ROWS-2) — so the
     /// magnified map shows behind them, and lift them above the crop so the wash sits over
-    /// the dungeon (glyphs, at zPosition 1, stay on top and fully opaque). Restores to
-    /// opaque, base z-order when inactive. `background.alpha` is independent of `bgcolor`,
-    /// so engine colour updates don't disturb it.
+    /// the dungeon (glyphs, at zPosition 1, stay on top and fully opaque). The dungeon cells
+    /// themselves (cols 21…99, rows 3…31) live in the crop container and are skipped. The
+    /// button row (ROWS-1) is outside the reveal and untouched. Restores to opaque, base
+    /// z-order when inactive. `background.alpha` is independent of `bgcolor`, so engine
+    /// colour updates don't disturb it.
     private func applySidebarWash(_ active: Bool) {
         guard !cells.isEmpty else { return }
         let alpha: CGFloat = active ? RogueScene.sidebarWashAlpha : 1.0
         let z: CGFloat = active ? 0.4 : 0.0   // above crop (0), below glyph (1)
-        for x in 0..<RogueScene.zoomColMin {                       // cols 0…20
-            for y in RogueScene.zoomRowMin...RogueScene.zoomRowMax { // rows 3…31
+        for x in 0...RogueScene.zoomColMax {              // cols 0…99
+            for y in 0...revealRowMax {                    // rows 0…(ROWS-2)
+                // Skip the dungeon cells (they're in the crop container, not chrome).
+                if x >= RogueScene.zoomColMin
+                    && y >= RogueScene.zoomRowMin && y <= RogueScene.zoomRowMax { continue }
                 let bg = cells[x][y].background
                 bg.alpha = alpha
                 bg.zPosition = z

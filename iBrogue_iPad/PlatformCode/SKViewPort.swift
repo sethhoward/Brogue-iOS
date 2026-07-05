@@ -161,11 +161,15 @@ class SKViewPort: SKView {
         let height = effectiveHeightPoints
         guard width > 0, height > 0 else { return point }
         // Which cell would this be at 1×? Only invert inside the zoomable map — but when
-        // reaching under the sidebar, extend the left bound from col 21 to col 0.
+        // reaching behind the interface, extend the bounds over the surrounding HUD chrome:
+        // cols 0…20 (sidebar), rows 0…2 (message log), and row 32 = ROWS-2 (flavor line).
+        // The button row (33) is deliberately left out.
         let cellX = Int(100.0 * max(point.x - leftInsetPoints, 0) / width)
         let cellY = Int(34.0 * point.y / height)
         let minCol = reach ? 0 : 21
-        guard cellX >= minCol, cellX <= 99, cellY >= 3, cellY <= 31 else { return point }
+        let minRow = reach ? 0 : 3
+        let maxRow = reach ? 32 : 31
+        guard cellX >= minCol, cellX <= 99, cellY >= minRow, cellY <= maxRow else { return point }
         return CGPoint(x: (point.x - rogueScene.zoomOriginXPoints) / scale,
                        y: (point.y - rogueScene.zoomOriginYPoints) / scale)
     }

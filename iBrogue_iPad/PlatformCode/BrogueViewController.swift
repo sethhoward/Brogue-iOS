@@ -1717,10 +1717,10 @@ final class BrogueViewController: UIViewController {
                 self?.toggleExamineZoom()
             }
             children.append(examineZoom)
-            // Extends the magnified map full-width under a translucent sidebar, and lets a
-            // held-magnifier drag reach the cells behind it.
-            let mapUnderSidebar = UIAction(title: "Map under sidebar",
-                                           image: UIImage(systemName: "rectangle.lefthalf.inset.filled"),
+            // Extends the magnified map behind the translucent interface (sidebar, message
+            // log, flavor line), and lets a held-magnifier drag reach the cells behind it.
+            let mapUnderSidebar = UIAction(title: "Map behind interface",
+                                           image: UIImage(systemName: "rectangle.inset.filled"),
                                            state: mapUnderSidebarEnabled ? .on : .off) { [weak self] _ in
                 self?.toggleMapUnderSidebar()
             }
@@ -2346,7 +2346,7 @@ extension BrogueViewController: UIPopoverPresentationControllerDelegate {
         label.translatesAutoresizingMaskIntoConstraints = false
         var tip = "Tip: pinch to zoom the map. Two-finger double-tap to zoom all the way out, and again to zoom back in."
         if mapUnderSidebarEnabled {
-            tip += " While zoomed, hold to inspect, then drag under the sidebar to reach the map behind it."
+            tip += " While zoomed, hold to inspect, then drag under the interface (sidebar, log, flavor line) to reach the map behind it."
         }
         label.text = tip
         label.numberOfLines = 0
@@ -3048,7 +3048,7 @@ extension BrogueViewController {
         let moveLoc = touches.first!.location(in: view)
         if gameplayControlsActive, gestureOriginZone != .sidebar,
            !pointIsInPlayArea(point: moveLoc),
-           !(sidebarReachLatched && pointIsInSidebarDungeon(point: moveLoc)) {
+           !(sidebarReachLatched && pointIsInReachRegion(point: moveLoc)) {
             hideMagnifier()
             return
         }
@@ -3184,13 +3184,14 @@ extension BrogueViewController {
         return false
     }
 
-    /// A point over the sidebar columns (0…20) but within the dungeon rows (mirrors
-    /// pointIsInPlayArea's row bounds) — the region a latched held-magnifier reach may
-    /// inspect once the map is revealed there. Raw (non-reach) cell coords: we're
+    /// The region a latched held-magnifier reach may inspect once the map is revealed behind
+    /// the interface: the full HUD frame — cols 0…99, rows 0…32 (ROWS-2) — which covers the
+    /// sidebar, the message log (top), and the flavor line (bottom). The button row (33) is
+    /// excluded so a reach drag can't stray onto it. Raw (non-reach) cell coords: we're
     /// classifying where the finger physically is, not where it resolves to.
-    private func pointIsInSidebarDungeon(point: CGPoint) -> Bool {
+    private func pointIsInReachRegion(point: CGPoint) -> Bool {
         let cellCoord = getCellCoords(at: point, viewport: skViewPort)
-        return cellCoord.x <= 20 && cellCoord.y > 3 && cellCoord.y < 32
+        return cellCoord.x >= 0 && cellCoord.x <= 99 && cellCoord.y >= 0 && cellCoord.y <= 32
     }
 
     /// iOS port (iBrogue): classify a touch-down location into the zone that owns the
@@ -3286,19 +3287,22 @@ extension BrogueViewController {
         let engineAllowsMagnifier = currentEngine.isCEFamily
             ? (gameplayControlsActive || isTargeting)
             : lastBrogueGameEvent.canShowMagnifyingGlass
-        // Normally the loupe only appears over the map (cols 21…99). While a reach drag is
-        // latched, also allow it over the sidebar columns (0…20) within the dungeon rows,
-        // so it keeps tracking as the finger crosses under the translucent sidebar.
-        let reachAllowed = sidebarReachLatched && pointIsInSidebarDungeon(point: point)
+        // Normally the loupe only appears over the map (cols 21…99, dungeon rows). While a
+        // reach drag is latched, also allow it anywhere in the reveal frame (over the
+        // sidebar, message log, and flavor line), so it keeps tracking as the finger crosses
+        // under the translucent interface.
+        let reachAllowed = sidebarReachLatched && pointIsInReachRegion(point: point)
         guard engineAllowsMagnifier, pointIsInPlayArea(point: point) || reachAllowed else {
             return false
         }
         // iPhone: suppress the magnifier over the chrome rows — the flavor line
         // (row 32) and the button bar (row 33) — so it doesn't pop up when the
-        // player is aiming for a button. Row 31 is now pure dungeon (the bottom
-        // map row), so the magnifier is allowed there. Not suppressed while
-        // targeting, when the buttons are hidden.
-        if UIDevice.current.userInterfaceIdiom == .phone, !isTargeting {
+        // player is aiming for a button. Row 31 is pure dungeon (the bottom map
+        // row), so the magnifier is allowed there. Not suppressed while targeting
+        // (buttons hidden), nor during a reach drag — there the reveal exposes the
+        // map behind the flavor line (row 32), and pointIsInReachRegion already
+        // excludes the button row (33).
+        if UIDevice.current.userInterfaceIdiom == .phone, !isTargeting, !sidebarReachLatched {
             let cell = getCellCoords(at: point, viewport: skViewPort)
             if cell.y >= 32 {
                 return false
