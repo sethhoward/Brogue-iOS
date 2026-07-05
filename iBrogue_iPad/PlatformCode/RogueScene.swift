@@ -222,6 +222,13 @@ extension RogueScene {
         if let glyph = UnicodeScalar(code) {
             cells[x][y].glyph = getTexture(glyph: String(glyph))
         }
+
+        // While the "map behind interface" reveal is active, keep this chrome cell's wash in
+        // sync with its (possibly new) colour: a health/status/nutrition bar that just
+        // filled or emptied should stay fully opaque, an empty cell stays translucent.
+        if sidebarRevealActive, isChromeRevealCell(x, y) {
+            cells[x][y].background.alpha = chromeCellBackgroundAlpha(cells[x][y].bgcolor)
+        }
     }
     
     override public func sceneDidLoad() {
@@ -502,26 +509,45 @@ extension RogueScene {
         applySidebarWash(active)
     }
 
-    /// Fade every HUD-chrome cell background inside the reveal frame — the sidebar (cols
-    /// 0…20), the message log (rows 0…2), and the flavor line (row ROWS-2) — so the
-    /// magnified map shows behind them, and lift them above the crop so the wash sits over
-    /// the dungeon (glyphs, at zPosition 1, stay on top and fully opaque). The dungeon cells
-    /// themselves (cols 21…99, rows 3…31) live in the crop container and are skipped. The
-    /// button row (ROWS-1) is outside the reveal and untouched. Restores to opaque, base
-    /// z-order when inactive. `background.alpha` is independent of `bgcolor`, so engine
-    /// colour updates don't disturb it.
+    /// Max colour channel below which a chrome cell's background counts as "empty" and gets
+    /// washed. At/above it the cell is a coloured background — a health / status / nutrition
+    /// bar (whose unfilled part is a *dim tint*, not black — see printProgressBar) — and
+    /// stays fully opaque. Uses max(r,g,b), not luminance, so a saturated-but-dark hue (a
+    /// blue bar) still reads as "coloured".
+    private static let chromeBarChannelFloor: CGFloat = 0.05
+
+    /// A chrome cell in the reveal frame? — cols 0…99, rows 0…(ROWS-2), excluding the dungeon
+    /// cells (cols 21…99, rows 3…31), which live in the crop container.
+    private func isChromeRevealCell(_ x: Int, _ y: Int) -> Bool {
+        guard x <= RogueScene.zoomColMax, y <= revealRowMax else { return false }
+        return !(x >= RogueScene.zoomColMin && y >= RogueScene.zoomRowMin && y <= RogueScene.zoomRowMax)
+    }
+
+    /// The alpha a chrome cell's background should have now: fully opaque when the reveal is
+    /// off, or when the cell is a coloured bar (so health / status / nutrition bars are never
+    /// dimmed); washed (translucent, so the map shows through) only for an empty/dark cell.
+    private func chromeCellBackgroundAlpha(_ bg: SKColor) -> CGFloat {
+        guard sidebarRevealActive else { return 1.0 }
+        var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
+        bg.getRed(&r, green: &g, blue: &b, alpha: &a)
+        return max(r, max(g, b)) < RogueScene.chromeBarChannelFloor ? RogueScene.sidebarWashAlpha : 1.0
+    }
+
+    /// Fade the *empty* HUD-chrome cell backgrounds inside the reveal frame — the sidebar
+    /// (cols 0…20), the message log (rows 0…2), and the flavor line (row ROWS-2) — so the
+    /// magnified map shows behind them, and lift them above the crop (glyphs, at zPosition 1,
+    /// stay on top and fully opaque). Coloured bar cells stay opaque (see
+    /// chromeCellBackgroundAlpha). Dungeon cells (in the crop container) and the button row
+    /// are skipped. Restores opaque + base z-order when inactive.
     private func applySidebarWash(_ active: Bool) {
         guard !cells.isEmpty else { return }
-        let alpha: CGFloat = active ? RogueScene.sidebarWashAlpha : 1.0
         let z: CGFloat = active ? 0.4 : 0.0   // above crop (0), below glyph (1)
         for x in 0...RogueScene.zoomColMax {              // cols 0…99
             for y in 0...revealRowMax {                    // rows 0…(ROWS-2)
-                // Skip the dungeon cells (they're in the crop container, not chrome).
-                if x >= RogueScene.zoomColMin
-                    && y >= RogueScene.zoomRowMin && y <= RogueScene.zoomRowMax { continue }
-                let bg = cells[x][y].background
-                bg.alpha = alpha
-                bg.zPosition = z
+                if !isChromeRevealCell(x, y) { continue }
+                let cell = cells[x][y]
+                cell.background.alpha = chromeCellBackgroundAlpha(cell.bgcolor)
+                cell.background.zPosition = z
             }
         }
     }
