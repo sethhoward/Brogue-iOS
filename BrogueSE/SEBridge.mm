@@ -848,6 +848,17 @@ void ceSetPlayerWindowLocation(short windowX, short windowY) {
     if (gHost) [gHost setPlayerWindowX:windowX y:windowY];
 }
 
+// iOS port (iBrogue): commitDraws() reports here whether a travel destination is pending
+// (rogue.cursorLoc is a real cell). Deduped so the frequent commitDraws calls only forward
+// state changes; the host uses it to swap the reactive center d-pad button between "continue
+// journey" and "rest".
+void ceSetTravelPending(boolean pending) {
+    static boolean last = false;
+    if ((boolean)pending == last) return;
+    last = pending;
+    if (gHost) [gHost setTravelPending:(BOOL)pending];
+}
+
 // iOS port (iBrogue): high scores are persisted in NSUserDefaults as three
 // parallel arrays. Kept under CE-specific keys, separate from the Classic
 // engine's list, since the two engines score independently. CE's

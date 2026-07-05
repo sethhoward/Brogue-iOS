@@ -123,6 +123,10 @@ final class CEHost: NSObject, BrogueCEHost {
         viewController?.setPlayerWindowX(Int(x), y: Int(y))
     }
 
+    func setTravelPending(_ pending: Bool) {
+        viewController?.setTravelPending(pending)
+    }
+
     // MARK: Game Center
     // These fire on the CE engine's background thread, so hop to main before
     // touching GameKit. The bridge has already gated on variant + wizard mode.

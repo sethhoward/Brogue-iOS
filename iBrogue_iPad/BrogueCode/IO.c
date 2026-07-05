@@ -32,6 +32,11 @@
 // Obj-C bridge (RogueDriver.mm).
 extern void iosSetPlayerWindowLocation(short windowX, short windowY);
 
+// iOS port (iBrogue): reports whether a travel destination is currently pending (rogue.cursorLoc
+// is a real cell), so the host's reactive center d-pad button can show "continue journey" vs
+// "rest". Deduped in the bridge. Called from refreshScreen each refresh.
+extern void iosSetTravelPending(boolean pending);
+
 // iOS port (iBrogue): reports whether a creature/item description box is showing
 // in the cursor loop, so the host can suspend pinch-zoom to 1×. Bridge dedupes.
 extern void setBrogueExamining(boolean examining);
@@ -859,6 +864,16 @@ void mainInputLoop() {
                 executePlaybackInput(&theEvent);
                 playingBack = rogue.playbackMode;
                 rogue.playbackMode = false;
+            } else if (theEvent.eventType == KEYSTROKE
+                       && theEvent.param1 == CONTINUE_TRAVEL_KEY) {
+                // iOS port (iBrogue): "continue journey" resumes the pending travel destination along
+                // the SAME route already computed and drawn for the cursor this iteration -- via
+                // travelRoute (fast, ~25ms/step), exactly what a second confirming tap does. NOT
+                // travel()->travelMap, the slow 500ms/step greedy path reserved for stairs. No-op if
+                // there's nothing to resume.
+                if (steps > 0 && coordinatesAreInMap(rogue.cursorLoc[0], rogue.cursorLoc[1])) {
+                    travelRoute(path, steps);
+                }
             } else {
                 executeEvent(&theEvent);
                 if (rogue.playbackMode) {
@@ -1834,6 +1849,9 @@ void commitDraws() {
     // iOS port (iBrogue): feed the player's window cell to the host for the
     // iPhone pinch-zoom auto-follow (deduped host-side).
     iosSetPlayerWindowLocation(mapToWindowX(player.xLoc), mapToWindowY(player.yLoc));
+    // iOS port (iBrogue): report whether a journey is pending so the host's reactive center d-pad
+    // button can swap between "continue journey" and "rest". Deduped host-side.
+    iosSetTravelPending(coordinatesAreInMap(rogue.cursorLoc[0], rogue.cursorLoc[1]));
 }
 
 // Debug feature: display the level to the screen without regard to lighting, field of view, etc.

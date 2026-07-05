@@ -119,6 +119,11 @@ NS_ASSUME_NONNULL_BEGIN
 // screen refresh, so the host's iPhone pinch-zoom can keep the player centered.
 - (void)setPlayerWindowX:(short)x y:(short)y;
 
+// Reports whether a travel destination is currently pending (the engine still remembers where
+// you were headed after an interruption), so the host can swap the reactive center d-pad button
+// between "continue journey" and "rest". Deduped in the bridge; forwarded only on change.
+- (void)setTravelPending:(BOOL)pending;
+
 // --- Game Center ------------------------------------------------------------
 // Invoked at game over with the final score, for the CE leaderboard. The bridge
 // has already filtered out non-standard variants and wizard runs before calling.

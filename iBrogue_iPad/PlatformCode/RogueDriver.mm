@@ -161,6 +161,17 @@ extern "C" void iosSetPlayerWindowLocation(short windowX, short windowY) {
     [brogueViewController setPlayerWindowX:windowX y:windowY];
 }
 
+// iOS port (iBrogue): refreshScreen() reports here whether a travel destination is pending
+// (rogue.cursorLoc is a real cell). Deduped so the frequent refresh calls only forward state
+// changes; the host uses it to swap the reactive center d-pad button between "continue journey"
+// and "rest".
+extern "C" void iosSetTravelPending(boolean pending) {
+    static boolean last = false;
+    if (pending == last) return;
+    last = pending;
+    [brogueViewController setTravelPending:(BOOL)pending];
+}
+
 __unused void pausingTimerStartsNow() {}
 
 // Returns true if the player interrupted the wait with a keystroke; otherwise false.

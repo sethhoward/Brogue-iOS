@@ -32,6 +32,35 @@ See `BrogueCE/Engine/IOS_MODIFICATIONS.md` (faithful CE) and
 
 ## Change log
 
+### 2026-07-05 — Continue-travel command + reactive center d-pad button
+
+**What.** A touch-friendly "continue my interrupted journey" command. Tapping a far tile auto-travels
+there, but any interruption (spotting a monster, etc.) stops you and — on a touch screen — forces you to
+re-select the destination, often re-triggering on the next thing you spot. The engine already remembers
+the destination: `rogue.cursorLoc` survives an interruption (only *arrival*, no-path, and stairs clear
+it) and the route stays drawn from it. The new command just re-runs `travel(rogue.cursorLoc, true)`.
+
+- **Key.** `#define CONTINUE_TRAVEL_KEY (128+21)` in `Rogue.h` — a synthetic, button-only code (no
+  physical-key binding) sitting above `REAPPLY_KEY`/`UNKNOWN_KEY`. Fits a `UInt8` and round-trips cleanly
+  through the keystroke-recording compressor (offset 21 is past `keystrokeCount`, so `compressKeystroke`/
+  `uncompressKeystroke` pass it through unchanged, no `keystrokeTable` collision). The **same value is
+  used in CE and Classic** so the one on-screen button dispatches in every engine.
+- **Dispatch.** `mainInputLoop`'s cursor-confirm (`doEvent`) branch intercepts `CONTINUE_TRAVEL_KEY` and
+  calls `travelRoute(path, steps)` — the exact route already computed and drawn for the cursor *this
+  iteration*, the same fast (~25ms/step) primitive a confirming tap uses, **not** `travel()`→`travelMap`
+  (the slow 500ms/step greedy path reserved for stairs — using it made continue ~20× slower and take a
+  different route than the displayed one). `travelRoute` also marks visible monsters `MB_ALREADY_SEEN`,
+  so it walks past them cleanly. **No explicit `recordKeystroke`** — `travelRoute` drives `playerMoves`,
+  which records each step's direction key, so the journey is captured as its moves (like a tap-travel).
+  Determinism-safe.
+- **Reactive-button state.** `commitDraws` reports whether a journey is pending via a new
+  `ceSetTravelPending(isPosInMap(rogue.cursorLoc))` extern (defined in `SEBridge.mm`, deduped, routed
+  through the `BrogueCEHost` `setTravelPending:` protocol method). The host swaps the center d-pad button
+  between a footprints "continue" glyph and the `zzz` "rest" glyph, sending the continue key vs `z`.
+- **Scope.** Walks past *already-seen* monsters and re-stops only on a *new* disturbance (the
+  `MB_WAS_VISIBLE` gate in `Time.c`) — i.e. exactly what re-clicking the tile already does; no new power,
+  no RNG/save impact. No-op when nothing is pending. Kept identical across Classic / CE / SE.
+
 ### 2026-07-05 — Examine description box: report its rect (fit-zoom) + suppress it for zoomed play-field examines
 
 **What.** Two iPhone examine-box hooks (identical hooks added to CE and Classic — see their

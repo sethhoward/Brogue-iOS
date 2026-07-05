@@ -23,6 +23,27 @@ future maintainers (human or AI) don't mistake an intentional port change for a 
 
 ## Change log
 
+### 2026-07-05 — Continue-travel command + reactive center d-pad button
+
+**What.** The Classic half of the touch-friendly "continue my interrupted journey" command (see
+`BrogueSE/Engine/IOS_MODIFICATIONS.md` for the full rationale), using Classic's coordinate-array and
+`ios*` naming. An iOS-platform QoL feature added identically to all three engines.
+
+- **Key.** `#define CONTINUE_TRAVEL_KEY (128+21)` in `Rogue.h` — synthetic, button-only code; value
+  matches CE and SE. Round-trips cleanly through Classic's keystroke compressor (149 is above
+  `UNKNOWN_KEY`, so `compressKeystroke`/`uncompressKeystroke` pass it through as a raw byte).
+- **Dispatch.** `mainInputLoop`'s cursor-confirm (`doEvent`) branch intercepts `CONTINUE_TRAVEL_KEY` →
+  `travelRoute(path, steps)` (Classic's `short path[1000][2]`) — the exact displayed route, the fast
+  primitive a confirming tap uses, not `travel()`→`travelMap` (slow, different path). No explicit
+  `recordKeystroke`: `travelRoute`→`playerMoves` records each step's direction key, so the journey
+  replays as its moves. Determinism-safe.
+- **Reactive-button state.** `refreshScreen` calls a new
+  `iosSetTravelPending(coordinatesAreInMap(rogue.cursorLoc[0], rogue.cursorLoc[1]))` extern (defined in
+  `RogueDriver.mm`, deduped, → `[brogueViewController setTravelPending:]`) so the host can swap the
+  center d-pad button between the footprints "continue" glyph and the `zzz` glyph.
+- **Scope.** Walks past *already-seen* monsters and re-stops on a *new* disturbance — same as
+  re-clicking; no new power, no RNG/save impact. No-op when idle. Kept identical across Classic / CE / SE.
+
 ### 2026-07-05 — Examine description box: report its rect (fit-zoom) + suppress it for zoomed play-field examines
 
 **What.** iPhone examine-box hooks, identical to CE/SE's (see `BrogueSE/Engine/IOS_MODIFICATIONS.md` for the

@@ -1694,6 +1694,16 @@ enum tileFlags {
 // the modern scheme physical 'A' remaps to this (see applyKeyboardScheme); under classic 'A' stays
 // AUTOPLAY_KEY. Value sits in the private range beside UNKNOWN_KEY and fits a UInt8 key event.
 #define REAPPLY_KEY         (128+20)
+// iOS port (iBrogue): resume the interrupted journey — the touch-friendly "continue" command.
+// Resumes travel along the route already computed and displayed for rogue.cursorLoc, via
+// travelRoute() (the same fast ~25ms/step path a confirming tap takes; NOT travel()->travelMap,
+// the slow 500ms/step greedy path reserved for stairs). Walks past already-seen monsters,
+// re-stopping only on a *new* disturbance. Dedicated synthetic code (sits above REAPPLY_KEY/
+// UNKNOWN_KEY, fits a UInt8, round-trips cleanly through the keystroke-recording compressor since
+// offset 21 is past keystrokeCount). Intercepted in mainInputLoop's cursor-confirm path (not
+// executeKeystroke); no physical-key binding. Value shared verbatim by CE and Classic so the one
+// button code works in every engine.
+#define CONTINUE_TRAVEL_KEY (128+21)
 #define SEED_KEY            '~'
 #define EASY_MODE_KEY       '&'
 #define ESCAPE_KEY          '\033'

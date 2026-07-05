@@ -255,12 +255,19 @@ final class BrogueViewController: UIViewController {
     /// remapping and means re-apply in every scheme.
     private static let reapplyKeyCode: UInt8 = 128 + 20
 
+    /// Synthetic key for "Continue travel" — resume the interrupted journey. Matches
+    /// CONTINUE_TRAVEL_KEY (128+21) in all three engines; the engine re-runs travel to the
+    /// still-pending destination (rogue.cursorLoc). Not a physical key. Present in every engine
+    /// (no `seOnly`/`ceOnly`), so the one button code dispatches wherever it's loaded.
+    private static let continueTravelKeyCode: UInt8 = 128 + 21
+
     /// Commands a side button may be bound to. Names mirror printHelpScreen().
     private static let commandCatalog: [Command] = [
         // Stairs & Travel
         Command(key: ">".ascii, name: "Descend",           category: "Stairs & Travel"),
         Command(key: "<".ascii, name: "Ascend",            category: "Stairs & Travel"),
         Command(key: "x".ascii, name: "Auto-explore",      category: "Stairs & Travel"),
+        Command(key: continueTravelKeyCode, name: "Continue travel", category: "Stairs & Travel"),
         // Resting & Waiting
         Command(key: "z".ascii, name: "Rest once",         category: "Resting & Waiting"),
         Command(key: "Z".ascii, name: "Rest until better", category: "Resting & Waiting"),
@@ -287,6 +294,7 @@ final class BrogueViewController: UIViewController {
         ">".ascii: "arrow.down.to.line",
         "<".ascii: "arrow.up.to.line",
         "x".ascii: "map",
+        continueTravelKeyCode: "shoeprints.fill",
         "z".ascii: "zzz",
         "Z".ascii: "bed.double.fill",
         "s".ascii: "magnifyingglass",
@@ -307,11 +315,22 @@ final class BrogueViewController: UIViewController {
         commandSymbols[key] ?? "circle.slash"
     }
 
+    /// Rebind-menu row title. Printable-ASCII commands show their key, e.g. "Throw (t)";
+    /// synthetic commands (Continue travel, Re-apply staff) have no meaningful character, so
+    /// they show just the name rather than a control-character glyph in parentheses.
+    private static func commandMenuTitle(_ command: Command) -> String {
+        if command.key >= 32 && command.key < 127 {
+            return "\(command.name) (\(Character(UnicodeScalar(command.key))))"
+        }
+        return command.name
+    }
+
     /// Point size / weight for button-face glyphs, matched to the old text scale.
     private static let buttonSymbolConfig = UIImage.SymbolConfiguration(pointSize: 20, weight: .semibold)
 
-    /// Default key per slot (top→bottom): throw, auto-explore, search, rest-until-better.
-    private static let defaultSideButtonKeys: [UInt8] = ["t".ascii, "x".ascii, "s".ascii, "Z".ascii]
+    /// Default key per slot (top→bottom): throw, apply/use, rest-until-better, descend.
+    /// (Auto-explore and search are omitted here — they have dedicated bottom-row buttons.)
+    private static let defaultSideButtonKeys: [UInt8] = ["t".ascii, "a".ascii, "Z".ascii, ">".ascii]
     private static let sideButtonKeysDefaultsKey = "sideButtonKeys"
 
     /// Current key bound to each of the four slots; persisted to UserDefaults.
@@ -326,12 +345,20 @@ final class BrogueViewController: UIViewController {
 
     /// Sentinel binding meaning the center button does nothing when tapped.
     private static let centerButtonNothing: UInt8 = 0
-    /// Center button's out-of-box binding: "Rest once" (z).
-    private static let centerButtonDefaultKey: UInt8 = "z".ascii
+    /// Center button's out-of-box binding: "Continue travel" — the reactive continue/rest button.
+    /// When bound to this key the center button continues a pending journey and falls back to Rest
+    /// once when idle (see `centerButtonEffectiveKey`). Only affects players who have never rebound
+    /// the center button; the stored binding is honored otherwise (loadCenterButtonKey).
+    private static let centerButtonDefaultKey: UInt8 = continueTravelKeyCode
     private static let centerButtonKeyDefaultsKey = "directionCenterButtonKey"
 
     /// Key bound to the center button; `centerButtonNothing` (0) = unbound.
     private var centerButtonKey: UInt8 = BrogueViewController.loadCenterButtonKey()
+
+    /// Whether the engine currently has a pending travel destination (reported per-turn by the
+    /// bridge via `setTravelPending`). Drives the reactive center button: continue when true,
+    /// Rest once when false.
+    private var isTravelPending = false
 
     // ── Directional-pad position ─────────────────────────────────────────
     // The pad can be two-finger-dragged. We persist that offset (one key,
@@ -1225,11 +1252,23 @@ final class BrogueViewController: UIViewController {
         refreshCenterButtonAppearance()
     }
 
-    /// Center button shows the SF Symbol for its bound command; when set to
-    /// "Nothing" it shows a slashed circle so it stays visible and long-pressable.
+    /// The key the center button acts as *right now*. Normally its bound key, but when bound to
+    /// "Continue travel" it becomes a smart button: continue while a journey is pending, else Rest
+    /// once. Only the center button is reactive — a side button bound to Continue travel stays pure
+    /// (always sends the continue key, which the engine no-ops when nothing is pending).
+    private var centerButtonEffectiveKey: UInt8 {
+        if centerButtonKey == BrogueViewController.continueTravelKeyCode && !isTravelPending {
+            return "z".ascii   // idle → Rest once
+        }
+        return centerButtonKey
+    }
+
+    /// Center button shows the SF Symbol for its effective command (footprints while a journey is
+    /// pending, zzz when it will rest instead); when set to "Nothing" it shows a slashed circle so
+    /// it stays visible and long-pressable.
     private func refreshCenterButtonAppearance() {
         guard let button = directionsViewController?.centerShortcutButton else { return }
-        let name = BrogueViewController.symbolName(for: centerButtonKey)
+        let name = BrogueViewController.symbolName(for: centerButtonEffectiveKey)
         button.setImage(UIImage(systemName: name, withConfiguration: BrogueViewController.buttonSymbolConfig), for: .normal)
         button.alpha = 1.0
     }
@@ -1237,7 +1276,20 @@ final class BrogueViewController: UIViewController {
     @objc private func centerButtonTapped() {
         guard centerButtonKey != BrogueViewController.centerButtonNothing else { return }
         fireHaptic()
-        addKeyEvent(event: centerButtonKey)
+        addKeyEvent(event: centerButtonEffectiveKey)
+    }
+
+    /// Host callback (fires on the engine thread): the engine reports whether a travel destination
+    /// is currently pending. Hop to main for UIKit (matches `setExamining`). Only the reactive
+    /// continue binding changes its face with pending state, so we only repaint in that case.
+    @objc func setTravelPending(_ pending: Bool) {
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self, self.isTravelPending != pending else { return }
+            self.isTravelPending = pending
+            if self.centerButtonKey == BrogueViewController.continueTravelKeyCode {
+                self.refreshCenterButtonAppearance()
+            }
+        }
     }
 
     /// Lays the buttons out along the trailing (cutout) edge: the first half of
@@ -2174,8 +2226,7 @@ extension BrogueViewController: UIContextMenuInteractionDelegate {
             let actions = catalog
                 .filter { $0.category == category }
                 .map { command -> UIAction in
-                    let keyChar = String(UnicodeScalar(command.key))
-                    let action = UIAction(title: "\(command.name) (\(keyChar))",
+                    let action = UIAction(title: BrogueViewController.commandMenuTitle(command),
                                           image: UIImage(systemName: BrogueViewController.symbolName(for: command.key))) { [weak self] _ in
                         self?.bindSideButton(slot: slot, to: command.key)
                     }
@@ -2231,8 +2282,7 @@ extension BrogueViewController: UIContextMenuInteractionDelegate {
             let actions = catalog
                 .filter { $0.category == category }
                 .map { command -> UIAction in
-                    let keyChar = String(UnicodeScalar(command.key))
-                    let action = UIAction(title: "\(command.name) (\(keyChar))",
+                    let action = UIAction(title: BrogueViewController.commandMenuTitle(command),
                                           image: UIImage(systemName: BrogueViewController.symbolName(for: command.key))) { [weak self] _ in
                         self?.bindCenterButton(to: command.key)
                     }

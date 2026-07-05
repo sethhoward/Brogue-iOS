@@ -28,6 +28,26 @@ covers the separate Classic engine that ships in the app target).
 
 ## Change log
 
+### 2026-07-05 — Continue-travel command + reactive center d-pad button
+
+**What.** The CE half of the touch-friendly "continue my interrupted journey" command (see
+`BrogueSE/Engine/IOS_MODIFICATIONS.md` for the full rationale). An iOS-platform QoL feature, added
+identically to all three engines and committed separately so CE stays cherry-pickable against upstream.
+
+- **Key.** `#define CONTINUE_TRAVEL_KEY (128+21)` in `Rogue.h` — synthetic, button-only code; value
+  matches SE and Classic so the single on-screen button code dispatches in every engine. Round-trips
+  cleanly through the keystroke compressor (offset 21 is past CE's 18-entry `keystrokeTable`).
+- **Dispatch.** `mainInputLoop`'s cursor-confirm (`doEvent`) branch intercepts `CONTINUE_TRAVEL_KEY` →
+  `travelRoute(path, steps)` (the exact displayed route; the fast primitive a confirming tap uses, not
+  `travel()`→`travelMap`, which is slow and takes a different path). No explicit `recordKeystroke`:
+  `travelRoute`→`playerMoves` records each step's direction key, so the journey replays as its moves
+  (like a tap-travel). Determinism-safe.
+- **Reactive-button state.** `commitDraws` calls a new `ceSetTravelPending(isPosInMap(rogue.cursorLoc))`
+  extern (defined in `CEBridge.mm`, deduped, routed via the `BrogueCEHost` `setTravelPending:` method) so
+  the host can swap the center d-pad button between the footprints "continue" glyph and the `zzz` glyph.
+- **Scope.** Walks past *already-seen* monsters and re-stops on a *new* disturbance (`MB_WAS_VISIBLE`
+  gate in `Time.c`) — same as re-clicking; no new power, no RNG/save impact. No-op when idle.
+
 ### 2026-07-05 — Examine description box: report its rect (fit-zoom) + suppress it for zoomed play-field examines
 
 **What.** iPhone examine-box hooks, identical to SE's (see `BrogueSE/Engine/IOS_MODIFICATIONS.md` for the
