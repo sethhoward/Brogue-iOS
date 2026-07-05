@@ -610,15 +610,15 @@ void initializeRogue(uint64_t seed) {
         // loop: identify (reveal the runic), enchanting (reach +6 to purify), and remove-curse (eject ->
         // shatter). Deterministic/replay-safe.
         theItem = generateItem(SCROLL, SCROLL_ENCHANTING);
-        theItem->quantity = 12;
-        identify(theItem);
-        theItem = addItemToPack(theItem);
-        theItem = generateItem(SCROLL, SCROLL_IDENTIFY);
         theItem->quantity = 5;
         identify(theItem);
         theItem = addItemToPack(theItem);
+        theItem = generateItem(SCROLL, SCROLL_IDENTIFY);
+        theItem->quantity = 1;
+        identify(theItem);
+        theItem = addItemToPack(theItem);
         theItem = generateItem(SCROLL, SCROLL_REMOVE_CURSE);
-        theItem->quantity = 3;
+        theItem->quantity = 1;
         identify(theItem);
         theItem = addItemToPack(theItem);
     }

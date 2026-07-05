@@ -2663,20 +2663,68 @@ static void recordCurrentCreatureHealths() {
 // Refreshed on the player + 8 neighbors (the minimal cloud that hides you from every non-adjacent
 // monster); cells you leave dissipate into a short trail (escape cover). Never clobbers another gas,
 // skips gas-blocking terrain, draws no RNG (replay-safe). Purify swaps this for a passive stealth aura.
+// iOS port (Brogue SE): world-anchored spatial hash (no RNG) -- ranks the Smoky armor's neighbor
+// cells so the haze thins the same cells first for a given position. Any stable mix of (x,y) works;
+// this one scatters adjacent cells well so the open lanes don't clump.
+static unsigned long smokyCellHash(short x, short y) {
+    unsigned long h = (unsigned long)((int)x * 73856093) ^ (unsigned long)((int)y * 19349663);
+    h ^= (h >> 13);
+    h *= 0x5bd1e995UL;
+    h ^= (h >> 15);
+    return h;
+}
+
 static void emitSmokyArmorCloud(void) {
     if (!(rogue.armor && (rogue.armor->flags & ITEM_RUNIC) && rogue.armor->enchant2 == A_SMOKY
           && runicCurseActive(rogue.armor))) {
         return;
     }
-    const short dirs[9][2] = {{0,0},{-1,-1},{0,-1},{1,-1},{-1,0},{1,0},{-1,1},{0,1},{1,1}};
-    for (short d = 0; d < 9; d++) {
-        short cx = player.loc.x + dirs[d][0], cy = player.loc.y + dirs[d][1];
+    // iOS port (Brogue SE): cursed-runics rework -- progressive per-enchant sight. Rather than
+    // wreathing all 8 neighbors in thick, sight-blocking smoke, we thin `clearCount` of them into
+    // wispy (sub-threshold) smoke that lets sight pass BOTH ways (symmetric: you see out, foes see
+    // in). Clearing a neighbor opens the whole sightline past it, so a couple of open lanes restores
+    // real exploration. The cursed enchant range is -1..+3 (ARMOR_RUNIC_PURIFY_ENCHANT purifies at
+    // +4); relief is front-loaded and capped below 8 so +3 still bites. Deterministic (pure functions
+    // of enchant1 and cell (x,y)); recomputed each turn, so no save fields and no replay drift.
+    static const short clearByTier[5] = {0, 2, 4, 5, 6}; // index = enchant1 + 1, for enchant1 -1..+3
+    const short clearCount = clearByTier[clamp((short)(rogue.armor->enchant1 + 1), 0, 4)];
+
+    const short dirs[8][2] = {{-1,-1},{0,-1},{1,-1},{-1,0},{1,0},{-1,1},{0,1},{1,1}};
+    unsigned long hash[8];
+    short order[8];
+    for (short d = 0; d < 8; d++) {
+        hash[d] = smokyCellHash(player.loc.x + dirs[d][0], player.loc.y + dirs[d][1]);
+        order[d] = d;
+    }
+    // Rank the 8 neighbors by hash and thin the `clearCount` lowest (tiny fixed-n selection sort).
+    // The lowest-N set is a subset of the lowest-(N+1) set, so enchanting only ever ADDS open lanes
+    // (never reshuffles), and the lanes drift organically as the (world-anchored) neighbor coords change.
+    for (short a = 0; a < clearCount; a++) {
+        for (short b = a + 1; b < 8; b++) {
+            if (hash[order[b]] < hash[order[a]]) {
+                const short t = order[a]; order[a] = order[b]; order[b] = t;
+            }
+        }
+    }
+    boolean thin[8] = {false};
+    for (short k = 0; k < clearCount && k < 8; k++) {
+        thin[order[k]] = true;
+    }
+
+    // Stamp own cell (always thick -- doesn't blind outbound sight, since the block is on seeing PAST
+    // a cell) plus the 8 neighbors (thick or thinned per the dither). Re-stamped every turn at both
+    // call sites so gas-averaging in updateEnvironment can't wash the pattern below/above the threshold.
+    for (short d = -1; d < 8; d++) {
+        const short cx = player.loc.x + (d < 0 ? 0 : dirs[d][0]);
+        const short cy = player.loc.y + (d < 0 ? 0 : dirs[d][1]);
         if (!coordinatesAreInMap(cx, cy)) continue;
         if (cellHasTerrainFlag((pos){ cx, cy }, T_OBSTRUCTS_GAS)) continue;
         if (pmap[cx][cy].layers[GAS] != NOTHING && pmap[cx][cy].layers[GAS] != SMOKE_GAS) continue;
         pmap[cx][cy].layers[GAS] = SMOKE_GAS;
-        if (pmap[cx][cy].volume < SMOKE_THICK_VOLUME + 6) {
-            pmap[cx][cy].volume = SMOKE_THICK_VOLUME + 6; // comfortably thick; survives a turn of dissipation
+        if (d >= 0 && thin[d]) {
+            pmap[cx][cy].volume = SMOKY_DITHER_THIN_VOLUME;   // open lane: dims but does not block sight
+        } else if (pmap[cx][cy].volume < SMOKE_THICK_VOLUME + 6) {
+            pmap[cx][cy].volume = SMOKE_THICK_VOLUME + 6;     // comfortably thick; survives a turn of dissipation
         }
         refreshDungeonCell((pos){ cx, cy });
     }

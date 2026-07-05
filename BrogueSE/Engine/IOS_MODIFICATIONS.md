@@ -32,6 +32,31 @@ See `BrogueCE/Engine/IOS_MODIFICATIONS.md` (faithful CE) and
 
 ## Change log
 
+### 2026-07-02 — Cursed-runics: Smoky armor progressive per-enchant sight (post-0.12.0)
+
+**Why.** The cursed Smoky armor's 1-tile blindness was too punishing to *live* with — fine as an opening
+handicap, but it made exploration (finding scrolls of enchanting, etc.) miserable in a dungeon you can't
+see. The rework makes the blindness **ease with every enchant** on the way to the +4 purify, so investment
+is felt continuously rather than only at the finish.
+
+**What.** `emitSmokyArmorCloud()` (`Time.c`) no longer wreathes all 8 neighbors in thick, sight-blocking
+smoke. It now **dithers**: `clearCount` of the 8 neighbors are thinned to sub-threshold smoke
+(`SMOKY_DITHER_THIN_VOLUME` = 10 < `SMOKE_THICK_VOLUME`), which dims but does not block — and clearing a
+neighbor opens the whole sightline past it. The easing is **symmetric** (an open lane lets foes see *in* as
+well), so cursed-Smoky stays a worse deal than the purified +3 stealth aura and never becomes free invisibility.
+
+- **Curve** (`clearByTier`, indexed by `enchant1 + 1`): `-1 → 0` (byte-identical to the old full blindness),
+  `0 → 2`, `+1 → 4`, `+2 → 5`, `+3 → 6` (capped below 8 so +3 still bites). `+4` purifies (cloud gone + the
+  stealth aura, unchanged).
+- **Which cells clear:** `smokyCellHash(x,y)` — a pure, world-anchored spatial hash (no RNG) — ranks the 8
+  neighbors; the `clearCount` lowest are thinned. The lowest-N set ⊂ lowest-(N+1), so enchanting only *adds*
+  lanes (monotonic, no reshuffle), and the open lanes drift organically as you move.
+- **Determinism:** pure functions of `enchant1` and cell `(x,y)`, recomputed each turn — no new save fields,
+  no substantive/cosmetic RNG, replay-safe. Re-stamped at both existing call sites (top-of-turn for monster
+  concealment; pre-vision for the player's FOV) so `updateEnvironment` gas-averaging can't wash out the pattern.
+- **Tuning constant** (`Rogue.h`): `SMOKY_DITHER_THIN_VOLUME`. Info-panel copy for cursed A_SMOKY (`Items.c`)
+  updated to describe the haze thinning per enchant.
+
 ### 2026-07-02 — Brogue SE 0.12.0 "C is for Curses": release cut (version + release notes)
 
 **What.** Cut the 0.12.0 release. Headline features since 0.11.0: the **cursed-runics rework** (double-edged

@@ -2727,7 +2727,7 @@ void itemDetails(char *buf, item *theItem) {
                             case A_SMOKY:
                                 // iOS port (Brogue SE): cursed-runics rework -- describe by purify state.
                                 if (theItem->enchant1 < ARMOR_RUNIC_PURIFY_ENCHANT) {
-                                    sprintf(buf2, "When worn it wreathes you in thick smoke: creatures more than a step away cannot see you -- you move unseen and can strike the unwary -- but your own sight collapses to your immediate surroundings. Enchant it to +%i to purify: the choking smoke refines into a subtle stealth, so you move unseen and unheard while seeing clearly. ", ARMOR_RUNIC_PURIFY_ENCHANT);
+                                    sprintf(buf2, "When worn it wreathes you in thick smoke: creatures more than a step away cannot see you -- you move unseen and can strike the unwary -- but your own sight collapses to your immediate surroundings. Each enchantment thins the haze further, opening more sightlines (though what you can see through, foes can too). Enchant it to +%i to purify: the smoke refines into a subtle stealth, so you move unseen and unheard while seeing clearly. ", ARMOR_RUNIC_PURIFY_ENCHANT);
                                 } else {
                                     strcpy(buf2, "When worn you move like smoke -- a subtle stealth that leaves you both harder to see and quieter, with no cost to your own sight. ");
                                 }
