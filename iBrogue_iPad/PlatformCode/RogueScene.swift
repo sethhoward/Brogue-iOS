@@ -101,6 +101,32 @@ extension CGSize {
         return defaults.bool(forKey: examineZoomEnabledDefaultsKey)
     }
 
+    /// UserDefaults key for "extend the magnified dungeon under a translucent sidebar."
+    @objc public static let mapUnderSidebarEnabledDefaultsKey = "mapUnderSidebarEnabled"
+
+    /// Whether the zoomed dungeon renders full-width under a translucent sidebar (so the
+    /// map shows behind the stats/monster list) and a magnifier-drag can reach the cells
+    /// there. **Default ON**; absent key → default, stored value (on/off) respected.
+    @objc public static var isMapUnderSidebarEnabledSetting: Bool {
+        let defaults = UserDefaults.standard
+        if defaults.object(forKey: mapUnderSidebarEnabledDefaultsKey) == nil { return true }
+        return defaults.bool(forKey: mapUnderSidebarEnabledDefaultsKey)
+    }
+
+    /// Whether the "map under sidebar" reveal is permitted (the user's Options toggle).
+    /// The reveal is *applied* only when also zoomed in — see `updateSidebarReveal`.
+    /// Seeded from the persisted setting; flipped live by `setMapUnderSidebarEnabled`.
+    private var mapUnderSidebarEnabled: Bool = RogueScene.isMapUnderSidebarEnabledSetting
+    /// Latched state of whether the reveal is currently applied (zoomed AND enabled), so
+    /// the mask-widen + sidebar-wash are re-applied only when it flips — not every zoom
+    /// tick (the engine thread's per-step auto-follow calls setZoom constantly).
+    private var sidebarRevealActive = false
+
+    /// Fraction of opacity kept on the sidebar cell backgrounds while the reveal is
+    /// active (glyphs stay fully opaque). Lower = more map shows through, at the cost of
+    /// text contrast. Tunable.
+    private static let sidebarWashAlpha: CGFloat = 0.5
+
     private var dungeonCrop: SKCropNode?
     private var dungeonContainer: SKNode?
     private var dungeonMask: SKSpriteNode?
@@ -351,19 +377,27 @@ extension RogueScene {
         }
     }
 
-    /// The dungeon-map rectangle (window cols 21…99, rows 3…30) in scene pixels,
-    /// derived from the live cell layout so it tracks rotations / inset changes.
+    /// The crop-mask rectangle (rows 3…31) in scene pixels, derived from the live cell
+    /// layout so it tracks rotations / inset changes. Normally spans the dungeon columns
+    /// (window cols 21…99); while the "map under sidebar" reveal is active it widens to the
+    /// full grid width (cols 0…99) so the magnified map shows under the translucent sidebar.
+    /// The auto-follow pan clamp (BrogueViewController.dungeonFramePoints) is unaffected and
+    /// stays on cols 21…99, so the framing/centering is unchanged — the extra columns are a
+    /// bonus reveal that shows black only hard against the map's left edge.
     private func dungeonFrameInScene() -> CGRect {
         let layout = currentLayout()
-        let cols = CGFloat(RogueScene.zoomColMax - RogueScene.zoomColMin + 1) // 79
-        let rows = CGFloat(RogueScene.zoomRowMax - RogueScene.zoomRowMin + 1) // 28
-        let minX = layout.xOffset + CGFloat(RogueScene.zoomColMin) * layout.cell.width
-        // Bottom edge of the lowest zoomed row (row 30), measured bottom-up.
+        let rows = CGFloat(RogueScene.zoomRowMax - RogueScene.zoomRowMin + 1) // 29
+        // Bottom edge of the lowest zoomed row, measured bottom-up.
         let minY = layout.yOffset
             + CGFloat(gridSize.rows - RogueScene.zoomRowMax - 1) * layout.cell.height
-        return CGRect(x: minX, y: minY,
-                      width: cols * layout.cell.width,
-                      height: rows * layout.cell.height)
+        let height = rows * layout.cell.height
+        if sidebarRevealActive {
+            let width = CGFloat(gridSize.cols) * layout.cell.width // cols 0…99
+            return CGRect(x: layout.xOffset, y: minY, width: width, height: height)
+        }
+        let cols = CGFloat(RogueScene.zoomColMax - RogueScene.zoomColMin + 1) // 79
+        let minX = layout.xOffset + CGFloat(RogueScene.zoomColMin) * layout.cell.width
+        return CGRect(x: minX, y: minY, width: cols * layout.cell.width, height: height)
     }
 
     /// Builds the crop + container once, before cells are parented (didMove).
@@ -434,6 +468,54 @@ extension RogueScene {
             x: pixelScale * originXPoints,
             y: size.height * (1 - scale) - pixelScale * originYPoints
         )
+        // Cross the zoomed/1× threshold on the same (main) thread that applies the
+        // transform, so the sidebar reveal flips in lockstep with the magnification.
+        updateSidebarReveal()
+    }
+
+    // MARK: - Map-under-sidebar reveal
+
+    /// Flip the Options toggle live (called from BrogueViewController). Re-applies the
+    /// reveal immediately so turning it off mid-zoom restores the opaque sidebar.
+    @objc public func setMapUnderSidebarEnabled(_ enabled: Bool) {
+        guard mapUnderSidebarEnabled != enabled else { return }
+        mapUnderSidebarEnabled = enabled
+        updateSidebarReveal()
+    }
+
+    /// Recompute whether the reveal should be applied (zoomed in AND enabled AND iPhone)
+    /// and, only when that latched state flips, re-mask the crop to full/partial width and
+    /// wash/unwash the sidebar backgrounds. Idempotent and cheap on the common no-flip path
+    /// (the engine thread's per-step auto-follow drives applyZoomToContainer constantly).
+    /// Must run on the main thread — it mutates the mask + cell nodes.
+    private func updateSidebarReveal() {
+        let active = zoomEnabled && mapUnderSidebarEnabled && zoomScale > 1.0
+        guard active != sidebarRevealActive else { return }
+        sidebarRevealActive = active
+        if let mask = dungeonMask {
+            let frame = dungeonFrameInScene()   // active-aware: full width while revealed
+            mask.size = frame.size
+            mask.position = frame.origin
+        }
+        applySidebarWash(active)
+    }
+
+    /// Fade the sidebar cell backgrounds (window cols 0…20, dungeon rows 3…31) so the
+    /// magnified map shows behind them, and lift them above the crop so the wash sits over
+    /// the dungeon (glyphs, at zPosition 1, stay on top and fully opaque). Restores to
+    /// opaque, base z-order when inactive. `background.alpha` is independent of `bgcolor`,
+    /// so engine colour updates don't disturb it.
+    private func applySidebarWash(_ active: Bool) {
+        guard !cells.isEmpty else { return }
+        let alpha: CGFloat = active ? RogueScene.sidebarWashAlpha : 1.0
+        let z: CGFloat = active ? 0.4 : 0.0   // above crop (0), below glyph (1)
+        for x in 0..<RogueScene.zoomColMin {                       // cols 0…20
+            for y in RogueScene.zoomRowMin...RogueScene.zoomRowMax { // rows 3…31
+                let bg = cells[x][y].background
+                bg.alpha = alpha
+                bg.zPosition = z
+            }
+        }
     }
 
     /// SpriteKit calls this on the main thread at the top of every frame, immediately

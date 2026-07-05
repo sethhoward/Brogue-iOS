@@ -88,13 +88,15 @@ extension UIDevice {
     }
 }
 
-@MainActor fileprivate func getCellCoords(at point: CGPoint, viewport: SKViewPort?) -> CGPoint {
+@MainActor fileprivate func getCellCoords(at point: CGPoint, viewport: SKViewPort?, reach: Bool = false) -> CGPoint {
     let screenH = UIScreen.main.bounds.size.height
     let screenW = UIScreen.main.bounds.size.width
     // When the dungeon map is pinch-zoomed, invert the zoom transform so a
     // touch resolves to the cell actually under the finger. No-op at 1× and
     // for points outside the zoomable map (sidebar, messages, button bar).
-    let point = viewport?.unzoomedPoint(point) ?? point
+    // `reach` extends the inverse over the sidebar columns for the held-magnifier
+    // "map under sidebar" drag (see SKViewPort.unzoomedPoint(_:reach:)).
+    let point = viewport?.unzoomedPoint(point, reach: reach) ?? point
     let effectiveHeight = viewport?.effectiveHeightPoints ?? screenH
     let effectiveWidth = viewport?.effectiveWidthPoints ?? screenW
     let leftInset = viewport?.leftInsetPoints ?? 0
@@ -117,17 +119,26 @@ extension String {
 @objc class UIBrogueTouchEvent: NSObject, NSCopying {
     @objc let phase: UITouch.Phase
     @objc let location: CGPoint
-    
+    /// True when this touch belongs to a held-magnifier drag reaching under the
+    /// translucent sidebar ("map under sidebar"): the bridge must then invert the zoom
+    /// over the sidebar columns so the commit lands on the magnified map cell rather than
+    /// a sidebar entity. Carried per-event (not a shared flag) because the bridge resolves
+    /// coordinates on the engine thread at dequeue time — a main-thread flag would race the
+    /// commit as the finger lifts. Stamped in `addTouchEvent`; read by the CE/SE host stash
+    /// and by the Classic RogueDriver bridge.
+    @objc var reachUnderSidebar: Bool = false
+
     required init(phase: UITouch.Phase, location: CGPoint) {
         self.phase = phase
         self.location = location
     }
-    
+
     required init(touchEvent: UIBrogueTouchEvent) {
         phase = touchEvent.phase
         location = touchEvent.location
+        reachUnderSidebar = touchEvent.reachUnderSidebar
     }
-    
+
     func copy(with zone: NSZone? = nil) -> Any {
         return type(of:self).init(touchEvent: self)
     }
@@ -536,6 +547,23 @@ final class BrogueViewController: UIViewController {
     /// When on (default), single-tapping a sidebar entity zooms out to 1× so its
     /// description box isn't clipped while zoomed. Toggleable in Options.
     private var examineZoomEnabled: Bool = RogueScene.isExamineZoomEnabledSetting
+
+    /// When on (default), the zoomed dungeon renders full-width under a translucent
+    /// sidebar and a held-magnifier drag can reach the map cells behind it. Toggleable
+    /// in Options; iPhone-only (the reveal only applies while zoomed).
+    private var mapUnderSidebarEnabled: Bool = RogueScene.isMapUnderSidebarEnabledSetting
+
+    /// Latched true while a held-magnifier drag is permitted to reach map cells under the
+    /// sidebar: set when the loupe arms over a play-area-origin gesture with the reveal
+    /// active (zoomed + enabled), cleared on finger-lift / a fresh touch. Stamped onto each
+    /// enqueued touch event (`addTouchEvent`) so the commit resolves in map space even
+    /// after this flag is cleared, and mirrored to `magView.sidebarReach` for the loupe.
+    private var sidebarReachLatched = false {
+        didSet {
+            guard oldValue != sidebarReachLatched else { return }
+            magView?.sidebarReach = sidebarReachLatched
+        }
+    }
 
     /// True once this process has gone to the background at least once. Distinguishes a warm
     /// foreground (we backgrounded earlier and the process survived) from a cold launch (a fresh
@@ -1689,6 +1717,14 @@ final class BrogueViewController: UIViewController {
                 self?.toggleExamineZoom()
             }
             children.append(examineZoom)
+            // Extends the magnified map full-width under a translucent sidebar, and lets a
+            // held-magnifier drag reach the cells behind it.
+            let mapUnderSidebar = UIAction(title: "Map under sidebar",
+                                           image: UIImage(systemName: "rectangle.lefthalf.inset.filled"),
+                                           state: mapUnderSidebarEnabled ? .on : .off) { [weak self] _ in
+                self?.toggleMapUnderSidebar()
+            }
+            children.append(mapUnderSidebar)
         }
 
         children.append(resetDirections)
@@ -1714,6 +1750,17 @@ final class BrogueViewController: UIViewController {
             examineArmDebounce?.cancel()
             examineArmed = false
         }
+        fireHaptic()
+        optionsButton?.menu = optionsMenu()
+    }
+
+    /// Flips "map under sidebar" (translucent sidebar + full-width zoomed map + held-
+    /// magnifier reach), persists it, applies it to the live scene (restoring the opaque
+    /// sidebar at once if turned off mid-zoom), and rebuilds the menu.
+    private func toggleMapUnderSidebar() {
+        mapUnderSidebarEnabled.toggle()
+        UserDefaults.standard.set(mapUnderSidebarEnabled, forKey: RogueScene.mapUnderSidebarEnabledDefaultsKey)
+        skViewPort.rogueScene.setMapUnderSidebarEnabled(mapUnderSidebarEnabled)
         fireHaptic()
         optionsButton?.menu = optionsMenu()
     }
@@ -2297,7 +2344,11 @@ extension BrogueViewController: UIPopoverPresentationControllerDelegate {
 
         let label = UILabel()
         label.translatesAutoresizingMaskIntoConstraints = false
-        label.text = "Tip: pinch to zoom the map. Two-finger double-tap to zoom all the way out, and again to zoom back in."
+        var tip = "Tip: pinch to zoom the map. Two-finger double-tap to zoom all the way out, and again to zoom back in."
+        if mapUnderSidebarEnabled {
+            tip += " While zoomed, hold to inspect, then drag under the sidebar to reach the map behind it."
+        }
+        label.text = tip
         label.numberOfLines = 0
         label.font = .preferredFont(forTextStyle: .subheadline)
         label.textColor = .label
@@ -2921,6 +2972,17 @@ extension BrogueViewController {
             // zone (see `gestureOriginZone`). Captured here, before the pinch/band
             // early-returns, and only for the primary finger so a pinch can't clobber it.
             gestureOriginZone = originZone(for: touches.first!.location(in: view))
+            // Map-under-sidebar: latch reach for any gesture that STARTS on the dungeon
+            // while the reveal is on screen, so a drag left into the translucent sidebar
+            // reaches the map behind it — even a fast drag that beats the 0.3s magnifier
+            // delay (otherwise the boundary-cross is dropped in touchesMoved, killing the
+            // loupe timer and freezing the selection at the sidebar edge). Non-dungeon
+            // origins latch false, keeping raw-coordinate routing (sidebar entity taps).
+            // Harmless for gestures that never leave the map (reach ≡ no-reach in cols
+            // 21…99). Gated on appliedScale (on-screen zoom), not the canonical zoomScale,
+            // which stays high behind a 1× menu.
+            sidebarReachLatched = gestureOriginZone == .playArea
+                && pinchZoomActive && mapUnderSidebarEnabled && appliedScale > 1.0
         }
 
         // iPhone (zoom on): a second finger means a pinch / two-finger pan is
@@ -2983,8 +3045,10 @@ extension BrogueViewController {
         // examine hovers. Gated on gameplayControlsActive so it never touches menu /
         // inventory interaction, where item rows sit above the play area (rows <= 3)
         // and must stay selectable by tap or drag.
+        let moveLoc = touches.first!.location(in: view)
         if gameplayControlsActive, gestureOriginZone != .sidebar,
-           !pointIsInPlayArea(point: touches.first!.location(in: view)) {
+           !pointIsInPlayArea(point: moveLoc),
+           !(sidebarReachLatched && pointIsInSidebarDungeon(point: moveLoc)) {
             hideMagnifier()
             return
         }
@@ -3120,6 +3184,15 @@ extension BrogueViewController {
         return false
     }
 
+    /// A point over the sidebar columns (0…20) but within the dungeon rows (mirrors
+    /// pointIsInPlayArea's row bounds) — the region a latched held-magnifier reach may
+    /// inspect once the map is revealed there. Raw (non-reach) cell coords: we're
+    /// classifying where the finger physically is, not where it resolves to.
+    private func pointIsInSidebarDungeon(point: CGPoint) -> Bool {
+        let cellCoord = getCellCoords(at: point, viewport: skViewPort)
+        return cellCoord.x <= 20 && cellCoord.y > 3 && cellCoord.y < 32
+    }
+
     /// iOS port (iBrogue): classify a touch-down location into the zone that owns the
     /// gesture. `isBandTouch` is checked first because it already carries the
     /// `gameplayControlsActive` guard — so `.band` is only ever latched during active
@@ -3134,6 +3207,11 @@ extension BrogueViewController {
     
     private func addTouchEvent(event: UIBrogueTouchEvent) {
         lastTouchLocation = event.location
+        // Stamp the reach decision onto the event so the bridge resolves it in map space
+        // at dequeue time (engine thread) even after the latch is cleared on lift. Only
+        // ever true during a genuine reach drag; the sidebar-examine and double-tap paths
+        // enqueue with the latch false, so their coordinates stay untouched.
+        event.reachUnderSidebar = sidebarReachLatched
         synchronized {
             // only want the last moved event, no point caching them all
             if let lastEvent = touchEvents.last, lastEvent.phase == .moved, !touchEvents.isEmpty {
@@ -3183,6 +3261,8 @@ extension BrogueViewController {
             magView.showMagnifier(at: lastTouchLocation)
             // Magnifier is now up: stop any in-progress d-pad press (kills its
             // repeat timer so a held button can't keep moving) and hide the pad.
+            // (Sidebar reach is latched earlier, at gesture start in touchesBegan, so a
+            // fast drag across the boundary isn't dropped before the loupe arms.)
             directionsViewController?.cancel()
             setDpadHiddenForMagnifier(true)
         }
@@ -3206,7 +3286,11 @@ extension BrogueViewController {
         let engineAllowsMagnifier = currentEngine.isCEFamily
             ? (gameplayControlsActive || isTargeting)
             : lastBrogueGameEvent.canShowMagnifyingGlass
-        guard engineAllowsMagnifier, pointIsInPlayArea(point: point) else {
+        // Normally the loupe only appears over the map (cols 21…99). While a reach drag is
+        // latched, also allow it over the sidebar columns (0…20) within the dungeon rows,
+        // so it keeps tracking as the finger crosses under the translucent sidebar.
+        let reachAllowed = sidebarReachLatched && pointIsInSidebarDungeon(point: point)
+        guard engineAllowsMagnifier, pointIsInPlayArea(point: point) || reachAllowed else {
             return false
         }
         // iPhone: suppress the magnifier over the chrome rows — the flavor line
@@ -3668,6 +3752,20 @@ final class SKMagView: SKView {
     /// No effect on iPad (which hovers the magnifier above the touch).
     var leftHandMode: Bool = false
 
+    /// Mirrors BrogueViewController.sidebarReachLatched: when true, the loupe resolves the
+    /// cell under the finger with the zoom inverse extended over the sidebar columns, so it
+    /// shows the magnified map behind the translucent sidebar rather than the sidebar cells.
+    var sidebarReach: Bool = false
+
+    /// Where the loupe sits relative to the finger. Tracked so a *change* (e.g. flipping
+    /// from beside the finger to above it when it reaches an edge) glides instead of
+    /// snapping, while same-placement finger tracking stays instant.
+    private enum LoupePlacement { case beside, above, below }
+    private var lastPlacement: LoupePlacement = .beside
+    /// While a placement glide is in flight, tracking sets are suppressed until this time so
+    /// they don't yank the animation. `CACurrentMediaTime` clock.
+    private var repositionUntil: CFTimeInterval = 0
+
     // Half-extents (cells out from the center) of the magnified block.
     // `xHalf` is the horizontal axis (2*xHalf+1 cells wide), `yHalf` the
     // vertical (2*yHalf+1 cells tall). The centering math in cellsAtTouch
@@ -3725,17 +3823,44 @@ final class SKMagView: SKView {
     
     func showMagnifier(at point: CGPoint) {
         cells = cellsAtTouch(point: point)
-        center = positionedCenter(forTouch: point)
+        let positioned = positionedCenter(forTouch: point)
+        setLoupeCenter(positioned.center, placement: positioned.placement)
         isHidden = false
     }
 
-    /// On iPad the magnifier hovers above the touch, flipping to the LEFT only
-    /// when that would clip off the top. On iPhone it ALWAYS sits to the left
-    /// of the finger — never above and never under it, so the finger never
-    /// occludes the magnified content. Always clamped to the parent's safe area
-    /// so it never sits under the iPhone notch / dynamic island or off the
-    /// leading edge.
-    private func positionedCenter(forTouch point: CGPoint) -> CGPoint {
+    /// Move the loupe to `newCenter`. Track the finger instantly while the placement is
+    /// unchanged, but GLIDE (animate) when the placement flips — e.g. from beside the finger
+    /// to above it when the loupe reaches an edge, so it never snaps. During the glide,
+    /// same-placement tracking sets are suppressed so they don't yank the animation. The
+    /// first show after being hidden always sets directly, so the loupe appears in place.
+    private func setLoupeCenter(_ newCenter: CGPoint, placement: LoupePlacement) {
+        let firstShow = isHidden
+        let now = CACurrentMediaTime()
+        if !firstShow && placement != lastPlacement {
+            lastPlacement = placement
+            repositionUntil = now + 0.2
+            UIView.animate(withDuration: 0.2, delay: 0,
+                           options: [.curveEaseOut, .beginFromCurrentState]) {
+                self.center = newCenter
+            }
+            return
+        }
+        lastPlacement = placement
+        if firstShow || now >= repositionUntil {
+            center = newCenter
+        }
+    }
+
+    /// Where to place the loupe, and its placement mode (for glide-vs-track above). On iPhone
+    /// it stays on the user's preferred side — left by default, right in left-handed mode — so
+    /// the finger never occludes the magnified content. It tracks beside the finger until the
+    /// finger nears the loupe's centre horizontally (reaching hard against the leading edge,
+    /// e.g. under the translucent sidebar); then, *keeping the same side*, it lifts vertically
+    /// — up by default, down when near the top — along a smooth circular arc, so the touched
+    /// cell at the centre clears the fingertip without any jarring beside↔above flip or
+    /// oscillation. On iPad it hovers above the touch, flipping left only when that would clip
+    /// the top. Always clamped to the parent's safe area (notch / dynamic island / edges).
+    private func positionedCenter(forTouch point: CGPoint) -> (center: CGPoint, placement: LoupePlacement) {
         let radius = size.width / 2
         let parent = superview
         let viewBounds = parent?.bounds ?? UIScreen.main.bounds
@@ -3748,51 +3873,52 @@ final class SKMagView: SKView {
         )
 
         let isPhone = UIDevice.current.userInterfaceIdiom == .phone
-
-        // Default placement: above the touch (offset.height is negative).
-        var c = CGPoint(
-            x: point.x + size.width / 2 - offset.width,
-            y: point.y - size.height / 2 + offset.height
-        )
-
-        // iPhone: ALWAYS place beside the finger — to the left by default, or to
-        // the right in left-handed mode (so the gripping hand never covers it).
-        // iPad: only flip left when the above-touch default would clip the top.
-        // Either way the magnifier sits beside the finger, never under it.
-        //
-        // TWEAK ME: `flipPadding` is the gap between the finger and the nearer
-        // edge of the magnifier when it sits beside it. Bigger = further away.
+        // TWEAK ME: gap between the finger and the nearer edge of the loupe.
         let flipPadding: CGFloat = 38
-        if isPhone && leftHandMode {
-            c.x = point.x + radius + flipPadding   // to the RIGHT of the finger
-            c.y = point.y
-        } else if isPhone || c.y - radius < bounds.minY {
-            c.x = point.x - radius - flipPadding    // to the LEFT of the finger
-            c.y = point.y
+        var c: CGPoint
+        var placement: LoupePlacement
+
+        if isPhone {
+            // Preferred side, clamped horizontally to the safe area.
+            var cx = leftHandMode ? point.x + radius + flipPadding    // RIGHT of finger
+                                  : point.x - radius - flipPadding      // LEFT of finger
+            if cx - radius < bounds.minX { cx = bounds.minX + radius }
+            else if cx + radius > bounds.maxX { cx = bounds.maxX - radius }
+
+            // As the finger nears the loupe's centre horizontally, lift the loupe off it so
+            // the centre cell stays visible. The lift follows a circle of radius `clearance`,
+            // so it's zero while the finger is comfortably to the side and grows smoothly to
+            // `clearance` as the finger reaches the centre — continuous, never a snap.
+            // TWEAK ME: `clearance` is how far the finger is kept from the loupe centre.
+            let clearance: CGFloat = 52
+            let dx = abs(point.x - cx)
+            let lift = dx < clearance ? (clearance * clearance - dx * dx).squareRoot() : 0
+            // Direction is chosen from the finger's height alone (stable as it moves
+            // sideways): lift down only when too near the top for an upward lift to fit.
+            let liftDown = point.y - clearance - radius < bounds.minY
+            c = CGPoint(x: cx, y: liftDown ? point.y + lift : point.y - lift)
+            placement = liftDown ? .below : .above
+        } else {
+            // iPad: hover above the touch, flipping left only when that clips the top.
+            c = CGPoint(x: point.x + size.width / 2 - offset.width,
+                        y: point.y - size.height / 2 + offset.height)
+            if c.y - radius < bounds.minY {
+                c = CGPoint(x: point.x - radius - flipPadding, y: point.y)
+                placement = .beside
+            } else {
+                placement = .above
+            }
         }
 
-        // Clamp horizontally so it doesn't spill past either side or under
-        // the notch. This is what enforces "can't go out of bounds toward
-        // the left" — if the finger is too close to the leading edge for
-        // the magnifier to fit beside it, we clamp it to the leading inset
-        // (the magnifier will partially overlap the finger, which is
-        // acceptable; staying visible is the priority).
-        if c.x - radius < bounds.minX {
-            c.x = bounds.minX + radius
-        } else if c.x + radius > bounds.maxX {
-            c.x = bounds.maxX - radius
-        }
+        // Final clamp to the safe area (notch / dynamic island / edges).
+        if c.x - radius < bounds.minX { c.x = bounds.minX + radius }
+        else if c.x + radius > bounds.maxX { c.x = bounds.maxX - radius }
+        if c.y - radius < bounds.minY { c.y = bounds.minY + radius }
+        else if c.y + radius > bounds.maxY { c.y = bounds.maxY - radius }
 
-        // Final vertical clamp.
-        if c.y - radius < bounds.minY {
-            c.y = bounds.minY + radius
-        } else if c.y + radius > bounds.maxY {
-            c.y = bounds.maxY - radius
-        }
-
-        return c
+        return (c, placement)
     }
-    
+
     func updateMagnifier(at point: CGPoint) {
         showMagnifier(at: point)
     }
@@ -3820,7 +3946,7 @@ final class SKMagView: SKView {
         guard let viewToMagnify = viewToMagnify else { return [Cell]() }
        
         let magnification: CGFloat = 1.0
-        let currentCellXY = getCellCoords(at: point, viewport: viewToMagnify)
+        let currentCellXY = getCellCoords(at: point, viewport: viewToMagnify, reach: sidebarReach)
         // Local aliases for the block half-extents (see xHalf/yHalf). `rows` is
         // the x-axis, `cols` the y-axis — the names are flipped historically.
         let rows = xHalf
@@ -3899,7 +4025,7 @@ final class SKMagView: SKView {
             // index is in 1× space — using `point` here would put the content
             // wildly off-center. Un-zoom the point so both agree; across one
             // on-screen (zoomed) cell the un-zoomed point sweeps exactly one cell.
-            let unzoomed = viewToMagnify.unzoomedPoint(point)
+            let unzoomed = viewToMagnify.unzoomedPoint(point, reach: sidebarReach)
             let xMouseOffset = (unzoomed.x - leftInset - (currentCellXY.x * (viewToMagnify.rogueScene.cells[0][0].size.width / screenScale))) * magnificationOffset
             let yMouseOffset = (unzoomed.y - (currentCellXY.y * (viewToMagnify.rogueScene.cells[0][0].size.height / screenScale))) * magnificationOffset
             

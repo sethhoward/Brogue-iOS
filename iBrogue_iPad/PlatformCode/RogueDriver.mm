@@ -253,8 +253,11 @@ void nextKeyOrMouseEvent(rogueEvent *returnEvent, boolean textInput, boolean col
                 
                 // Invert pinch-zoom (iPhone) so the engine sees the cell under
                 // the finger; identity at 1× / outside the map. Same inverse as
-                // the Swift getCellCoords and the CE bridge.
-                CGPoint loc = [skviewPort unzoomedPoint:touch.location];
+                // the Swift getCellCoords and the CE bridge. `reachUnderSidebar`
+                // extends the inverse over the sidebar columns for the held-magnifier
+                // "map under sidebar" drag (the flag rides on the event, so this is
+                // race-free with the finger lifting).
+                CGPoint loc = [skviewPort unzoomedPoint:touch.location reach:touch.reachUnderSidebar];
                 float xInPlay = MAX(float(loc.x) - leftInset, 0.0f);
                 x = COLS * xInPlay / width;
                 y = ROWS * float(loc.y) / height;
