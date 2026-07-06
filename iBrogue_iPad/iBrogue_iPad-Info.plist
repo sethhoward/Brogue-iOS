@@ -30,6 +30,10 @@
 	<string>public.app-category.role-playing-games</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
+	<key>NSUserActivityTypes</key>
+	<array>
+		<string>SethHoward.iBrogue.continueGame</string>
+	</array>
 	<key>UIAppFonts</key>
 	<array>
 		<string>Arial Unicode.ttf</string>

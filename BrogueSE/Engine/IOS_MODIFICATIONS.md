@@ -32,6 +32,23 @@ See `BrogueCE/Engine/IOS_MODIFICATIONS.md` (faithful CE) and
 
 ## Change log
 
+### 2026-07-06 — Game handoff (Phase 1b): report live game context (depth/turn/seed) to the host
+
+**What.** `commitDraws` now reports the live game's context to the host so the cross-device Continuity
+**Handoff** activity's banner/metadata (depth/turn/seed) stays current. Part of the game-handoff feature
+(CE + SE only; Classic is excluded — its recordings are desync-prone). Platform wiring lives in the
+bridge + Swift; only the `IO.c` hook is engine C. See `docs/design/game-handoff.md`.
+
+- **`IO.c` `commitDraws`:** after the existing `ceSetTravelPending` call, gated on `!rogue.playbackMode`
+  (skip loading/replay), call `ceSetGameContext(rogue.depthLevel, rogue.playerTurnNumber, rogue.seed)`.
+  Extern declared alongside `ceSetTravelPending` near the top of `IO.c`.
+- **Bridge (`SEBridge.mm`):** `ceSetGameContext` dedupes on depth (forwarded only when the player
+  changes level; per-turn churn is unnecessary since the recording bytes stream live at pickup) and calls
+  the new `BrogueCEHost setGameDepth:turn:seed:`. The depth dedup (`gLastHandoffDepth`) resets when the
+  title reappears (`reportAtTitleIfChanged`) so a new game re-forwards its first depth.
+- **Determinism:** pure outbound signaling — reads engine state, writes nothing to it. No RNG, no save
+  fields, replay-safe.
+
 ### 2026-07-05 — Continue-travel command + reactive center d-pad button
 
 **What.** A touch-friendly "continue my interrupted journey" command. Tapping a far tile auto-travels

@@ -124,6 +124,12 @@ NS_ASSUME_NONNULL_BEGIN
 // between "continue journey" and "rest". Deduped in the bridge; forwarded only on change.
 - (void)setTravelPending:(BOOL)pending;
 
+// iOS port (iBrogue): reports the live game's context (current depth, input turn, master seed) so the
+// host can keep the cross-device Continuity Handoff activity's banner/metadata current. Deduped in the
+// bridge on depth change (per-turn churn is unnecessary; the recording bytes are streamed live at
+// pickup). Emitted only during live play, not playback. See docs/design/game-handoff.md.
+- (void)setGameDepth:(NSInteger)depth turn:(long)turn seed:(uint64_t)seed;
+
 // --- Game Center ------------------------------------------------------------
 // Invoked at game over with the final score, for the CE leaderboard. The bridge
 // has already filtered out non-standard variants and wizard runs before calling.

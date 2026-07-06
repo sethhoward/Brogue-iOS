@@ -28,6 +28,20 @@ covers the separate Classic engine that ships in the app target).
 
 ## Change log
 
+### 2026-07-06 — Game handoff (Phase 1b): report live game context (depth/turn/seed) to the host
+
+**What.** The CE half of the game-handoff game-context hook (see `BrogueSE/Engine/IOS_MODIFICATIONS.md`
+for the full rationale). `commitDraws` reports the live game's depth/turn/seed to the host so the
+cross-device Continuity **Handoff** activity stays current. Added identically to CE and SE (Classic is
+excluded — desync-prone recordings); only the `IO.c` hook is engine C. See `docs/design/game-handoff.md`.
+
+- **`IO.c` `commitDraws`:** after `ceSetTravelPending`, gated on `!rogue.playbackMode`, call
+  `ceSetGameContext(rogue.depthLevel, rogue.playerTurnNumber, rogue.seed)`; extern declared near the top
+  of `IO.c` beside `ceSetTravelPending`.
+- **Bridge (`CEBridge.mm`):** `ceSetGameContext` dedupes on depth → new `BrogueCEHost
+  setGameDepth:turn:seed:`; the depth dedup resets at the title (`reportAtTitleIfChanged`).
+- **Determinism:** pure outbound signaling; no RNG, no save fields, replay-safe.
+
 ### 2026-07-05 — Continue-travel command + reactive center d-pad button
 
 **What.** The CE half of the touch-friendly "continue my interrupted journey" command (see

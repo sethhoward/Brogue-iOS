@@ -177,6 +177,10 @@ final class BrogueViewController: UIViewController {
     private var ceHost: CEHost?
     /// The engine currently running on `engineThread`.
     private var currentEngine: EngineKind = .classic
+    /// Advertises the in-progress CE / Brogue SE run to the user's other nearby devices via
+    /// Continuity Handoff. Classic is never advertised (its recordings are desync-prone and
+    /// unsafe to replay). See docs/design/game-handoff.md.
+    private let gameHandoff = GameHandoff()
     /// The background thread running the active engine's `rogueMain`.
     private var engineThread: Thread?
     /// Set while a title-screen engine swap is in flight (awaiting clean exit).
@@ -895,6 +899,17 @@ final class BrogueViewController: UIViewController {
     override func viewDidLoad() {
         super.viewDidLoad()
 
+        // Handoff (Continuity): a pickup can arrive while we're running (notification) or via a cold
+        // launch (stashed in GameHandoff.pendingReceive, drained in viewDidAppear). See docs/design/game-handoff.md.
+        NotificationCenter.default.addObserver(self, selector: #selector(handoffDidArrive),
+                                               name: GameHandoff.didReceiveNotification, object: nil)
+        // Handoff (Continuity): source-side confirmation when a pickup finishes serving (Phase 3a).
+        gameHandoff.onServeComplete = { [weak self] ok, detail in
+            self?.presentHandoffAlert(title: ok ? "Handed Off ✓" : "Handoff Interrupted",
+                                      message: ok ? "The other device received the run (ACK). (Phase 3a: no relinquish yet.)"
+                                                  : "The transfer didn't complete; your run is untouched.\n\(detail)")
+        }
+
         currentEngine = BrogueViewController.persistedEngine()
         setupVersionChooser()
         setupOptionsButton()
@@ -1001,6 +1016,8 @@ final class BrogueViewController: UIViewController {
         applyNotchInsets()
         updateDpadNotchAvoidance()
         applyMacWindowSizeRestrictionsIfNeeded()
+        // Handoff (Continuity): drain a pickup that arrived before we were on screen (cold launch).
+        processPendingHandoff()
     }
 
     /// iOS port (iBrogue): Mac Catalyst only — stop the window from being resized so small the
@@ -1595,6 +1612,99 @@ final class BrogueViewController: UIViewController {
         }
     }
 
+    /// Lineage tag for the Handoff payload / save-dir routing: "ce", "se", or "classic".
+    private var engineLineageString: String {
+        switch currentEngine {
+        case .classic: return "classic"
+        case .ce: return "ce"
+        case .se: return "se"
+        }
+    }
+
+    /// The current engine's last-known game seed (persisted by the bridge's
+    /// `cePersistLastSeed`). Best-effort display metadata for the Handoff banner; 0 if unset.
+    private var lastPersistedSeed: UInt64 {
+        let key = (currentEngine == .se) ? "se last game seed" : "ce last game seed"
+        return (UserDefaults.standard.object(forKey: key) as? NSNumber)?.uint64Value ?? 0
+    }
+
+    /// Called by the CE/SE bridge (deduped on depth change) with the live game's context, so the
+    /// Handoff activity's banner/metadata stays current. Runs on the engine thread → hop to main.
+    func setGameContext(depth: Int, turn: Int, seed: UInt64) {
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self, !self.atTitle, self.currentEngine != .classic else { return }
+            self.gameHandoff.advertise(lineage: self.engineLineageString,
+                                       seed: seed, depth: depth, turn: turn)
+        }
+    }
+
+    // MARK: - Handoff receive (Phase 2: parse + guard; transfer/resume land in Phase 3)
+
+    /// A Handoff pickup arrived while the app is already running.
+    @objc private func handoffDidArrive() {
+        DispatchQueue.main.async { [weak self] in self?.processPendingHandoff() }
+    }
+
+    /// Drains a pending Handoff pickup (from a live notification or a cold launch): parse the payload
+    /// and run the compatibility guard, then surface the result. The stream transfer + resume land in
+    /// Phase 3. See docs/design/game-handoff.md.
+    private func processPendingHandoff() {
+        // Only act once we're on screen so we can present; otherwise viewDidAppear retries.
+        guard viewIfLoaded?.window != nil, let activity = GameHandoff.pendingActivity else { return }
+        GameHandoff.pendingActivity = nil
+        let info = activity.userInfo ?? [:]
+
+        let lineage = (info["lineage"] as? String) ?? ""
+        let theirVersion = (info["version"] as? String) ?? "?"
+
+        // Guard 1 — lineage must be a replay-safe engine (CE or SE; Classic is never advertised).
+        guard lineage == "ce" || lineage == "se" else {
+            presentHandoffAlert(title: "Can't Continue",
+                                message: "This game isn't from a compatible engine.")
+            return
+        }
+        // Guard 2 — pre-transfer compatibility proxy: the sender's app version must match ours (same
+        // build ⟹ same engine ⟹ replay-compatible). The engine's own load-time version check is the
+        // exact backstop once the recording streams (Phase 3b/3c).
+        guard theirVersion == GameHandoff.appVersion else {
+            presentHandoffAlert(title: "Update Needed",
+                                message: "That game is from Brogue \(theirVersion); this device has \(GameHandoff.appVersion). Update both devices to the same version to hand off.")
+            return
+        }
+
+        // Phase 3a — pull the payload over the continuation streams (placeholder bytes for now) to
+        // prove the channel. Phase 3b/3c write the received recording to disk, route to the engine,
+        // and resume via the cold-launch marker path.
+        activity.getContinuationStreams { [weak self] input, output, error in
+            DispatchQueue.main.async {
+                guard let self = self else { return }
+                guard let input = input, let output = output, error == nil else {
+                    self.presentHandoffAlert(title: "Handoff Failed",
+                                             message: "Couldn't open the transfer channel: \(error?.localizedDescription ?? "no streams").")
+                    return
+                }
+                HandoffTransfer.receive(input: input, output: output) { result in
+                    DispatchQueue.main.async {
+                        switch result {
+                        case .success(let data):
+                            let preview = String(data: data.prefix(64), encoding: .utf8) ?? "\(data.count) bytes"
+                            self.presentHandoffAlert(title: "Transfer OK (Phase 3a)",
+                                                     message: "Received \(data.count) bytes from \(lineage.uppercased()).\n\(preview)")
+                        case .failure(let err):
+                            self.presentHandoffAlert(title: "Transfer Failed", message: "\(err)")
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private func presentHandoffAlert(title: String, message: String) {
+        let alert = UIAlertController(title: title, message: message, preferredStyle: .alert)
+        alert.addAction(UIAlertAction(title: "OK", style: .default))
+        present(alert, animated: true)
+    }
+
     /// Called by the CE bridge: true only while the CE title screen is showing.
     @objc func setCEAtTitle(_ value: Bool) {
         DispatchQueue.main.async { [weak self] in
@@ -1608,6 +1718,18 @@ final class BrogueViewController: UIViewController {
             // (a game is starting/resuming) restores the player's remembered zoom — the
             // first player-cell report then animates it in, recentered on the player.
             if value { self.resetZoom() } else { self.restoreStoredZoom() }
+
+            // Handoff (Continuity): advertise the run while in play; stop at the title. Driven
+            // here because this is the CE/SE begin/end signal (Classic never calls setCEAtTitle,
+            // so it's excluded for free). Phase 1 advertises with best-effort metadata; live
+            // depth/turn arrive via a game-context push in a later phase. See docs/design/game-handoff.md.
+            if value {
+                self.gameHandoff.stop()
+            } else if self.currentEngine != .classic {
+                self.gameHandoff.advertise(lineage: self.engineLineageString,
+                                           seed: self.lastPersistedSeed,
+                                           depth: 0, turn: 0)
+            }
         }
     }
 
@@ -4279,7 +4401,271 @@ final class SKMagView: SKView {
         
         // offset needs to be offset by the appropriate cellsize.
         parentNode.position = position
-        
+
         return cells.flatMap { $0 }
+    }
+}
+
+/// Owns the Continuity **Handoff** `NSUserActivity` that advertises an in-progress
+/// CE / Brogue SE run to the user's other nearby devices (same Apple ID).
+///
+/// Phase 1 (current): advertise only — the Handoff affordance appears on a second device
+/// while a game is in play. Phases 2–3 add the receive/route handler (`SceneDelegate`) and
+/// the continuation-stream transfer + deep-ACK relinquish. Classic is never advertised (its
+/// recordings are desync-prone and unsafe to replay). See docs/design/game-handoff.md.
+///
+/// (Lives here for now to avoid a pbxproj entry; extract to `GameHandoff.swift` in Phase 2
+/// when the `SceneDelegate` continue-handler lands.)
+final class GameHandoff: NSObject, NSUserActivityDelegate {
+    /// Reverse-DNS activity type. Must exactly match the `NSUserActivityTypes` entry in
+    /// Info.plist and be identical across devices (one app) for Handoff to pair.
+    static let activityType = "SethHoward.iBrogue.continueGame"
+
+    /// Posted when a Handoff pickup arrives; the payload is also stashed in `pendingReceive` so a
+    /// cold launch (no live observer yet) can drain it once the receiving VC appears.
+    static let didReceiveNotification = Notification.Name("GameHandoffDidReceive")
+
+    /// The most recent incoming pickup's activity, awaiting processing. Retained so the receiver can
+    /// call `getContinuationStreams`; read-and-cleared by the VC.
+    static var pendingActivity: NSUserActivity?
+
+    /// The app's version+build — the pre-transfer compatibility proxy carried in the payload. Two
+    /// devices on the same app build run the same engine, so matching versions ⟹ replay-compatible.
+    /// (The engine's own load-time version check is the exact backstop once the recording streams.)
+    static var appVersion: String {
+        let info = Bundle.main.infoDictionary
+        let short = (info?["CFBundleShortVersionString"] as? String) ?? "?"
+        let build = (info?["CFBundleVersion"] as? String) ?? "?"
+        return "\(short) (\(build))"
+    }
+
+    /// Deliver an incoming Handoff activity (from `scene(_:continue:)` or a cold launch). Validates
+    /// the type, stashes the payload, and notifies any live receiver.
+    static func deliver(_ activity: NSUserActivity) {
+        guard activity.activityType == activityType else { return }
+        pendingActivity = activity
+        NotificationCenter.default.post(name: didReceiveNotification, object: nil)
+    }
+
+    /// Called (on main) after the source finishes serving a pickup — `ok` true if the receiver ACKed;
+    /// `detail` carries the failure reason otherwise (for diagnosing device-only bugs).
+    var onServeComplete: ((_ ok: Bool, _ detail: String) -> Void)?
+
+    private var activity: NSUserActivity?
+
+    /// Begin/refresh advertising the current run. `lineage` is "ce" or "se". `seed`/`depth`/
+    /// `turn` are display + (future) routing metadata; the recording bytes themselves are
+    /// streamed live at pickup, not stored here. Must be called on the main thread.
+    func advertise(lineage: String, seed: UInt64, depth: Int, turn: Int) {
+        let activity = self.activity ?? NSUserActivity(activityType: Self.activityType)
+        activity.isEligibleForHandoff = true
+        activity.supportsContinuationStreams = true   // Phase 3: the receiver pulls the payload over these
+        activity.delegate = self                      // source side: userActivity(_:didReceive:outputStream:)
+        activity.userInfo = [
+            "lineage": lineage,
+            "version": Self.appVersion,
+            "seed": String(seed),          // string to preserve full 64-bit fidelity across the plist round-trip
+            "depth": depth,
+            "turn": turn,
+        ]
+        activity.title = Self.bannerTitle(lineage: lineage, depth: depth)
+        self.activity = activity
+        activity.becomeCurrent()
+    }
+
+    /// Stop advertising — returned to title, game over, or nothing resumable.
+    /// Must be called on the main thread.
+    func stop() {
+        activity?.invalidate()
+        activity = nil
+    }
+
+    // MARK: NSUserActivityDelegate (source side)
+
+    /// The receiver called `getContinuationStreams`; serve the payload over the pair. Phase 3a sends a
+    /// placeholder to prove the channel end-to-end; Phase 3b streams the flushed recording bytes.
+    func userActivity(_ userActivity: NSUserActivity, didReceive inputStream: InputStream, outputStream: OutputStream) {
+        let payload = Data("BROGUE-HANDOFF-3A: channel OK".utf8)   // TODO Phase 3b: flushed recording bytes
+        HandoffTransfer.send(payload, input: inputStream, output: outputStream) { [weak self] result in
+            let ok: Bool; let detail: String
+            switch result {
+            case .success: ok = true; detail = ""
+            case .failure(let e): ok = false; detail = "\(e)"
+            }
+            DispatchQueue.main.async { self?.onServeComplete?(ok, detail) }
+        }
+    }
+
+    private static func bannerTitle(lineage: String, depth: Int) -> String {
+        let engine = (lineage == "se") ? "Brogue SE" : "Brogue CE"
+        return depth > 0 ? "\(engine) — Depth \(depth)" : engine
+    }
+}
+
+/// Drives one side of a Handoff continuation-stream transfer on a private background-thread runloop
+/// (continuation streams need a live runloop to pump their events). Retains itself for the duration,
+/// so callers fire-and-forget. Phase 3a proves the bidirectional channel + a 1-byte ACK with a
+/// placeholder payload; Phase 3b/3c carry the real recording bytes and the destination save/load.
+/// See docs/design/game-handoff.md.
+final class HandoffTransfer: NSObject, StreamDelegate {
+    enum TransferError: Error, CustomStringConvertible {
+        case timeout(String), closedEarly(String), stream(String)
+        var description: String {
+            switch self {
+            case .timeout(let s):     return "timeout — \(s)"
+            case .closedEarly(let s): return "closed early — \(s)"
+            case .stream(let s):      return "stream error — \(s)"
+            }
+        }
+    }
+
+    private enum Mode { case send, receive }
+    private static let ackByte: UInt8 = 0x06
+    private static let timeoutSeconds: TimeInterval = 15
+    private static var active = Set<HandoffTransfer>()   // main-thread only
+
+    private let input: InputStream
+    private let output: OutputStream
+    private let mode: Mode
+    private let completion: (Result<Data, Error>) -> Void
+
+    // send: framed [UInt32 big-endian length][payload], consumed as it's written; then read one ACK byte.
+    private var outbox: Data
+    private var sentAll = false
+    // receive: accumulate raw bytes, parse the length prefix, assemble the payload, then write one ACK byte.
+    private var inbox = Data()
+    private var expectedLen: Int?
+    private var payload = Data()
+    private var wantAck = false
+
+    private var finished = false
+    private var watchdog: Timer?
+
+    private init(input: InputStream, output: OutputStream, mode: Mode, framed: Data,
+                 completion: @escaping (Result<Data, Error>) -> Void) {
+        self.input = input
+        self.output = output
+        self.mode = mode
+        self.outbox = framed
+        self.completion = completion
+        super.init()
+    }
+
+    /// Source: write a length-prefixed `payload`, then read a 1-byte ACK. Framing by length (not stream
+    /// close) so completion never depends on EOF propagating across the continuation-stream pair — the
+    /// EOF dependency was the stall.
+    static func send(_ payload: Data, input: InputStream, output: OutputStream,
+                     completion: @escaping (Result<Data, Error>) -> Void) {
+        var len = UInt32(payload.count).bigEndian
+        var framed = Data()
+        withUnsafeBytes(of: &len) { framed.append(contentsOf: $0) }
+        framed.append(payload)
+        launch(HandoffTransfer(input: input, output: output, mode: .send, framed: framed, completion: completion))
+    }
+
+    /// Destination: read the length-prefixed payload, then write a 1-byte ACK; completes with the payload.
+    static func receive(input: InputStream, output: OutputStream,
+                        completion: @escaping (Result<Data, Error>) -> Void) {
+        launch(HandoffTransfer(input: input, output: output, mode: .receive, framed: Data(), completion: completion))
+    }
+
+    private static func launch(_ t: HandoffTransfer) {
+        // Pump on the MAIN runloop (always live under UIKit), NOT a private-thread runloop.
+        DispatchQueue.main.async {
+            active.insert(t)
+            t.input.delegate = t
+            t.output.delegate = t
+            t.input.schedule(in: .main, forMode: .common)
+            t.output.schedule(in: .main, forMode: .common)
+            t.input.open()
+            t.output.open()
+            t.watchdog = Timer.scheduledTimer(withTimeInterval: timeoutSeconds, repeats: false) { [weak t] _ in
+                guard let t = t else { return }
+                t.finish(.failure(TransferError.timeout(t.progress)))
+            }
+        }
+    }
+
+    /// Human-readable transfer state — surfaced in failure alerts so a device-only bug is diagnosable.
+    private var progress: String {
+        mode == .send
+            ? "send sentAll=\(sentAll) remaining=\(outbox.count)"
+            : "recv len=\(expectedLen.map(String.init) ?? "nil") payload=\(payload.count) raw=\(inbox.count)"
+    }
+
+    func stream(_ aStream: Stream, handle eventCode: Stream.Event) {
+        switch eventCode {
+        case .hasSpaceAvailable where aStream === output: pumpOutput()
+        case .hasBytesAvailable where aStream === input:  pumpInput()
+        case .endEncountered where aStream === input:     inputEnded()
+        case .errorOccurred:
+            finish(.failure(TransferError.stream("\(aStream.streamError?.localizedDescription ?? "?") [\(progress)]")))
+        default: break
+        }
+    }
+
+    private func pumpOutput() {
+        switch mode {
+        case .send:
+            guard !outbox.isEmpty else { sentAll = true; return }
+            let n = outbox.withUnsafeBytes { raw in
+                output.write(raw.bindMemory(to: UInt8.self).baseAddress!, maxLength: outbox.count)
+            }
+            if n > 0 { outbox.removeFirst(n) }
+            else if n < 0 { finish(.failure(TransferError.stream("write [\(progress)]"))); return }
+            if outbox.isEmpty { sentAll = true }
+        case .receive:
+            tryWriteAck()
+        }
+    }
+
+    private func pumpInput() {
+        switch mode {
+        case .send:
+            var b: UInt8 = 0
+            let n = input.read(&b, maxLength: 1)
+            if n == 1 && b == HandoffTransfer.ackByte { finish(.success(Data())) }
+            else if n < 0 { finish(.failure(TransferError.stream("read ack [\(progress)]"))) }
+        case .receive:
+            var buf = [UInt8](repeating: 0, count: 8192)
+            let n = input.read(&buf, maxLength: buf.count)
+            if n > 0 { inbox.append(buf, count: n) }
+            else if n < 0 { finish(.failure(TransferError.stream("read [\(progress)]"))); return }
+            parseReceive()
+        }
+    }
+
+    private func parseReceive() {
+        if expectedLen == nil, inbox.count >= 4 {
+            expectedLen = Int(inbox.prefix(4).reduce(UInt32(0)) { ($0 << 8) | UInt32($1) })
+        }
+        if let len = expectedLen, inbox.count >= 4 + len {
+            payload = inbox.subdata(in: 4 ..< 4 + len)
+            wantAck = true
+            tryWriteAck()
+        }
+    }
+
+    private func tryWriteAck() {
+        guard wantAck, !finished, output.hasSpaceAvailable else { return }
+        var b = HandoffTransfer.ackByte
+        if output.write(&b, maxLength: 1) == 1 { finish(.success(payload)) }
+    }
+
+    private func inputEnded() {
+        // Length-framed, so EOF isn't our completion signal; seeing it before we're done is an early close.
+        if mode == .send { finish(.failure(TransferError.closedEarly("no ack [\(progress)]"))) }
+        else if !wantAck { finish(.failure(TransferError.closedEarly(progress))) }
+    }
+
+    private func finish(_ result: Result<Data, Error>) {
+        guard !finished else { return }
+        finished = true
+        watchdog?.invalidate(); watchdog = nil
+        input.close(); output.close()
+        input.remove(from: .main, forMode: .common)
+        output.remove(from: .main, forMode: .common)
+        completion(result)
+        HandoffTransfer.active.remove(self)
     }
 }

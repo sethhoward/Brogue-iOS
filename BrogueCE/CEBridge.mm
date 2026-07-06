@@ -106,12 +106,17 @@ static void reportUIModeIfChanged(void) {
 // what gates the version chooser (and prevents an in-game engine switch).
 extern "C" { volatile boolean brogueCEAtTitle = false; }
 static int gLastReportedAtTitle = -1;
+// iOS port (iBrogue): last game depth forwarded to the host for the cross-device Continuity Handoff
+// activity (see ceSetGameContext below). Reset when the title reappears so a new game re-forwards its
+// first depth. See docs/design/game-handoff.md.
+static short gLastHandoffDepth = -1;
 
 static void reportAtTitleIfChanged(void) {
     if (gHost) {
         int v = brogueCEAtTitle ? 1 : 0;
         if (v != gLastReportedAtTitle) {
             gLastReportedAtTitle = v;
+            if (brogueCEAtTitle) gLastHandoffDepth = -1;   // iOS port (iBrogue): re-forward depth next game
             [gHost setAtTitle:(BOOL)brogueCEAtTitle];
         }
     }
@@ -768,6 +773,17 @@ void ceSetTravelPending(boolean pending) {
     if ((boolean)pending == last) return;
     last = pending;
     if (gHost) [gHost setTravelPending:(BOOL)pending];
+}
+
+// iOS port (iBrogue): commitDraws() reports the live game's context here (current depth, input turn,
+// master seed) so the host can keep the cross-device Continuity Handoff activity current. Deduped on
+// depth — the frequent commitDraws calls forward only when the player changes level; per-turn churn is
+// unnecessary since the recording bytes are streamed live at pickup. gLastHandoffDepth is reset when
+// the title reappears (reportAtTitleIfChanged). See docs/design/game-handoff.md.
+void ceSetGameContext(short depth, unsigned long turn, uint64_t seed) {
+    if (depth == gLastHandoffDepth) return;
+    gLastHandoffDepth = depth;
+    if (gHost) [gHost setGameDepth:(NSInteger)depth turn:(long)turn seed:seed];
 }
 
 // iOS port (iBrogue): high scores are persisted in NSUserDefaults as three
