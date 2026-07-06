@@ -1633,12 +1633,16 @@ final class BrogueViewController: UIViewController {
 
     private static let engineDefaultsKey = "selectedEngine"
 
-    /// The engine to boot on launch — the last one played, defaulting to Classic.
+    /// The engine to boot on launch — the last one played, defaulting to Brogue SE
+    /// when the user hasn't picked one yet (fresh install / no stored preference).
+    /// An explicit Classic choice is honored via the `"classic"` case; only a missing
+    /// or unrecognized value falls through to SE.
     private static func persistedEngine() -> EngineKind {
         switch UserDefaults.standard.string(forKey: engineDefaultsKey) {
+        case "classic": return .classic
         case "ce": return .ce
         case "se": return .se
-        default: return .classic
+        default: return .se
         }
     }
 
