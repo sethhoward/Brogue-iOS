@@ -125,7 +125,7 @@ extension CGSize {
     /// Fraction of opacity kept on the sidebar cell backgrounds while the reveal is
     /// active (glyphs stay fully opaque). Lower = more map shows through, at the cost of
     /// text contrast. Tunable.
-    private static let sidebarWashAlpha: CGFloat = 0.5
+    private static let sidebarWashAlpha: CGFloat = 0.4
 
     private var dungeonCrop: SKCropNode?
     private var dungeonContainer: SKNode?

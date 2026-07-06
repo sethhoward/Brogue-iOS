@@ -384,6 +384,13 @@ final class BrogueViewController: UIViewController {
     /// user's flush/default placement is preserved in the non-notch orientation.
     private var dpadNotchAvoidance: CGFloat = 0
 
+    /// Resting opacity of the directional pad (semi-transparent so the map shows
+    /// through). Also the alpha the pad fades back to after a sidebar-scrub fade-out.
+    private static let dpadRestingAlpha: CGFloat = 0.3
+    /// True while the d-pad is faded out for an in-progress sidebar scrub, so the fade
+    /// fires once per scrub and the restore is a no-op when nothing was faded.
+    private var dpadFadedForSidebarScrub = false
+
     /// Extra points the notch-avoidance nudge clears the safe-area inset by.
     /// Higher = pad sits further from the cutout; can go to 0 (flush to the inset)
     /// or negative (allow slight overlap). Tune to taste.
@@ -638,6 +645,7 @@ final class BrogueViewController: UIViewController {
                 examineArmDebounce?.cancel()                  // box gone → drop a pending arm
                 examineArmed = false                          // …and require a fresh sidebar tap
                 examineBox = nil                              // …and forget its rect
+                examineFromSidebar = false                    // …and its sidebar-tap provenance
             }
             isExamining = examineBoxShown && examineArmed
         }
@@ -657,6 +665,15 @@ final class BrogueViewController: UIViewController {
             isExamining = examineBoxShown && examineArmed
         }
     }
+    /// True the instant a sidebar single-tap selects an entity, until that examine ends or a
+    /// fresh input arrives. Unlike `examineArmed` (deferred 0.3s for double-tap protection),
+    /// this is set immediately, so it's already true when the engine draws the box a frame
+    /// later — the box is drawn once and `moveCursor` then blocks, so a deferred flag would
+    /// suppress it forever. It's the "show this box" signal: a deliberate sidebar tap shows
+    /// (and zooms out); every *other* box while zoomed — auto-explore stopping on an entity,
+    /// a play-field drag-hold, hover, tab-cycle — is suppressed (it would tear against the
+    /// 1× sidebar). See `shouldSuppressExamineBox`.
+    private var examineFromSidebar = false
     /// Deferred arm: a sidebar single-tap schedules arming after the double-tap window
     /// so a double-tap (attack/run toward) cancels it first and never zooms out.
     private var examineArmDebounce: DispatchWorkItem?
@@ -892,7 +909,7 @@ final class BrogueViewController: UIViewController {
         let panGesture = UIPanGestureRecognizer(target: self, action: #selector(draggedView(_:)))
         panGesture.minimumNumberOfTouches = 2
         dContainerView.addGestureRecognizer(panGesture)
-        dContainerView.alpha = 0.3
+        dContainerView.alpha = BrogueViewController.dpadRestingAlpha
 
         setupZoomGestures()
         setupHoverGesture()
@@ -2830,15 +2847,16 @@ extension BrogueViewController: UIGestureRecognizerDelegate {
     }
 
     /// Whether the engine should skip drawing the examine description box for the *current*
-    /// cursor examine. True only when zoomed in on screen AND the examine came from a
-    /// play-field drag-hold (gesture origin .playArea) — where the box, drawn into the
-    /// magnified dungeon cells, would tear against the 1× sidebar/chrome. A sidebar tap
-    /// (origin .sidebar, or a lingering box after the finger lifts → origin nil) is NOT
-    /// suppressed: it zooms out to show the box readably. Queried by all three engines'
-    /// examine loops via the bridge. iPhone-only (nothing is magnified elsewhere).
-    /// Presentational only — a one-frame stale cross-thread read is harmless.
+    /// cursor examine. True when zoomed in on screen AND the examine did NOT come from a
+    /// sidebar tap — i.e. a play-field drag-hold, auto-explore stopping on an entity, hover,
+    /// or tab-cycle — where the box, drawn into the magnified dungeon cells, would tear
+    /// against the 1× sidebar/chrome. A deliberate sidebar tap (`examineFromSidebar`) is NOT
+    /// suppressed: it zooms out to show the box readably. Inverting the test (suppress unless
+    /// sidebar) is what catches the no-touch cases like auto-explore that a positive
+    /// "finger on the play field" test missed. Queried by all three engines' examine loops
+    /// via the bridge. iPhone-only. Presentational — a one-frame stale read is harmless.
     @objc func shouldSuppressExamineBox() -> Bool {
-        return isPhoneIdiom && appliedScale > 1.0 && gestureOriginZone == .playArea
+        return isPhoneIdiom && appliedScale > 1.0 && !examineFromSidebar
     }
 
     /// Centers the player's window cell in the dungeon frame (auto-follow), instantly.
@@ -3140,6 +3158,11 @@ extension BrogueViewController {
             // which stays high behind a 1× menu.
             sidebarReachLatched = gestureOriginZone == .playArea
                 && pinchZoomActive && mapUnderSidebarEnabled && appliedScale > 1.0
+            // Fresh gesture: drop any prior sidebar-tap examine provenance. A sidebar
+            // single-tap re-sets it in touchesEnded; anything else (incl. tapping the
+            // Explore button, which kicks off auto-explore) leaves it false so that box is
+            // suppressed while zoomed.
+            examineFromSidebar = false
         }
 
         // iPhone (zoom on): a second finger means a pinch / two-finger pan is
@@ -3210,6 +3233,15 @@ extension BrogueViewController {
             return
         }
 
+        // A sidebar scrub has begun to move (a plain tap never reaches touchesMoved):
+        // fade the d-pad out so its lower-left overlap stops hiding and blocking the
+        // bottom sidebar entities. Disables the pad's touches immediately, so the
+        // hit-test guard below passes on this same event and the scrub reaches the cells
+        // behind it. Restored on release (touchesEnded / touchesCancelled).
+        if gameplayControlsActive, gestureOriginZone == .sidebar {
+            setDpadFadedForSidebarScrub(true)
+        }
+
         guard dContainerView.hitTest(touches.first!.location(in: dContainerView), with: event) == nil else { return }
 
         if let touch = touches.first {
@@ -3225,8 +3257,9 @@ extension BrogueViewController {
         super.touchesEnded(touches, with: event)
 
         // Release the latched origin zone once every finger has lifted, on every path.
+        // Fade the d-pad back in too (no-op unless a sidebar scrub faded it out).
         let allFingersUp = activeTouchCount(event) == 0
-        defer { if allFingersUp { gestureOriginZone = nil } }
+        defer { if allFingersUp { gestureOriginZone = nil; setDpadFadedForSidebarScrub(false) } }
 
         // A multi-touch gesture (pinch / two-finger pan) was in progress: never
         // commit a tap on release — that's what produced the view "snap." Reset
@@ -3280,6 +3313,12 @@ extension BrogueViewController {
                     addTouchEvent(event: UIBrogueTouchEvent(phase: .ended, location: lastTouchLocation))
                 } else {
                     // Single-tap selects an entity → the engine shows its description box.
+                    // Mark it a sidebar-tap examine immediately (before the deferred arm) so
+                    // the box isn't suppressed when the engine draws it a frame later — this
+                    // is the deliberate "show it" case (auto-explore / play-field boxes stay
+                    // suppressed while zoomed). Set regardless of examineZoomEnabled: a
+                    // sidebar tap always shows the box; the zoom-out is the separate arm.
+                    examineFromSidebar = true
                     // Defer arming past the double-tap window so a follow-up double-tap
                     // cancels it; only a lone single tap actually suspends the zoom.
                     examineArmDebounce?.cancel()
@@ -3315,6 +3354,7 @@ extension BrogueViewController {
         if activeTouchCount(event) == 0 {
             multiTouchGestureActive = false
             gestureOriginZone = nil
+            setDpadFadedForSidebarScrub(false)   // fade the d-pad back if a scrub faded it out
         }
     }
 
@@ -3509,6 +3549,32 @@ extension BrogueViewController {
             refreshDirectionPadVisibility()
         }
     }
+
+    /// Fades the directional pad out for the duration of a sidebar scrub, then fades it
+    /// back on release. The pad's lower-left corner overlaps the bottom sidebar entities;
+    /// while scrubbing the entity list that overlap both hides them (it's semi-opaque) and
+    /// eats their touches (the touchesMoved hit-test guard bails over the pad), so the
+    /// lowest entities can't be browsed or selected. Distinct from the magnifier's instant
+    /// hide (setDpadHiddenForMagnifier): a scrub is a continuous gesture, so this animates
+    /// to match the loupe's polish. Interaction is disabled *immediately* (not after the
+    /// fade) so the hit-test guard passes on the very same event and the scrub reaches the
+    /// cells behind the pad. Restoring hands final visibility back to
+    /// refreshDirectionPadVisibility() (the source of truth for gameplay-state / hardware-
+    /// keyboard presence); this only manages the transient alpha. The guard makes the
+    /// fade fire once per scrub and the restore a no-op when nothing was faded.
+    private func setDpadFadedForSidebarScrub(_ faded: Bool) {
+        guard faded != dpadFadedForSidebarScrub else { return }
+        dpadFadedForSidebarScrub = faded
+        if faded {
+            dContainerView.isUserInteractionEnabled = false   // pass scrub touches through NOW
+            UIView.animate(withDuration: 0.2) { self.dContainerView.alpha = 0 }
+        } else {
+            UIView.animate(withDuration: 0.2) {
+                self.dContainerView.alpha = BrogueViewController.dpadRestingAlpha
+            }
+            refreshDirectionPadVisibility()                   // restore isHidden / interaction per state
+        }
+    }
 }
 
 extension BrogueViewController {
@@ -3554,6 +3620,10 @@ extension BrogueViewController {
 
     // iOS port (iBrogue): full hardware-key enqueue carrying modifiers and the `raw` (scheme-eligible) flag.
     fileprivate func addKeyEvent(code: UInt8, shift: Bool, control: Bool, raw: Bool) {
+        // Any key command (move, rest, explore, inventory, …) means the next examine box
+        // isn't a sidebar-tap one, so it should suppress while zoomed. Covers auto-explore
+        // triggered by a hardware key (button taps are covered by touchesBegan).
+        examineFromSidebar = false
         synchronized {
             keyEvents.append(QueuedKeyEvent(code: code, shift: shift, control: control, raw: raw))
         }
