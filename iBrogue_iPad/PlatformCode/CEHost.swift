@@ -39,7 +39,15 @@ final class CEHost: NSObject, BrogueCEHost {
     func effectiveWidthPoints() -> CGFloat { viewPort?.effectiveWidthPoints ?? 0 }
     func effectiveHeightPoints() -> CGFloat { viewPort?.effectiveHeightPoints ?? 0 }
     func leftInsetPoints() -> CGFloat { viewPort?.leftInsetPoints ?? 0 }
-    func unzoomedPoint(_ point: CGPoint) -> CGPoint { viewPort?.unzoomedPoint(point) ?? point }
+
+    /// The reach flag of the touch event most recently handed to the engine by
+    /// `dequeueTouchEvent`. The engine's input loop calls `dequeueTouchEvent` then
+    /// `unzoomedPoint` back-to-back on the engine thread, so stashing it here carries the
+    /// per-event "map under sidebar" decision into the coordinate inverse without a shared
+    /// main-thread flag that could race the commit. See UIBrogueTouchEvent.reachUnderSidebar.
+    private var pendingReach = false
+
+    func unzoomedPoint(_ point: CGPoint) -> CGPoint { viewPort?.unzoomedPoint(point, reach: pendingReach) ?? point }
 
     // MARK: Input
 
@@ -56,6 +64,8 @@ final class CEHost: NSObject, BrogueCEHost {
         guard let touch = viewController?.dequeTouchEvent() else { return false }
         outLocation.pointee = touch.location
         outPhase.pointee = touch.phase.rawValue
+        // Stash for the unzoomedPoint call the engine makes next on this thread.
+        pendingReach = touch.reachUnderSidebar
         return true
     }
 
@@ -101,8 +111,20 @@ final class CEHost: NSObject, BrogueCEHost {
         viewController?.setExamining(examining)
     }
 
+    func setExamineBox(_ x: Int, y: Int, width: Int, height: Int) {
+        viewController?.setExamineBox(x, y: y, width: width, height: height)
+    }
+
+    func shouldSuppressExamineBox() -> Bool {
+        viewController?.shouldSuppressExamineBox() ?? false
+    }
+
     func setPlayerWindowX(_ x: Int16, y: Int16) {
         viewController?.setPlayerWindowX(Int(x), y: Int(y))
+    }
+
+    func setTravelPending(_ pending: Bool) {
+        viewController?.setTravelPending(pending)
     }
 
     // MARK: Game Center

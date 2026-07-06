@@ -144,15 +144,32 @@ class SKViewPort: SKView {
     /// everywhere else (sidebar, messages, button bar) it returns `point`
     /// unchanged so those map 1:1.
     @objc public func unzoomedPoint(_ point: CGPoint) -> CGPoint {
+        return unzoomedPoint(point, reach: false)
+    }
+
+    /// `reach` variant: when true (a held-magnifier drag under a translucent sidebar,
+    /// "map under sidebar"), the zoom inverse also applies over the sidebar columns
+    /// (0…20), so a touch there resolves to the magnified map cell logically behind it
+    /// instead of returning unchanged (→ the sidebar entity path). Off, it's identical to
+    /// the plain `unzoomedPoint`. Kept as a separate ObjC selector so the existing
+    /// `unzoomedPoint:` call sites (the CE/SE host bridge, Classic RogueDriver) are
+    /// undisturbed; the reach decision travels per-touch-event, never a shared flag.
+    @objc public func unzoomedPoint(_ point: CGPoint, reach: Bool) -> CGPoint {
         let scale = rogueScene.zoomScale
         guard scale != 1.0 else { return point }
         let width = effectiveWidthPoints
         let height = effectiveHeightPoints
         guard width > 0, height > 0 else { return point }
-        // Which cell would this be at 1×? Only invert inside the zoomable map.
+        // Which cell would this be at 1×? Only invert inside the zoomable map — but when
+        // reaching behind the interface, extend the bounds over the surrounding HUD chrome:
+        // cols 0…20 (sidebar), rows 0…2 (message log), and row 32 = ROWS-2 (flavor line).
+        // The button row (33) is deliberately left out.
         let cellX = Int(100.0 * max(point.x - leftInsetPoints, 0) / width)
         let cellY = Int(34.0 * point.y / height)
-        guard cellX >= 21, cellX <= 99, cellY >= 3, cellY <= 31 else { return point }
+        let minCol = reach ? 0 : 21
+        let minRow = reach ? 0 : 3
+        let maxRow = reach ? 32 : 31
+        guard cellX >= minCol, cellX <= 99, cellY >= minRow, cellY <= maxRow else { return point }
         return CGPoint(x: (point.x - rogueScene.zoomOriginXPoints) / scale,
                        y: (point.y - rogueScene.zoomOriginYPoints) / scale)
     }

@@ -23,6 +23,42 @@ future maintainers (human or AI) don't mistake an intentional port change for a 
 
 ## Change log
 
+### 2026-07-05 — Continue-travel command + reactive center d-pad button
+
+**What.** The Classic half of the touch-friendly "continue my interrupted journey" command (see
+`BrogueSE/Engine/IOS_MODIFICATIONS.md` for the full rationale), using Classic's coordinate-array and
+`ios*` naming. An iOS-platform QoL feature added identically to all three engines.
+
+- **Key.** `#define CONTINUE_TRAVEL_KEY (128+21)` in `Rogue.h` — synthetic, button-only code; value
+  matches CE and SE. Round-trips cleanly through Classic's keystroke compressor (149 is above
+  `UNKNOWN_KEY`, so `compressKeystroke`/`uncompressKeystroke` pass it through as a raw byte).
+- **Dispatch.** `mainInputLoop`'s cursor-confirm (`doEvent`) branch intercepts `CONTINUE_TRAVEL_KEY` →
+  `travelRoute(path, steps)` (Classic's `short path[1000][2]`) — the exact displayed route, the fast
+  primitive a confirming tap uses, not `travel()`→`travelMap` (slow, different path). No explicit
+  `recordKeystroke`: `travelRoute`→`playerMoves` records each step's direction key, so the journey
+  replays as its moves. Determinism-safe.
+- **Reactive-button state.** `refreshScreen` calls a new
+  `iosSetTravelPending(coordinatesAreInMap(rogue.cursorLoc[0], rogue.cursorLoc[1]))` extern (defined in
+  `RogueDriver.mm`, deduped, → `[brogueViewController setTravelPending:]`) so the host can swap the
+  center d-pad button between the footprints "continue" glyph and the `zzz` glyph.
+- **Scope.** Walks past *already-seen* monsters and re-stops on a *new* disturbance — same as
+  re-clicking; no new power, no RNG/save impact. No-op when idle. Kept identical across Classic / CE / SE.
+
+### 2026-07-05 — Examine description box: report its rect (fit-zoom) + suppress it for zoomed play-field examines
+
+**What.** iPhone examine-box hooks, identical to CE/SE's (see `BrogueSE/Engine/IOS_MODIFICATIONS.md` for the
+full rationale), using Classic's `setBrogue*` naming. (1) `printTextBox` stashes its rect (`x2, y2, width,
+lineCount + padLines`) in file-static `gLastTextBox{X,Y,Width,Height}`; the cursor/examine loop reports it
+via a new `setBrogueExamineBox(x,y,w,h)` extern just before `setBrogueExamining` so the host can zoom to
+*fit* the box instead of dropping to 1×. (2) The loop gates `printMonsterDetails`/`printFloorItemDetails`
+(Classic's `(monst, rbuf)` / `(theItem, rbuf)` signatures) on `!brogueShouldSuppressExamineBox()` so a box
+triggered by a zoomed play-field drag-hold is skipped — the sidebar highlight + one-line flavor still show.
+
+- **Bridge:** `RogueDriver.mm` defines `setBrogueExamineBox` (→ `[brogueViewController setExamineBox:…]`)
+  and `brogueShouldSuppressExamineBox` (→ `[brogueViewController shouldSuppressExamineBox]`).
+- **Scope:** pure presentation; no gameplay/RNG/save impact. iPhone-only in effect (host consumers are
+  phone-gated). Kept identical across Classic / CE / SE.
+
 ### 2026-06-16 — On-screen ESC button during targeting (parity with CE/SE)
 
 **What.** While aiming a throw/zap, Classic now shows the on-screen ESC button so a touch player can

@@ -825,6 +825,18 @@ void ceSetExamining(boolean examining) {
     if (gHost) [gHost setExamining:(BOOL)examining];
 }
 
+// iOS port (Brogue SE): forwards the examine description box's window rect so the iPhone
+// host can zoom to fit it rather than all the way to 1×. Emitted only when a box is shown.
+void ceSetExamineBox(short x, short y, short width, short height) {
+    if (gHost) [gHost setExamineBox:(NSInteger)x y:(NSInteger)y width:(NSInteger)width height:(NSInteger)height];
+}
+
+// iOS port (Brogue SE): the examine loop asks this before drawing a description box; YES means
+// skip it (zoomed-in play-field examine, where the box would tear against the 1× sidebar).
+boolean ceShouldSuppressExamineBox(void) {
+    return gHost ? (boolean)[gHost shouldSuppressExamineBox] : false;
+}
+
 // iOS port (iBrogue): commitDraws() reports the player's WINDOW cell here every
 // refresh so the iPhone pinch-zoom can auto-follow. Deduped against the last
 // reported cell so the (frequent) commitDraws calls don't spam the host.
@@ -834,6 +846,17 @@ void ceSetPlayerWindowLocation(short windowX, short windowY) {
     lastX = windowX;
     lastY = windowY;
     if (gHost) [gHost setPlayerWindowX:windowX y:windowY];
+}
+
+// iOS port (iBrogue): commitDraws() reports here whether a travel destination is pending
+// (rogue.cursorLoc is a real cell). Deduped so the frequent commitDraws calls only forward
+// state changes; the host uses it to swap the reactive center d-pad button between "continue
+// journey" and "rest".
+void ceSetTravelPending(boolean pending) {
+    static boolean last = false;
+    if ((boolean)pending == last) return;
+    last = pending;
+    if (gHost) [gHost setTravelPending:(BOOL)pending];
 }
 
 // iOS port (iBrogue): high scores are persisted in NSUserDefaults as three

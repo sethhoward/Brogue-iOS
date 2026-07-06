@@ -102,9 +102,27 @@ NS_ASSUME_NONNULL_BEGIN
 // examine loop), so the host can suspend pinch-zoom to 1× and not clip the box.
 - (void)setExamining:(BOOL)examining;
 
+// Reports the examine description box's WINDOW-cell rect so the iPhone host can zoom to
+// *fit* the box instead of dropping all the way to 1× — keeping the map and box text as
+// large as legibly fits. Emitted just before setExamining:YES; hosts that don't
+// implement the fit behavior can ignore it and keep the 1× zoom-out.
+- (void)setExamineBox:(NSInteger)x y:(NSInteger)y width:(NSInteger)width height:(NSInteger)height;
+
+// Asked by the cursor examine loop before drawing a description box. Returns YES when the
+// box should be skipped — the iPhone map is zoomed in and this examine came from a
+// play-field drag-hold, where the box (drawn in the magnified dungeon cells) would tear
+// against the 1× sidebar/chrome. The entity is still highlighted in the sidebar. A sidebar
+// tap returns NO (it zooms out to show the box instead).
+- (BOOL)shouldSuppressExamineBox;
+
 // Reports the player's WINDOW cell (already mapToWindow-converted) after each
 // screen refresh, so the host's iPhone pinch-zoom can keep the player centered.
 - (void)setPlayerWindowX:(short)x y:(short)y;
+
+// Reports whether a travel destination is currently pending (the engine still remembers where
+// you were headed after an interruption), so the host can swap the reactive center d-pad button
+// between "continue journey" and "rest". Deduped in the bridge; forwarded only on change.
+- (void)setTravelPending:(BOOL)pending;
 
 // --- Game Center ------------------------------------------------------------
 // Invoked at game over with the final score, for the CE leaderboard. The bridge

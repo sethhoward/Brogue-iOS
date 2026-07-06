@@ -28,6 +28,42 @@ covers the separate Classic engine that ships in the app target).
 
 ## Change log
 
+### 2026-07-05 — Continue-travel command + reactive center d-pad button
+
+**What.** The CE half of the touch-friendly "continue my interrupted journey" command (see
+`BrogueSE/Engine/IOS_MODIFICATIONS.md` for the full rationale). An iOS-platform QoL feature, added
+identically to all three engines and committed separately so CE stays cherry-pickable against upstream.
+
+- **Key.** `#define CONTINUE_TRAVEL_KEY (128+21)` in `Rogue.h` — synthetic, button-only code; value
+  matches SE and Classic so the single on-screen button code dispatches in every engine. Round-trips
+  cleanly through the keystroke compressor (offset 21 is past CE's 18-entry `keystrokeTable`).
+- **Dispatch.** `mainInputLoop`'s cursor-confirm (`doEvent`) branch intercepts `CONTINUE_TRAVEL_KEY` →
+  `travelRoute(path, steps)` (the exact displayed route; the fast primitive a confirming tap uses, not
+  `travel()`→`travelMap`, which is slow and takes a different path). No explicit `recordKeystroke`:
+  `travelRoute`→`playerMoves` records each step's direction key, so the journey replays as its moves
+  (like a tap-travel). Determinism-safe.
+- **Reactive-button state.** `commitDraws` calls a new `ceSetTravelPending(isPosInMap(rogue.cursorLoc))`
+  extern (defined in `CEBridge.mm`, deduped, routed via the `BrogueCEHost` `setTravelPending:` method) so
+  the host can swap the center d-pad button between the footprints "continue" glyph and the `zzz` glyph.
+- **Scope.** Walks past *already-seen* monsters and re-stops on a *new* disturbance (`MB_WAS_VISIBLE`
+  gate in `Time.c`) — same as re-clicking; no new power, no RNG/save impact. No-op when idle.
+
+### 2026-07-05 — Examine description box: report its rect (fit-zoom) + suppress it for zoomed play-field examines
+
+**What.** iPhone examine-box hooks, identical to SE's (see `BrogueSE/Engine/IOS_MODIFICATIONS.md` for the
+full rationale). (1) `printTextBox` stashes its rect (`x2, y2, width, lineCount + padLines`) in file-static
+`gLastTextBox{X,Y,Width,Height}`; the cursor/examine loop reports it via a new `ceSetExamineBox(x,y,w,h)`
+extern just before `ceSetExamining` so the host can zoom to *fit* the box instead of dropping to 1×.
+(2) The loop gates `printMonsterDetails`/`printFloorItemDetails` on `!ceShouldSuppressExamineBox()` so a
+box triggered by a zoomed play-field drag-hold (which would tear against the 1× sidebar) is skipped — the
+sidebar highlight + one-line flavor still show.
+
+- **Bridge:** `CEBridge.mm` defines `ceSetExamineBox` (→ `[gHost setExamineBox:…]`) and
+  `ceShouldSuppressExamineBox` (→ `[gHost shouldSuppressExamineBox]`); both were added to the shared
+  `BrogueCEHost` protocol and implemented in `CEHost.swift`.
+- **Scope:** pure presentation; no gameplay/RNG/save impact. iPhone-only in effect (host consumers are
+  phone-gated). Kept identical across CE / SE / Classic so it stays cherry-pickable.
+
 ### 2026-06-19 — File management: debug "Import" button (CE/SE)
 
 **What.** The Manage Files screen gains an "Import" button (left bar, beside Edit) that opens the

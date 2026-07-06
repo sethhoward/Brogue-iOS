@@ -32,6 +32,60 @@ See `BrogueCE/Engine/IOS_MODIFICATIONS.md` (faithful CE) and
 
 ## Change log
 
+### 2026-07-05 — Continue-travel command + reactive center d-pad button
+
+**What.** A touch-friendly "continue my interrupted journey" command. Tapping a far tile auto-travels
+there, but any interruption (spotting a monster, etc.) stops you and — on a touch screen — forces you to
+re-select the destination, often re-triggering on the next thing you spot. The engine already remembers
+the destination: `rogue.cursorLoc` survives an interruption (only *arrival*, no-path, and stairs clear
+it) and the route stays drawn from it. The new command just re-runs `travel(rogue.cursorLoc, true)`.
+
+- **Key.** `#define CONTINUE_TRAVEL_KEY (128+21)` in `Rogue.h` — a synthetic, button-only code (no
+  physical-key binding) sitting above `REAPPLY_KEY`/`UNKNOWN_KEY`. Fits a `UInt8` and round-trips cleanly
+  through the keystroke-recording compressor (offset 21 is past `keystrokeCount`, so `compressKeystroke`/
+  `uncompressKeystroke` pass it through unchanged, no `keystrokeTable` collision). The **same value is
+  used in CE and Classic** so the one on-screen button dispatches in every engine.
+- **Dispatch.** `mainInputLoop`'s cursor-confirm (`doEvent`) branch intercepts `CONTINUE_TRAVEL_KEY` and
+  calls `travelRoute(path, steps)` — the exact route already computed and drawn for the cursor *this
+  iteration*, the same fast (~25ms/step) primitive a confirming tap uses, **not** `travel()`→`travelMap`
+  (the slow 500ms/step greedy path reserved for stairs — using it made continue ~20× slower and take a
+  different route than the displayed one). `travelRoute` also marks visible monsters `MB_ALREADY_SEEN`,
+  so it walks past them cleanly. **No explicit `recordKeystroke`** — `travelRoute` drives `playerMoves`,
+  which records each step's direction key, so the journey is captured as its moves (like a tap-travel).
+  Determinism-safe.
+- **Reactive-button state.** `commitDraws` reports whether a journey is pending via a new
+  `ceSetTravelPending(isPosInMap(rogue.cursorLoc))` extern (defined in `SEBridge.mm`, deduped, routed
+  through the `BrogueCEHost` `setTravelPending:` protocol method). The host swaps the center d-pad button
+  between a footprints "continue" glyph and the `zzz` "rest" glyph, sending the continue key vs `z`.
+- **Scope.** Walks past *already-seen* monsters and re-stops only on a *new* disturbance (the
+  `MB_WAS_VISIBLE` gate in `Time.c`) — i.e. exactly what re-clicking the tile already does; no new power,
+  no RNG/save impact. No-op when nothing is pending. Kept identical across Classic / CE / SE.
+
+### 2026-07-05 — Examine description box: report its rect (fit-zoom) + suppress it for zoomed play-field examines
+
+**What.** Two iPhone examine-box hooks (identical hooks added to CE and Classic — see their
+IOS_MODIFICATIONS). (1) *Fit-zoom:* the "zoom out on examine" nicety used to drop the magnified map all the
+way to 1× whenever a description box appeared, shrinking the box text (it's drawn in the magnified dungeon
+cells); the engine now reports the box's window-cell rect so the host can zoom only as far as needed to
+*fit* it. (2) *Suppress:* a description box triggered by a **play-field drag-hold while zoomed** tore
+against the 1× sidebar/chrome (only the dungeon columns magnify); the engine now asks the host and skips
+drawing the box in that case (the sidebar still highlights the entity, and the one-line flavor still shows).
+
+- **`IO.c` `printTextBox`:** after shading the box, stash its rect (`x2, y2, width, lineCount + padLines`)
+  in file-static `gLastTextBox{X,Y,Width,Height}`.
+- **`IO.c` cursor/examine loop (`mainInputLoop`):**
+  - Gate `printMonsterDetails`/`printFloorItemDetails` on `!ceShouldSuppressExamineBox()` (the sidebar
+    `refreshSideBar` highlight still runs before the gate).
+  - Just before `ceSetExamining(textDisplayed)`, when `textDisplayed`, call `ceSetExamineBox(x,y,w,h)` with
+    the stashed rect. Safe because only `printLocationDescription` → `flavorMessage` (a one-line
+    `printString`, not a `printTextBox`) runs between the box and here, so it can't clobber the rect.
+- **Bridge:** `SEBridge.mm` defines `ceSetExamineBox` → `[gHost setExamineBox:y:width:height:]` and
+  `ceShouldSuppressExamineBox` → `[gHost shouldSuppressExamineBox]`; both host methods were added to the
+  shared `BrogueCEHost` protocol and implemented in `CEHost.swift`.
+- **Scope:** applied to all three engines (this file, CE, Classic). Pure presentation; no gameplay/RNG/save
+  impact. iPhone-only in effect (the host consumers are phone-gated); the host suppresses only for a zoomed
+  play-field examine (`gestureOriginZone == .playArea`), never a sidebar tap.
+
 ### 2026-07-02 — Cursed-runics: Smoky armor progressive per-enchant sight (post-0.12.0)
 
 **Why.** The cursed Smoky armor's 1-tile blindness was too punishing to *live* with — fine as an opening

@@ -1167,6 +1167,15 @@ enum tileFlags {
 #define PAGE_UP_KEY            63276
 #define PAGE_DOWN_KEY        63277
 
+// iOS port (iBrogue): resume the interrupted journey — the touch-friendly "continue" command.
+// Resumes travel along the route already displayed for rogue.cursorLoc, via travelRoute() (the
+// same fast ~25ms/step path a confirming tap takes; NOT travel()->travelMap, the slow greedy path
+// reserved for stairs). Walks past already-seen monsters, re-stopping only on a *new* disturbance.
+// Dedicated synthetic code (fits a uchar, round-trips through the keystroke compressor).
+// Intercepted in mainInputLoop's cursor-confirm path (not executeKeystroke); no physical-key
+// binding. Value matches CE and SE.
+#define CONTINUE_TRAVEL_KEY   (128+21)
+
 #define UNKNOWN_KEY            (128+19)
 
 // iOS port (iBrogue): selectable keyboard schemes — see docs/design/keyboard-schemes.md and the matching
