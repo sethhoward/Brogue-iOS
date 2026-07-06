@@ -28,6 +28,19 @@ covers the separate Classic engine that ships in the app target).
 
 ## Change log
 
+### 2026-07-06 — Game handoff (Phase 3b): flush the live recording on demand for the transfer
+
+**What.** The CE half of the handoff recording flush (see `BrogueSE/Engine/IOS_MODIFICATIONS.md` for the
+full rationale). A bridge hook flushes the live recording to `currentFilePath` and returns its bytes,
+reusing the background-suspend `flushBufferToFile()` + engine-thread poll pattern (no vendored engine
+`.c` change — bridge/host only). See `docs/design/game-handoff.md`.
+
+- **`CEBridge.mm`:** `ce_flushRecordingForHandoff()` sets `gCEHandoffFlushRequested` + waits on a
+  semaphore; `ceTakeBackgroundSnapshotIfRequested` services it with `flushBufferToFile()` and signals,
+  then reads `currentFilePath` and returns the bytes.
+- **`BrogueCEHost.h`:** declares `ce_flushRecordingForHandoff`.
+- **Determinism:** read-only with respect to game state; no RNG, no save fields.
+
 ### 2026-07-06 — Game handoff (Phase 1b): report live game context (depth/turn/seed) to the host
 
 **What.** The CE half of the game-handoff game-context hook (see `BrogueSE/Engine/IOS_MODIFICATIONS.md`

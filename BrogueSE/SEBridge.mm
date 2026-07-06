@@ -94,6 +94,13 @@ extern "C" { volatile boolean brogueSETerminationRequested = false; }
 static volatile bool gSEBackgroundSaveRequested = false;
 static NSString *const kSEResumePathKey = @"se resume path";
 
+// iOS port (Brogue SE): game-handoff recording flush. The handoff source (OFF the main thread) sets
+// gSEHandoffFlushRequested and waits on gSEHandoffFlushDone; the engine thread flushes the live
+// recording to currentFilePath at its next poll and signals, so the source can read the exact-state
+// bytes and stream them to the receiving device. See docs/design/game-handoff.md.
+static volatile bool gSEHandoffFlushRequested = false;
+static dispatch_semaphore_t gSEHandoffFlushDone = nil;
+
 // Engine globals (defined in the vendored engine; this file declares them locally near each use).
 // Declared here too so the background-snapshot helper below can read them. C linkage to match the
 // engine's C definitions (and the other declarations in this file).
@@ -392,6 +399,15 @@ extern "C" __attribute__((visibility("default"))) void se_requestTermination(voi
 // playback flushBufferToFile() is itself a no-op. The Swift host clears the marker on a surviving
 // foreground, so the snapshot only resumes us after an actual OS kill.
 static void seTakeBackgroundSnapshotIfRequested(void) {
+    // iOS port (Brogue SE): game-handoff flush — same poll point, flushes the live recording and signals
+    // the waiting source so it can stream the exact-state bytes. See docs/design/game-handoff.md.
+    if (gSEHandoffFlushRequested) {
+        gSEHandoffFlushRequested = false;
+        if (!rogue.playbackMode && currentFilePath[0] != '\0') {
+            flushBufferToFile();
+        }
+        if (gSEHandoffFlushDone) dispatch_semaphore_signal(gSEHandoffFlushDone);
+    }
     if (!gSEBackgroundSaveRequested) {
         return;
     }
@@ -407,6 +423,19 @@ static void seTakeBackgroundSnapshotIfRequested(void) {
 // iOS port (Brogue SE): host hook (UI thread) — request a snapshot on app background.
 extern "C" __attribute__((visibility("default"))) void se_requestBackgroundSave(void) {
     gSEBackgroundSaveRequested = true;
+}
+
+// iOS port (Brogue SE): host hook (called OFF the main thread by the handoff source). Asks the engine
+// thread to flush the live recording, waits (bounded) for it, then reads and returns the exact-state
+// save bytes to stream to the receiving device. nil if there's no live game or the flush times out.
+extern "C" __attribute__((visibility("default"))) NSData * _Nullable se_flushRecordingForHandoff(void) {
+    gSEHandoffFlushDone = dispatch_semaphore_create(0);
+    gSEHandoffFlushRequested = true;
+    long timedOut = dispatch_semaphore_wait(gSEHandoffFlushDone,
+                                            dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2 * NSEC_PER_SEC)));
+    gSEHandoffFlushDone = nil;
+    if (timedOut || currentFilePath[0] == '\0') return nil;
+    return [NSData dataWithContentsOfFile:[NSString stringWithUTF8String:currentFilePath]];
 }
 
 // iOS port (Brogue SE): host hook (UI thread) — drop a stale resume marker when the app survived

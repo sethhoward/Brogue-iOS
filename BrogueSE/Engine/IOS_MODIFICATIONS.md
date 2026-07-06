@@ -32,6 +32,20 @@ See `BrogueCE/Engine/IOS_MODIFICATIONS.md` (faithful CE) and
 
 ## Change log
 
+### 2026-07-06 — Game handoff (Phase 3b): flush the live recording on demand for the transfer
+
+**What.** The handoff source streams the *exact-state* recording to the receiving device. Added a
+bridge hook that flushes the live recording to `currentFilePath` and returns its bytes, reusing the
+same `flushBufferToFile()` + engine-thread poll pattern as background-suspend (no vendored engine `.c`
+change — bridge/host only). See `docs/design/game-handoff.md`.
+
+- **`SEBridge.mm`:** `se_flushRecordingForHandoff()` (host hook, called off-main) sets
+  `gSEHandoffFlushRequested` and waits on a semaphore; `seTakeBackgroundSnapshotIfRequested` (engine
+  thread, same poll point as the background snapshot) services it with `flushBufferToFile()` and signals,
+  then the hook reads `currentFilePath` and returns the bytes (`NSData`).
+- **`BrogueSEHost.h`:** declares `se_flushRecordingForHandoff`.
+- **Determinism:** read-only with respect to game state (flush + file read); no RNG, no save fields.
+
 ### 2026-07-06 — Game handoff (Phase 1b): report live game context (depth/turn/seed) to the host
 
 **What.** `commitDraws` now reports the live game's context to the host so the cross-device Continuity

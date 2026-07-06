@@ -168,6 +168,11 @@ void ce_setHardwareKeyboardConnected(int connected);
 void ce_requestBackgroundSave(void);
 void ce_clearResumeMarker(void);
 
+// iOS port (iBrogue): game handoff. Called OFF the main thread by the handoff source: flushes the
+// live recording on the engine thread, then returns the exact-state save bytes to stream to the
+// receiving device. nil if there's no live game or the flush times out. See docs/design/game-handoff.md.
+NSData * _Nullable ce_flushRecordingForHandoff(void);
+
 #ifdef __cplusplus
 }
 #endif

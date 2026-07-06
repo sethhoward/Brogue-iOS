@@ -181,6 +181,9 @@ final class BrogueViewController: UIViewController {
     /// Continuity Handoff. Classic is never advertised (its recordings are desync-prone and
     /// unsafe to replay). See docs/design/game-handoff.md.
     private let gameHandoff = GameHandoff()
+    /// Set when a received handoff is waiting for the engine to reach its title so it can be booted
+    /// into the run (consumed in `setCEAtTitle`). See docs/design/game-handoff.md.
+    private var handoffResumePending: EngineKind?
     /// The background thread running the active engine's `rogueMain`.
     private var engineThread: Thread?
     /// Set while a title-screen engine swap is in flight (awaiting clean exit).
@@ -906,7 +909,7 @@ final class BrogueViewController: UIViewController {
         // Handoff (Continuity): source-side confirmation when a pickup finishes serving (Phase 3a).
         gameHandoff.onServeComplete = { [weak self] ok, detail in
             self?.presentHandoffAlert(title: ok ? "Handed Off ✓" : "Handoff Interrupted",
-                                      message: ok ? "The other device received the run (ACK). (Phase 3a: no relinquish yet.)"
+                                      message: ok ? "The other device received the run (ACK). This device still has it (relinquish comes later)."
                                                   : "The transfer didn't complete; your run is untouched.\n\(detail)")
         }
 
@@ -1687,9 +1690,7 @@ final class BrogueViewController: UIViewController {
                     DispatchQueue.main.async {
                         switch result {
                         case .success(let data):
-                            let preview = String(data: data.prefix(64), encoding: .utf8) ?? "\(data.count) bytes"
-                            self.presentHandoffAlert(title: "Transfer OK (Phase 3a)",
-                                                     message: "Received \(data.count) bytes from \(lineage.uppercased()).\n\(preview)")
+                            self.installAndResumeHandoff(data: data, lineage: lineage)
                         case .failure(let err):
                             self.presentHandoffAlert(title: "Transfer Failed", message: "\(err)")
                         }
@@ -1703,6 +1704,55 @@ final class BrogueViewController: UIViewController {
         let alert = UIAlertController(title: title, message: message, preferredStyle: .alert)
         alert.addAction(UIAlertAction(title: "OK", style: .default))
         present(alert, animated: true)
+    }
+
+    /// 3c: write the received recording into the target engine's save dir, set that engine's resume
+    /// marker, and boot the engine so `initializeLaunchArguments` cold-resumes it (`NG_OPEN_GAME`).
+    /// The engine renames the file to LastGame + deletes this source on load. No relinquish on the
+    /// source yet (Phase 4). See docs/design/game-handoff.md.
+    private func installAndResumeHandoff(data: Data, lineage: String) {
+        let target: EngineKind = (lineage == "se") ? .se : .ce
+        let subfolder = (target == .se) ? "se" : "ce"
+        let dir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent(subfolder)
+        do {
+            try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+            let name = uniqueHandoffFileName(in: dir)
+            try data.write(to: dir.appendingPathComponent(name))
+            // Relative filename: the engine chdir's to Documents/<subfolder>, so it resolves on boot.
+            UserDefaults.standard.set(name, forKey: (target == .se) ? "se resume path" : "ce resume path")
+            performHandoffBoot(target)
+        } catch {
+            presentHandoffAlert(title: "Handoff Failed",
+                                message: "Couldn't save the received game: \(error.localizedDescription)")
+        }
+    }
+
+    /// A collision-free save name in `dir` (the engine renames it to LastGame on load, so it's transient).
+    private func uniqueHandoffFileName(in dir: URL) -> String {
+        let base = "Handoff", ext = "broguesave"
+        var name = "\(base).\(ext)"
+        var n = 2
+        while FileManager.default.fileExists(atPath: dir.appendingPathComponent(name).path) {
+            name = "\(base) \(n).\(ext)"
+            n += 1
+        }
+        return name
+    }
+
+    /// Restart (or switch to) `target` so a fresh `rogueMain` consumes the resume marker. Unlike
+    /// `requestEngineSwitch`, allows `target == currentEngine` (the common iPad-SE → SE handoff). The
+    /// engine's terminate hook lives in its title loop, so if we're not at the title yet, defer until
+    /// `setCEAtTitle` reports it.
+    private func performHandoffBoot(_ target: EngineKind) {
+        guard atTitle, !switchPending else { handoffResumePending = target; return }
+        switchPending = true
+        pendingTargetEngine = target
+        switch currentEngine {
+        case .ce: ce_requestTermination()
+        case .se: se_requestTermination()
+        case .classic: setClassicTerminationRequested(true)
+        }
     }
 
     /// Called by the CE bridge: true only while the CE title screen is showing.
@@ -1725,6 +1775,11 @@ final class BrogueViewController: UIViewController {
             // depth/turn arrive via a game-context push in a later phase. See docs/design/game-handoff.md.
             if value {
                 self.gameHandoff.stop()
+                // A received handoff waiting for the title can now boot into its run (see performHandoffBoot).
+                if let target = self.handoffResumePending {
+                    self.handoffResumePending = nil
+                    self.performHandoffBoot(target)
+                }
             } else if self.currentEngine != .classic {
                 self.gameHandoff.advertise(lineage: self.engineLineageString,
                                            seed: self.lastPersistedSeed,
@@ -4452,11 +4507,15 @@ final class GameHandoff: NSObject, NSUserActivityDelegate {
     var onServeComplete: ((_ ok: Bool, _ detail: String) -> Void)?
 
     private var activity: NSUserActivity?
+    /// Lineage ("ce"/"se") of the run being advertised — tells the source-side stream delegate which
+    /// engine's recording to flush. Set in `advertise`.
+    private var currentLineage = "se"
 
     /// Begin/refresh advertising the current run. `lineage` is "ce" or "se". `seed`/`depth`/
     /// `turn` are display + (future) routing metadata; the recording bytes themselves are
     /// streamed live at pickup, not stored here. Must be called on the main thread.
     func advertise(lineage: String, seed: UInt64, depth: Int, turn: Int) {
+        currentLineage = lineage
         let activity = self.activity ?? NSUserActivity(activityType: Self.activityType)
         activity.isEligibleForHandoff = true
         activity.supportsContinuationStreams = true   // Phase 3: the receiver pulls the payload over these
@@ -4485,14 +4544,24 @@ final class GameHandoff: NSObject, NSUserActivityDelegate {
     /// The receiver called `getContinuationStreams`; serve the payload over the pair. Phase 3a sends a
     /// placeholder to prove the channel end-to-end; Phase 3b streams the flushed recording bytes.
     func userActivity(_ userActivity: NSUserActivity, didReceive inputStream: InputStream, outputStream: OutputStream) {
-        let payload = Data("BROGUE-HANDOFF-3A: channel OK".utf8)   // TODO Phase 3b: flushed recording bytes
-        HandoffTransfer.send(payload, input: inputStream, output: outputStream) { [weak self] result in
-            let ok: Bool; let detail: String
-            switch result {
-            case .success: ok = true; detail = ""
-            case .failure(let e): ok = false; detail = "\(e)"
+        // Flushing the recording is engine-thread work + a file read, so do it off the main thread,
+        // then stream the exact-state bytes to the receiver.
+        let lineage = currentLineage
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            let data = (lineage == "se") ? se_flushRecordingForHandoff() : ce_flushRecordingForHandoff()
+            guard let data = data, !data.isEmpty else {
+                // No live recording to send; the receiver's watchdog times out and it keeps nothing.
+                DispatchQueue.main.async { self?.onServeComplete?(false, "couldn't read the current recording") }
+                return
             }
-            DispatchQueue.main.async { self?.onServeComplete?(ok, detail) }
+            HandoffTransfer.send(data, input: inputStream, output: outputStream) { result in
+                let ok: Bool; let detail: String
+                switch result {
+                case .success: ok = true; detail = ""
+                case .failure(let e): ok = false; detail = "\(e)"
+                }
+                DispatchQueue.main.async { self?.onServeComplete?(ok, detail) }
+            }
         }
     }
 
