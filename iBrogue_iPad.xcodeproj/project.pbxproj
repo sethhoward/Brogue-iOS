@@ -298,6 +298,26 @@
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
+		C51D4EF32FFD90EF007ED2BE /* BrogueVCs */ = {
+			isa = PBXGroup;
+			children = (
+				ECBE68AC1EC0E1C600E9F366 /* BrogueViewController.swift */,
+				C51D4ED92FFD8369007ED2BE /* BrogueViewController+IBActions.swift */,
+				C51D4EDD2FFD8659007ED2BE /* BrogueViewController+Hints.swift */,
+				C51D4EDF2FFD86E2007ED2BE /* BrogueViewController+Zoom.swift */,
+				C51D4EE12FFD8814007ED2BE /* BrogueViewController+Touch.swift */,
+				C51D4EE32FFD8895007ED2BE /* BrogueViewController+Magnifier.swift */,
+				C51D4EE52FFD8916007ED2BE /* BrogueViewController+AppLifecycle.swift */,
+				C51D4EE72FFD898F007ED2BE /* BrogueViewController+Keyboard.swift */,
+				C51D4EE92FFD8B63007ED2BE /* BrogueViewController+TitleUI.swift */,
+				C51D4EEB2FFD8C0C007ED2BE /* BrogueViewController+Handoff.swift */,
+				C51D4EED2FFD8CD3007ED2BE /* BrogueViewController+EngineSession.swift */,
+				C51D4EEF2FFD8DC6007ED2BE /* BrogueViewController+ActionButtons.swift */,
+				C51D4EF12FFD8FA9007ED2BE /* BrogueViewController+Layout.swift */,
+			);
+			path = BrogueVCs;
+			sourceTree = "<group>";
+		};
 		C528726C17526D84000B4F05 /* Third Party */ = {
 			isa = PBXGroup;
 			children = (
@@ -397,32 +417,20 @@
 			isa = PBXGroup;
 			children = (
 				ECE0ECF31F156DA600F65B75 /* Directional Controls */,
-				ECBE68A81EC0D4C600E9F366 /* Cell.swift */,
-				ECBE68A61EC0D4A200E9F366 /* RogueScene.swift */,
 				C57A964D16D7EB4C00C233F1 /* RogueDriver.h */,
 				C57A964E16D7EB4C00C233F1 /* RogueDriver.mm */,
 				ECBE68A51EC0D45200E9F366 /* iBrogue_iPad-Bridging-Header.h */,
-				ECBE68AA1EC0DB1800E9F366 /* SKViewPort.swift */,
-				ECBE68AC1EC0E1C600E9F366 /* BrogueViewController.swift */,
+				C51D4EF32FFD90EF007ED2BE /* BrogueVCs */,
+				C556D4502FD0D39600D81184 /* CEHost.swift */,
+				ECBE68A81EC0D4C600E9F366 /* Cell.swift */,
+				ECBE68B41EC0E1C900E9F366 /* ContentView.swift */,
 				ED0000000000000000000F02 /* FileManagementViewController.swift */,
 				ECBE68AF1EC0E1C700E9F366 /* GameCenter.swift */,
-				ECBE68B41EC0E1C900E9F366 /* ContentView.swift */,
-				C556D4502FD0D39600D81184 /* CEHost.swift */,
-				C51D4ED52FFD820E007ED2BE /* SKMagView.swift */,
 				C51D4ED72FFD830A007ED2BE /* GameHandoff.swift */,
-				C51D4ED92FFD8369007ED2BE /* BrogueViewController+IBActions.swift */,
 				C51D4EDB2FFD84CC007ED2BE /* HapticsController.swift */,
-				C51D4EDD2FFD8659007ED2BE /* BrogueViewController+Hints.swift */,
-				C51D4EDF2FFD86E2007ED2BE /* BrogueViewController+Zoom.swift */,
-				C51D4EE12FFD8814007ED2BE /* BrogueViewController+Touch.swift */,
-				C51D4EE32FFD8895007ED2BE /* BrogueViewController+Magnifier.swift */,
-				C51D4EE52FFD8916007ED2BE /* BrogueViewController+AppLifecycle.swift */,
-				C51D4EE72FFD898F007ED2BE /* BrogueViewController+Keyboard.swift */,
-				C51D4EE92FFD8B63007ED2BE /* BrogueViewController+TitleUI.swift */,
-				C51D4EEB2FFD8C0C007ED2BE /* BrogueViewController+Handoff.swift */,
-				C51D4EED2FFD8CD3007ED2BE /* BrogueViewController+EngineSession.swift */,
-				C51D4EEF2FFD8DC6007ED2BE /* BrogueViewController+ActionButtons.swift */,
-				C51D4EF12FFD8FA9007ED2BE /* BrogueViewController+Layout.swift */,
+				ECBE68A61EC0D4A200E9F366 /* RogueScene.swift */,
+				C51D4ED52FFD820E007ED2BE /* SKMagView.swift */,
+				ECBE68AA1EC0DB1800E9F366 /* SKViewPort.swift */,
 			);
 			path = PlatformCode;
 			sourceTree = "<group>";
