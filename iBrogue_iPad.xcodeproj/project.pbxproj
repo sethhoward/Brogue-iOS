@@ -7,6 +7,8 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		5C000000000000000000000B /* BrogueClassic.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 5C0000000000000000000009 /* BrogueClassic.framework */; };
+		5C000000000000000000000C /* BrogueClassic.framework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = 5C0000000000000000000009 /* BrogueClassic.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 		5E000000000000000000000B /* BrogueSE.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 5E0000000000000000000009 /* BrogueSE.framework */; };
 		5E000000000000000000000C /* BrogueSE.framework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = 5E0000000000000000000009 /* BrogueSE.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 		BCE7E000000000000000F002 /* BrogueCE.ttf in Resources */ = {isa = PBXBuildFile; fileRef = BCE7E000000000000000F001 /* BrogueCE.ttf */; };
@@ -27,8 +29,6 @@
 		C51D4EF02FFD8DC6007ED2BE /* BrogueViewController+ActionButtons.swift in Sources */ = {isa = PBXBuildFile; fileRef = C51D4EEF2FFD8DC6007ED2BE /* BrogueViewController+ActionButtons.swift */; };
 		C51D4EF22FFD8FA9007ED2BE /* BrogueViewController+Layout.swift in Sources */ = {isa = PBXBuildFile; fileRef = C51D4EF12FFD8FA9007ED2BE /* BrogueViewController+Layout.swift */; };
 		C5213CD21B7533AE00E97A27 /* Arial Unicode.ttf in Resources */ = {isa = PBXBuildFile; fileRef = C5213CD11B75308E00E97A27 /* Arial Unicode.ttf */; };
-		C52686AB215C0B5D00033E3F /* PowerTables.c in Sources */ = {isa = PBXBuildFile; fileRef = C52686AA215C0B5D00033E3F /* PowerTables.c */; };
-		C52686AD215C0B8700033E3F /* Sqrt.c in Sources */ = {isa = PBXBuildFile; fileRef = C52686AC215C0B8700033E3F /* Sqrt.c */; };
 		C52B092216E5848500675CC7 /* GameCenterIOS4.m in Sources */ = {isa = PBXBuildFile; fileRef = C52B091B16E5848500675CC7 /* GameCenterIOS4.m */; settings = {COMPILER_FLAGS = "-fno-objc-arc"; }; };
 		C52B092316E5848500675CC7 /* GameCenterManager.m in Sources */ = {isa = PBXBuildFile; fileRef = C52B091D16E5848500675CC7 /* GameCenterManager.m */; settings = {COMPILER_FLAGS = "-fno-objc-arc"; }; };
 		C52B092516E5848500675CC7 /* UIViewController+UIViewController_GCLeaderBoardView.m in Sources */ = {isa = PBXBuildFile; fileRef = C52B092116E5848500675CC7 /* UIViewController+UIViewController_GCLeaderBoardView.m */; settings = {COMPILER_FLAGS = "-fno-objc-arc"; }; };
@@ -46,22 +46,6 @@
 		C57A963B16D7EAD500C233F1 /* Default.png in Resources */ = {isa = PBXBuildFile; fileRef = C57A963A16D7EAD500C233F1 /* Default.png */; };
 		C57A963D16D7EAD500C233F1 /* Default@2x.png in Resources */ = {isa = PBXBuildFile; fileRef = C57A963C16D7EAD500C233F1 /* Default@2x.png */; };
 		C57A963F16D7EAD500C233F1 /* Default-568h@2x.png in Resources */ = {isa = PBXBuildFile; fileRef = C57A963E16D7EAD500C233F1 /* Default-568h@2x.png */; };
-		C57A965116D7EB4C00C233F1 /* RogueDriver.mm in Sources */ = {isa = PBXBuildFile; fileRef = C57A964E16D7EB4C00C233F1 /* RogueDriver.mm */; };
-		C57A966516D7EB5500C233F1 /* Architect.c in Sources */ = {isa = PBXBuildFile; fileRef = C57A965416D7EB5500C233F1 /* Architect.c */; settings = {COMPILER_FLAGS = "-fno-objc-arc"; }; };
-		C57A966616D7EB5500C233F1 /* Buttons.c in Sources */ = {isa = PBXBuildFile; fileRef = C57A965516D7EB5500C233F1 /* Buttons.c */; settings = {COMPILER_FLAGS = "-fno-objc-arc"; }; };
-		C57A966716D7EB5500C233F1 /* Combat.c in Sources */ = {isa = PBXBuildFile; fileRef = C57A965616D7EB5500C233F1 /* Combat.c */; settings = {COMPILER_FLAGS = "-fno-objc-arc"; }; };
-		C57A966816D7EB5500C233F1 /* Dijkstra.c in Sources */ = {isa = PBXBuildFile; fileRef = C57A965716D7EB5500C233F1 /* Dijkstra.c */; settings = {COMPILER_FLAGS = "-fno-objc-arc"; }; };
-		C57A966916D7EB5500C233F1 /* Globals.c in Sources */ = {isa = PBXBuildFile; fileRef = C57A965816D7EB5500C233F1 /* Globals.c */; settings = {COMPILER_FLAGS = "-fno-objc-arc"; }; };
-		C57A966A16D7EB5500C233F1 /* Grid.c in Sources */ = {isa = PBXBuildFile; fileRef = C57A965916D7EB5500C233F1 /* Grid.c */; settings = {COMPILER_FLAGS = "-fno-objc-arc"; }; };
-		C57A966B16D7EB5500C233F1 /* IO.c in Sources */ = {isa = PBXBuildFile; fileRef = C57A965B16D7EB5500C233F1 /* IO.c */; settings = {COMPILER_FLAGS = "-fno-objc-arc"; }; };
-		C57A966C16D7EB5500C233F1 /* Items.c in Sources */ = {isa = PBXBuildFile; fileRef = C57A965C16D7EB5500C233F1 /* Items.c */; settings = {COMPILER_FLAGS = "-fno-objc-arc"; }; };
-		C57A966D16D7EB5500C233F1 /* Light.c in Sources */ = {isa = PBXBuildFile; fileRef = C57A965D16D7EB5500C233F1 /* Light.c */; settings = {COMPILER_FLAGS = "-fno-objc-arc"; }; };
-		C57A966E16D7EB5500C233F1 /* MainMenu.c in Sources */ = {isa = PBXBuildFile; fileRef = C57A965E16D7EB5500C233F1 /* MainMenu.c */; settings = {COMPILER_FLAGS = "-fno-objc-arc"; }; };
-		C57A966F16D7EB5500C233F1 /* Monsters.c in Sources */ = {isa = PBXBuildFile; fileRef = C57A965F16D7EB5500C233F1 /* Monsters.c */; settings = {COMPILER_FLAGS = "-fno-objc-arc"; }; };
-		C57A967016D7EB5500C233F1 /* Movement.c in Sources */ = {isa = PBXBuildFile; fileRef = C57A966016D7EB5500C233F1 /* Movement.c */; settings = {COMPILER_FLAGS = "-fno-objc-arc"; }; };
-		C57A967116D7EB5500C233F1 /* Random.c in Sources */ = {isa = PBXBuildFile; fileRef = C57A966116D7EB5500C233F1 /* Random.c */; settings = {COMPILER_FLAGS = "-fno-objc-arc"; }; };
-		C57A967216D7EB5500C233F1 /* Recordings.c in Sources */ = {isa = PBXBuildFile; fileRef = C57A966216D7EB5500C233F1 /* Recordings.c */; settings = {COMPILER_FLAGS = "-fno-objc-arc"; }; };
-		C57A967316D7EB5500C233F1 /* RogueMain.mm in Sources */ = {isa = PBXBuildFile; fileRef = C57A966416D7EB5500C233F1 /* RogueMain.mm */; settings = {COMPILER_FLAGS = "-fno-objc-arc"; }; };
 		C57A967516DBF1CE00C233F1 /* QuartzCore.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = C57A967416DBF1CE00C233F1 /* QuartzCore.framework */; };
 		C5958C6C174AFFBB00519AD9 /* about_brogue.png in Resources */ = {isa = PBXBuildFile; fileRef = C5958C5C174AFFBB00519AD9 /* about_brogue.png */; };
 		C5958C6D174AFFBB00519AD9 /* about_brogue@2x.png in Resources */ = {isa = PBXBuildFile; fileRef = C5958C5D174AFFBB00519AD9 /* about_brogue@2x.png */; };
@@ -81,7 +65,6 @@
 		C5958C7B174AFFBB00519AD9 /* gamecenterlogo_brogue@2x.png in Resources */ = {isa = PBXBuildFile; fileRef = C5958C6B174AFFBB00519AD9 /* gamecenterlogo_brogue@2x.png */; };
 		C59B21C716EA48E0007018DE /* MONACO.TTF in Resources */ = {isa = PBXBuildFile; fileRef = C59B21C616EA48E0007018DE /* MONACO.TTF */; };
 		C5B7FF1B1D8D933D00F04098 /* Main.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = C5B7FF1A1D8D933D00F04098 /* Main.storyboard */; };
-		C5B9B66C17D23BEA00D8459E /* Time.mm in Sources */ = {isa = PBXBuildFile; fileRef = C5B9B66B17D23BE900D8459E /* Time.mm */; };
 		C5D117041D8B786800356DBA /* Images.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = C5D117031D8B786800356DBA /* Images.xcassets */; };
 		C5D5EC6C16FC07EB00E9A9AF /* icon_72x72.png in Resources */ = {isa = PBXBuildFile; fileRef = C5D5EC6B16FC07EB00E9A9AF /* icon_72x72.png */; };
 		C5D5EC6E16FC07F300E9A9AF /* icon_144x144.png in Resources */ = {isa = PBXBuildFile; fileRef = C5D5EC6D16FC07F300E9A9AF /* icon_144x144.png */; };
@@ -98,6 +81,13 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
+		5C000000000000000000000D /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = C57A961D16D7EAD500C233F1 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 5C0000000000000000000001;
+			remoteInfo = BrogueClassic;
+		};
 		5E000000000000000000000D /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
 			containerPortal = C57A961D16D7EAD500C233F1 /* Project object */;
@@ -123,6 +113,7 @@
 			files = (
 				C556D4042FD0CDEF00D81184 /* BrogueCE.framework in Embed Frameworks */,
 				5E000000000000000000000C /* BrogueSE.framework in Embed Frameworks */,
+				5C000000000000000000000C /* BrogueClassic.framework in Embed Frameworks */,
 			);
 			name = "Embed Frameworks";
 			runOnlyForDeploymentPostprocessing = 0;
@@ -130,6 +121,7 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		5C0000000000000000000009 /* BrogueClassic.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = BrogueClassic.framework; sourceTree = BUILT_PRODUCTS_DIR; };
 		5E0000000000000000000009 /* BrogueSE.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = BrogueSE.framework; sourceTree = BUILT_PRODUCTS_DIR; };
 		BCE7E000000000000000F001 /* BrogueCE.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = BrogueCE.ttf; sourceTree = "<group>"; };
 		C5105B1416EE90A300E09905 /* GameSettings.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = GameSettings.h; sourceTree = "<group>"; };
@@ -152,8 +144,6 @@
 		C5213CD11B75308E00E97A27 /* Arial Unicode.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Arial Unicode.ttf"; sourceTree = "<group>"; };
 		C52686A6215C0A9800033E3F /* libc++.tbd */ = {isa = PBXFileReference; lastKnownFileType = "sourcecode.text-based-dylib-definition"; name = "libc++.tbd"; path = "usr/lib/libc++.tbd"; sourceTree = SDKROOT; };
 		C52686A8215C0AA800033E3F /* libc++.1.tbd */ = {isa = PBXFileReference; lastKnownFileType = "sourcecode.text-based-dylib-definition"; name = "libc++.1.tbd"; path = "usr/lib/libc++.1.tbd"; sourceTree = SDKROOT; };
-		C52686AA215C0B5D00033E3F /* PowerTables.c */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.c; path = PowerTables.c; sourceTree = "<group>"; };
-		C52686AC215C0B8700033E3F /* Sqrt.c */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.c; path = Sqrt.c; sourceTree = "<group>"; };
 		C52B091A16E5848500675CC7 /* GameCenterIOS4.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = GameCenterIOS4.h; sourceTree = "<group>"; };
 		C52B091B16E5848500675CC7 /* GameCenterIOS4.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = GameCenterIOS4.m; sourceTree = "<group>"; };
 		C52B091C16E5848500675CC7 /* GameCenterManager.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = GameCenterManager.h; sourceTree = "<group>"; };
@@ -179,25 +169,6 @@
 		C57A963A16D7EAD500C233F1 /* Default.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = Default.png; sourceTree = "<group>"; };
 		C57A963C16D7EAD500C233F1 /* Default@2x.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "Default@2x.png"; sourceTree = "<group>"; };
 		C57A963E16D7EAD500C233F1 /* Default-568h@2x.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "Default-568h@2x.png"; sourceTree = "<group>"; };
-		C57A964D16D7EB4C00C233F1 /* RogueDriver.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = RogueDriver.h; sourceTree = "<group>"; };
-		C57A964E16D7EB4C00C233F1 /* RogueDriver.mm */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.objcpp; path = RogueDriver.mm; sourceTree = "<group>"; };
-		C57A965416D7EB5500C233F1 /* Architect.c */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.c; path = Architect.c; sourceTree = "<group>"; };
-		C57A965516D7EB5500C233F1 /* Buttons.c */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.c; path = Buttons.c; sourceTree = "<group>"; };
-		C57A965616D7EB5500C233F1 /* Combat.c */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.c; path = Combat.c; sourceTree = "<group>"; };
-		C57A965716D7EB5500C233F1 /* Dijkstra.c */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.c; path = Dijkstra.c; sourceTree = "<group>"; };
-		C57A965816D7EB5500C233F1 /* Globals.c */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.c; path = Globals.c; sourceTree = "<group>"; };
-		C57A965916D7EB5500C233F1 /* Grid.c */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.c; path = Grid.c; sourceTree = "<group>"; };
-		C57A965A16D7EB5500C233F1 /* IncludeGlobals.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = IncludeGlobals.h; sourceTree = "<group>"; };
-		C57A965B16D7EB5500C233F1 /* IO.c */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.c; path = IO.c; sourceTree = "<group>"; };
-		C57A965C16D7EB5500C233F1 /* Items.c */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.c; path = Items.c; sourceTree = "<group>"; };
-		C57A965D16D7EB5500C233F1 /* Light.c */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.c; path = Light.c; sourceTree = "<group>"; };
-		C57A965E16D7EB5500C233F1 /* MainMenu.c */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.c; path = MainMenu.c; sourceTree = "<group>"; };
-		C57A965F16D7EB5500C233F1 /* Monsters.c */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.c; path = Monsters.c; sourceTree = "<group>"; };
-		C57A966016D7EB5500C233F1 /* Movement.c */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.c; path = Movement.c; sourceTree = "<group>"; };
-		C57A966116D7EB5500C233F1 /* Random.c */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.c; path = Random.c; sourceTree = "<group>"; };
-		C57A966216D7EB5500C233F1 /* Recordings.c */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.c; path = Recordings.c; sourceTree = "<group>"; };
-		C57A966316D7EB5500C233F1 /* Rogue.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = Rogue.h; sourceTree = "<group>"; };
-		C57A966416D7EB5500C233F1 /* RogueMain.mm */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.objcpp; path = RogueMain.mm; sourceTree = "<group>"; };
 		C57A967416DBF1CE00C233F1 /* QuartzCore.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = QuartzCore.framework; path = System/Library/Frameworks/QuartzCore.framework; sourceTree = SDKROOT; };
 		C5958C5C174AFFBB00519AD9 /* about_brogue.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = about_brogue.png; sourceTree = "<group>"; };
 		C5958C5D174AFFBB00519AD9 /* about_brogue@2x.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "about_brogue@2x.png"; sourceTree = "<group>"; };
@@ -217,7 +188,6 @@
 		C5958C6B174AFFBB00519AD9 /* gamecenterlogo_brogue@2x.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "gamecenterlogo_brogue@2x.png"; sourceTree = "<group>"; };
 		C59B21C616EA48E0007018DE /* MONACO.TTF */ = {isa = PBXFileReference; lastKnownFileType = file; path = MONACO.TTF; sourceTree = "<group>"; };
 		C5B7FF1A1D8D933D00F04098 /* Main.storyboard */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = file.storyboard; path = Main.storyboard; sourceTree = "<group>"; };
-		C5B9B66B17D23BE900D8459E /* Time.mm */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.objcpp; path = Time.mm; sourceTree = "<group>"; };
 		C5D117031D8B786800356DBA /* Images.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Images.xcassets; sourceTree = "<group>"; };
 		C5D5EC6B16FC07EB00E9A9AF /* icon_72x72.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = icon_72x72.png; sourceTree = "<group>"; };
 		C5D5EC6D16FC07F300E9A9AF /* icon_144x144.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = icon_144x144.png; sourceTree = "<group>"; };
@@ -259,14 +229,29 @@
 			);
 			target = 5E0000000000000000000001 /* BrogueSE */;
 		};
+		5C0000000000000000000ED1 /* PBXFileSystemSynchronizedBuildFileExceptionSet */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			additionalCompilerFlagsByRelativePath = {
+				"Engine/RogueMain.mm" = "-fno-objc-arc";
+			};
+			target = 5C0000000000000000000001 /* BrogueClassic */;
+		};
 /* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
+		5C000000000000000000000A /* BrogueClassic */ = {isa = PBXFileSystemSynchronizedRootGroup; exceptions = (5C0000000000000000000ED1 /* PBXFileSystemSynchronizedBuildFileExceptionSet */, ); explicitFileTypes = {}; explicitFolders = (); path = BrogueClassic; sourceTree = "<group>"; };
 		5E000000000000000000000A /* BrogueSE */ = {isa = PBXFileSystemSynchronizedRootGroup; exceptions = (5E0000000000000000000ED1 /* PBXFileSystemSynchronizedBuildFileExceptionSet */, ); explicitFileTypes = {}; explicitFolders = (); path = BrogueSE; sourceTree = "<group>"; };
 		C556D3FC2FD0CDEE00D81184 /* BrogueCE */ = {isa = PBXFileSystemSynchronizedRootGroup; explicitFileTypes = {}; explicitFolders = (); path = BrogueCE; sourceTree = "<group>"; };
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
+		5C0000000000000000000004 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		5E0000000000000000000004 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
@@ -289,6 +274,7 @@
 				C57A967516DBF1CE00C233F1 /* QuartzCore.framework in Frameworks */,
 				C556D4032FD0CDEF00D81184 /* BrogueCE.framework in Frameworks */,
 				5E000000000000000000000B /* BrogueSE.framework in Frameworks */,
+				5C000000000000000000000B /* BrogueClassic.framework in Frameworks */,
 				C57A962916D7EAD500C233F1 /* UIKit.framework in Frameworks */,
 				C57A962B16D7EAD500C233F1 /* Foundation.framework in Frameworks */,
 				C57A962D16D7EAD500C233F1 /* CoreGraphics.framework in Frameworks */,
@@ -349,6 +335,7 @@
 				C57A962E16D7EAD500C233F1 /* iBrogue_iPad */,
 				C556D3FC2FD0CDEE00D81184 /* BrogueCE */,
 				5E000000000000000000000A /* BrogueSE */,
+				5C000000000000000000000A /* BrogueClassic */,
 				C57A962716D7EAD500C233F1 /* Frameworks */,
 				C57A962616D7EAD500C233F1 /* Products */,
 			);
@@ -360,6 +347,7 @@
 				C57A962516D7EAD500C233F1 /* Brogue.app */,
 				C556D3FB2FD0CDEE00D81184 /* BrogueCE.framework */,
 				5E0000000000000000000009 /* BrogueSE.framework */,
+				5C0000000000000000000009 /* BrogueClassic.framework */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -381,7 +369,6 @@
 			children = (
 				C528726C17526D84000B4F05 /* Third Party */,
 				C5958C5B174AFFBB00519AD9 /* Image Assets */,
-				C57A965316D7EB5500C233F1 /* BrogueCode */,
 				C57A964B16D7EB4C00C233F1 /* PlatformCode */,
 				C57A963716D7EAD500C233F1 /* AppDelegate.h */,
 				C57A963816D7EAD500C233F1 /* AppDelegate.m */,
@@ -417,8 +404,6 @@
 			isa = PBXGroup;
 			children = (
 				ECE0ECF31F156DA600F65B75 /* Directional Controls */,
-				C57A964D16D7EB4C00C233F1 /* RogueDriver.h */,
-				C57A964E16D7EB4C00C233F1 /* RogueDriver.mm */,
 				ECBE68A51EC0D45200E9F366 /* iBrogue_iPad-Bridging-Header.h */,
 				C51D4EF32FFD90EF007ED2BE /* BrogueVCs */,
 				C556D4502FD0D39600D81184 /* CEHost.swift */,
@@ -433,33 +418,6 @@
 				ECBE68AA1EC0DB1800E9F366 /* SKViewPort.swift */,
 			);
 			path = PlatformCode;
-			sourceTree = "<group>";
-		};
-		C57A965316D7EB5500C233F1 /* BrogueCode */ = {
-			isa = PBXGroup;
-			children = (
-				C5B9B66B17D23BE900D8459E /* Time.mm */,
-				C57A965416D7EB5500C233F1 /* Architect.c */,
-				C57A965516D7EB5500C233F1 /* Buttons.c */,
-				C57A965616D7EB5500C233F1 /* Combat.c */,
-				C57A965716D7EB5500C233F1 /* Dijkstra.c */,
-				C57A965816D7EB5500C233F1 /* Globals.c */,
-				C57A965916D7EB5500C233F1 /* Grid.c */,
-				C57A965A16D7EB5500C233F1 /* IncludeGlobals.h */,
-				C57A965B16D7EB5500C233F1 /* IO.c */,
-				C57A965C16D7EB5500C233F1 /* Items.c */,
-				C57A965D16D7EB5500C233F1 /* Light.c */,
-				C57A965E16D7EB5500C233F1 /* MainMenu.c */,
-				C57A965F16D7EB5500C233F1 /* Monsters.c */,
-				C52686AC215C0B8700033E3F /* Sqrt.c */,
-				C57A966016D7EB5500C233F1 /* Movement.c */,
-				C52686AA215C0B5D00033E3F /* PowerTables.c */,
-				C57A966116D7EB5500C233F1 /* Random.c */,
-				C57A966216D7EB5500C233F1 /* Recordings.c */,
-				C57A966316D7EB5500C233F1 /* Rogue.h */,
-				C57A966416D7EB5500C233F1 /* RogueMain.mm */,
-			);
-			path = BrogueCode;
 			sourceTree = "<group>";
 		};
 		C5958C5B174AFFBB00519AD9 /* Image Assets */ = {
@@ -501,6 +459,13 @@
 /* End PBXGroup section */
 
 /* Begin PBXHeadersBuildPhase section */
+		5C0000000000000000000002 /* Headers */ = {
+			isa = PBXHeadersBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		5E0000000000000000000002 /* Headers */ = {
 			isa = PBXHeadersBuildPhase;
 			buildActionMask = 2147483647;
@@ -518,6 +483,29 @@
 /* End PBXHeadersBuildPhase section */
 
 /* Begin PBXNativeTarget section */
+		5C0000000000000000000001 /* BrogueClassic */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 5C0000000000000000000006 /* Build configuration list for PBXNativeTarget "BrogueClassic" */;
+			buildPhases = (
+				5C0000000000000000000002 /* Headers */,
+				5C0000000000000000000003 /* Sources */,
+				5C0000000000000000000004 /* Frameworks */,
+				5C0000000000000000000005 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				5C000000000000000000000A /* BrogueClassic */,
+			);
+			name = BrogueClassic;
+			packageProductDependencies = (
+			);
+			productName = BrogueClassic;
+			productReference = 5C0000000000000000000009 /* BrogueClassic.framework */;
+			productType = "com.apple.product-type.framework";
+		};
 		5E0000000000000000000001 /* BrogueSE */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = 5E0000000000000000000006 /* Build configuration list for PBXNativeTarget "BrogueSE" */;
@@ -579,6 +567,7 @@
 			dependencies = (
 				C556D4022FD0CDEF00D81184 /* PBXTargetDependency */,
 				5E000000000000000000000E /* PBXTargetDependency */,
+				5C000000000000000000000E /* PBXTargetDependency */,
 			);
 			name = iBrogue_iPad;
 			productName = iBrogue_iPad;
@@ -596,6 +585,9 @@
 				LastUpgradeCheck = 2640;
 				ORGANIZATIONNAME = "Seth howard";
 				TargetAttributes = {
+					5C0000000000000000000001 = {
+						CreatedOnToolsVersion = 26.5;
+					};
 					5E0000000000000000000001 = {
 						CreatedOnToolsVersion = 26.5;
 					};
@@ -628,11 +620,19 @@
 				C57A962416D7EAD500C233F1 /* iBrogue_iPad */,
 				C556D3FA2FD0CDEE00D81184 /* BrogueCE */,
 				5E0000000000000000000001 /* BrogueSE */,
+				5C0000000000000000000001 /* BrogueClassic */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
+		5C0000000000000000000005 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		5E0000000000000000000005 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -704,6 +704,13 @@
 /* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
+		5C0000000000000000000003 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		5E0000000000000000000003 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -722,21 +729,15 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				C52686AB215C0B5D00033E3F /* PowerTables.c in Sources */,
 				C57A963516D7EAD500C233F1 /* main.m in Sources */,
 				C51D4EE22FFD8814007ED2BE /* BrogueViewController+Touch.swift in Sources */,
 				C57A963916D7EAD500C233F1 /* AppDelegate.m in Sources */,
 				ECBE68A91EC0D4C600E9F366 /* Cell.swift in Sources */,
 				C51D4EF02FFD8DC6007ED2BE /* BrogueViewController+ActionButtons.swift in Sources */,
-				C57A965116D7EB4C00C233F1 /* RogueDriver.mm in Sources */,
 				C51D4EE82FFD898F007ED2BE /* BrogueViewController+Keyboard.swift in Sources */,
-				C52686AD215C0B8700033E3F /* Sqrt.c in Sources */,
-				C57A966516D7EB5500C233F1 /* Architect.c in Sources */,
 				C51D4EE02FFD86E2007ED2BE /* BrogueViewController+Zoom.swift in Sources */,
 				C532C8A61971AB8800695956 /* DirectionControlsViewController.m in Sources */,
 				C51D4EEE2FFD8CD3007ED2BE /* BrogueViewController+EngineSession.swift in Sources */,
-				C57A966616D7EB5500C233F1 /* Buttons.c in Sources */,
-				C57A966716D7EB5500C233F1 /* Combat.c in Sources */,
 				C51D4EE42FFD8895007ED2BE /* BrogueViewController+Magnifier.swift in Sources */,
 				ECBE68AD1EC0E1C600E9F366 /* BrogueViewController.swift in Sources */,
 				C556D4512FD0D39600D81184 /* CEHost.swift in Sources */,
@@ -747,30 +748,17 @@
 				C51D4EEA2FFD8B63007ED2BE /* BrogueViewController+TitleUI.swift in Sources */,
 				ECBE68B31EC0E1C900E9F366 /* ContentView.swift in Sources */,
 				C51D4ED62FFD820F007ED2BE /* SKMagView.swift in Sources */,
-				C57A966816D7EB5500C233F1 /* Dijkstra.c in Sources */,
 				C51D4EDC2FFD84CC007ED2BE /* HapticsController.swift in Sources */,
-				C57A966916D7EB5500C233F1 /* Globals.c in Sources */,
-				C57A966A16D7EB5500C233F1 /* Grid.c in Sources */,
 				C51D4EEC2FFD8C0C007ED2BE /* BrogueViewController+Handoff.swift in Sources */,
 				ECBE68AB1EC0DB1800E9F366 /* SKViewPort.swift in Sources */,
 				C51D4EDE2FFD8659007ED2BE /* BrogueViewController+Hints.swift in Sources */,
-				C57A966B16D7EB5500C233F1 /* IO.c in Sources */,
 				C51D4ED82FFD830A007ED2BE /* GameHandoff.swift in Sources */,
-				C57A966C16D7EB5500C233F1 /* Items.c in Sources */,
-				C57A966D16D7EB5500C233F1 /* Light.c in Sources */,
-				C57A966E16D7EB5500C233F1 /* MainMenu.c in Sources */,
-				C57A966F16D7EB5500C233F1 /* Monsters.c in Sources */,
-				C57A967016D7EB5500C233F1 /* Movement.c in Sources */,
 				C51D4EE62FFD8916007ED2BE /* BrogueViewController+AppLifecycle.swift in Sources */,
-				C57A967116D7EB5500C233F1 /* Random.c in Sources */,
-				C57A967216D7EB5500C233F1 /* Recordings.c in Sources */,
-				C57A967316D7EB5500C233F1 /* RogueMain.mm in Sources */,
 				C52B092216E5848500675CC7 /* GameCenterIOS4.m in Sources */,
 				C52B092316E5848500675CC7 /* GameCenterManager.m in Sources */,
 				ECBE68A71EC0D4A200E9F366 /* RogueScene.swift in Sources */,
 				C52B092516E5848500675CC7 /* UIViewController+UIViewController_GCLeaderBoardView.m in Sources */,
 				C5105B1616EE90A400E09905 /* GameSettings.m in Sources */,
-				C5B9B66C17D23BEA00D8459E /* Time.mm in Sources */,
 				C51D4EDA2FFD8369007ED2BE /* BrogueViewController+IBActions.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -778,6 +766,11 @@
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
+		5C000000000000000000000E /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 5C0000000000000000000001 /* BrogueClassic */;
+			targetProxy = 5C000000000000000000000D /* PBXContainerItemProxy */;
+		};
 		5E000000000000000000000E /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
 			target = 5E0000000000000000000001 /* BrogueSE */;
@@ -802,6 +795,129 @@
 /* End PBXVariantGroup section */
 
 /* Begin XCBuildConfiguration section */
+		5C0000000000000000000007 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				BUILD_LIBRARY_FOR_DISTRIBUTION = YES;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				"CODE_SIGN_IDENTITY[sdk=iphoneos*]" = "iPhone Developer";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				DYLIB_COMPATIBILITY_VERSION = 1;
+				DYLIB_CURRENT_VERSION = 1;
+				DYLIB_INSTALL_NAME_BASE = "@rpath";
+				ENABLE_MODULE_VERIFIER = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"DEBUG=1",
+					"$(inherited)",
+				);
+				GCC_WARN_ABOUT_RETURN_TYPE = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "Copyright © 2026 Seth howard. All rights reserved.";
+				INSTALL_PATH = "$(LOCAL_LIBRARY_DIR)/Frameworks";
+				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+				MARKETING_VERSION = 1.0;
+				MODULE_VERIFIER_SUPPORTED_LANGUAGES = "objective-c objective-c++";
+				MODULE_VERIFIER_SUPPORTED_LANGUAGE_STANDARDS = "gnu17 gnu++20";
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				PRODUCT_BUNDLE_IDENTIFIER = com.sandoze.BrogueClassic;
+				PRODUCT_NAME = "$(TARGET_NAME:c99extidentifier)";
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_INSTALL_MODULE = YES;
+				SWIFT_INSTALL_OBJC_HEADER = NO;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				VERSIONING_SYSTEM = "apple-generic";
+				VERSION_INFO_PREFIX = "";
+			};
+			name = Debug;
+		};
+		5C0000000000000000000008 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				BUILD_LIBRARY_FOR_DISTRIBUTION = YES;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CODE_SIGN_IDENTITY = "Apple Development";
+				CODE_SIGN_STYLE = Automatic;
+				COPY_PHASE_STRIP = NO;
+				CURRENT_PROJECT_VERSION = 1;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				DEVELOPMENT_TEAM = KKMWNTN39N;
+				DYLIB_COMPATIBILITY_VERSION = 1;
+				DYLIB_CURRENT_VERSION = 1;
+				DYLIB_INSTALL_NAME_BASE = "@rpath";
+				ENABLE_MODULE_VERIFIER = YES;
+				ENABLE_NS_ASSERTIONS = NO;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "Copyright © 2026 Seth howard. All rights reserved.";
+				INSTALL_PATH = "$(LOCAL_LIBRARY_DIR)/Frameworks";
+				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+				MARKETING_VERSION = 1.0;
+				MODULE_VERIFIER_SUPPORTED_LANGUAGES = "objective-c objective-c++";
+				MODULE_VERIFIER_SUPPORTED_LANGUAGE_STANDARDS = "gnu17 gnu++20";
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				PRODUCT_BUNDLE_IDENTIFIER = com.sandoze.BrogueClassic;
+				PRODUCT_NAME = "$(TARGET_NAME:c99extidentifier)";
+				PROVISIONING_PROFILE_SPECIFIER = "";
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_INSTALL_MODULE = YES;
+				SWIFT_INSTALL_OBJC_HEADER = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				VERSIONING_SYSTEM = "apple-generic";
+				VERSION_INFO_PREFIX = "";
+			};
+			name = Release;
+		};
 		5E0000000000000000000007 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -1249,6 +1365,15 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
+		5C0000000000000000000006 /* Build configuration list for PBXNativeTarget "BrogueClassic" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				5C0000000000000000000007 /* Debug */,
+				5C0000000000000000000008 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
 		5E0000000000000000000006 /* Build configuration list for PBXNativeTarget "BrogueSE" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (

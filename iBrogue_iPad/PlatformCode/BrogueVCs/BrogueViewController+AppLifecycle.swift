@@ -30,7 +30,7 @@ extension BrogueViewController {
         didBackgroundThisProcess = true
         guard !atTitle else { return }
         switch currentEngine {
-        case .classic: setClassicBackgroundSaveRequested(true)
+        case .classic: classic_requestBackgroundSave()
         case .ce:      ce_requestBackgroundSave()
         case .se:      se_requestBackgroundSave()
         }
@@ -43,7 +43,7 @@ extension BrogueViewController {
     @objc private func appDidBecomeActive() {
         guard didBackgroundThisProcess else { return }
         switch currentEngine {
-        case .classic: clearClassicResumeMarker()
+        case .classic: classic_clearResumeMarker()
         case .ce:      ce_clearResumeMarker()
         case .se:      se_clearResumeMarker()
         }

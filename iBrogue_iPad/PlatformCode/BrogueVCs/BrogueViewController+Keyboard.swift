@@ -202,7 +202,7 @@ extension BrogueViewController {
         let isConnected = connected
         #endif
         hardwareKeyboardConnected = isConnected
-        setHardwareKeyboardConnected(isConnected ? 1 : 0)
+        classic_setHardwareKeyboardConnected(isConnected ? 1 : 0)
         ce_setHardwareKeyboardConnected(isConnected ? 1 : 0)
         se_setHardwareKeyboardConnected(isConnected ? 1 : 0)
         DispatchQueue.main.async { [weak self] in

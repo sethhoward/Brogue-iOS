@@ -10,7 +10,7 @@
 
 import UIKit
 
-final class CEHost: NSObject, BrogueCEHost {
+final class CEHost: NSObject, BrogueClassicHost {
     private weak var viewPort: SKViewPort?
     private weak var viewController: BrogueViewController?
     private let colorSpace = CGColorSpaceCreateDeviceRGB()
@@ -150,6 +150,40 @@ final class CEHost: NSObject, BrogueCEHost {
     }
 
     func submitCEAchievement(withID identifier: String) {
+        DispatchQueue.main.async {
+            GameCenter.shared.submitAchievement(identifier, percentComplete: 100)
+        }
+    }
+
+    // MARK: BrogueClassicHost (Classic-only additions)
+    // Classic keeps its own UI-event model and Game Center leaderboard, so it needs a few
+    // callbacks CE/SE don't. The same CEHost instance serves whichever engine is active.
+
+    func setGameEvent(_ event: Int) {
+        viewController?.lastBrogueGameEvent = BrogueGameEvent(rawValue: event) ?? .showTitle
+    }
+
+    func setClassicTargeting(_ targeting: Bool) {
+        viewController?.setClassicTargeting(targeting)
+    }
+
+    func presentClassicFileManagement() {
+        viewController?.presentFileManagementScreen()
+    }
+
+    func presentClassicGameCenter() {
+        viewController?.presentGameCenterScreen()
+    }
+
+    // Classic leaderboard (iBrogue_High_Score), distinct from CE's. Fires on the engine
+    // thread, so hop to main before touching GameKit.
+    func reportClassicScore(_ score: Int) {
+        DispatchQueue.main.async {
+            GameCenter.shared.reportScore(Int64(score), leaderboardID: GameCenter.highScoreLeaderboardID)
+        }
+    }
+
+    func submitClassicAchievement(_ identifier: String) {
         DispatchQueue.main.async {
             GameCenter.shared.submitAchievement(identifier, percentComplete: 100)
         }

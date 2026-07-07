@@ -19,13 +19,14 @@ extension BrogueViewController {
     func startEngine() {
         switch currentEngine {
         case .classic:
-            // Classic 1.7.5 engine, compiled into the app target.
-            setClassicTerminationRequested(false) // clear any prior switch request
-            RogueDriver.sharedInstance(with: skViewPort, viewController: self)
+            // Classic 1.7.5 engine, in its own embedded framework. Same CEHost bridge as
+            // CE/SE; classic_start() clears any prior termination request internally.
+            let host = CEHost(viewPort: skViewPort, viewController: self)
+            ceHost = host
             // iPhone-only layout tweaks (taller bottom button bar). iPad: default.
-            setPhoneLayout(UIDevice.current.userInterfaceIdiom == .phone ? 1 : 0)
+            classic_setPhoneLayout(UIDevice.current.userInterfaceIdiom == .phone ? 1 : 0)
             let thread = Thread { [weak self] in
-                rogueMain()
+                classic_start(host)
                 self?.engineDidExit()
             }
             thread.stackSize = 400 * 8192
@@ -87,7 +88,7 @@ extension BrogueViewController {
         case .se:
             se_requestTermination()
         case .classic:
-            setClassicTerminationRequested(true)
+            classic_requestTermination()
         }
     }
 

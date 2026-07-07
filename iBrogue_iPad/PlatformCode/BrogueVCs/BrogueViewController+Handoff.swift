@@ -138,7 +138,7 @@ extension BrogueViewController {
         switch currentEngine {
         case .ce: ce_requestTermination()
         case .se: se_requestTermination()
-        case .classic: setClassicTerminationRequested(true)
+        case .classic: classic_requestTermination()
         }
     }
 
