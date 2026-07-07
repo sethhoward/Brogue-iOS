@@ -209,7 +209,12 @@ final class BrogueViewController: UIViewController {
     /// description of the selected engine's key features.
     private var infoButton: UIButton?
     /// True while the active engine is showing its title screen (chooser visible).
-    private var atTitle = false { didSet { updateVersionChooserVisibility(); updateTitleOptionsVisibility() } }
+    private var atTitle = false { didSet {
+        updateVersionChooserVisibility(); updateTitleOptionsVisibility()
+        // Menu magnify is only ever engaged while at the title, so leaving it (to a run, High
+        // Scores, recordings, death, …) is the single point that must always tear it down.
+        if !atTitle { tearDownMenuMagnify() }
+    } }
     fileprivate var touchEvents = [UIBrogueTouchEvent]()
     fileprivate var lastTouchLocation = CGPoint()
     @objc fileprivate var directionsViewController: DirectionControlsViewController?
@@ -670,6 +675,15 @@ final class BrogueViewController: UIViewController {
     /// report one (CE / Classic) — those keep the 1× zoom-out.
     private struct ExamineBox { let x: Int; let y: Int; let w: Int; let h: Int }
     private var examineBox: ExamineBox?
+
+    /// iOS port (iBrogue): window-cell rect of the currently-shown modal menu overlay, reported by
+    /// the engine (setMenuBox). Phase 0 uses it to auto-magnify the title menu / its dialogs to a
+    /// readable, tappable size on iPhone — instantly, no camera movement. nil when no menu is up.
+    private struct MenuBox: Equatable { let x: Int; let y: Int; let w: Int; let h: Int }
+    private var menuBox: MenuBox?
+    /// True while the full-grid menu magnify is engaged, so apply/clear are idempotent and we know
+    /// to tear it down when leaving the title.
+    private var menuMagnifyEngaged = false
     /// Set only by a sidebar single-tap; gates the zoom-suspend so deliberate sidebar
     /// selections suspend but auto-appearing boxes (auto-explore stopping on an item, a
     /// tap-to-move over a monster) do not. Cleared when the box ends and on competing inputs.
@@ -713,6 +727,19 @@ final class BrogueViewController: UIViewController {
     /// description box doesn't blow up to full magnification (which read as "too far") —
     /// it keeps the box legible while leaving surrounding map context. Tunable.
     private static let examineMaxScale: CGFloat = 1.8
+    /// User-adjustable cap for the menu fit-magnify (see menuFitZoom), set via Options ▸ Menu size.
+    /// The value IS the maximum magnification the menu panels use: menuScaleMin (1.0) turns the
+    /// magnify off (menus render at 1×), up to menuScaleMax. On a portrait phone the vertical fit
+    /// often binds below this anyway. Persisted; absent key → menuScaleDefault.
+    static let menuScaleDefaultsKey = "menuMagnifyScale"
+    static let menuScaleDefault: CGFloat = 1.3
+    static let menuScaleMin: CGFloat = 1.0
+    static let menuScaleMax: CGFloat = 1.4
+    static var menuMagnifyScaleSetting: CGFloat {
+        let defaults = UserDefaults.standard
+        guard defaults.object(forKey: menuScaleDefaultsKey) != nil else { return menuScaleDefault }
+        return min(menuScaleMax, max(menuScaleMin, CGFloat(defaults.double(forKey: menuScaleDefaultsKey))))
+    }
     /// Fractional finger-spread change required before a pinch starts zooming.
     /// Below this, a two-finger drag is treated as a pure pan (Photos-style).
     private static let zoomActivationThreshold: CGFloat = 0.20   // 10%
@@ -863,7 +890,7 @@ final class BrogueViewController: UIViewController {
                     self.showInventoryButton.isHidden = true
                     // Game Center + File Management moved into the Classic title menu.
                     self.leaderBoardButton?.isHidden = true
-                    self.seedButton.isHidden = false
+                    self.seedButton.isHidden = true
                     self.escButtonWanted = false
                     self.refreshEscButtonVisibility()
                     self.resetZoom()
@@ -1537,6 +1564,15 @@ final class BrogueViewController: UIViewController {
             // Directional pad + action bar only during normal play. The d-pad is additionally
             // hidden when a hardware keyboard is attached; see refreshDirectionPadVisibility().
             self.gameplayControlsActive = inPlay
+
+            // iOS port (iBrogue): the menu magnify is valid ONLY while a button menu is up
+            // (uiMode == InMenu, 0). Every other state — normal play, or an escape/keyboard prompt
+            // (Save recording, seed entry, the "call" name/inscribe prompts, confirmations) — must
+            // drop it, else it lingers on a stale menu rect and tears that overlay. Nested button
+            // menus stay InMenu (the bridge dedups the transient InNormalPlay between them), so this
+            // never flickers mid-menu. This is the general teardown for CE/SE (Classic uses events).
+            if uiMode != 0 { self.tearDownMenuMagnify() }
+
             self.refreshDirectionPadVisibility()
             self.updateActionButtonVisibility()
 
@@ -1606,6 +1642,31 @@ final class BrogueViewController: UIViewController {
         }
     }
 
+    /// iOS port (iBrogue): the engine reports the window-cell rect of a modal menu overlay here.
+    /// Phase 0: driven from the SE title menu (main menu / flyout / variant & mode dialogs). On
+    /// iPhone, while at the title, this auto-magnifies that rect to a readable/tappable size —
+    /// instantly, no camera movement. Reports overwrite each other as the active menu changes
+    /// (e.g. main menu → dialog → back), so no explicit per-menu clear is needed; the magnify is
+    /// torn down when we leave the title (see resetZoom / restoreStoredZoom). No-op off iPhone.
+    @objc func setMenuBox(_ x: Int, y: Int, width: Int, height: Int) {
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self else { return }
+            // The title loop re-reports every animation frame; skip the redundant re-apply unless
+            // the rect actually changed (or we aren't yet engaged, so a first report always lands).
+            let box = MenuBox(x: x, y: y, w: width, h: height)
+            guard self.menuBox != box || !self.menuMagnifyEngaged else { return }
+            self.menuBox = box
+            self.applyMenuMagnify()
+        }
+    }
+
+    /// iOS port (iBrogue): the engine reports that no menu overlay is shown. Tears down any menu
+    /// magnify. (Phase 0 mostly relies on the leave-title teardown; this is the explicit path used
+    /// when a menu closes without a state change — and by later phases, e.g. closing inventory.)
+    @objc func clearMenuBox() {
+        DispatchQueue.main.async { [weak self] in self?.tearDownMenuMagnify() }
+    }
+
     /// Moves the esc button to the lower-left safe-area corner during targeting,
     /// restoring its resting position afterward. Uses a transform (rather than
     /// touching .center) so it composes with the storyboard layout, matching how
@@ -1669,14 +1730,13 @@ final class BrogueViewController: UIViewController {
     /// Phase 3. See docs/design/game-handoff.md.
     private func processPendingHandoff() {
         // Only act once we're on screen so we can present; otherwise viewDidAppear retries.
-        guard viewIfLoaded?.window != nil else { NSLog("[HANDOFF] processPending: no window yet"); return }
-        guard let activity = GameHandoff.pendingActivity else { NSLog("[HANDOFF] processPending: nothing pending"); return }
+        guard viewIfLoaded?.window != nil else { return }
+        guard let activity = GameHandoff.pendingActivity else { return }
         GameHandoff.pendingActivity = nil
         let info = activity.userInfo ?? [:]
 
         let lineage = (info["lineage"] as? String) ?? ""
         let theirVersion = (info["version"] as? String) ?? "?"
-        NSLog("[HANDOFF] processPending: lineage=\(lineage) theirVer=\(theirVersion) ourVer=\(GameHandoff.appVersion)")
 
         // Guard 1 — lineage must be a replay-safe engine (CE or SE; Classic is never advertised).
         guard lineage == "ce" || lineage == "se" else {
@@ -1695,20 +1755,17 @@ final class BrogueViewController: UIViewController {
         }
 
         // Pull the payload over the continuation streams, then write it + resume.
-        NSLog("[HANDOFF] processPending: calling getContinuationStreams")
         var streamsArrived = false
         activity.getContinuationStreams { [weak self] input, output, error in
             DispatchQueue.main.async {
                 guard let self = self else { return }
                 streamsArrived = true
-                NSLog("[HANDOFF] getContinuationStreams cb: input=\(input != nil) output=\(output != nil) err=\(error?.localizedDescription ?? "nil")")
                 guard let input = input, let output = output, error == nil else {
                     self.presentHandoffAlert(title: "Handoff Failed",
                                              message: "Couldn't open the transfer channel: \(error?.localizedDescription ?? "no streams").")
                     return
                 }
                 HandoffTransfer.receive(input: input, output: output) { data, commit in
-                    NSLog("[HANDOFF] receive: \(data.count) bytes — deciding whether to resume")
                     self.installAndResumeHandoff(data: data, lineage: lineage, commit: commit)
                 }
             }
@@ -1716,7 +1773,6 @@ final class BrogueViewController: UIViewController {
         // Watchdog: if getContinuationStreams never calls back (silent hang seen on Mac), surface it.
         DispatchQueue.main.asyncAfter(deadline: .now() + 20) { [weak self] in
             guard let self = self, !streamsArrived else { return }
-            NSLog("[HANDOFF] getContinuationStreams: NO callback after 20s")
             self.presentHandoffAlert(title: "Handoff Timed Out",
                                      message: "The transfer channel never opened. Keep the sending device on its game screen; both must share one Apple ID.")
         }
@@ -1742,7 +1798,6 @@ final class BrogueViewController: UIViewController {
         // transfer gives the engine time to reach its title first. (Phase 5 will auto persist-before-
         // replace instead of refusing.) See docs/design/game-handoff.md.
         guard atTitle, !switchPending else {
-            NSLog("[HANDOFF] installAndResume: destination not at title (atTitle=\(atTitle) switchPending=\(switchPending)) — refusing; source keeps its run")
             commit(false)
             presentHandoffAlert(title: "Finish Your Game First",
                                 message: "This device isn't at its title screen. Return to the title, then hand off again — your other device kept its run.")
@@ -1757,11 +1812,9 @@ final class BrogueViewController: UIViewController {
             try data.write(to: dir.appendingPathComponent(name))
             // Relative filename: the engine chdir's to Documents/<subfolder>, so it resolves on boot.
             UserDefaults.standard.set(name, forKey: (target == .se) ? "se resume path" : "ce resume path")
-            NSLog("[HANDOFF] installAndResume: wrote \(name) (\(data.count) bytes), marker set, committing + booting \(subfolder)")
             commit(true)                 // ACK the source → it relinquishes; we're committed to resuming
             performHandoffBoot(target)
         } catch {
-            NSLog("[HANDOFF] installAndResume: write failed \(error)")
             commit(false)                // couldn't save → don't take the source's run
             presentHandoffAlert(title: "Handoff Failed",
                                 message: "Couldn't save the received game: \(error.localizedDescription)")
@@ -1785,8 +1838,7 @@ final class BrogueViewController: UIViewController {
     /// engine's terminate hook lives in its title loop, so if we're not at the title yet, defer until
     /// `setCEAtTitle` reports it.
     private func performHandoffBoot(_ target: EngineKind) {
-        NSLog("[HANDOFF] performHandoffBoot(\(target)): atTitle=\(atTitle) switchPending=\(switchPending) currentEngine=\(currentEngine)")
-        guard atTitle, !switchPending else { NSLog("[HANDOFF] performHandoffBoot: deferring until title"); handoffResumePending = target; return }
+        guard atTitle, !switchPending else { handoffResumePending = target; return }
         switchPending = true
         pendingTargetEngine = target
         switch currentEngine {
@@ -2101,6 +2153,20 @@ final class BrogueViewController: UIViewController {
                 self?.toggleMapUnderSidebar()
             }
             children.append(mapUnderSidebar)
+            // Magnification applied to the title / menu / inventory panels (iPhone menu magnify).
+            // The value is the max scale; 1.0× turns it off. Stepped submenu over the useful range
+            // (a slider can't live in a UIMenu, and 5 steps are easier to hit than a tiny slider).
+            let current = BrogueViewController.menuMagnifyScaleSetting
+            let steps: [CGFloat] = [1.0, 1.1, 1.2, 1.3, 1.4]   // explicit to avoid FP stride drift
+            let sizeItems: [UIMenuElement] = steps.map { step in
+                UIAction(title: String(format: "%.1f×", Double(step)),
+                         state: abs(step - current) < 0.05 ? .on : .off) { [weak self] _ in
+                    self?.setMenuMagnifyScale(step)
+                }
+            }
+            children.append(UIMenu(title: "Menu size",
+                                   image: UIImage(systemName: "textformat.size"),
+                                   children: sizeItems))
         }
 
         children.append(resetDirections)
@@ -2139,6 +2205,16 @@ final class BrogueViewController: UIViewController {
         skViewPort.rogueScene.setMapUnderSidebarEnabled(mapUnderSidebarEnabled)
         fireHaptic()
         optionsButton?.menu = optionsMenu()
+    }
+
+    /// Sets the menu-magnify scale (Options ▸ Menu size), persists it, rebuilds the menu so the
+    /// checkmark updates, and re-applies live to the currently-shown menu (the title menu is up
+    /// while Options is open) at the new scale. 1.0× tears the magnify down (menus render at 1×).
+    private func setMenuMagnifyScale(_ scale: CGFloat) {
+        UserDefaults.standard.set(Double(scale), forKey: BrogueViewController.menuScaleDefaultsKey)
+        fireHaptic()
+        optionsButton?.menu = optionsMenu()
+        applyMenuMagnify()   // re-fit the current menuBox at the new scale (or tear down at 1.0×)
     }
 
     /// Flips the haptics setting, persists it, gives confirming feedback if it was
@@ -3109,6 +3185,68 @@ extension BrogueViewController: UIGestureRecognizerDelegate {
         return (scale, CGPoint(x: f.midX - scale * boxCenterX, y: f.midY - scale * boxCenterY))
     }
 
+    /// iOS port (iBrogue): scale + origin that fit the reported menu rect into the FULL viewport
+    /// (with a margin), centered — the phase-0 title-menu magnify. Unlike examineFitZoom (which
+    /// fits within the dungeon rect so an in-map box can't spill into the HUD), a menu owns the
+    /// whole screen, so it fits/centers against the entire viewport. Capped at menuMaxScale; never
+    /// below 1×. Returns nil when it only fits at ~1× (nothing worth magnifying).
+    private func menuFitZoom(_ box: MenuBox) -> (scale: CGFloat, origin: CGPoint)? {
+        guard box.w > 0, box.h > 0 else { return nil }
+        let w = skViewPort.effectiveWidthPoints
+        let h = skViewPort.effectiveHeightPoints
+        guard w > 0, h > 0 else { return nil }
+        let cw = w / CGFloat(COLS)
+        let ch = h / CGFloat(ROWS)
+        let li = skViewPort.leftInsetPoints        // 0 at the title (padding disabled there)
+        let boxW = CGFloat(box.w) * cw
+        let boxH = CGFloat(box.h) * ch
+        let margin: CGFloat = 14                    // TWEAK ME: gap kept around the menu
+        let fit = min((w - 2 * margin) / boxW, (h - 2 * margin) / boxH)
+        let scale = max(1.0, min(BrogueViewController.menuMagnifyScaleSetting, fit))
+        guard scale > 1.0 else { return nil }
+        // Box centre in 1× view points; centre it in the viewport (center = scale·c + origin).
+        let boxCenterX = li + (CGFloat(box.x) + CGFloat(box.w) / 2) * cw
+        let boxCenterY = (CGFloat(box.y) + CGFloat(box.h) / 2) * ch
+        var ox = li + w / 2 - scale * boxCenterX
+        var oy = h / 2 - scale * boxCenterY
+        // Clamp the origin to the range that keeps the (virtual) grid extent covering the viewport,
+        // so the magnified menu stays fully on-screen. For a menu flush against a grid edge (the
+        // main menu sits at cols ~80–99) this right-aligns it against that edge rather than centring
+        // it half-off; a menu nearer the middle is unaffected and stays centred. Forward map is
+        // screenPt = scale·u + origin, grid 1× extent u ∈ [li, li+w] × [0, h].
+        ox = min(li * (1 - scale), max((li + w) * (1 - scale), ox))
+        oy = min(0, max(h * (1 - scale), oy))
+        return (scale, CGPoint(x: ox, y: oy))
+    }
+
+    /// iOS port (iBrogue): apply the menu magnify for the current `menuBox` — the title menu, and
+    /// (phase 1) in-game overlays: inventory, the action menu, and buttoned dialogs. iPhone only;
+    /// instant (no animation). Scales ONLY the menu cells (a panel over the untouched 1× grid), not
+    /// the whole grid. The gate is simply "a menu rect is reported": the engine reports one only
+    /// while a button menu is up (reportTitleMenuBox / buttonInputLoop) and it's torn down on return
+    /// to play. If the box only fits at ~1× it tears any prior magnify down instead, so a wide
+    /// dialog following a narrow menu doesn't stay wrongly zoomed.
+    private func applyMenuMagnify() {
+        guard isPhoneIdiom, let box = menuBox, let fit = menuFitZoom(box) else {
+            tearDownMenuMagnify()
+            return
+        }
+        skViewPort.rogueScene.applyMenuMagnify(
+            colMin: box.x, colMax: box.x + box.w - 1,
+            rowMin: box.y, rowMax: box.y + box.h - 1,
+            scale: fit.scale, originXPoints: fit.origin.x, originYPoints: fit.origin.y)
+        menuMagnifyEngaged = true
+    }
+
+    /// iOS port (iBrogue): tear down any menu magnify, returning the borrowed cells to the flat
+    /// grid. Idempotent. The gameplay zoom transform is never touched by the menu path.
+    private func tearDownMenuMagnify() {
+        guard menuMagnifyEngaged else { return }
+        menuMagnifyEngaged = false
+        menuBox = nil
+        skViewPort.rogueScene.endMenuMagnify()
+    }
+
     /// Whether the examine box is already fully on-screen at the *current* displayed
     /// transform — in which case examine leaves the view exactly as-is (no pan, no zoom).
     /// At ≤1× the box renders at its designed 1× position, which the engine already fit on
@@ -3209,6 +3347,13 @@ extension BrogueViewController: UIGestureRecognizerDelegate {
         // Aiming a throw/zap is map interaction — keep the zoom. An examine
         // description box is treated like an overlay — suspend to 1× so it isn't clipped.
         let onMap = (gameplayControlsActive || isTargeting) && !isExamining
+        if onMap {
+            // Returning to map play — drop any in-game menu magnify FIRST, so its borrowed cells
+            // are back in the dungeon container before the gameplay zoom is (re)applied below;
+            // otherwise the container would scale while missing them and tear the map. This is the
+            // reliable teardown for inventory/menu close (uiMode → InNormalPlay). Idempotent.
+            tearDownMenuMagnify()
+        }
         guard onMap, zoomScale > 1.0 else {
             // Examining a description box: if it's already fully on-screen at the current
             // zoom (always true at ≤1×), leave the view exactly as-is — no pan, no zoom.
@@ -3255,6 +3400,7 @@ extension BrogueViewController: UIGestureRecognizerDelegate {
     /// preference (storedZoomScale) is untouched, so the next run still restores it.
     private func resetZoom() {
         guard isPhoneIdiom else { return }
+        tearDownMenuMagnify()   // reparent any menu-magnified cells back before resetting
         zoomScale = 1.0
         zoomOriginPt = .zero
         manualPanActive = false
@@ -3282,6 +3428,7 @@ extension BrogueViewController: UIGestureRecognizerDelegate {
     /// land on the map center instead of the player. `resetZoom` (title/death) clears it.
     private func restoreStoredZoom() {
         guard isPhoneIdiom else { return }
+        tearDownMenuMagnify()   // leaving the title into a run — drop the menu magnify first
         manualPanActive = false
         zoomScale = storedZoomScale
         zoomOriginPt = .zero
@@ -4610,8 +4757,7 @@ final class GameHandoff: NSObject, NSUserActivityDelegate {
     /// Deliver an incoming Handoff activity (from `scene(_:continue:)` or a cold launch). Validates
     /// the type, stashes the payload, and notifies any live receiver.
     static func deliver(_ activity: NSUserActivity) {
-        guard activity.activityType == activityType else { NSLog("[HANDOFF] deliver: wrong type \(activity.activityType)"); return }
-        NSLog("[HANDOFF] deliver: stashing activity, posting notification")
+        guard activity.activityType == activityType else { return }
         pendingActivity = activity
         NotificationCenter.default.post(name: didReceiveNotification, object: nil)
     }

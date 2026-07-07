@@ -61,6 +61,11 @@ extern void ceSetExamineBox(short x, short y, short width, short height);
 // iOS port (Brogue SE): asked before drawing an examine description box; true → skip it
 // (zoomed-in play-field examine, where the box would tear against the 1× sidebar/chrome).
 extern boolean ceShouldSuppressExamineBox(void);
+// iOS port (Brogue SE): reports the window rect of a modal menu overlay (a buttoned text box —
+// e.g. the title's variant / mode dialogs) so the iPhone host can auto-magnify it to a readable,
+// tappable size. clearMenuBox → no menu shown. Only SE emits these; CE/Classic hosts ignore.
+extern void ceSetMenuBox(short x, short y, short width, short height);
+extern void ceClearMenuBox(void);
 // The rect of the most recently drawn text box (window cells), captured in printTextBox
 // and read at the examine site below. Overwritten by every printTextBox, but the examine
 // path reads it immediately after drawing, before anything else can draw a box.
@@ -3813,6 +3818,11 @@ boolean getInputTextString(char *inputText,
     screenDisplayBuffer dbuf;
     SavedDisplayBuffer rbuf;
 
+    // iOS port (Brogue SE): a text-input prompt (e.g. "Save recording as…") is NOT a button menu,
+    // so it reports no rect. It can follow a menu directly (save/quit flow) without returning to
+    // play, leaving the iPhone menu magnify engaged on a stale rect — which tears this prompt.
+    ceClearMenuBox();
+
     // handle defaultEntry values exceeding maxLength
     promptSuffixLen = strlen(promptSuffix);
     defaultEntrylengthOverflow = strlen(defaultEntry) + promptSuffixLen - maxLength;
@@ -5356,6 +5366,12 @@ static void printDiscoveries(short category, short count, unsigned short itemCha
 
 /// @brief Display the feats screen. Lists all feats and their achievement status.
 void displayFeatsScreen() {
+    // iOS port (Brogue SE): full-screen 1× info view. Drop the menu magnify AND mark a non-play
+    // uiMode so the host also suspends the dungeon pinch-zoom (gameplayControlsActive=false);
+    // otherwise the view draws into the zoomed dungeon cells and appears magnified. Restored below.
+    ceClearMenuBox();
+    const CBrogueGameEvent fsvOldUiMode = uiMode;
+    uiMode = CBrogueGameEventInMenu;
     char availableColorEscape[5] = "", achievedColorEscape[5] = "", failedColorEscape[5] = "";
     encodeMessageColor(availableColorEscape, 0, &white);
     encodeMessageColor(achievedColorEscape, 0, &advancementMessageColor);
@@ -5405,9 +5421,15 @@ void displayFeatsScreen() {
     overlayDisplayBuffer(&dbuf);
     waitForKeystrokeOrMouseClick();
     restoreDisplayBuffer(&rbuf);
+    uiMode = fsvOldUiMode;   // iOS port (Brogue SE): restore play state → dungeon zoom resumes on exit
 }
 
 void printDiscoveriesScreen() {
+    // iOS port (Brogue SE): full-screen 1× info view — see displayFeatsScreen. Drop the menu magnify
+    // and suspend the dungeon pinch-zoom (non-play uiMode) so the list renders at 1×.
+    ceClearMenuBox();
+    const CBrogueGameEvent fsvOldUiMode = uiMode;
+    uiMode = CBrogueGameEventInMenu;
     short i, j, y;
     const SavedDisplayBuffer rbuf = saveDisplayBuffer();
 
@@ -5443,6 +5465,7 @@ void printDiscoveriesScreen() {
     waitForKeystrokeOrMouseClick();
 
     restoreDisplayBuffer(&rbuf);
+    uiMode = fsvOldUiMode;   // iOS port (Brogue SE): restore play state → dungeon zoom resumes on exit
 }
 
 void printHighScores(boolean hiliteMostRecent) {
@@ -6184,7 +6207,12 @@ short printTextBox(char *textBuf, short x, short y, short width,
         x2 = x;
     }
 
-    while (((lineCount = wrapText(NULL, textBuf, width)) + y2) >= ROWS - 2 && width < COLS-5) {
+    // iOS port (Brogue SE): reserve room for the action buttons drawn below the text. They can wrap
+    // to a second (double-spaced) line, so without this a long description (e.g. staff of firebolt /
+    // frost) leaves the text just fitting but pushes the wrapped button line — "call"/"relabel" —
+    // onto the flavor/button chrome rows, where it's lost. Widen the box until text + buttons fit.
+    const short buttonReserve = (buttonCount > 0) ? 4 : 0;
+    while (((lineCount = wrapText(NULL, textBuf, width)) + y2 + buttonReserve) >= ROWS - 2 && width < COLS-5) {
         // While the text doesn't fit and the width doesn't fill the screen, increase the width.
         width++;
         if (x2 + (width / 2) > COLS / 2) {
@@ -6230,6 +6258,8 @@ short printTextBox(char *textBuf, short x, short y, short width,
     gLastTextBoxHeight = lineCount + padLines;
 
     if (buttonCount > 0) {
+        // iOS port (Brogue SE): the iPhone menu-magnify rect is reported inside buttonInputLoop
+        // (the single choke point for all button menus), so nothing to report here.
         return buttonInputLoop(buttons, buttonCount, x2, y2, width, by - y2 + 1 + padLines, NULL);
     } else {
         return -1;

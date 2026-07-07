@@ -45,7 +45,7 @@ class SKViewPort: SKView {
     /// edge is inset by this much, and the trailing (notch) safe-area
     /// reservation is reduced by the same amount. Equal-and-opposite, so the
     /// grid keeps its width and simply slides right by this amount.
-    @objc public static let gridRightShift: CGFloat = 16
+    @objc public static let gridRightShift: CGFloat = 12
 
     /// Height of the playable area in points, accounting for whether padding is currently
     /// applied. Used by touch→cell math in both Swift and Obj-C.
@@ -155,11 +155,32 @@ class SKViewPort: SKView {
     /// `unzoomedPoint:` call sites (the CE/SE host bridge, Classic RogueDriver) are
     /// undisturbed; the reach decision travels per-touch-event, never a shared flag.
     @objc public func unzoomedPoint(_ point: CGPoint, reach: Bool) -> CGPoint {
-        let scale = rogueScene.zoomScale
-        guard scale != 1.0 else { return point }
         let width = effectiveWidthPoints
         let height = effectiveHeightPoints
         guard width > 0, height > 0 else { return point }
+        // Menu magnify (title / menus): only the reported menu cells are scaled (into a separate
+        // container); the rest of the screen stays 1×. Invert taps that land within the magnified
+        // menu's screen rect; pass everything else through unchanged. Checked before the gameplay
+        // zoom branch because the dungeon scale is 1× while a menu is up.
+        if rogueScene.menuMagnifyActive {
+            let s = rogueScene.menuMagnifyScale
+            guard s != 1.0 else { return point }
+            let ox = rogueScene.menuMagnifyOriginXPoints
+            let oy = rogueScene.menuMagnifyOriginYPoints
+            let cw = width / 100.0
+            let ch = height / 34.0
+            let li = leftInsetPoints
+            let left   = s * (li + CGFloat(rogueScene.menuColMin)     * cw) + ox
+            let right  = s * (li + CGFloat(rogueScene.menuColMax + 1) * cw) + ox
+            let top    = s * (CGFloat(rogueScene.menuRowMin)     * ch) + oy
+            let bottom = s * (CGFloat(rogueScene.menuRowMax + 1) * ch) + oy
+            if point.x >= left, point.x <= right, point.y >= top, point.y <= bottom {
+                return CGPoint(x: (point.x - ox) / s, y: (point.y - oy) / s)
+            }
+            return point
+        }
+        let scale = rogueScene.zoomScale
+        guard scale != 1.0 else { return point }
         // Which cell would this be at 1×? Only invert inside the zoomable map — but when
         // reaching behind the interface, extend the bounds over the surrounding HUD chrome:
         // cols 0…20 (sidebar), rows 0…2 (message log), and row 32 = ROWS-2 (flavor line).

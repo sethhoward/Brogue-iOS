@@ -108,6 +108,13 @@ NS_ASSUME_NONNULL_BEGIN
 // implement the fit behavior can ignore it and keep the 1× zoom-out.
 - (void)setExamineBox:(NSInteger)x y:(NSInteger)y width:(NSInteger)width height:(NSInteger)height;
 
+// Reports the WINDOW-cell rect of a modal menu overlay (title menu / dialogs; later inventory
+// and in-game menus), so an iPhone host can auto-magnify it to a readable, tappable size —
+// instantly, no camera movement. Reports overwrite as the active menu changes. clearMenuBox
+// signals no menu is shown. Hosts that don't magnify menus can ignore both.
+- (void)setMenuBox:(NSInteger)x y:(NSInteger)y width:(NSInteger)width height:(NSInteger)height;
+- (void)clearMenuBox;
+
 // Asked by the cursor examine loop before drawing a description box. Returns YES when the
 // box should be skipped — the iPhone map is zoomed in and this examine came from a
 // play-field drag-hold, where the box (drawn in the magnified dungeon cells) would tear

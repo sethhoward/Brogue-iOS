@@ -323,6 +323,12 @@ short processButtonInput(buttonState *state, boolean *canceled, rogueEvent *even
 }
 
 // Displays a bunch of buttons and collects user input.
+// iOS port (iBrogue): report the active menu's window rect to the host for the iPhone menu
+// magnify. buttonInputLoop is the single choke point for every button menu (inventory, action
+// menu, and all printTextBox dialogs), so reporting here covers them all with no per-site hooks.
+// Teardown is host-driven when play resumes; nested menus just overwrite, no clear between.
+extern void ceSetMenuBox(short x, short y, short width, short height);
+
 // Returns the index number of the chosen button, or -1 if the user cancels.
 // A window region is described by winX, winY, winWidth and winHeight.
 // Clicking outside of that region will constitute canceling.
@@ -346,6 +352,16 @@ short buttonInputLoop(brogueButton *buttons,
 
     CBrogueGameEvent oldUiMode = uiMode;
     uiMode = CBrogueGameEventInMenu;    // tablet ui mode
+    // iOS port (iBrogue): iPhone menu magnify. Expand by a 1-cell "trim" HORIZONTALLY only, so a
+    // printTextBox dialog's side shadow (the rectangularShading halo) scales with the panel instead
+    // of being left behind at 1× (the dark seam beside the box). NOT vertically: the tall inventory
+    // list has no shadow, so top/bottom trim would just add unneeded rows and shrink the fit scale.
+    {
+        const short trim = 1;
+        short mx = max(0, winX - trim);
+        short mw = min(COLS - 1, winX + winWidth - 1 + trim) - mx + 1;
+        ceSetMenuBox(mx, winY, mw, winHeight);
+    }
     do {
         screenDisplayBuffer dbuf;
         clearDisplayBuffer(&dbuf);

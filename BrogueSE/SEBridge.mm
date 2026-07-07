@@ -873,6 +873,16 @@ void ceSetExamineBox(short x, short y, short width, short height) {
     if (gHost) [gHost setExamineBox:(NSInteger)x y:(NSInteger)y width:(NSInteger)width height:(NSInteger)height];
 }
 
+// iOS port (Brogue SE): forwards a modal menu overlay's window rect so the iPhone host can
+// auto-magnify it (phase 0: the title menu & its dialogs). clearMenuBox → no menu shown.
+void ceSetMenuBox(short x, short y, short width, short height) {
+    if (gHost) [gHost setMenuBox:(NSInteger)x y:(NSInteger)y width:(NSInteger)width height:(NSInteger)height];
+}
+
+void ceClearMenuBox(void) {
+    if (gHost) [gHost clearMenuBox];
+}
+
 // iOS port (Brogue SE): the examine loop asks this before drawing a description box; YES means
 // skip it (zoomed-in play-field examine, where the box would tear against the 1× sidebar).
 boolean ceShouldSuppressExamineBox(void) {

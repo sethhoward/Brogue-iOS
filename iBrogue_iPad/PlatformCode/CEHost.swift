@@ -115,6 +115,14 @@ final class CEHost: NSObject, BrogueCEHost {
         viewController?.setExamineBox(x, y: y, width: width, height: height)
     }
 
+    func setMenuBox(_ x: Int, y: Int, width: Int, height: Int) {
+        viewController?.setMenuBox(x, y: y, width: width, height: height)
+    }
+
+    func clearMenuBox() {
+        viewController?.clearMenuBox()
+    }
+
     func shouldSuppressExamineBox() -> Bool {
         viewController?.shouldSuppressExamineBox() ?? false
     }

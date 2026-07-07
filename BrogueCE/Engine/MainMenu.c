@@ -180,7 +180,8 @@ static void antiAlias(unsigned char mask[COLS][ROWS]) {
 }
 
 #define MENU_TITLE_OFFSET_X (-7)
-#define MENU_TITLE_OFFSET_Y (-2)
+// iOS port (iBrogue): title raised to sit higher above the menu on iPhone (matches Brogue SE).
+#define MENU_TITLE_OFFSET_Y (-7)
 
 static void initializeMenuFlames(boolean includeTitle,
                           const color *colors[COLS][(ROWS + MENU_FLAME_ROW_PADDING)],
@@ -249,7 +250,7 @@ static void initializeMenuFlames(boolean includeTitle,
                 "#### ####",
             };
             // ~half the height of the "E" in BROGUE (which is ~14 rows tall).
-            const short ceRows = 7, ceCols = 9, ceBaseX = 78, ceBaseY = 9;
+            const short ceRows = 7, ceCols = 9, ceBaseX = 78, ceBaseY = 4;   // iOS port (iBrogue): follow the raised title
             for (short cy = 0; cy < ceRows; cy++) {
                 for (short cx = 0; cx < ceCols; cx++) {
                     if (ceAccent[cy][cx] != ' ') {
@@ -547,6 +548,44 @@ static void redrawMainMenuButtons(buttonState *menu, screenDisplayBuffer *button
 
 #define FLYOUT_X 59
 
+// iOS port (iBrogue): report the currently-shown title menu's bounding rect (the main menu, plus
+// the flyout when one is open) to the host, so iPhone can auto-magnify it to a readable, tappable
+// size. Called each title redraw; the host dedupes identical rects. Buttoned dialogs (game mode /
+// variant) report their own rect from buttonInputLoop; when one closes, the next redraw here
+// re-reports the menu. A 1-cell trim carries the menu's shadow. Coordinates are window cells.
+extern void ceSetMenuBox(short x, short y, short width, short height);
+extern void ceClearMenuBox(void);
+
+static void reportTitleMenuBox(buttonState *mainMenu, buttonState *flyoutMenu, boolean flyoutActive) {
+    short minX = COLS, minY = ROWS, maxX = 0, maxY = 0;
+    for (short i = 0; i < mainMenu->buttonCount; i++) {
+        if (!(mainMenu->buttons[i].flags & B_DRAW)) continue;
+        short w = strLenWithoutEscapes(mainMenu->buttons[i].text);
+        minX = min(minX, mainMenu->buttons[i].x);
+        maxX = max(maxX, (short)(mainMenu->buttons[i].x + w));
+        minY = min(minY, mainMenu->buttons[i].y);
+        maxY = max(maxY, mainMenu->buttons[i].y);
+    }
+    if (flyoutActive) {
+        for (short i = 0; i < flyoutMenu->buttonCount; i++) {
+            if (!(flyoutMenu->buttons[i].flags & B_DRAW)) continue;
+            short w = strLenWithoutEscapes(flyoutMenu->buttons[i].text);
+            minX = min(minX, flyoutMenu->buttons[i].x);
+            maxX = max(maxX, (short)(flyoutMenu->buttons[i].x + w));
+            minY = min(minY, flyoutMenu->buttons[i].y);
+            maxY = max(maxY, flyoutMenu->buttons[i].y);
+        }
+    }
+    if (maxX > minX && maxY >= minY) {
+        const short trim = 1;
+        short x0 = max(0, minX - trim);
+        short y0 = max(0, minY - trim);
+        short x1 = min(COLS - 1, maxX - 1 + trim);
+        short y1 = min(ROWS - 1, maxY + trim);
+        ceSetMenuBox(x0, y0, (short)(x1 - x0 + 1), (short)(y1 - y0 + 1));
+    }
+}
+
 static void titleMenu() {
     signed short flames[COLS][(ROWS + MENU_FLAME_ROW_PADDING)][3]; // red, green and blue
     signed short colorSources[MENU_FLAME_COLOR_SOURCE_COUNT][4]; // red, green, blue, and rand, one for each color source (no more than MENU_FLAME_COLOR_SOURCE_COUNT).
@@ -619,6 +658,8 @@ static void titleMenu() {
                     mainMenu.buttonDepressed = -1;
                     mainMenu.buttonFocused = -1;
                 }
+                // iOS port (iBrogue): report the visible menu rect for the iPhone auto-magnify.
+                reportTitleMenuBox(&mainMenu, &flyoutMenu, isFlyoutActive());
                 // Pause briefly.
                 if (pauseBrogue(MENU_FLAME_UPDATE_DELAY, (PauseBehavior){.interuptForMouseMove = true})) {
                     // There was input during the pause! Get the input.
@@ -671,6 +712,10 @@ static void titleMenu() {
         } while (theEvent.eventType != MOUSE_UP && theEvent.eventType != KEYSTROKE && (isFlyoutActive() || rogue.nextGame == NG_NOTHING));
     } while (isFlyoutActive() || rogue.nextGame == NG_NOTHING);
     drawMenuFlames(flames, mask);
+    // iOS port (iBrogue): leaving the title menu (into a game, or a sub-screen that doesn't report
+    // its own rect — file browser, high scores, recordings). Clear the iPhone menu magnify so its
+    // borrowed cells don't corrupt that next screen; returning to the title re-magnifies above.
+    ceClearMenuBox();
 }
 
 // Closes Brogue without any further prompts, animations, or user interaction.

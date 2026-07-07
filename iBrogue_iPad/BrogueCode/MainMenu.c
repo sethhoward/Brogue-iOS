@@ -35,7 +35,7 @@
 #define MENU_FLAME_UPDATE_DELAY			50
 #define MENU_FLAME_ROW_PADDING			2
 #define MENU_TITLE_OFFSET_X				(-4)
-#define MENU_TITLE_OFFSET_Y				(-2)	// iOS port (iBrogue): nudged title up one cell
+#define MENU_TITLE_OFFSET_Y				(-5)	// iOS port (iBrogue): raised to sit above the menu on iPhone (matches Brogue SE/CE)
 
 #define MENU_FLAME_COLOR_SOURCE_COUNT	1136
 
@@ -260,6 +260,11 @@ void initializeMenuFlames(boolean includeTitle,
 	
 }
 
+// iOS port (iBrogue): iPhone menu magnify — report the flat title menu's rect each redraw and
+// clear it on exit. (buttonInputLoop reports in-game menus; the title uses processButtonInput.)
+extern void setBrogueMenuBox(short x, short y, short width, short height);
+extern void clearBrogueMenuBox(void);
+
 void titleMenu() {
 	signed short flames[COLS][(ROWS + MENU_FLAME_ROW_PADDING)][3]; // red, green and blue
 	signed short colorSources[MENU_FLAME_COLOR_SOURCE_COUNT][4]; // red, green, blue, and rand, one for each color source (no more than MENU_FLAME_COLOR_SOURCE_COUNT).
@@ -379,7 +384,17 @@ void titleMenu() {
 		drawMenuFlames(flames, mask);
 		overlayDisplayBuffer(shadowBuf, NULL);
 		overlayDisplayBuffer(state.dbuf, NULL);
-		
+
+		// iOS port (iBrogue): report the title menu rect (+1-cell shadow trim) for iPhone magnify.
+		{
+			const short trim = 1;
+			short mx = max(0, x - trim);
+			short my = max(0, y - trim);
+			short mw = min(COLS - 1, x + 20 - 1 + trim) - mx + 1;
+			short mh = min(ROWS - 1, y + (b * 2 - 1) - 1 + trim) - my + 1;
+			setBrogueMenuBox(mx, my, mw, mh);
+		}
+
 		// Pause briefly.
 		if (pauseBrogue(MENU_FLAME_UPDATE_DELAY)) {
 			// There was input during the pause! Get the input.
@@ -403,6 +418,9 @@ void titleMenu() {
 		
 	} while (button == -1 && rogue.nextGame == NG_NOTHING);
 	drawMenuFlames(flames, mask);
+	// iOS port (iBrogue): leaving the title menu — clear the iPhone menu magnify so a following
+	// screen (file manager, Game Center, high scores, recordings) isn't corrupted by stale cells.
+	clearBrogueMenuBox();
 	if (button != -1) {
         if (button == fileManagementButton) {
             // iOS port (iBrogue): open the native file manager and stay on the title.
