@@ -1705,6 +1705,11 @@ enum tileFlags {
 // executeKeystroke); no physical-key binding. Value shared verbatim by CE and Classic so the one
 // button code works in every engine.
 #define CONTINUE_TRAVEL_KEY (128+21)
+// iOS port (Brogue SE): game handoff — synthetic, button-only code injected by the host on a confirmed
+// device handoff. Handled in executeKeystroke: ends the run silently (no gameOver bookkeeping), deletes
+// the resumable save, and returns to the title so the run lives only on the receiving device. Value
+// shared by CE and SE. See docs/design/game-handoff.md.
+#define HANDOFF_RELINQUISH_KEY (128+22)
 #define SEED_KEY            '~'
 #define EASY_MODE_KEY       '&'
 #define ESCAPE_KEY          '\033'

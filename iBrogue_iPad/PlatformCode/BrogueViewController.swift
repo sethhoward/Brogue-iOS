@@ -184,6 +184,13 @@ final class BrogueViewController: UIViewController {
     /// Set when a received handoff is waiting for the engine to reach its title so it can be booted
     /// into the run (consumed in `setCEAtTitle`). See docs/design/game-handoff.md.
     private var handoffResumePending: EngineKind?
+    /// True on the SOURCE while a handoff transfer is in flight: input is starved so the run can't
+    /// advance a turn that would be lost on relinquish. See docs/design/game-handoff.md.
+    private var handoffInFlight = false
+    /// Matches HANDOFF_RELINQUISH_KEY in each engine's Rogue.h — injected to end the run silently once
+    /// the receiver confirms (deep ACK).
+    private static let handoffRelinquishKey: UInt8 = 128 + 22
+    private weak var handoffOverlay: UIView?
     /// The background thread running the active engine's `rogueMain`.
     private var engineThread: Thread?
     /// Set while a title-screen engine swap is in flight (awaiting clean exit).
@@ -833,7 +840,9 @@ final class BrogueViewController: UIViewController {
     }
     @IBOutlet fileprivate weak var inputTextField: UITextField!
     @IBOutlet fileprivate weak var showInventoryButton: UIButton!
-    @IBOutlet fileprivate weak var leaderBoardButton: UIButton!
+    // Optional: the Game Center leaderboard button was removed from Main.storyboard, so this outlet
+    // may be unconnected. All accesses use optional-chaining so its absence can't crash launch.
+    @IBOutlet fileprivate weak var leaderBoardButton: UIButton?
     @IBOutlet fileprivate weak var seedButton: UIButton!
 
     /// Title-screen-only button (created in code, no art asset) that opens the
@@ -853,13 +862,13 @@ final class BrogueViewController: UIViewController {
                     self.inputTextField.resignFirstResponder()
                     self.showInventoryButton.isHidden = true
                     // Game Center + File Management moved into the Classic title menu.
-                    self.leaderBoardButton.isHidden = true
+                    self.leaderBoardButton?.isHidden = true
                     self.seedButton.isHidden = false
                     self.escButtonWanted = false
                     self.refreshEscButtonVisibility()
                     self.resetZoom()
                 case .startNewGame, .openGame, .beginOpenGame:
-                    self.leaderBoardButton.isHidden = true
+                    self.leaderBoardButton?.isHidden = true
                     self.seedButton.isHidden = true
                     self.manageFilesButton?.isHidden = true
                     self.seedKeyDown = false
@@ -907,10 +916,17 @@ final class BrogueViewController: UIViewController {
         NotificationCenter.default.addObserver(self, selector: #selector(handoffDidArrive),
                                                name: GameHandoff.didReceiveNotification, object: nil)
         // Handoff (Continuity): source-side confirmation when a pickup finishes serving (Phase 3a).
+        gameHandoff.onServeBegan = { [weak self] in self?.beginHandoffFreeze() }
         gameHandoff.onServeComplete = { [weak self] ok, detail in
-            self?.presentHandoffAlert(title: ok ? "Handed Off ✓" : "Handoff Interrupted",
-                                      message: ok ? "The other device received the run (ACK). This device still has it (relinquish comes later)."
-                                                  : "The transfer didn't complete; your run is untouched.\n\(detail)")
+            guard let self = self else { return }
+            if ok {
+                // Receiver has the run — relinquish here so it lives in one place (drops to title).
+                self.relinquishAfterHandoff()
+            } else {
+                self.endHandoffFreeze()
+                self.presentHandoffAlert(title: "Handoff Interrupted",
+                                         message: "The transfer didn't complete; your run is untouched.\n\(detail)")
+            }
         }
 
         currentEngine = BrogueViewController.persistedEngine()
@@ -1513,7 +1529,7 @@ final class BrogueViewController: UIViewController {
 
             // CE renders its own menu (New Game / Play / View); hide the Classic
             // overlay buttons (leaderboard is Game Center — Classic only).
-            self.leaderBoardButton.isHidden = true
+            self.leaderBoardButton?.isHidden = true
             self.seedButton.isHidden = true
             self.manageFilesButton?.isHidden = true
             self.showInventoryButton.isHidden = true
@@ -1753,6 +1769,70 @@ final class BrogueViewController: UIViewController {
         case .se: se_requestTermination()
         case .classic: setClassicTerminationRequested(true)
         }
+    }
+
+    // MARK: - Handoff source: freeze during transfer, relinquish on ACK (Phase 4)
+
+    /// Freeze the run while a handoff transfer is in flight: starve input so no turn advances (a turn
+    /// taken mid-transfer would be lost on relinquish), and show a "Handing off…" overlay.
+    private func beginHandoffFreeze() {
+        synchronized {
+            handoffInFlight = true
+            keyEvents.removeAll()
+            touchEvents.removeAll()
+        }
+        showHandoffOverlay()
+    }
+
+    /// Transfer failed/aborted — unfreeze and resume in place; nothing was lost.
+    private func endHandoffFreeze() {
+        synchronized {
+            handoffInFlight = false
+            keyEvents.removeAll()
+            touchEvents.removeAll()
+        }
+        hideHandoffOverlay()
+    }
+
+    /// Receiver confirmed (deep ACK) — relinquish: inject the relinquish key so the engine ends the run
+    /// silently, deletes its save, and drops to title; also clear this engine's resume marker.
+    private func relinquishAfterHandoff() {
+        synchronized {
+            keyEvents.removeAll()
+            touchEvents.removeAll()
+            handoffInFlight = false   // let the injected relinquish key through
+            keyEvents.append(QueuedKeyEvent(code: Self.handoffRelinquishKey, shift: false, control: false, raw: false))
+        }
+        switch currentEngine {
+        case .se: se_clearResumeMarker()
+        case .ce: ce_clearResumeMarker()
+        case .classic: break
+        }
+        hideHandoffOverlay()
+    }
+
+    private func showHandoffOverlay() {
+        guard handoffOverlay == nil else { return }
+        let overlay = UIView(frame: view.bounds)
+        overlay.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        overlay.backgroundColor = UIColor.black.withAlphaComponent(0.6)
+        let label = UILabel()
+        label.text = "Handing off…"
+        label.textColor = .white
+        label.font = .systemFont(ofSize: 20, weight: .semibold)
+        label.translatesAutoresizingMaskIntoConstraints = false
+        overlay.addSubview(label)
+        NSLayoutConstraint.activate([
+            label.centerXAnchor.constraint(equalTo: overlay.centerXAnchor),
+            label.centerYAnchor.constraint(equalTo: overlay.centerYAnchor),
+        ])
+        view.addSubview(overlay)
+        handoffOverlay = overlay
+    }
+
+    private func hideHandoffOverlay() {
+        handoffOverlay?.removeFromSuperview()
+        handoffOverlay = nil
     }
 
     /// Called by the CE bridge: true only while the CE title screen is showing.
@@ -3630,7 +3710,7 @@ extension BrogueViewController {
     }
 
     @objc func hasTouchEvent() -> Bool {
-        synchronized { !touchEvents.isEmpty }
+        synchronized { !handoffInFlight && !touchEvents.isEmpty }
     }
 }
 
@@ -3830,7 +3910,7 @@ extension BrogueViewController {
     }
 
     @objc func hasKeyEvent() -> Bool {
-        synchronized { !keyEvents.isEmpty }
+        synchronized { !handoffInFlight && !keyEvents.isEmpty }
     }
 }
 
@@ -4502,6 +4582,9 @@ final class GameHandoff: NSObject, NSUserActivityDelegate {
         NotificationCenter.default.post(name: didReceiveNotification, object: nil)
     }
 
+    /// Called (on main) when the source begins serving a pickup — freeze the run until it resolves.
+    var onServeBegan: (() -> Void)?
+
     /// Called (on main) after the source finishes serving a pickup — `ok` true if the receiver ACKed;
     /// `detail` carries the failure reason otherwise (for diagnosing device-only bugs).
     var onServeComplete: ((_ ok: Bool, _ detail: String) -> Void)?
@@ -4544,6 +4627,7 @@ final class GameHandoff: NSObject, NSUserActivityDelegate {
     /// The receiver called `getContinuationStreams`; serve the payload over the pair. Phase 3a sends a
     /// placeholder to prove the channel end-to-end; Phase 3b streams the flushed recording bytes.
     func userActivity(_ userActivity: NSUserActivity, didReceive inputStream: InputStream, outputStream: OutputStream) {
+        DispatchQueue.main.async { [weak self] in self?.onServeBegan?() }   // freeze the source run
         // Flushing the recording is engine-thread work + a file read, so do it off the main thread,
         // then stream the exact-state bytes to the receiver.
         let lineage = currentLineage

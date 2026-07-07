@@ -45,6 +45,10 @@ extern void ceSetTravelPending(boolean pending);
 // during playback. Called from commitDraws. See docs/design/game-handoff.md.
 extern void ceSetGameContext(short depth, unsigned long turn, uint64_t seed);
 
+// iOS port (iBrogue): the live recording's file path (defined in Recordings.c). Used by the game-handoff
+// relinquish (HANDOFF_RELINQUISH_KEY) to delete the resumable save on the source. See docs/design/game-handoff.md.
+extern char currentFilePath[BROGUE_FILENAME_MAX];
+
 // iOS port (iBrogue): reports whether a creature/item description box is showing
 // in the cursor loop, so the host can suspend pinch-zoom to 1×. Bridge dedupes.
 extern void ceSetExamining(boolean examining);
@@ -3708,6 +3712,18 @@ void executeKeystroke(signed long keystroke, boolean controlKey, boolean shiftKe
                 rogue.quit = true;
                 gameOver("Quit", true);
             }
+            break;
+        case HANDOFF_RELINQUISH_KEY:
+            // iOS port (Brogue SE): the run was handed off to another device. End it here with NO
+            // gameOver bookkeeping (no death/quit history, high score, or saved recording), delete the
+            // resumable save so this device can't continue it, and return to the title -- the same clean
+            // exit path NEW_GAME_KEY uses. See docs/design/game-handoff.md.
+            if (currentFilePath[0] != '\0') {
+                remove(currentFilePath);
+                currentFilePath[0] = '\0';   // block any later flush from recreating the save
+            }
+            rogue.nextGame = NG_NOTHING;
+            rogue.gameHasEnded = true;
             break;
         case GRAPHICS_KEY:
             if (hasGraphics) {

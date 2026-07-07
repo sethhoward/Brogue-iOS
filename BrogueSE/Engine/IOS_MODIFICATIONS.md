@@ -32,6 +32,21 @@ See `BrogueCE/Engine/IOS_MODIFICATIONS.md` (faithful CE) and
 
 ## Change log
 
+### 2026-07-06 — Game handoff (Phase 4): silent relinquish key (end a handed-off run, no bookkeeping)
+
+**What.** When a run is handed off to another device, the source ends it *silently* so the run lives in
+one place and leaves no trace on the source. Added `HANDOFF_RELINQUISH_KEY` (a synthetic, button-only key
+the host injects on the deep ACK), handled in `executeKeystroke` beside NEW_GAME_KEY/QUIT_KEY. See
+`docs/design/game-handoff.md`.
+
+- **`Rogue.h`:** `#define HANDOFF_RELINQUISH_KEY (128+22)` (beside CONTINUE_TRAVEL_KEY; value shared with CE).
+- **`IO.c` `executeKeystroke`:** the new case ends the run with NO `gameOver` bookkeeping (no death/quit
+  run-history, high score, or saved recording — unlike QUIT_KEY): `remove(currentFilePath)` then blank it
+  (so no later flush recreates the resumable save), `rogue.nextGame = NG_NOTHING`, `rogue.gameHasEnded =
+  true` — the same clean exit NEW_GAME_KEY uses. Declares `extern char currentFilePath[]`.
+- **Host side:** starves input during the transfer (freeze), injects this key on the ACK, then clears the
+  resume marker. No RNG or save-format impact; the relinquish key is never recorded.
+
 ### 2026-07-06 — Game handoff (Phase 3b): flush the live recording on demand for the transfer
 
 **What.** The handoff source streams the *exact-state* recording to the receiving device. Added a
