@@ -173,6 +173,10 @@ void ce_clearResumeMarker(void);
 // receiving device. nil if there's no live game or the flush times out. See docs/design/game-handoff.md.
 NSData * _Nullable ce_flushRecordingForHandoff(void);
 
+// iOS port (iBrogue): the engine's recording/save-compatibility version (BROGUE_VERSION_STRING),
+// identical across builds of the same source — the handoff version-guard token. See docs/design/game-handoff.md.
+const char *ce_recordingVersion(void);
+
 #ifdef __cplusplus
 }
 #endif

@@ -107,6 +107,7 @@ static dispatch_semaphore_t gSEHandoffFlushDone = nil;
 extern "C" {
 extern playerCharacter rogue;
 extern char currentFilePath[BROGUE_FILENAME_MAX];
+extern const char *brogueVersion;   // iOS port (Brogue SE): engine recording version (save-compat token) for handoff
 }
 
 // CE's commitDraws() only re-plots cells that changed vs its previouslyPlottedCells
@@ -436,6 +437,13 @@ extern "C" __attribute__((visibility("default"))) NSData * _Nullable se_flushRec
     gSEHandoffFlushDone = nil;
     if (timedOut || currentFilePath[0] == '\0') return nil;
     return [NSData dataWithContentsOfFile:[NSString stringWithUTF8String:currentFilePath]];
+}
+
+// iOS port (Brogue SE): the engine's recording/save-compatibility version string (BROGUE_VERSION_STRING).
+// Identical across all builds of the same source, so the handoff guard uses it instead of the app
+// version+build (which changes every build and wrongly blocks cross-device/cross-platform handoff).
+extern "C" __attribute__((visibility("default"))) const char *se_recordingVersion(void) {
+    return brogueVersion;
 }
 
 // iOS port (Brogue SE): host hook (UI thread) — drop a stale resume marker when the app survived

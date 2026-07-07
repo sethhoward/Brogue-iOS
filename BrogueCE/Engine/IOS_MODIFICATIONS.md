@@ -28,6 +28,15 @@ covers the separate Classic engine that ships in the app target).
 
 ## Change log
 
+### 2026-07-07 — Game handoff: engine recording-version accessor (cross-platform version guard)
+
+**What.** The CE half (see `BrogueSE/Engine/IOS_MODIFICATIONS.md` for the rationale). The handoff guard
+compares the engine recording version (BROGUE_VERSION_STRING) instead of the app version+build, so
+differing build numbers no longer block cross-device / cross-platform handoff. Bridge/host only.
+
+- **`CEBridge.mm`:** `ce_recordingVersion()` returns `brogueVersion`; declared in `BrogueCEHost.h`.
+- **Determinism:** read-only; no RNG, no save fields.
+
 ### 2026-07-06 — Game handoff (Phase 4): silent relinquish key (end a handed-off run, no bookkeeping)
 
 **What.** The CE half of the handoff relinquish (see `BrogueSE/Engine/IOS_MODIFICATIONS.md` for the full

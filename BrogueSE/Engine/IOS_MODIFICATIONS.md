@@ -32,6 +32,17 @@ See `BrogueCE/Engine/IOS_MODIFICATIONS.md` (faithful CE) and
 
 ## Change log
 
+### 2026-07-07 — Game handoff: engine recording-version accessor (cross-platform version guard)
+
+**What.** The handoff compatibility guard now compares the engine's recording/save-version string
+(BROGUE_VERSION_STRING) instead of the app version+build — the build number changes every build, so the
+old proxy wrongly blocked cross-device / cross-platform handoff (iPhone→Mac). Bridge/host only. See
+`docs/design/game-handoff.md`.
+
+- **`SEBridge.mm`:** `se_recordingVersion()` returns `brogueVersion` (BROGUE_VERSION_STRING); declared in
+  `BrogueSEHost.h`. The host stamps it into the Handoff `userInfo` and compares it on receipt.
+- **Determinism:** read-only; no RNG, no save fields.
+
 ### 2026-07-06 — Game handoff (Phase 4): silent relinquish key (end a handed-off run, no bookkeeping)
 
 **What.** When a run is handed off to another device, the source ends it *silently* so the run lives in
