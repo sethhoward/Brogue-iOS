@@ -11,6 +11,21 @@
 		5E000000000000000000000C /* BrogueSE.framework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = 5E0000000000000000000009 /* BrogueSE.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 		BCE7E000000000000000F002 /* BrogueCE.ttf in Resources */ = {isa = PBXBuildFile; fileRef = BCE7E000000000000000F001 /* BrogueCE.ttf */; };
 		C5105B1616EE90A400E09905 /* GameSettings.m in Sources */ = {isa = PBXBuildFile; fileRef = C5105B1516EE90A300E09905 /* GameSettings.m */; };
+		C51D4ED62FFD820F007ED2BE /* SKMagView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C51D4ED52FFD820E007ED2BE /* SKMagView.swift */; };
+		C51D4ED82FFD830A007ED2BE /* GameHandoff.swift in Sources */ = {isa = PBXBuildFile; fileRef = C51D4ED72FFD830A007ED2BE /* GameHandoff.swift */; };
+		C51D4EDA2FFD8369007ED2BE /* BrogueViewController+IBActions.swift in Sources */ = {isa = PBXBuildFile; fileRef = C51D4ED92FFD8369007ED2BE /* BrogueViewController+IBActions.swift */; };
+		C51D4EDC2FFD84CC007ED2BE /* HapticsController.swift in Sources */ = {isa = PBXBuildFile; fileRef = C51D4EDB2FFD84CC007ED2BE /* HapticsController.swift */; };
+		C51D4EDE2FFD8659007ED2BE /* BrogueViewController+Hints.swift in Sources */ = {isa = PBXBuildFile; fileRef = C51D4EDD2FFD8659007ED2BE /* BrogueViewController+Hints.swift */; };
+		C51D4EE02FFD86E2007ED2BE /* BrogueViewController+Zoom.swift in Sources */ = {isa = PBXBuildFile; fileRef = C51D4EDF2FFD86E2007ED2BE /* BrogueViewController+Zoom.swift */; };
+		C51D4EE22FFD8814007ED2BE /* BrogueViewController+Touch.swift in Sources */ = {isa = PBXBuildFile; fileRef = C51D4EE12FFD8814007ED2BE /* BrogueViewController+Touch.swift */; };
+		C51D4EE42FFD8895007ED2BE /* BrogueViewController+Magnifier.swift in Sources */ = {isa = PBXBuildFile; fileRef = C51D4EE32FFD8895007ED2BE /* BrogueViewController+Magnifier.swift */; };
+		C51D4EE62FFD8916007ED2BE /* BrogueViewController+AppLifecycle.swift in Sources */ = {isa = PBXBuildFile; fileRef = C51D4EE52FFD8916007ED2BE /* BrogueViewController+AppLifecycle.swift */; };
+		C51D4EE82FFD898F007ED2BE /* BrogueViewController+Keyboard.swift in Sources */ = {isa = PBXBuildFile; fileRef = C51D4EE72FFD898F007ED2BE /* BrogueViewController+Keyboard.swift */; };
+		C51D4EEA2FFD8B63007ED2BE /* BrogueViewController+TitleUI.swift in Sources */ = {isa = PBXBuildFile; fileRef = C51D4EE92FFD8B63007ED2BE /* BrogueViewController+TitleUI.swift */; };
+		C51D4EEC2FFD8C0C007ED2BE /* BrogueViewController+Handoff.swift in Sources */ = {isa = PBXBuildFile; fileRef = C51D4EEB2FFD8C0C007ED2BE /* BrogueViewController+Handoff.swift */; };
+		C51D4EEE2FFD8CD3007ED2BE /* BrogueViewController+EngineSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = C51D4EED2FFD8CD3007ED2BE /* BrogueViewController+EngineSession.swift */; };
+		C51D4EF02FFD8DC6007ED2BE /* BrogueViewController+ActionButtons.swift in Sources */ = {isa = PBXBuildFile; fileRef = C51D4EEF2FFD8DC6007ED2BE /* BrogueViewController+ActionButtons.swift */; };
+		C51D4EF22FFD8FA9007ED2BE /* BrogueViewController+Layout.swift in Sources */ = {isa = PBXBuildFile; fileRef = C51D4EF12FFD8FA9007ED2BE /* BrogueViewController+Layout.swift */; };
 		C5213CD21B7533AE00E97A27 /* Arial Unicode.ttf in Resources */ = {isa = PBXBuildFile; fileRef = C5213CD11B75308E00E97A27 /* Arial Unicode.ttf */; };
 		C52686AB215C0B5D00033E3F /* PowerTables.c in Sources */ = {isa = PBXBuildFile; fileRef = C52686AA215C0B5D00033E3F /* PowerTables.c */; };
 		C52686AD215C0B8700033E3F /* Sqrt.c in Sources */ = {isa = PBXBuildFile; fileRef = C52686AC215C0B8700033E3F /* Sqrt.c */; };
@@ -119,6 +134,21 @@
 		BCE7E000000000000000F001 /* BrogueCE.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = BrogueCE.ttf; sourceTree = "<group>"; };
 		C5105B1416EE90A300E09905 /* GameSettings.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = GameSettings.h; sourceTree = "<group>"; };
 		C5105B1516EE90A300E09905 /* GameSettings.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = GameSettings.m; sourceTree = "<group>"; };
+		C51D4ED52FFD820E007ED2BE /* SKMagView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SKMagView.swift; sourceTree = "<group>"; };
+		C51D4ED72FFD830A007ED2BE /* GameHandoff.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GameHandoff.swift; sourceTree = "<group>"; };
+		C51D4ED92FFD8369007ED2BE /* BrogueViewController+IBActions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "BrogueViewController+IBActions.swift"; sourceTree = "<group>"; };
+		C51D4EDB2FFD84CC007ED2BE /* HapticsController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HapticsController.swift; sourceTree = "<group>"; };
+		C51D4EDD2FFD8659007ED2BE /* BrogueViewController+Hints.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "BrogueViewController+Hints.swift"; sourceTree = "<group>"; };
+		C51D4EDF2FFD86E2007ED2BE /* BrogueViewController+Zoom.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "BrogueViewController+Zoom.swift"; sourceTree = "<group>"; };
+		C51D4EE12FFD8814007ED2BE /* BrogueViewController+Touch.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "BrogueViewController+Touch.swift"; sourceTree = "<group>"; };
+		C51D4EE32FFD8895007ED2BE /* BrogueViewController+Magnifier.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "BrogueViewController+Magnifier.swift"; sourceTree = "<group>"; };
+		C51D4EE52FFD8916007ED2BE /* BrogueViewController+AppLifecycle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "BrogueViewController+AppLifecycle.swift"; sourceTree = "<group>"; };
+		C51D4EE72FFD898F007ED2BE /* BrogueViewController+Keyboard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "BrogueViewController+Keyboard.swift"; sourceTree = "<group>"; };
+		C51D4EE92FFD8B63007ED2BE /* BrogueViewController+TitleUI.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "BrogueViewController+TitleUI.swift"; sourceTree = "<group>"; };
+		C51D4EEB2FFD8C0C007ED2BE /* BrogueViewController+Handoff.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "BrogueViewController+Handoff.swift"; sourceTree = "<group>"; };
+		C51D4EED2FFD8CD3007ED2BE /* BrogueViewController+EngineSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "BrogueViewController+EngineSession.swift"; sourceTree = "<group>"; };
+		C51D4EEF2FFD8DC6007ED2BE /* BrogueViewController+ActionButtons.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "BrogueViewController+ActionButtons.swift"; sourceTree = "<group>"; };
+		C51D4EF12FFD8FA9007ED2BE /* BrogueViewController+Layout.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "BrogueViewController+Layout.swift"; sourceTree = "<group>"; };
 		C5213CD11B75308E00E97A27 /* Arial Unicode.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Arial Unicode.ttf"; sourceTree = "<group>"; };
 		C52686A6215C0A9800033E3F /* libc++.tbd */ = {isa = PBXFileReference; lastKnownFileType = "sourcecode.text-based-dylib-definition"; name = "libc++.tbd"; path = "usr/lib/libc++.tbd"; sourceTree = SDKROOT; };
 		C52686A8215C0AA800033E3F /* libc++.1.tbd */ = {isa = PBXFileReference; lastKnownFileType = "sourcecode.text-based-dylib-definition"; name = "libc++.1.tbd"; path = "usr/lib/libc++.1.tbd"; sourceTree = SDKROOT; };
@@ -378,6 +408,21 @@
 				ECBE68AF1EC0E1C700E9F366 /* GameCenter.swift */,
 				ECBE68B41EC0E1C900E9F366 /* ContentView.swift */,
 				C556D4502FD0D39600D81184 /* CEHost.swift */,
+				C51D4ED52FFD820E007ED2BE /* SKMagView.swift */,
+				C51D4ED72FFD830A007ED2BE /* GameHandoff.swift */,
+				C51D4ED92FFD8369007ED2BE /* BrogueViewController+IBActions.swift */,
+				C51D4EDB2FFD84CC007ED2BE /* HapticsController.swift */,
+				C51D4EDD2FFD8659007ED2BE /* BrogueViewController+Hints.swift */,
+				C51D4EDF2FFD86E2007ED2BE /* BrogueViewController+Zoom.swift */,
+				C51D4EE12FFD8814007ED2BE /* BrogueViewController+Touch.swift */,
+				C51D4EE32FFD8895007ED2BE /* BrogueViewController+Magnifier.swift */,
+				C51D4EE52FFD8916007ED2BE /* BrogueViewController+AppLifecycle.swift */,
+				C51D4EE72FFD898F007ED2BE /* BrogueViewController+Keyboard.swift */,
+				C51D4EE92FFD8B63007ED2BE /* BrogueViewController+TitleUI.swift */,
+				C51D4EEB2FFD8C0C007ED2BE /* BrogueViewController+Handoff.swift */,
+				C51D4EED2FFD8CD3007ED2BE /* BrogueViewController+EngineSession.swift */,
+				C51D4EEF2FFD8DC6007ED2BE /* BrogueViewController+ActionButtons.swift */,
+				C51D4EF12FFD8FA9007ED2BE /* BrogueViewController+Layout.swift */,
 			);
 			path = PlatformCode;
 			sourceTree = "<group>";
@@ -671,30 +716,44 @@
 			files = (
 				C52686AB215C0B5D00033E3F /* PowerTables.c in Sources */,
 				C57A963516D7EAD500C233F1 /* main.m in Sources */,
+				C51D4EE22FFD8814007ED2BE /* BrogueViewController+Touch.swift in Sources */,
 				C57A963916D7EAD500C233F1 /* AppDelegate.m in Sources */,
 				ECBE68A91EC0D4C600E9F366 /* Cell.swift in Sources */,
+				C51D4EF02FFD8DC6007ED2BE /* BrogueViewController+ActionButtons.swift in Sources */,
 				C57A965116D7EB4C00C233F1 /* RogueDriver.mm in Sources */,
+				C51D4EE82FFD898F007ED2BE /* BrogueViewController+Keyboard.swift in Sources */,
 				C52686AD215C0B8700033E3F /* Sqrt.c in Sources */,
 				C57A966516D7EB5500C233F1 /* Architect.c in Sources */,
+				C51D4EE02FFD86E2007ED2BE /* BrogueViewController+Zoom.swift in Sources */,
 				C532C8A61971AB8800695956 /* DirectionControlsViewController.m in Sources */,
+				C51D4EEE2FFD8CD3007ED2BE /* BrogueViewController+EngineSession.swift in Sources */,
 				C57A966616D7EB5500C233F1 /* Buttons.c in Sources */,
 				C57A966716D7EB5500C233F1 /* Combat.c in Sources */,
+				C51D4EE42FFD8895007ED2BE /* BrogueViewController+Magnifier.swift in Sources */,
 				ECBE68AD1EC0E1C600E9F366 /* BrogueViewController.swift in Sources */,
 				C556D4512FD0D39600D81184 /* CEHost.swift in Sources */,
+				C51D4EF22FFD8FA9007ED2BE /* BrogueViewController+Layout.swift in Sources */,
 				ED0000000000000000000F01 /* FileManagementViewController.swift in Sources */,
 				ECBE68AE1EC0E1C700E9F366 /* GameCenter.swift in Sources */,
 				ECBE68B11EC0E1C800E9F366 /* SceneDelegate.swift in Sources */,
+				C51D4EEA2FFD8B63007ED2BE /* BrogueViewController+TitleUI.swift in Sources */,
 				ECBE68B31EC0E1C900E9F366 /* ContentView.swift in Sources */,
+				C51D4ED62FFD820F007ED2BE /* SKMagView.swift in Sources */,
 				C57A966816D7EB5500C233F1 /* Dijkstra.c in Sources */,
+				C51D4EDC2FFD84CC007ED2BE /* HapticsController.swift in Sources */,
 				C57A966916D7EB5500C233F1 /* Globals.c in Sources */,
 				C57A966A16D7EB5500C233F1 /* Grid.c in Sources */,
+				C51D4EEC2FFD8C0C007ED2BE /* BrogueViewController+Handoff.swift in Sources */,
 				ECBE68AB1EC0DB1800E9F366 /* SKViewPort.swift in Sources */,
+				C51D4EDE2FFD8659007ED2BE /* BrogueViewController+Hints.swift in Sources */,
 				C57A966B16D7EB5500C233F1 /* IO.c in Sources */,
+				C51D4ED82FFD830A007ED2BE /* GameHandoff.swift in Sources */,
 				C57A966C16D7EB5500C233F1 /* Items.c in Sources */,
 				C57A966D16D7EB5500C233F1 /* Light.c in Sources */,
 				C57A966E16D7EB5500C233F1 /* MainMenu.c in Sources */,
 				C57A966F16D7EB5500C233F1 /* Monsters.c in Sources */,
 				C57A967016D7EB5500C233F1 /* Movement.c in Sources */,
+				C51D4EE62FFD8916007ED2BE /* BrogueViewController+AppLifecycle.swift in Sources */,
 				C57A967116D7EB5500C233F1 /* Random.c in Sources */,
 				C57A967216D7EB5500C233F1 /* Recordings.c in Sources */,
 				C57A967316D7EB5500C233F1 /* RogueMain.mm in Sources */,
@@ -704,6 +763,7 @@
 				C52B092516E5848500675CC7 /* UIViewController+UIViewController_GCLeaderBoardView.m in Sources */,
 				C5105B1616EE90A400E09905 /* GameSettings.m in Sources */,
 				C5B9B66C17D23BEA00D8459E /* Time.mm in Sources */,
+				C51D4EDA2FFD8369007ED2BE /* BrogueViewController+IBActions.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
