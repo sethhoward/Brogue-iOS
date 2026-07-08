@@ -468,6 +468,15 @@ extern "C" __attribute__((visibility("default"))) void se_setHardwareKeyboardCon
     HARDWARE_KEYBOARD_CONNECTED = (connected != 0);
 }
 
+// iOS port (Brogue SE): opt printTextBox into a fully opaque background (vs the default translucent
+// INTERFACE_OPACITY panel). The host enables it on iPhone, where description/info boxes are shown
+// magnified and the dungeon bleeding through the enlarged panel hurts legibility. Drives the engine's
+// gDescriptionBoxOpaque flag (IO.c). Static for the process lifetime; the host sets it at engine start.
+extern boolean gDescriptionBoxOpaque;
+extern "C" __attribute__((visibility("default"))) void se_setDescriptionBoxOpaque(int opaque) {
+    gDescriptionBoxOpaque = (opaque != 0);
+}
+
 // ---------------------------------------------------------------------------
 // Platform contract.  Signatures must match Rogue.h exactly. Color order for
 // plotChar follows CE's declaration: back* first, fore* second.

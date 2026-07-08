@@ -32,6 +32,25 @@ See `BrogueCE/Engine/IOS_MODIFICATIONS.md` (faithful CE) and
 
 ## Change log
 
+### 2026-07-08 — Opaque description boxes on iPhone (SE only)
+
+**What.** SE-only, iPhone-only: description / info text boxes (`printTextBox`) render with a fully
+opaque background (opacity 100) instead of the default translucent `INTERFACE_OPACITY` (95). On
+iPhone the box is shown *magnified* (menu-magnify / examine fit-zoom), so the enlarged translucent
+panel lets the dungeon bleed through and hurts legibility. iPad / macOS keep the translucent look.
+
+- **`IO.c`:** new external-linkage flag `boolean gDescriptionBoxOpaque` (default `false`);
+  `printTextBox` shades with `gDescriptionBoxOpaque ? 100 : INTERFACE_OPACITY`.
+- **`SEBridge.mm` + `BrogueSEHost.h`:** new exported entry point `se_setDescriptionBoxOpaque(int)`
+  drives the flag (sibling of `se_setKeyboardLabelsEnabled`). SE-only — no `BrogueCEHost` protocol
+  change, so nothing crosses into CE / Classic.
+- **Host (`BrogueViewController+EngineSession.swift`):** calls
+  `se_setDescriptionBoxOpaque(isPhoneIdiom ? 1 : 0)` at SE engine start.
+
+Experiment / tuning: it's a static per-process flag gated on device idiom. To make it zoom-gated
+instead (opaque only while actually magnified), promote it to a host *query* like
+`ceShouldSuppressExamineBox` and read it per `printTextBox`.
+
 ### 2026-07-08 — Menu-magnify: report the visible (haloed) box rect, not the cancel region
 
 **What.** In `IO.c printTextBox`, the window rect passed to `buttonInputLoop` (which the iPhone

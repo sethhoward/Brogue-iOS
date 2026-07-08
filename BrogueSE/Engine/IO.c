@@ -71,6 +71,13 @@ extern void ceClearMenuBox(void);
 // path reads it immediately after drawing, before anything else can draw a box.
 static short gLastTextBoxX, gLastTextBoxY, gLastTextBoxWidth, gLastTextBoxHeight;
 
+// iOS port (Brogue SE): when true, description / info text boxes (printTextBox) render with a fully
+// opaque background (opacity 100) instead of the default translucent INTERFACE_OPACITY panel. Set by
+// the host via se_setDescriptionBoxOpaque() — enabled on iPhone, where the box is shown magnified and
+// the dungeon bleeding through the enlarged panel hurts legibility. Default off, so iPad / macOS keep
+// the translucent look. External linkage so SEBridge.mm can drive it.
+boolean gDescriptionBoxOpaque = false;
+
 // Populates path[][] with a list of coordinates starting at origin and traversing down the map. Returns the number of steps in the path.
 short getPlayerPathOnMap(pos path[1000], short **map, pos origin) {
     pos at = origin;
@@ -6248,7 +6255,11 @@ short printTextBox(char *textBuf, short x, short y, short width,
     screenDisplayBuffer dbuf;
     clearDisplayBuffer(&dbuf);
     printStringWithWrapping(textBuf, x2, y2, width, foreColor, backColor, &dbuf);
-    rectangularShading(x2, y2, width, lineCount + padLines, backColor, INTERFACE_OPACITY, &dbuf);
+    // iOS port (Brogue SE): on iPhone the box is shown magnified; a translucent panel lets the
+    // enlarged dungeon bleed through and hurts legibility, so the host opts into a fully opaque
+    // background (see gDescriptionBoxOpaque). iPad / macOS keep the default translucent look.
+    const short boxOpacity = gDescriptionBoxOpaque ? 100 : INTERFACE_OPACITY;
+    rectangularShading(x2, y2, width, lineCount + padLines, backColor, boxOpacity, &dbuf);
     overlayDisplayBuffer(&dbuf);
 
     // iOS port (Brogue SE): remember this box's rect for the iPhone examine fit-zoom.

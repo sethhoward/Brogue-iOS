@@ -50,6 +50,10 @@ extension BrogueViewController {
             // CE; only the entry point differs (se_start vs ce_start).
             let host = CEHost(viewPort: skViewPort, viewController: self)
             ceHost = host
+            // iOS port (Brogue SE): on iPhone, render description/info boxes with an opaque
+            // background — they're shown magnified, where a translucent panel lets the enlarged
+            // dungeon bleed through and hurts legibility. iPad / macOS keep the translucent look.
+            se_setDescriptionBoxOpaque(isPhoneIdiom ? 1 : 0)
             let thread = Thread { [weak self] in
                 se_start(host)
                 self?.engineDidExit()
