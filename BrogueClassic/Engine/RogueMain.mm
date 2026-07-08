@@ -1083,7 +1083,7 @@ void gameOver(char *killedBy, boolean useCustomPhrasing) {
                 printString(buf, (COLS - strLenWithoutEscapes(buf)) / 2, y, &advancementMessageColor, &black, 0);
                 y++;
                 // Seth:
-                [[GameCenter shared] submitAchievement:[NSString stringWithUTF8String:featTable[i].name] percentComplete:100.];
+                submitAchievementForCharString((char *)featTable[i].name);
             }
         }
         
@@ -1176,7 +1176,7 @@ void victory(boolean superVictory) {
             i++;
             
             // Seth:
-            [[GameCenter shared] submitAchievement:[NSString stringWithUTF8String:featTable[j].name] percentComplete:100.];
+            submitAchievementForCharString((char *)featTable[j].name);
         }
     }
     

@@ -25,7 +25,6 @@
 #include "IncludeGlobals.h"
 #include <math.h>
 
-#import "GameCenterManager.h"
 
 void exposeCreatureToFire(creature *monst) {
     char buf[COLS], buf2[COLS];
@@ -931,7 +930,7 @@ void addXPXPToAlly(short XPXP, creature *monst) {
         if (monst->xpxp > 1500 * 20) {
             rogue.featRecord[FEAT_COMPANION] = true;
             // Seth
-            [[GameCenter shared] submitAchievement:kAchievementCompanion percentComplete:100.];
+            submitAchievementForCharString((char *)kAchievementUTF8Companion);
         }
     }
 }
