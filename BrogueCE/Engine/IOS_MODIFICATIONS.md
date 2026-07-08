@@ -28,6 +28,20 @@ covers the separate Classic engine that ships in the app target).
 
 ## Change log
 
+### 2026-07-08 — Menu-magnify: report the visible (haloed) box rect, not the cancel region
+
+**What.** In `IO.c printTextBox`, the window rect passed to `buttonInputLoop` (which the iPhone
+menu-magnify borrows and scales, via `ceSetMenuBox`) started at `y2` and used
+`by - y2 + 1 + padLines` for the height. `rectangularShading` draws a one-cell shadow halo on every
+side, so the box the player actually sees spans `(x2-1, y2-1)`…`(x2+width, y2+lineCount+padLines)`.
+The old rect therefore **dropped the top halo row** (left behind as a dark 1× seam above the
+magnified panel) and, because `by - y2 + 1 + padLines` double-counts the padding, **over-ran the
+bottom** with empty rows. Fixed by passing `winY = y2 - 1` and `winHeight = lineCount + padLines + 2`
+so the borrowed/reported rect equals the visible box. `winY`/`winHeight` only bound the
+click-to-cancel region (buttons are positioned absolutely), so the cancel region now matches the
+visible box too — no interaction regression. Marked `// iOS port (iBrogue):` (platform fix shared
+with SE + Classic).
+
 ### 2026-07-07 — Item-detail box: reserve room for action buttons so long descriptions keep "call"
 
 **What.** `printTextBox`'s auto-widen only widened until the **text** fit above the flavor/button

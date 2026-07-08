@@ -5296,7 +5296,16 @@ short printTextBox(char *textBuf, short x, short y, short width,
     gLastTextBoxHeight = lineCount + padLines;
 
     if (buttonCount > 0) {
-        return buttonInputLoop(buttons, buttonCount, x2, y2, width, by - y2 + 1 + padLines, NULL);
+        // iOS port (iBrogue): the window rect passed here is also what the iPhone menu-magnify
+        // borrows and scales (buttonInputLoop reports it via setMenuBox). rectangularShading draws
+        // a one-cell shadow halo on every side, so the box the player sees spans
+        // (x2-1, y2-1)…(x2+width, y2+lineCount+padLines). Raise the top by one to include the top
+        // halo row (otherwise it's left behind as a dark 1x seam above the magnified panel) and
+        // size the height to text+buttons+halo (the old `by - y2 + 1 + padLines` double-counted the
+        // padding, over-running the bottom with empty rows). The horizontal halo is added by
+        // buttonInputLoop's own 1-cell trim. winY/winHeight only bound the click-to-cancel region
+        // (buttons are positioned absolutely), so the visible box now equals the cancel region.
+        return buttonInputLoop(buttons, buttonCount, x2, y2 - 1, width, lineCount + padLines + 2, NULL);
     } else {
         return -1;
     }

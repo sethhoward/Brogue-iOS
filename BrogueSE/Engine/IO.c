@@ -6259,8 +6259,16 @@ short printTextBox(char *textBuf, short x, short y, short width,
 
     if (buttonCount > 0) {
         // iOS port (Brogue SE): the iPhone menu-magnify rect is reported inside buttonInputLoop
-        // (the single choke point for all button menus), so nothing to report here.
-        return buttonInputLoop(buttons, buttonCount, x2, y2, width, by - y2 + 1 + padLines, NULL);
+        // (the single choke point for all button menus). The window rect passed here IS that rect,
+        // so it must describe the box the player actually sees. rectangularShading draws a one-cell
+        // shadow halo on every side, so the visible box spans (x2-1, y2-1)…(x2+width, y2+lineCount+padLines).
+        // Raise the top by one to include the top halo row (otherwise it's left behind as a dark 1x
+        // seam above the magnified panel) and size the height to text+buttons+halo (the old
+        // `by - y2 + 1 + padLines` double-counted the padding, over-running the bottom with empty
+        // rows). The horizontal halo is added by buttonInputLoop's own 1-cell trim. winY/winHeight
+        // only bound the click-to-cancel region (buttons are positioned absolutely), so the visible
+        // box now equals the cancel region.
+        return buttonInputLoop(buttons, buttonCount, x2, y2 - 1, width, lineCount + padLines + 2, NULL);
     } else {
         return -1;
     }
