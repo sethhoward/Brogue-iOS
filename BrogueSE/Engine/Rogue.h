@@ -4026,6 +4026,8 @@ extern "C" {
     void populateMonsters(void);
     void updateMonsterState(creature *monst);
     void decrementMonsterStatus(creature *monst);
+    boolean isSoothableAffliction(short statusIndex); // iOS port (Brogue SE): bloodwort soothing vapors -- the soft afflictions the healing cloud ticks 2x
+    boolean creatureInSoothingVapor(const creature *monst); // iOS port (Brogue SE): bloodwort soothing vapors -- eligibility (in cloud, not inanimate/submerged)
     boolean specifiedPathBetween(short x1, short y1, short x2, short y2,
                                  unsigned long blockingTerrain, unsigned long blockingFlags);
     boolean traversiblePathBetween(creature *monst, short x2, short y2);

@@ -32,6 +32,38 @@ See `BrogueCE/Engine/IOS_MODIFICATIONS.md` (faithful CE) and
 
 ## Change log
 
+### 2026-07-08 — Bloodwort soothing vapors: soft afflictions tick 2× in the healing cloud
+
+**What.** Brings BrogueCE issue #514 to SE in its non-overpowered form: the bloodwort healing cloud
+(`HEALING_CLOUD` / `T_CAUSES_HEALING`) doesn't *cure* ailments — it drains **soft afflictions twice as
+fast** while a creature stands in it. Symmetric (player + monsters), same eligibility as the cloud's HP
+heal (skip `MONST_INANIMATE` + `MB_SUBMERGED`). Never cures: the cloud is `TM_GAS_DISSIPATES_QUICKLY`, so
+exposure is only a few turns. Full spec + rationale in `docs/design/bloodwort-soothing-vapors.md`.
+
+- **Accelerated set (9):** `WEAKENED`, `HALLUCINATING`, `SLOWED`, `CONFUSED`, `NAUSEOUS`, `DISCORDANT`,
+  `MAGICAL_FEAR`, `ENTRANCED`, `DARKNESS`. Excludes damage-ticks (`BURNING`/`POISONED` — the HP heal
+  already out-heals poison), hard lockouts (`PARALYZED`/`FROZEN` run full duration), and
+  structural/bookkeeping statuses. All positive buffs untouched.
+- **`Monsters.c`:** two new shared helpers — `isSoothableAffliction(statusIndex)` (single source of truth
+  for the set) and `creatureInSoothingVapor(monst)` (mirrors the heal gate). In `decrementMonsterStatus`,
+  a pre-decrement at the top of the status loop, applied **only when `status > 1`**, so the switch below
+  still performs the final tick-to-zero and its per-status cleanup (SLOWED speed restore, DISCORDANT
+  guard, etc.) — doubling the rate without bypassing any cleanup.
+- **`Time.c` (`decrementPlayerStatus`):** the player's statuses decrement here, not in
+  `decrementMonsterStatus`, so the same `> 1` pre-decrement is added at the **top** of the function —
+  crucially *before* the cursed-runic top-ups (Delirium hallucination @ ~2375, Acrophobia confusion
+  @ ~2397). A runic-forced status sits at its steady forced value of 1 at turn-top (not `> 1`), so the
+  vapor is a correct no-op on it (no flicker, no "…fade" spam); those stay purify/remove-only. The vapor
+  only accelerates the portion of an affliction stacked *above* the forced floor. One-time subtle
+  player line "the soothing spores ease your afflictions." latched per exposure (cosmetic static; not
+  game state).
+- **`Rogue.h`:** prototypes for the two helpers.
+- **Determinism:** RNG-free (flag + integer decrement) → save-replay-safe. Behavior change, so
+  pre-existing SE recordings that pass through a bloodwort cloud won't replay identically (normal for an
+  SE gameplay change).
+- **Tuning:** the `2×` is the single `> 1` pre-decrement; bump toward per-effect factors later if
+  playtesting wants it.
+
 ### 2026-07-08 — Opaque description boxes on iPhone (SE only)
 
 **What.** SE-only, iPhone-only: description / info text boxes (`printTextBox`) render with a fully
