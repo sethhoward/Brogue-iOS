@@ -4590,6 +4590,16 @@ void monstersTurn(creature *monst) {
         return;
     }
 
+    // #855: a kraken or eel beached on dry land writhes helplessly -- it cannot seize, attack, or
+    // move. The info box already describes this state; enforce it here. Any seize it was holding is
+    // released in applyInstantTileEffectsToCreature above.
+    if ((monst->info.flags & MONST_RESTRICTED_TO_LIQUID)
+        && !cellHasTMFlag(monst->loc, TM_ALLOWS_SUBMERGING)) {
+
+        monst->ticksUntilTurn = monst->movementSpeed;
+        return;
+    }
+
     monst->ticksUntilTurn = monst->movementSpeed / 3; // will be later overwritten by movement or attack
 
     // iOS port (iBrogue): any creature with a flee component runs its reusable dormant->flee AI in place
