@@ -1251,6 +1251,11 @@ enum tileFlags {
 // compressor). Intercepted in mainInputLoop's cursor-confirm path (not executeKeystroke); no
 // physical-key binding. Value matches SE and Classic.
 #define CONTINUE_TRAVEL_KEY (128+21)
+// iOS port (iBrogue): game handoff — synthetic, button-only code injected by the host on a confirmed
+// device handoff. Handled in executeKeystroke: ends the run silently (no gameOver bookkeeping), deletes
+// the resumable save, and returns to the title so the run lives only on the receiving device. Value
+// shared by CE and SE. See docs/design/game-handoff.md.
+#define HANDOFF_RELINQUISH_KEY (128+22)
 
 #define UNKNOWN_KEY         (128+19)
 

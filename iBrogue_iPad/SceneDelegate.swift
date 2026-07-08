@@ -36,5 +36,27 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         window.rootViewController = UIHostingController(rootView: ContentView())
         window.makeKeyAndVisible()
         self.window = window
+
+        // Handoff (Continuity): a cold launch triggered by a Handoff pickup delivers the activity
+        // here. It's stashed and drained once BrogueViewController appears. See docs/design/game-handoff.md.
+        NSLog("[HANDOFF] willConnectTo: \(connectionOptions.userActivities.count) activities: \(connectionOptions.userActivities.map { $0.activityType })")
+        if let activity = connectionOptions.userActivities.first(where: { $0.activityType == GameHandoff.activityType }) {
+            GameHandoff.deliver(activity)
+        }
+    }
+
+    // Handoff (Continuity): a pickup while the app is already running arrives here.
+    func scene(_ scene: UIScene, continue userActivity: NSUserActivity) {
+        NSLog("[HANDOFF] scene continue: \(userActivity.activityType)")
+        GameHandoff.deliver(userActivity)
+    }
+
+    // Handoff (Continuity): the system is about to deliver a continuation — logs the type on Mac/iOS.
+    func scene(_ scene: UIScene, willContinueUserActivityWithType userActivityType: String) {
+        NSLog("[HANDOFF] willContinueUserActivityWithType: \(userActivityType)")
+    }
+
+    func scene(_ scene: UIScene, didFailToContinueUserActivityWithType userActivityType: String, error: Error) {
+        NSLog("[HANDOFF] didFailToContinue: \(userActivityType) err=\(error.localizedDescription)")
     }
 }

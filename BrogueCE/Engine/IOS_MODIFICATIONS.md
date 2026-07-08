@@ -28,6 +28,55 @@ covers the separate Classic engine that ships in the app target).
 
 ## Change log
 
+### 2026-07-07 — Game handoff: engine recording-version accessor (cross-platform version guard)
+
+**What.** The CE half (see `BrogueSE/Engine/IOS_MODIFICATIONS.md` for the rationale). The handoff guard
+compares the engine recording version (BROGUE_VERSION_STRING) instead of the app version+build, so
+differing build numbers no longer block cross-device / cross-platform handoff. Bridge/host only.
+
+- **`CEBridge.mm`:** `ce_recordingVersion()` returns `brogueVersion`; declared in `BrogueCEHost.h`.
+- **Determinism:** read-only; no RNG, no save fields.
+
+### 2026-07-06 — Game handoff (Phase 4): silent relinquish key (end a handed-off run, no bookkeeping)
+
+**What.** The CE half of the handoff relinquish (see `BrogueSE/Engine/IOS_MODIFICATIONS.md` for the full
+rationale). `HANDOFF_RELINQUISH_KEY`, injected by the host on the deep ACK, ends a handed-off run silently
+so it leaves no trace on the source. See `docs/design/game-handoff.md`.
+
+- **`Rogue.h`:** `#define HANDOFF_RELINQUISH_KEY (128+22)` (beside CONTINUE_TRAVEL_KEY; value shared with SE).
+- **`IO.c` `executeKeystroke`:** the new case ends the run with NO `gameOver` bookkeeping (unlike QUIT_KEY):
+  `remove(currentFilePath)` then blank it, `rogue.nextGame = NG_NOTHING`, `rogue.gameHasEnded = true` — the
+  clean NEW_GAME_KEY exit path. Declares `extern char currentFilePath[]`.
+- **Host side:** freezes input during the transfer, injects this key on the ACK, then clears the resume
+  marker. No RNG or save-format impact; the relinquish key is never recorded.
+
+### 2026-07-06 — Game handoff (Phase 3b): flush the live recording on demand for the transfer
+
+**What.** The CE half of the handoff recording flush (see `BrogueSE/Engine/IOS_MODIFICATIONS.md` for the
+full rationale). A bridge hook flushes the live recording to `currentFilePath` and returns its bytes,
+reusing the background-suspend `flushBufferToFile()` + engine-thread poll pattern (no vendored engine
+`.c` change — bridge/host only). See `docs/design/game-handoff.md`.
+
+- **`CEBridge.mm`:** `ce_flushRecordingForHandoff()` sets `gCEHandoffFlushRequested` + waits on a
+  semaphore; `ceTakeBackgroundSnapshotIfRequested` services it with `flushBufferToFile()` and signals,
+  then reads `currentFilePath` and returns the bytes.
+- **`BrogueCEHost.h`:** declares `ce_flushRecordingForHandoff`.
+- **Determinism:** read-only with respect to game state; no RNG, no save fields.
+
+### 2026-07-06 — Game handoff (Phase 1b): report live game context (depth/turn/seed) to the host
+
+**What.** The CE half of the game-handoff game-context hook (see `BrogueSE/Engine/IOS_MODIFICATIONS.md`
+for the full rationale). `commitDraws` reports the live game's depth/turn/seed to the host so the
+cross-device Continuity **Handoff** activity stays current. Added identically to CE and SE (Classic is
+excluded — desync-prone recordings); only the `IO.c` hook is engine C. See `docs/design/game-handoff.md`.
+
+- **`IO.c` `commitDraws`:** after `ceSetTravelPending`, gated on `!rogue.playbackMode`, call
+  `ceSetGameContext(rogue.depthLevel, rogue.playerTurnNumber, rogue.seed)`; extern declared near the top
+  of `IO.c` beside `ceSetTravelPending`.
+- **Bridge (`CEBridge.mm`):** `ceSetGameContext` dedupes on depth → new `BrogueCEHost
+  setGameDepth:turn:seed:`; the depth dedup resets at the title (`reportAtTitleIfChanged`).
+- **Determinism:** pure outbound signaling; no RNG, no save fields, replay-safe.
+
 ### 2026-07-05 — Continue-travel command + reactive center d-pad button
 
 **What.** The CE half of the touch-friendly "continue my interrupted journey" command (see

@@ -127,6 +127,10 @@ final class CEHost: NSObject, BrogueCEHost {
         viewController?.setTravelPending(pending)
     }
 
+    func setGameDepth(_ depth: Int, turn: Int, seed: UInt64) {
+        viewController?.setGameContext(depth: depth, turn: turn, seed: seed)
+    }
+
     // MARK: Game Center
     // These fire on the CE engine's background thread, so hop to main before
     // touching GameKit. The bridge has already gated on variant + wizard mode.

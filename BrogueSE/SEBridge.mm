@@ -94,12 +94,20 @@ extern "C" { volatile boolean brogueSETerminationRequested = false; }
 static volatile bool gSEBackgroundSaveRequested = false;
 static NSString *const kSEResumePathKey = @"se resume path";
 
+// iOS port (Brogue SE): game-handoff recording flush. The handoff source (OFF the main thread) sets
+// gSEHandoffFlushRequested and waits on gSEHandoffFlushDone; the engine thread flushes the live
+// recording to currentFilePath at its next poll and signals, so the source can read the exact-state
+// bytes and stream them to the receiving device. See docs/design/game-handoff.md.
+static volatile bool gSEHandoffFlushRequested = false;
+static dispatch_semaphore_t gSEHandoffFlushDone = nil;
+
 // Engine globals (defined in the vendored engine; this file declares them locally near each use).
 // Declared here too so the background-snapshot helper below can read them. C linkage to match the
 // engine's C definitions (and the other declarations in this file).
 extern "C" {
 extern playerCharacter rogue;
 extern char currentFilePath[BROGUE_FILENAME_MAX];
+extern const char *brogueVersion;   // iOS port (Brogue SE): engine recording version (save-compat token) for handoff
 }
 
 // CE's commitDraws() only re-plots cells that changed vs its previouslyPlottedCells
@@ -127,12 +135,17 @@ static void reportUIModeIfChanged(void) {
 // what gates the version chooser (and prevents an in-game engine switch).
 extern "C" { volatile boolean brogueCEAtTitle = false; }
 static int gLastReportedAtTitle = -1;
+// iOS port (iBrogue): last game depth forwarded to the host for the cross-device Continuity Handoff
+// activity (see ceSetGameContext below). Reset when the title reappears so a new game re-forwards its
+// first depth. See docs/design/game-handoff.md.
+static short gLastHandoffDepth = -1;
 
 static void reportAtTitleIfChanged(void) {
     if (gHost) {
         int v = brogueCEAtTitle ? 1 : 0;
         if (v != gLastReportedAtTitle) {
             gLastReportedAtTitle = v;
+            if (brogueCEAtTitle) gLastHandoffDepth = -1;   // iOS port (iBrogue): re-forward depth next game
             [gHost setAtTitle:(BOOL)brogueCEAtTitle];
         }
     }
@@ -387,6 +400,15 @@ extern "C" __attribute__((visibility("default"))) void se_requestTermination(voi
 // playback flushBufferToFile() is itself a no-op. The Swift host clears the marker on a surviving
 // foreground, so the snapshot only resumes us after an actual OS kill.
 static void seTakeBackgroundSnapshotIfRequested(void) {
+    // iOS port (Brogue SE): game-handoff flush — same poll point, flushes the live recording and signals
+    // the waiting source so it can stream the exact-state bytes. See docs/design/game-handoff.md.
+    if (gSEHandoffFlushRequested) {
+        gSEHandoffFlushRequested = false;
+        if (!rogue.playbackMode && currentFilePath[0] != '\0') {
+            flushBufferToFile();
+        }
+        if (gSEHandoffFlushDone) dispatch_semaphore_signal(gSEHandoffFlushDone);
+    }
     if (!gSEBackgroundSaveRequested) {
         return;
     }
@@ -402,6 +424,26 @@ static void seTakeBackgroundSnapshotIfRequested(void) {
 // iOS port (Brogue SE): host hook (UI thread) — request a snapshot on app background.
 extern "C" __attribute__((visibility("default"))) void se_requestBackgroundSave(void) {
     gSEBackgroundSaveRequested = true;
+}
+
+// iOS port (Brogue SE): host hook (called OFF the main thread by the handoff source). Asks the engine
+// thread to flush the live recording, waits (bounded) for it, then reads and returns the exact-state
+// save bytes to stream to the receiving device. nil if there's no live game or the flush times out.
+extern "C" __attribute__((visibility("default"))) NSData * _Nullable se_flushRecordingForHandoff(void) {
+    gSEHandoffFlushDone = dispatch_semaphore_create(0);
+    gSEHandoffFlushRequested = true;
+    long timedOut = dispatch_semaphore_wait(gSEHandoffFlushDone,
+                                            dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2 * NSEC_PER_SEC)));
+    gSEHandoffFlushDone = nil;
+    if (timedOut || currentFilePath[0] == '\0') return nil;
+    return [NSData dataWithContentsOfFile:[NSString stringWithUTF8String:currentFilePath]];
+}
+
+// iOS port (Brogue SE): the engine's recording/save-compatibility version string (BROGUE_VERSION_STRING).
+// Identical across all builds of the same source, so the handoff guard uses it instead of the app
+// version+build (which changes every build and wrongly blocks cross-device/cross-platform handoff).
+extern "C" __attribute__((visibility("default"))) const char *se_recordingVersion(void) {
+    return brogueVersion;
 }
 
 // iOS port (Brogue SE): host hook (UI thread) — drop a stale resume marker when the app survived
@@ -857,6 +899,17 @@ void ceSetTravelPending(boolean pending) {
     if ((boolean)pending == last) return;
     last = pending;
     if (gHost) [gHost setTravelPending:(BOOL)pending];
+}
+
+// iOS port (iBrogue): commitDraws() reports the live game's context here (current depth, input turn,
+// master seed) so the host can keep the cross-device Continuity Handoff activity current. Deduped on
+// depth — the frequent commitDraws calls forward only when the player changes level; per-turn churn is
+// unnecessary since the recording bytes are streamed live at pickup. gLastHandoffDepth is reset when
+// the title reappears (reportAtTitleIfChanged). See docs/design/game-handoff.md.
+void ceSetGameContext(short depth, unsigned long turn, uint64_t seed) {
+    if (depth == gLastHandoffDepth) return;
+    gLastHandoffDepth = depth;
+    if (gHost) [gHost setGameDepth:(NSInteger)depth turn:(long)turn seed:seed];
 }
 
 // iOS port (iBrogue): high scores are persisted in NSUserDefaults as three

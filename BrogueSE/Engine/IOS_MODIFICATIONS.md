@@ -32,6 +32,63 @@ See `BrogueCE/Engine/IOS_MODIFICATIONS.md` (faithful CE) and
 
 ## Change log
 
+### 2026-07-07 — Game handoff: engine recording-version accessor (cross-platform version guard)
+
+**What.** The handoff compatibility guard now compares the engine's recording/save-version string
+(BROGUE_VERSION_STRING) instead of the app version+build — the build number changes every build, so the
+old proxy wrongly blocked cross-device / cross-platform handoff (iPhone→Mac). Bridge/host only. See
+`docs/design/game-handoff.md`.
+
+- **`SEBridge.mm`:** `se_recordingVersion()` returns `brogueVersion` (BROGUE_VERSION_STRING); declared in
+  `BrogueSEHost.h`. The host stamps it into the Handoff `userInfo` and compares it on receipt.
+- **Determinism:** read-only; no RNG, no save fields.
+
+### 2026-07-06 — Game handoff (Phase 4): silent relinquish key (end a handed-off run, no bookkeeping)
+
+**What.** When a run is handed off to another device, the source ends it *silently* so the run lives in
+one place and leaves no trace on the source. Added `HANDOFF_RELINQUISH_KEY` (a synthetic, button-only key
+the host injects on the deep ACK), handled in `executeKeystroke` beside NEW_GAME_KEY/QUIT_KEY. See
+`docs/design/game-handoff.md`.
+
+- **`Rogue.h`:** `#define HANDOFF_RELINQUISH_KEY (128+22)` (beside CONTINUE_TRAVEL_KEY; value shared with CE).
+- **`IO.c` `executeKeystroke`:** the new case ends the run with NO `gameOver` bookkeeping (no death/quit
+  run-history, high score, or saved recording — unlike QUIT_KEY): `remove(currentFilePath)` then blank it
+  (so no later flush recreates the resumable save), `rogue.nextGame = NG_NOTHING`, `rogue.gameHasEnded =
+  true` — the same clean exit NEW_GAME_KEY uses. Declares `extern char currentFilePath[]`.
+- **Host side:** starves input during the transfer (freeze), injects this key on the ACK, then clears the
+  resume marker. No RNG or save-format impact; the relinquish key is never recorded.
+
+### 2026-07-06 — Game handoff (Phase 3b): flush the live recording on demand for the transfer
+
+**What.** The handoff source streams the *exact-state* recording to the receiving device. Added a
+bridge hook that flushes the live recording to `currentFilePath` and returns its bytes, reusing the
+same `flushBufferToFile()` + engine-thread poll pattern as background-suspend (no vendored engine `.c`
+change — bridge/host only). See `docs/design/game-handoff.md`.
+
+- **`SEBridge.mm`:** `se_flushRecordingForHandoff()` (host hook, called off-main) sets
+  `gSEHandoffFlushRequested` and waits on a semaphore; `seTakeBackgroundSnapshotIfRequested` (engine
+  thread, same poll point as the background snapshot) services it with `flushBufferToFile()` and signals,
+  then the hook reads `currentFilePath` and returns the bytes (`NSData`).
+- **`BrogueSEHost.h`:** declares `se_flushRecordingForHandoff`.
+- **Determinism:** read-only with respect to game state (flush + file read); no RNG, no save fields.
+
+### 2026-07-06 — Game handoff (Phase 1b): report live game context (depth/turn/seed) to the host
+
+**What.** `commitDraws` now reports the live game's context to the host so the cross-device Continuity
+**Handoff** activity's banner/metadata (depth/turn/seed) stays current. Part of the game-handoff feature
+(CE + SE only; Classic is excluded — its recordings are desync-prone). Platform wiring lives in the
+bridge + Swift; only the `IO.c` hook is engine C. See `docs/design/game-handoff.md`.
+
+- **`IO.c` `commitDraws`:** after the existing `ceSetTravelPending` call, gated on `!rogue.playbackMode`
+  (skip loading/replay), call `ceSetGameContext(rogue.depthLevel, rogue.playerTurnNumber, rogue.seed)`.
+  Extern declared alongside `ceSetTravelPending` near the top of `IO.c`.
+- **Bridge (`SEBridge.mm`):** `ceSetGameContext` dedupes on depth (forwarded only when the player
+  changes level; per-turn churn is unnecessary since the recording bytes stream live at pickup) and calls
+  the new `BrogueCEHost setGameDepth:turn:seed:`. The depth dedup (`gLastHandoffDepth`) resets when the
+  title reappears (`reportAtTitleIfChanged`) so a new game re-forwards its first depth.
+- **Determinism:** pure outbound signaling — reads engine state, writes nothing to it. No RNG, no save
+  fields, replay-safe.
+
 ### 2026-07-05 — Continue-travel command + reactive center d-pad button
 
 **What.** A touch-friendly "continue my interrupted journey" command. Tapping a far tile auto-travels
