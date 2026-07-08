@@ -1243,6 +1243,20 @@ enum tileFlags {
 #define PAGE_DOWN_KEY       63277
 #define PRINTSCREEN_KEY     '\054'
 
+// iOS port (iBrogue): resume the interrupted journey — the touch-friendly "continue" command.
+// Resumes travel along the route already displayed for rogue.cursorLoc, via travelRoute() (the
+// same fast ~25ms/step path a confirming tap takes; NOT travel()->travelMap, the slow greedy path
+// reserved for stairs). Walks past already-seen monsters, re-stopping only on a *new* disturbance.
+// Dedicated synthetic code (fits a UInt8, round-trips cleanly through the keystroke-recording
+// compressor). Intercepted in mainInputLoop's cursor-confirm path (not executeKeystroke); no
+// physical-key binding. Value matches SE and Classic.
+#define CONTINUE_TRAVEL_KEY (128+21)
+// iOS port (iBrogue): game handoff — synthetic, button-only code injected by the host on a confirmed
+// device handoff. Handled in executeKeystroke: ends the run silently (no gameOver bookkeeping), deletes
+// the resumable save, and returns to the title so the run lives only on the receiving device. Value
+// shared by CE and SE. See docs/design/game-handoff.md.
+#define HANDOFF_RELINQUISH_KEY (128+22)
+
 #define UNKNOWN_KEY         (128+19)
 
 // iOS port (iBrogue): selectable keyboard schemes — see docs/design/keyboard-schemes.md. A scheme

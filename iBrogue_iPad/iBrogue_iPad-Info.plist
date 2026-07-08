@@ -2,8 +2,6 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-	<key>LSApplicationCategoryType</key>
-	<string>public.app-category.role-playing-games</string>
 	<key>CFBundleDevelopmentRegion</key>
 	<string>en</string>
 	<key>CFBundleDisplayName</key>
@@ -28,8 +26,14 @@
 	<string>????</string>
 	<key>CFBundleVersion</key>
 	<string>$(CURRENT_PROJECT_VERSION)</string>
+	<key>LSApplicationCategoryType</key>
+	<string>public.app-category.role-playing-games</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
+	<key>NSUserActivityTypes</key>
+	<array>
+		<string>SethHoward.iBrogue.continueGame</string>
+	</array>
 	<key>UIAppFonts</key>
 	<array>
 		<string>Arial Unicode.ttf</string>

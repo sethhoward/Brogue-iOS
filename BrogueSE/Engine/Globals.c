@@ -622,6 +622,14 @@ const floorTileType tileCatalog[NUMBER_TILETYPES] = {
     // freezes (T_CAUSES_FREEZE; see applyInstantTileEffectsToCreature), and the cloud douses flame
     // (TM_EXTINGUISHES_FIRE). Not flammable; dissipates quickly like the other potion gases.
  /*FROST_GAS*/                 {' ',       0,                      &lightBlue,         35, 0,  0,0,0,                                          0,  NO_LIGHT,   (T_CAUSES_FREEZE), (TM_STAND_IN_TILE | TM_GAS_DISSIPATES_QUICKLY | TM_EXTINGUISHES_FIRE),     "a cloud of biting frost", "the air is full of stinging, frost-laden mist."},
+
+ // iOS port (Brogue SE): Altars of Divination -- a cross of up to four one-use identify altars around a
+ // central totem (replaces the deprecated altars of insight). Walkable (surface-effects only) like the other
+ // altars; the statue is a solid centerpiece the guardian bursts from. See performDivination (Items.c).
+ /*DIVINATION_ALTAR*/         {G_ORB_ALTAR,&altarForeColor,      &goldAltarBackColor, 17, 0,  0,0,0,                      0,  CANDLE_LIGHT,   (T_OBSTRUCTS_SURFACE_EFFECTS), (TM_DIVINATION_ACTIVATION | TM_LIST_IN_SIDEBAR | TM_VISUALLY_DISTINCT),                             "an altar of divination", "place an unidentified item here and its nature will be revealed."},
+ /*DIVINATION_ALTAR_ARMED*/  {G_ORB_ALTAR,&altarForeColor,      &goldAltarBackColor, 17, 0,  0,0,DF_DIVINATION_ALTAR_CLOSE,0,CANDLE_LIGHT,  (T_OBSTRUCTS_SURFACE_EFFECTS), (TM_PROMOTES_ON_ITEM_PICKUP | TM_VANISHES_UPON_PROMOTION | TM_LIST_IN_SIDEBAR | TM_VISUALLY_DISTINCT), "a divining altar",       "the revealed item rests here; lift it and the altar will seal shut."},
+ /*DIVINATION_ALTAR_CLOSED*/ {G_ORB_ALTAR,&black,               &goldAltarBackColor, 17, 0,  0,0,0,                      0,  NO_LIGHT,       (T_OBSTRUCTS_SURFACE_EFFECTS), (TM_LIST_IN_SIDEBAR | TM_VISUALLY_DISTINCT),                                                       "a sealed altar",         "the altar has sealed shut, its stone cold and silent."},
+ /*DIVINATION_STATUE*/       {G_STATUE,   &wallBackColor,       &statueBackColor,    17, 0,  0,0,0,                      0,  CANDLE_LIGHT,   (T_OBSTRUCTS_PASSABILITY | T_OBSTRUCTS_ITEMS | T_OBSTRUCTS_GAS | T_OBSTRUCTS_SURFACE_EFFECTS), (TM_LIST_IN_SIDEBAR | TM_VISUALLY_DISTINCT), "a looming statue",       "a weathered stone statue looms over the altars; something seems to stir within it."},
 };
 
 unsigned long terrainFlags(pos p) {
@@ -1019,6 +1027,10 @@ dungeonFeature dungeonFeatureCatalog[NUMBER_DUNGEON_FEATURES] = {
     // iOS port (Brogue SE): companion dry grass for a fire trap. Contained (75/25, vs open DF_DEAD_GRASS's
     // 75/5 sprawl) and chains no dead foliage -- just flammable grass that the trap's flame can ignite.
     {DEAD_GRASS,                SURFACE,    75,     25,     (DFF_BLOCKED_BY_OTHER_LAYERS)},
+
+    // iOS port (Brogue SE): an armed divination altar seals shut (-> DIVINATION_ALTAR_CLOSED) when its
+    // revealed item is lifted. Fired via TM_PROMOTES_ON_ITEM_PICKUP -> promoteTile -> this promoteType DF.
+    {DIVINATION_ALTAR_CLOSED,   DUNGEON,    0,      0,      0},
 };
 
 const dungeonProfile dungeonProfileCatalog[NUMBER_DUNGEON_PROFILES] = {
@@ -1756,8 +1768,8 @@ itemTable keyTable[NUMBER_KEY_TYPES] = {
 };
 
 itemTable foodTable[NUMBER_FOOD_KINDS] = {
-    {"ration of food",      "", "", 3, 25,  0, 1800, {0,0,0}, true, false, 0, false, "A ration of food. Was it left by former adventurers? Is it a curious byproduct of the subterranean ecosystem? A meal taken in peace, with nothing on the hunt for you, settles the mind enough to study an unidentified scroll and sense whether its magic is benevolent or malevolent."},
-    {"mango",               "", "", 1, 15,  0, 1550, {0,0,0}, true, false, 0, false, "An odd fruit to be found so deep beneath the surface of the earth, but only slightly less filling than a ration of food. Like any meal, it feeds the mind as well as the body when eaten undisturbed, affording a quiet moment to divine the nature of an unknown scroll."},
+    {"ration of food",      "", "", 3, 25,  0, 1800, {0,0,0}, true, false, 0, false, "A ration of food. Was it left by former adventurers? Is it a curious byproduct of the subterranean ecosystem? A meal settles the mind enough to study an unidentified scroll and sense whether its magic is benevolent or malevolent."},
+    {"mango",               "", "", 1, 15,  0, 1550, {0,0,0}, true, false, 0, false, "An odd fruit to be found so deep beneath the surface of the earth, but only slightly less filling than a ration of food. Like any meal, it feeds the mind as well as the body, affording a quiet moment to divine the nature of an unknown scroll."},
     {"cooked food",         "", "", 0, 15,  0, 1800, {0,0,0}, true, false, 0, false, "A ration of food caught in a fire and cooked to perfection. It is as filling as a fresh ration, and a hot meal knits flesh besides -- eating it will close your wounds, restoring a little health with each of the next few turns."} // iOS port (Brogue SE): frequency 0 -- only created when a ration burns (see burnItem). Power 1800 = a full ration; eating grants STATUS_REGENERATING (see eat()).
 };
 
@@ -1802,8 +1814,9 @@ const char weaponRunicNames[NUMBER_WEAPON_RUNIC_KINDS][30] = {
     "confusion",
     "force",
     "slaying",
-    "mercy",
-    "plenty"
+    "delirium",
+    "recklessness",
+    "clumsiness"
 };
 
 const char armorRunicNames[NUMBER_ARMOR_ENCHANT_KINDS][30] = {
@@ -1815,9 +1828,9 @@ const char armorRunicNames[NUMBER_ARMOR_ENCHANT_KINDS][30] = {
     "reflection",
     "respiration",
     "dampening",
-    "burden",
-    "vulnerability",
-    "immolation",
+    "anchor",
+    "smoky",
+    "acrophobia",
 };
 
 itemTable staffTable[NUMBER_STAFF_KINDS] = {

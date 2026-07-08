@@ -1112,6 +1112,8 @@ boolean playerMoves(short direction) {
                    && cellHasTerrainFlag((pos){ newX, newY }, T_AUTO_DESCENT)
                    && (!cellHasTerrainFlag((pos){ newX, newY }, T_ENTANGLES) || cellHasTMFlag((pos){ newX, newY }, TM_PROMOTES_ON_PLAYER_ENTRY))
                    && !cellHasTMFlag((pos){ newX, newY }, TM_IS_SECRET)
+                   // iOS port (Brogue SE): cursed-runics rework -- an identified Acrophobia wearer dives at will (fall-immune).
+                   && !(rogue.armor && (rogue.armor->flags & (ITEM_RUNIC | ITEM_RUNIC_IDENTIFIED)) == (ITEM_RUNIC | ITEM_RUNIC_IDENTIFIED) && rogue.armor->enchant2 == A_ACROPHOBIA)
                    && !confirm("Dive into the depths?", false)) {
 
             brogueAssert(!committed);

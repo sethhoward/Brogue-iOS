@@ -35,9 +35,35 @@
 // Obj-C++ bridge (CEBridge.mm).
 extern void ceSetPlayerWindowLocation(short windowX, short windowY);
 
+// iOS port (iBrogue): reports whether a travel destination is currently pending (rogue.cursorLoc
+// is a real cell), so the host's reactive center d-pad button can show "continue journey" vs
+// "rest". Deduped in the bridge. Called from commitDraws each refresh.
+extern void ceSetTravelPending(boolean pending);
+
+// iOS port (iBrogue): reports the live game's context (depth/turn/seed) so the host can keep the
+// cross-device Continuity Handoff activity current. Deduped in the bridge on depth change; skipped
+// during playback. Called from commitDraws. See docs/design/game-handoff.md.
+extern void ceSetGameContext(short depth, unsigned long turn, uint64_t seed);
+
+// iOS port (iBrogue): the live recording's file path (defined in Recordings.c). Used by the game-handoff
+// relinquish (HANDOFF_RELINQUISH_KEY) to delete the resumable save on the source. See docs/design/game-handoff.md.
+extern char currentFilePath[BROGUE_FILENAME_MAX];
+
 // iOS port (iBrogue): reports whether a creature/item description box is showing
 // in the cursor loop, so the host can suspend pinch-zoom to 1×. Bridge dedupes.
 extern void ceSetExamining(boolean examining);
+
+// iOS port (iBrogue): reports the last examine description box's window rect so the iPhone
+// host can zoom to *fit* it instead of dropping to 1× — keeping the map and box text as
+// large as legibly fits. Coordinates are window cells. Reported just before ceSetExamining.
+extern void ceSetExamineBox(short x, short y, short width, short height);
+// iOS port (iBrogue): asked before drawing an examine description box; true → skip it
+// (zoomed-in play-field examine, where the box would tear against the 1× sidebar/chrome).
+extern boolean ceShouldSuppressExamineBox(void);
+// The rect of the most recently drawn text box (window cells), captured in printTextBox and
+// read at the examine site. Overwritten by every printTextBox, but the examine path reads it
+// immediately after drawing, before anything else can draw a box.
+static short gLastTextBoxX, gLastTextBoxY, gLastTextBoxWidth, gLastTextBoxHeight;
 
 // Populates path[][] with a list of coordinates starting at origin and traversing down the map. Returns the number of steps in the path.
 short getPlayerPathOnMap(pos path[1000], short **map, pos origin) {
@@ -681,7 +707,11 @@ void mainInputLoop() {
                     rogue.playbackMode = false;
 
                     focusedOnMonster = true;
-                    if (monst != &player && (!player.status[STATUS_HALLUCINATING] || rogue.playbackOmniscience || player.status[STATUS_TELEPATHIC])) {
+                    // iOS port (iBrogue): the host suppresses the box for a zoomed-in
+                    // play-field examine (it would tear against the 1× sidebar); the sidebar
+                    // still highlights the entity above.
+                    if (monst != &player && (!player.status[STATUS_HALLUCINATING] || rogue.playbackOmniscience || player.status[STATUS_TELEPATHIC])
+                        && !ceShouldSuppressExamineBox()) {
                         rbuf = saveDisplayBuffer();
                         printMonsterDetails(monst);
                         textDisplayed = true;
@@ -692,7 +722,8 @@ void mainInputLoop() {
                     rogue.playbackMode = false;
 
                     focusedOnItem = true;
-                    if (!player.status[STATUS_HALLUCINATING] || rogue.playbackOmniscience) {
+                    if ((!player.status[STATUS_HALLUCINATING] || rogue.playbackOmniscience)
+                        && !ceShouldSuppressExamineBox()) {
                         rbuf = saveDisplayBuffer();
                         printFloorItemDetails(theItem);
                         textDisplayed = true;
@@ -708,8 +739,14 @@ void mainInputLoop() {
             }
 
             // iOS port (iBrogue): tell the host whether a description box is up so the
-            // iPhone pinch-zoom can suspend to 1× while one lingers (moveCursor blocks
-            // below while it's shown). Host debounces, so a tap-through doesn't flicker.
+            // iPhone pinch-zoom can suspend while one lingers (moveCursor blocks below
+            // while it's shown). Host debounces, so a tap-through doesn't flicker. When a
+            // box is up, also report its rect (captured by printMonsterDetails/
+            // printFloorItemDetails above; printLocationDescription only prints the one-line
+            // flavor message, so it doesn't disturb it) so the host can zoom to fit it.
+            if (textDisplayed) {
+                ceSetExamineBox(gLastTextBoxX, gLastTextBoxY, gLastTextBoxWidth, gLastTextBoxHeight);
+            }
             ceSetExamining(textDisplayed);
 
             // Get the input!
@@ -843,6 +880,16 @@ void mainInputLoop() {
 #endif
                 playingBack = rogue.playbackMode;
                 rogue.playbackMode = false;
+            } else if (theEvent.eventType == KEYSTROKE
+                       && theEvent.param1 == CONTINUE_TRAVEL_KEY) {
+                // iOS port (iBrogue): "continue journey" resumes the pending travel destination along
+                // the SAME route already computed and drawn for the cursor this iteration -- via
+                // travelRoute (fast, ~25ms/step, marks visible monsters already-seen), exactly what a
+                // second confirming tap does. NOT travel()->travelMap, the slow 500ms/step greedy path
+                // reserved for stairs. No-op if there's nothing to resume.
+                if (steps > 0 && isPosInMap(rogue.cursorLoc)) {
+                    travelRoute(path, steps);
+                }
             } else {
                 executeEvent(&theEvent);
                 if (rogue.playbackMode) {
@@ -916,6 +963,15 @@ void commitDraws() {
     // iOS port (iBrogue): feed the player's window cell to the host for the
     // iPhone pinch-zoom auto-follow (deduped host-side).
     ceSetPlayerWindowLocation(mapToWindowX(player.loc.x), mapToWindowY(player.loc.y));
+    // iOS port (iBrogue): report whether a journey is pending so the host's reactive center d-pad
+    // button can swap between "continue journey" and "rest". Deduped host-side.
+    ceSetTravelPending(isPosInMap(rogue.cursorLoc));
+    // iOS port (iBrogue): report the live game's context (depth/turn/seed) so the host can keep the
+    // Continuity Handoff activity current. Skipped during playback (loading/replay); deduped host-side
+    // on depth change. See docs/design/game-handoff.md.
+    if (!rogue.playbackMode) {
+        ceSetGameContext(rogue.depthLevel, rogue.playerTurnNumber, rogue.seed);
+    }
 }
 
 // flags the entire window as needing to be redrawn at next flush.
@@ -2740,6 +2796,18 @@ void executeKeystroke(signed long keystroke, boolean controlKey, boolean shiftKe
                 gameOver("Quit", true);
             }
             break;
+        case HANDOFF_RELINQUISH_KEY:
+            // iOS port (iBrogue): the run was handed off to another device. End it here with NO
+            // gameOver bookkeeping (no death/quit history, high score, or saved recording), delete the
+            // resumable save so this device can't continue it, and return to the title -- the same clean
+            // exit path NEW_GAME_KEY uses. See docs/design/game-handoff.md.
+            if (currentFilePath[0] != '\0') {
+                remove(currentFilePath);
+                currentFilePath[0] = '\0';   // block any later flush from recreating the save
+            }
+            rogue.nextGame = NG_NOTHING;
+            rogue.gameHasEnded = true;
+            break;
         case GRAPHICS_KEY:
             if (hasGraphics) {
                 graphicsMode = setGraphicsMode((graphicsMode + 1) % 3);
@@ -2815,6 +2883,10 @@ void executeKeystroke(signed long keystroke, boolean controlKey, boolean shiftKe
     rogue.cautiousMode = false;
 }
 
+// iOS port (iBrogue): a text-input prompt isn't a button menu (reports no rect); clear the iPhone
+// menu magnify at its start so a stale magnify from a preceding menu doesn't tear the prompt.
+extern void ceClearMenuBox(void);
+
 boolean getInputTextString(char *inputText,
                            const char *prompt,
                            short maxLength,
@@ -2827,6 +2899,8 @@ boolean getInputTextString(char *inputText,
     const short textEntryBounds[TEXT_INPUT_TYPES][2] = {{' ', '~'}, {' ', '~'}, {'0', '9'}};
     screenDisplayBuffer dbuf;
     SavedDisplayBuffer rbuf;
+
+    ceClearMenuBox();   // iOS port (iBrogue): drop any stale menu magnify before drawing the prompt
 
     // handle defaultEntry values exceeding maxLength
     promptSuffixLen = strlen(promptSuffix);
@@ -4358,6 +4432,12 @@ static void printDiscoveries(short category, short count, unsigned short itemCha
 
 /// @brief Display the feats screen. Lists all feats and their achievement status.
 void displayFeatsScreen() {
+    // iOS port (iBrogue): full-screen 1× info view. Drop the menu magnify AND mark a non-play
+    // uiMode so the host also suspends the dungeon pinch-zoom (gameplayControlsActive=false);
+    // otherwise the view draws into the zoomed dungeon cells and appears magnified. Restored below.
+    ceClearMenuBox();
+    const CBrogueGameEvent fsvOldUiMode = uiMode;
+    uiMode = CBrogueGameEventInMenu;
     char availableColorEscape[5] = "", achievedColorEscape[5] = "", failedColorEscape[5] = "";
     encodeMessageColor(availableColorEscape, 0, &white);
     encodeMessageColor(achievedColorEscape, 0, &advancementMessageColor);
@@ -4407,9 +4487,15 @@ void displayFeatsScreen() {
     overlayDisplayBuffer(&dbuf);
     waitForKeystrokeOrMouseClick();
     restoreDisplayBuffer(&rbuf);
+    uiMode = fsvOldUiMode;   // iOS port (iBrogue): restore play state → dungeon zoom resumes on exit
 }
 
 void printDiscoveriesScreen() {
+    // iOS port (iBrogue): full-screen 1× info view — see displayFeatsScreen. Drop the menu magnify
+    // and suspend the dungeon pinch-zoom (non-play uiMode) so the list renders at 1×.
+    ceClearMenuBox();
+    const CBrogueGameEvent fsvOldUiMode = uiMode;
+    uiMode = CBrogueGameEventInMenu;
     short i, j, y;
     const SavedDisplayBuffer rbuf = saveDisplayBuffer();
 
@@ -4445,6 +4531,7 @@ void printDiscoveriesScreen() {
     waitForKeystrokeOrMouseClick();
 
     restoreDisplayBuffer(&rbuf);
+    uiMode = fsvOldUiMode;   // iOS port (iBrogue): restore play state → dungeon zoom resumes on exit
 }
 
 void printHighScores(boolean hiliteMostRecent) {
@@ -5158,7 +5245,12 @@ short printTextBox(char *textBuf, short x, short y, short width,
         x2 = x;
     }
 
-    while (((lineCount = wrapText(NULL, textBuf, width)) + y2) >= ROWS - 2 && width < COLS-5) {
+    // iOS port (iBrogue): reserve room for the action buttons drawn below the text. They can wrap
+    // to a second (double-spaced) line, so without this a long description leaves the text just
+    // fitting but pushes the wrapped button line — "call"/"relabel" — onto the flavor/button chrome
+    // rows, where it's lost. Widen the box until text + buttons fit.
+    const short buttonReserve = (buttonCount > 0) ? 4 : 0;
+    while (((lineCount = wrapText(NULL, textBuf, width)) + y2 + buttonReserve) >= ROWS - 2 && width < COLS-5) {
         // While the text doesn't fit and the width doesn't fill the screen, increase the width.
         width++;
         if (x2 + (width / 2) > COLS / 2) {
@@ -5196,6 +5288,12 @@ short printTextBox(char *textBuf, short x, short y, short width,
     printStringWithWrapping(textBuf, x2, y2, width, foreColor, backColor, &dbuf);
     rectangularShading(x2, y2, width, lineCount + padLines, backColor, INTERFACE_OPACITY, &dbuf);
     overlayDisplayBuffer(&dbuf);
+
+    // iOS port (iBrogue): remember this box's rect for the iPhone examine fit-zoom.
+    gLastTextBoxX = x2;
+    gLastTextBoxY = y2;
+    gLastTextBoxWidth = width;
+    gLastTextBoxHeight = lineCount + padLines;
 
     if (buttonCount > 0) {
         return buttonInputLoop(buttons, buttonCount, x2, y2, width, by - y2 + 1 + padLines, NULL);

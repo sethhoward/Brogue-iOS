@@ -252,12 +252,16 @@ item *makeItemInto(item *theItem, unsigned long itemCategory, short itemKind) {
             if (rand_percent(40)) {
                 theItem->enchant1 += rand_range(1, 3);
                 if (rand_percent(50)) {
-                    // cursed
-                    theItem->enchant1 *= -1;
-                    theItem->flags |= ITEM_CURSED;
-                    if (rand_percent(33)) { // give it a bad runic
+                    // iOS port (Brogue SE): cursed-runics rework. Negative items split two ways: a
+                    // double-edged *runic* curse (welds on, starts at exactly -1, purify to lift it)
+                    // or a plain "inferior" item (random -1..-3, no runic, freely removable -- no
+                    // ITEM_CURSED). Runic share of negatives raised from 33% to 55%.
+                    if (rand_percent(55)) {
+                        theItem->enchant1 = -1;
                         theItem->enchant2 = rand_range(NUMBER_GOOD_WEAPON_ENCHANT_KINDS, NUMBER_WEAPON_RUNIC_KINDS - 1);
-                        theItem->flags |= ITEM_RUNIC;
+                        theItem->flags |= (ITEM_CURSED | ITEM_RUNIC);
+                    } else {
+                        theItem->enchant1 *= -1;
                     }
                 } else if (rand_range(3, 10)
                            * ((theItem->flags & ITEM_ATTACKS_STAGGER) ? 2 : 1)
@@ -300,12 +304,15 @@ item *makeItemInto(item *theItem, unsigned long itemCategory, short itemKind) {
             if (rand_percent(40)) {
                 theItem->enchant1 += rand_range(1, 3);
                 if (rand_percent(50)) {
-                    // cursed
-                    theItem->enchant1 *= -1;
-                    theItem->flags |= ITEM_CURSED;
-                    if (rand_percent(33)) { // give it a bad runic
+                    // iOS port (Brogue SE): cursed-runics rework (see the weapon case above). A
+                    // double-edged runic curse (welds, starts at exactly -1) vs an inferior plain
+                    // negative (random -1..-3, no runic, freely removable); runic share 33% -> 55%.
+                    if (rand_percent(55)) {
+                        theItem->enchant1 = -1;
                         theItem->enchant2 = rand_range(NUMBER_GOOD_ARMOR_ENCHANT_KINDS, NUMBER_ARMOR_ENCHANT_KINDS - 1);
-                        theItem->flags |= ITEM_RUNIC;
+                        theItem->flags |= (ITEM_CURSED | ITEM_RUNIC);
+                    } else {
+                        theItem->enchant1 *= -1;
                     }
                 } else if (rand_range(0, 95) > theItem->armor) { // give it a good runic
                     theItem->enchant2 = rand_range(0, NUMBER_GOOD_ARMOR_ENCHANT_KINDS - 1);
@@ -1132,6 +1139,61 @@ char nextAvailableInventoryCharacter() {
     return 0;
 }
 
+// iOS port (Brogue SE): cursed-runics rework helpers. A "bad" (double-edged) runic is one whose
+// enchant2 sits in the malevolent tail of its category's runic enum.
+static boolean isBadRunic(const item *theItem) {
+    if (!(theItem->flags & ITEM_RUNIC)) {
+        return false;
+    }
+    if (theItem->category & WEAPON) {
+        return theItem->enchant2 >= NUMBER_GOOD_WEAPON_ENCHANT_KINDS;
+    }
+    if (theItem->category & ARMOR) {
+        return theItem->enchant2 >= NUMBER_GOOD_ARMOR_ENCHANT_KINDS;
+    }
+    return false;
+}
+
+static short runicPurifyThreshold(const item *theItem) {
+    return (theItem->category & WEAPON) ? WEAPON_RUNIC_PURIFY_ENCHANT : ARMOR_RUNIC_PURIFY_ENCHANT;
+}
+
+// Once a cursed double-edged runic has been enchanted to its purify threshold, the weld releases.
+// (The downside itself is gated on enchant level in the effect code, so it is already gone by now.)
+// Clumsiness is special: it tempers into a genuine runic of quietus. Returns true only on the
+// transition, so callers can announce it; a no-op for anything that isn't a cursed bad runic at or
+// above its threshold.
+static boolean purifyRunicIfReady(item *theItem) {
+    if ((theItem->flags & (ITEM_CURSED | ITEM_RUNIC)) != (ITEM_CURSED | ITEM_RUNIC)
+        || !isBadRunic(theItem)
+        || theItem->enchant1 < runicPurifyThreshold(theItem)) {
+        return false;
+    }
+    theItem->flags &= ~ITEM_CURSED;
+    if ((theItem->category & WEAPON) && theItem->enchant2 == W_CLUMSINESS) {
+        theItem->enchant2 = W_QUIETUS;
+    }
+    return true;
+}
+
+// iOS port (Brogue SE): cursed-runics rework. True while a double-edged runic's downside is in force
+// -- a bad runic not yet enchanted to its purify threshold. The effect code keys cursed-phase behavior
+// on this (Delirium's hallucination + confusion, Clumsiness's fumble, Recklessness's +damage-taken).
+boolean runicCurseActive(const item *theItem) {
+    return isBadRunic(theItem) && theItem->enchant1 < runicPurifyThreshold(theItem);
+}
+
+// iOS port (Brogue SE): cursed-runics rework -- a PURIFIED Smoky armor refines its smoke into a passive
+// stealth aura. Computed fresh at the consumption sites (stealth range + noise) so it's correct no matter
+// when you purified. 0 while unworn or still cursed (the cursed form conceals via emitted smoke instead).
+short smokyPurifyStealthBonus(void) {
+    if (rogue.armor && (rogue.armor->flags & ITEM_RUNIC) && rogue.armor->enchant2 == A_SMOKY
+        && !runicCurseActive(rogue.armor)) {
+        return SMOKY_STEALTH_BONUS;
+    }
+    return 0;
+}
+
 void checkForDisenchantment(item *theItem) {
     char buf[COLS], buf2[COLS];
 
@@ -1149,11 +1211,10 @@ void checkForDisenchantment(item *theItem) {
             messageWithColor(buf, &itemMessageColor, 0);
         }
     }
-    if (theItem->flags & ITEM_CURSED
-        && theItem->enchant1 >= 0) {
-
-        theItem->flags &= ~ITEM_CURSED;
-    }
+    // iOS port (Brogue SE): cursed-runics rework. A cursed runic's weld lifts only when it reaches
+    // its purify threshold -- the old "any enchant >= 0 lifts the curse" rule is gone. (Rings and
+    // non-runic cursed items are lifted directly by uncurse() on the scroll paths.)
+    purifyRunicIfReady(theItem);
 }
 
 static boolean itemIsSwappable(const item *theItem) {
@@ -1278,6 +1339,8 @@ static boolean performInsightSacrifice(short machineNumber);
 
 // iOS port (iBrogue): the altars-of-transference machine; defined below near performInsightSacrifice.
 static boolean performEnchantTransfer(short machineNumber);
+// iOS port (Brogue SE): the Altars of Divination machine; defined below near performInsightSacrifice.
+static boolean performDivination(short machineNumber);
 
 void updateFloorItems() {
     short x, y;
@@ -1413,6 +1476,23 @@ void updateFloorItems() {
 
                 activateMachine(pmap[x][y].machineNumber, (pos){ x, y });
             }
+        }
+
+        // iOS port (Brogue SE): sibling of the insight/commutation blocks -- the Altars of Divination.
+        // Unlike those, this doesn't wire the machine (no activateMachine): performDivination identifies the
+        // one item placed on an active altar, arms that altar, and rolls the statue's awaken directly.
+        if (cellHasTMFlag((pos){ x, y }, TM_DIVINATION_ACTIVATION)
+            && pmap[x][y].machineNumber) {
+
+            while (nextItem != NULL
+                   && pmap[x][y].machineNumber == pmapAt(nextItem->loc)->machineNumber
+                   && cellHasTMFlag(nextItem->loc, TM_DIVINATION_ACTIVATION)) {
+
+                // Skip other items in this machine so we don't process the same room twice this pass.
+                nextItem = nextItem->nextItem;
+            }
+
+            performDivination(pmap[x][y].machineNumber);
         }
     }
 }
@@ -2079,8 +2159,9 @@ void itemDetails(char *buf, item *theItem) {
         "the enemy will be confused",
         "the enemy will be flung",
         "[slaying]", // never used
-        "the enemy will be healed",
-        "the enemy will be cloned"
+        "[delirium]",      // never used -- W_DELIRIUM has a custom description block below
+        "[recklessness]",  // never used -- W_RECKLESSNESS has a custom description block below
+        "[clumsiness]"     // never used -- W_CLUMSINESS has a custom description block below
     };
 
     goodColorEscape[0] = badColorEscape[0] = whiteColorEscape[0] = '\0';
@@ -2401,6 +2482,59 @@ void itemDetails(char *buf, item *theItem) {
                                         theName);
                             }
                             strcat(buf, buf2);
+                        } else if (theItem->enchant2 == W_DELIRIUM) {
+                            // iOS port (Brogue SE): cursed-runics rework -- dual-mode; describe by purify state.
+                            boolean known = (theItem->flags & ITEM_IDENTIFIED) || rogue.playbackOmniscience;
+                            if (theItem->enchant1 < WEAPON_RUNIC_PURIFY_ENCHANT) {
+                                strcat(buf, "A maddening delirium bleeds from the blade: while wielded it leaves you permanently hallucinating, so you cannot reliably tell what you face -- beware striking an acid mound blind. ");
+                                if (known) {
+                                    sprintf(buf2, "%i%% of the time it hits, it drowns the enemy in confusion. ", runicWeaponChance(theItem, false, 0));
+                                } else {
+                                    strcpy(buf2, "Sometimes, when it hits, it drowns the enemy in confusion. ");
+                                }
+                                strcat(buf, buf2);
+                                sprintf(buf2, "Enchant it to +%i to purify: the hallucination lifts and its venom becomes a vigor-sapping weakness. ", WEAPON_RUNIC_PURIFY_ENCHANT);
+                                strcat(buf, buf2);
+                            } else {
+                                if (known) {
+                                    sprintf(buf2, "You have learned to see through the illusion, and the blade's venom turns outward: %i%% of the time it hits, it saps the enemy's vigor -- its damage, accuracy and defense. ", runicWeaponChance(theItem, false, 0));
+                                } else {
+                                    strcpy(buf2, "You have learned to see through the illusion, and the blade's venom turns outward: sometimes, when it hits, it saps the enemy's vigor. ");
+                                }
+                                strcat(buf, buf2);
+                            }
+                        } else if (theItem->enchant2 == W_RECKLESSNESS) {
+                            // iOS port (Brogue SE): cursed-runics rework -- passive (not an on-hit proc).
+                            boolean known = (theItem->flags & ITEM_IDENTIFIED) || rogue.playbackOmniscience;
+                            short dealtPct = RECKLESSNESS_DAMAGE_DEALT_BASE + max(0, (short)(enchant / FP_FACTOR)) * RECKLESSNESS_DAMAGE_DEALT_PER_ENCHANT;
+                            if (theItem->enchant1 < WEAPON_RUNIC_PURIFY_ENCHANT) {
+                                if (known) {
+                                    sprintf(buf2, "A reckless fury drives every blow: you deal %i%% more damage, but in your abandon you take %i%% more from every source. ", dealtPct, RECKLESSNESS_DAMAGE_TAKEN_PCT);
+                                } else {
+                                    strcpy(buf2, "A reckless fury drives every blow: you deal more damage, but in your abandon you take more from every source. ");
+                                }
+                                strcat(buf, buf2);
+                                sprintf(buf2, "Enchant it to +%i to purify -- the recklessness hones into pure aggression, keeping the extra damage without the vulnerability. ", WEAPON_RUNIC_PURIFY_ENCHANT);
+                                strcat(buf, buf2);
+                            } else {
+                                if (known) {
+                                    sprintf(buf2, "A honed aggression drives every blow: you deal %i%% more damage, at no cost to your own defense. ", dealtPct);
+                                } else {
+                                    strcpy(buf2, "A honed aggression drives every blow: you deal more damage, at no cost to your own defense. ");
+                                }
+                                strcat(buf, buf2);
+                            }
+                        } else if (theItem->enchant2 == W_CLUMSINESS) {
+                            // iOS port (Brogue SE): cursed-runics rework -- cursed-only (purify -> W_QUIETUS above).
+                            boolean known = (theItem->flags & ITEM_IDENTIFIED) || rogue.playbackOmniscience;
+                            if (known) {
+                                sprintf(buf2, "The blade is treacherously unbalanced: %i%% of the time it hits, a wild swing takes the enemy's head clean off. ", runicWeaponChance(theItem, false, 0));
+                            } else {
+                                strcpy(buf2, "The blade is treacherously unbalanced: sometimes, when it hits, a wild swing takes the enemy's head clean off. ");
+                            }
+                            strcat(buf, buf2);
+                            sprintf(buf2, "But while cursed you sometimes trip over your own strike -- missing and left reeling -- a risk that shrinks as your strength outmatches the weapon. Enchant it to +%i to purify it into a true runic of quietus. ", WEAPON_RUNIC_PURIFY_ENCHANT);
+                            strcat(buf, buf2);
                         } else {
                             if ((theItem->flags & ITEM_IDENTIFIED) || rogue.playbackOmniscience) {
                                 if (runicWeaponChance(theItem, false, 0) < 2
@@ -2447,10 +2581,6 @@ void itemDetails(char *buf, item *theItem) {
                                                 weaponForceDistance(enchant));
                                         strcat(buf, buf2);
                                         nextLevelState = weaponForceDistance(enchant + enchantMagnitude() * enchantIncrement(theItem));
-                                        break;
-                                    case W_MERCY:
-                                        strcpy(buf2, " by 50% of its maximum health. ");
-                                        strcat(buf, buf2);
                                         break;
                                     default:
                                         strcpy(buf2, ". ");
@@ -2514,7 +2644,7 @@ void itemDetails(char *buf, item *theItem) {
                                 theName);
                         strcat(buf, buf2);
 
-                        // A_MULTIPLICITY, A_MUTUALITY, A_ABSORPTION, A_REPRISAL, A_IMMUNITY, A_REFLECTION, A_BURDEN, A_VULNERABILITY, A_IMMOLATION
+                        // good runics handled below; the SE double-edged curses A_ANCHOR/A_SMOKY/A_ACROPHOBIA get interim copy (Phase 2 rewrites)
                         switch (theItem->enchant2) {
                             case A_MULTIPLICITY:
                                 sprintf(buf2, "When worn, 33%% of the time that an enemy's attack connects, %i allied spectral duplicate%s of your attacker will appear for 3 turns. ",
@@ -2586,14 +2716,29 @@ void itemDetails(char *buf, item *theItem) {
                             case A_DAMPENING:
                                 strcpy(buf2, "When worn, it will safely absorb the concussive impact of any explosions (though you may still be burned). ");
                                 break;
-                            case A_BURDEN:
-                                strcpy(buf2, "10% of the time it absorbs a blow, its strength requirement will permanently increase. ");
+                            case A_ANCHOR:
+                                // iOS port (Brogue SE): cursed-runics rework -- describe by purify state.
+                                if (theItem->enchant1 < ARMOR_RUNIC_PURIFY_ENCHANT) {
+                                    sprintf(buf2, "Its great weight makes you far harder to wound (a substantial defense bonus), but drags at your legs -- you move ponderously slowly, though your attacks are unhindered. Enchant it to +%i to purify: the drag lifts, and its weight roots you like an anchor against knockback and seizing. ", ARMOR_RUNIC_PURIFY_ENCHANT);
+                                } else {
+                                    strcpy(buf2, "Its great weight makes you far harder to wound (a substantial defense bonus) and roots you like an anchor -- you cannot be knocked back or seized -- yet you have learned to bear it without losing a step. ");
+                                }
                                 break;
-                            case A_VULNERABILITY:
-                                strcpy(buf2, "While it is worn, inbound attacks will inflict twice as much damage. ");
+                            case A_SMOKY:
+                                // iOS port (Brogue SE): cursed-runics rework -- describe by purify state.
+                                if (theItem->enchant1 < ARMOR_RUNIC_PURIFY_ENCHANT) {
+                                    sprintf(buf2, "When worn it wreathes you in thick smoke: creatures more than a step away cannot see you -- you move unseen and can strike the unwary -- but your own sight collapses to your immediate surroundings. Each enchantment thins the haze further, opening more sightlines (though what you can see through, foes can too). Enchant it to +%i to purify: the smoke refines into a subtle stealth, so you move unseen and unheard while seeing clearly. ", ARMOR_RUNIC_PURIFY_ENCHANT);
+                                } else {
+                                    strcpy(buf2, "When worn you move like smoke -- a subtle stealth that leaves you both harder to see and quieter, with no cost to your own sight. ");
+                                }
                                 break;
-                            case A_IMMOLATION:
-                                strcpy(buf2, "10% of the time it absorbs a blow, it will explode in flames. ");
+                            case A_ACROPHOBIA:
+                                // iOS port (Brogue SE): cursed-runics rework -- describe by purify state.
+                                if (theItem->enchant1 < ARMOR_RUNIC_PURIFY_ENCHANT) {
+                                    sprintf(buf2, "When worn you take no damage from falls and may dive into a chasm at will -- but a dreadful vertigo grips you whenever you stand at a chasm's edge, leaving you confused. Enchant it to +%i to conquer the fear, keeping the fearless descent. ", ARMOR_RUNIC_PURIFY_ENCHANT);
+                                } else {
+                                    strcpy(buf2, "When worn you have mastered your fear of heights: you take no damage from falls and may dive into a chasm at will, with no vertigo at the brink. ");
+                                }
                                 break;
                             default:
                                 break;
@@ -8184,6 +8329,7 @@ static boolean useCharm(item *theItem) {
         case CHARM_SHATTERING:
             messageWithColor("your charm emits a wave of turquoise light that pierces the nearby walls!", &itemMessageColor, 0);
             crystalize(charmShattering(enchant));
+            emitEnvironmentalNoise(player.loc, NOISE_BOOMING, NULL); // iOS port (Brogue SE): a wall-breach is deafening
             break;
         case CHARM_GUARDIAN:
             messageWithColor("your charm flashes and the form of a mythical guardian coalesces!", &itemMessageColor, 0);
@@ -8364,11 +8510,21 @@ static void magicMapCell(short x, short y) {
 }
 
 static boolean uncurse( item *theItem ) {
-    if (theItem->flags & ITEM_CURSED) {
-        theItem->flags &= ~ITEM_CURSED;
-        return true;
+    if (!(theItem->flags & ITEM_CURSED)) {
+        return false;
     }
-    return false;
+    // iOS port (Brogue SE): cursed-runics rework. Cleansing (remove-curse / protect) only lifts the
+    // weld on an *equipped* double-edged runic -- remove-curse's pack sweep leaves unworn cursed
+    // runics alone. Lifting the weld does NOT destroy the runic: the item drops into a "pending
+    // shatter" state (bad runic, no longer welded, still below its purify threshold). It shatters
+    // only if the player then deliberately unequips it (see unequipItem) -- so an accidental scroll
+    // read is harmless; the destructive act is the choice to take it off. Rings/non-runic cursed
+    // items lift unconditionally, as before.
+    if (isBadRunic(theItem) && !(theItem->flags & ITEM_EQUIPPED)) {
+        return false;
+    }
+    theItem->flags &= ~ITEM_CURSED;
+    return true;
 }
 
 boolean readScroll(item *theItem) {
@@ -8514,7 +8670,21 @@ boolean readScroll(item *theItem) {
             itemName(theItem, buf, false, false, NULL);
             sprintf(buf2, "your %s gleam%s briefly in the darkness.", buf, (theItem->quantity == 1 ? "s" : ""));
             messageWithColor(buf2, &itemMessageColor, 0);
-            if (uncurse(theItem)) {
+            // iOS port (Brogue SE): cursed-runics rework. A cursed *runic* isn't lifted by the first
+            // enchant -- its weld holds until you reach the purify threshold, which lifts the curse,
+            // sheds the downside, and tempers clumsiness into an executioner's edge (quietus). Rings
+            // and any non-runic cursed item keep the vanilla "one enchant lifts the curse" behavior.
+            if ((theItem->flags & (ITEM_CURSED | ITEM_RUNIC)) == (ITEM_CURSED | ITEM_RUNIC)
+                && isBadRunic(theItem)) {
+                if (purifyRunicIfReady(theItem)) {
+                    if ((theItem->category & WEAPON) && theItem->enchant2 == W_QUIETUS) {
+                        sprintf(buf2, "your %s finds its balance -- the curse tempers into an executioner's edge.", buf);
+                    } else {
+                        sprintf(buf2, "the curse is purged from your %s -- only its gift remains.", buf);
+                    }
+                    messageWithColor(buf2, &goodMessageColor, 0);
+                }
+            } else if (uncurse(theItem)) {
                 sprintf(buf2, "a malevolent force leaves your %s.", buf);
                 messageWithColor(buf2, &itemMessageColor, 0);
             }
@@ -8627,6 +8797,7 @@ boolean readScroll(item *theItem) {
         case SCROLL_SHATTERING:
             messageWithColor("the scroll emits a wave of turquoise light that pierces the nearby walls!", &itemMessageColor, 0);
             crystalize(9);
+            emitEnvironmentalNoise(player.loc, NOISE_BOOMING, NULL); // iOS port (Brogue SE): a wall-breach is deafening
             break;
         case SCROLL_DISCORD:
             discordBlast("the scroll", DCOLS);
@@ -8936,19 +9107,13 @@ void gainPolarityInsightFromRest(void) {
     rogue.disturbed = true; // interrupt any auto-rest so the discovery is noticed
 }
 
-// iOS port (iBrogue): eating a meal with nothing hunting you is a calm moment to study a SCROLL — it
-// reveals the good/bad polarity of a random still-unknown scroll, or fully identifies a random scroll
-// whose polarity you already know (scrolls only; see applyPolarityInsightToRandomItem). Gated on no
-// creature in the (Hunting) state. The random pick is action-triggered (called from eat() on a successful
-// meal), reconstructed identically on replay.
+// iOS port (iBrogue): eating a meal is a moment to study a SCROLL — it reveals the good/bad polarity of a
+// random still-unknown scroll, or fully identifies a random scroll whose polarity you already know
+// (scrolls only; see applyPolarityInsightToRandomItem). Always fires on a successful meal, regardless of
+// whether a monster is aware of / hunting you (the old "no creature in the Hunting state" gate was removed
+// 2026-07-02). The random pick is action-triggered (called from eat() on a successful meal), reconstructed
+// identically on replay.
 void gainScrollInsightFromEating(void) {
-    // Only when nothing is hunting you — you need a calm moment to study.
-    for (creatureIterator it = iterateCreatures(monsters); hasNextCreature(it);) {
-        if (nextCreature(&it)->creatureState == MONSTER_TRACKING_SCENT) {
-            return;
-        }
-    }
-
     boolean fullID = false;
     item *target = applyPolarityInsightToRandomItem(SCROLL, false /* scrolls only, no potion favoring */, &fullID);
     if (target == NULL) {
@@ -9272,6 +9437,101 @@ static boolean performInsightSacrifice(short machineNumber) {
     pmap[paymentLoc.x][paymentLoc.y].flags &= ~(HAS_ITEM | ITEM_DETECTED);
     deleteItem(paymentItem);
     refreshDungeonCell(paymentLoc);
+    return true;
+}
+
+// iOS port (Brogue SE): the Altars of Divination machine. When an unidentified item is placed on an active
+// altar, fully identify it, ARM that altar (it now holds the revealed item and seals shut on pickup via
+// TM_PROMOTES_ON_ITEM_PICKUP), and roll the statue's escalating awaken. "Fire only if it helps": an already-
+// known item is a no-op (the altar stays active and the item is lifted freely), so junk can't safely defuse
+// the room and the risk is bound to value actually gained. The Nth identify (room-scoped counter) awakens the
+// statue's single guardian at 0/25/50/75% for uses 1/2/3/4; on an awaken a tiered monster bursts from the statue
+// "off balance" and every UNUSED altar shatters (a previously-armed altar holding your earlier item is spared,
+// as is the one you just used). Substantive rand_percent -> deterministic/replay-safe. See design/environmental
+// -sounds.md's sibling note and PERCEPTION/IDENTIFICATION audits. Returns true if an identification occurred.
+static boolean performDivination(short machineNumber) {
+    // Find the one active altar holding an item (the player places one per turn).
+    item *theItem = NULL;
+    pos altarLoc = INVALID_POS, statueLoc = INVALID_POS;
+    for (short i = 0; i < DCOLS; i++) {
+        for (short j = 0; j < DROWS; j++) {
+            if (pmap[i][j].machineNumber != machineNumber) {
+                continue;
+            }
+            if (pmap[i][j].layers[DUNGEON] == DIVINATION_STATUE) {
+                statueLoc = (pos){ i, j };
+            } else if (pmap[i][j].layers[DUNGEON] == DIVINATION_ALTAR && theItem == NULL) {
+                // Fire only if it helps: an already-known item is skipped (a no-op; it's lifted back freely),
+                // and -- crucially -- skipping it here means a known item left on one altar can't block an
+                // unknown item waiting on another.
+                item *anItem = itemAtLoc((pos){ i, j });
+                if (anItem != NULL && !itemIdentityFullyKnown(anItem)) {
+                    theItem = anItem;
+                    altarLoc = (pos){ i, j };
+                }
+            }
+        }
+    }
+    if (theItem == NULL) {
+        return false; // no identifiable item on an active altar
+    }
+
+    char theName[COLS * 3], buf[COLS * 3];
+    identify(theItem);
+    tryIdentifyLastItemKinds(theItem->category);
+    itemName(theItem, theName, true, true, NULL);
+    sprintf(buf, "the altar's light washes over the item: it is %s.", theName);
+    messageWithColor(buf, &itemMessageColor, 0);
+
+    // Arm the altar: it now holds the revealed item and will seal shut (DIVINATION_ALTAR_CLOSED) when lifted.
+    pmap[altarLoc.x][altarLoc.y].layers[DUNGEON] = DIVINATION_ALTAR_ARMED;
+    refreshDungeonCell(altarLoc);
+
+    rogue.divinationAltarUses++;
+
+    // Totem escalation flavor (deterministic by use count) -- always fires; the tail reports the roll.
+    static const char *stir[4] = {
+        "The statue stirs faintly.",
+        "The statue groans; something within it shifts.",
+        "Cracks race across the statue's surface.",
+        "The statue shudders violently.",
+    };
+    const short useN = rogue.divinationAltarUses;
+    messageWithColor(stir[clamp(useN, 1, 4) - 1], &flavorTextColor, 0);
+
+    short chance;
+    switch (useN) {
+        case 1:  chance = 0; break;                        // the first pull is always safe
+        case 2:  chance = DIVINATION_AWAKEN_USE2; break;
+        case 3:  chance = DIVINATION_AWAKEN_USE3; break;
+        default: chance = DIVINATION_AWAKEN_USE4; break;   // use 4 and any beyond
+    }
+
+    if (!rogue.divinationAltarAwakened && chance > 0 && rand_percent(chance) && isPosInMap(statueLoc)) {
+        // The guardian awakens: spawn the tiered monster and shatter every UNUSED altar (the just-armed one
+        // and any previously-armed altar still holding an item are spared, so no revealed item is destroyed).
+        rogue.divinationAltarAwakened = true;
+        creature *guardian = spawnDivinationGuardian(statueLoc, useN);
+        for (short i = 0; i < DCOLS; i++) {
+            for (short j = 0; j < DROWS; j++) {
+                if (pmap[i][j].machineNumber == machineNumber
+                    && pmap[i][j].layers[DUNGEON] == DIVINATION_ALTAR) {
+                    pmap[i][j].layers[DUNGEON] = DIVINATION_ALTAR_CLOSED;
+                    refreshDungeonCell((pos){ i, j });
+                }
+            }
+        }
+        if (guardian != NULL) {
+            char mName[COLS * 3];
+            monsterName(mName, guardian, false);
+            sprintf(buf, "the statue cracks open and %s heaves itself free, off balance! The other altars crack and go dark.", mName);
+        } else {
+            strcpy(buf, "the statue cracks open and something heaves itself free! The other altars crack and go dark.");
+        }
+        messageWithColor(buf, &badMessageColor, REQUIRE_ACKNOWLEDGMENT);
+    } else if (useN > 1) {
+        messageWithColor("...but the statue falls silent.", &flavorTextColor, 0);
+    }
     return true;
 }
 
@@ -10032,6 +10292,11 @@ void recalculateEquipmentBonuses() {
         if (player.info.defense < 0) {
             player.info.defense = 0;
         }
+        // iOS port (Brogue SE): cursed-runics rework -- Anchor grants a flat defense bonus (always on,
+        // even purified); its downside (move-slow while cursed) lives in the per-turn move-cost path.
+        if ((theItem->flags & ITEM_RUNIC) && theItem->enchant2 == A_ANCHOR) {
+            player.info.defense += ANCHOR_DEFENSE_BONUS;
+        }
     }
 }
 
@@ -10144,6 +10409,22 @@ boolean equipItem(item *theItem, boolean force, item *unequipHint) {
             }
             messageWithColor(buf1, &itemMessageColor, 0);
         }
+
+        // iOS port (Brogue SE): cursed-runics rework -- Delirium's hallucination is unmistakable the
+        // instant you grip it: reveal the runic on equip, and (while still cursed) start the
+        // hallucination now; decrementPlayerStatus refreshes it each turn while wielded.
+        if ((theItem->category & WEAPON) && (theItem->flags & ITEM_RUNIC) && theItem->enchant2 == W_DELIRIUM) {
+            autoIdentify(theItem);
+            if (runicCurseActive(theItem)) {
+                player.status[STATUS_HALLUCINATING] = max(player.status[STATUS_HALLUCINATING], 2);
+                player.maxStatus[STATUS_HALLUCINATING] = max(player.maxStatus[STATUS_HALLUCINATING], player.status[STATUS_HALLUCINATING]);
+            }
+        }
+        // iOS port (Brogue SE): cursed-runics rework -- Smoky's smoke pours out the instant it's donned,
+        // so the runic reveals on equip (the per-turn emit + FOV handle the concealment/blindness).
+        if ((theItem->category & ARMOR) && (theItem->flags & ITEM_RUNIC) && theItem->enchant2 == A_SMOKY) {
+            autoIdentify(theItem);
+        }
     }
 
     return true;
@@ -10164,6 +10445,22 @@ boolean unequipItem(item *theItem, boolean force) {
         confirmMessages();
         messageWithColor(buf, &itemMessageColor, 0);
         return false;
+    }
+    // iOS port (Brogue SE): cursed-runics rework. A double-edged runic whose weld was lifted by
+    // cleansing (remove-curse / protect) but not yet purified shatters when the player deliberately
+    // takes it off -- rejecting the bargain. Any player-initiated removal counts (explicit unequip,
+    // swap, drop, throw: all force == false); engine-forced unequips never shatter. Confirm first
+    // because it's destructive AND detonates a wall-piercing burst.
+    const boolean shatterOnRemoval = !force
+        && isBadRunic(theItem)
+        && !(theItem->flags & ITEM_CURSED)
+        && theItem->enchant1 < runicPurifyThreshold(theItem);
+    if (shatterOnRemoval) {
+        itemName(theItem, buf2, false, false, NULL);
+        sprintf(buf, "Taking off your %s will shatter its runes. Proceed?", buf2);
+        if (!confirm(buf, false)) {
+            return false;
+        }
     }
     theItem->flags &= ~ITEM_EQUIPPED;
     if (theItem->category & WEAPON) {
@@ -10192,6 +10489,19 @@ boolean unequipItem(item *theItem, boolean force) {
         }
     }
     updateEncumbrance();
+    // iOS port (Brogue SE): cursed-runics rework. Now that the runic is off, reject the bargain: strip
+    // the runic (leaving a plain inferior item) and detonate a shattering burst -- crystalize breaches
+    // the nearby walls (killing wall-embedded monsters, freeing captives), and it rings out at booming
+    // volume (see Q-decisions in docs/design/cursed-runics-rework.md).
+    if (shatterOnRemoval) {
+        theItem->enchant2 = 0;
+        theItem->flags &= ~(ITEM_RUNIC | ITEM_RUNIC_HINTED | ITEM_RUNIC_IDENTIFIED);
+        itemName(theItem, buf2, false, false, NULL);
+        sprintf(buf, "the runes shatter from your %s, and a wave of turquoise light pierces the nearby walls!", buf2);
+        messageWithColor(buf, &itemMessageColor, 0);
+        crystalize(9);
+        emitEnvironmentalNoise(player.loc, NOISE_BOOMING, NULL);
+    }
     return true;
 }
 

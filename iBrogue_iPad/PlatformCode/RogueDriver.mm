@@ -161,6 +161,17 @@ extern "C" void iosSetPlayerWindowLocation(short windowX, short windowY) {
     [brogueViewController setPlayerWindowX:windowX y:windowY];
 }
 
+// iOS port (iBrogue): refreshScreen() reports here whether a travel destination is pending
+// (rogue.cursorLoc is a real cell). Deduped so the frequent refresh calls only forward state
+// changes; the host uses it to swap the reactive center d-pad button between "continue journey"
+// and "rest".
+extern "C" void iosSetTravelPending(boolean pending) {
+    static boolean last = false;
+    if (pending == last) return;
+    last = pending;
+    [brogueViewController setTravelPending:(BOOL)pending];
+}
+
 __unused void pausingTimerStartsNow() {}
 
 // Returns true if the player interrupted the wait with a keystroke; otherwise false.
@@ -253,8 +264,11 @@ void nextKeyOrMouseEvent(rogueEvent *returnEvent, boolean textInput, boolean col
                 
                 // Invert pinch-zoom (iPhone) so the engine sees the cell under
                 // the finger; identity at 1× / outside the map. Same inverse as
-                // the Swift getCellCoords and the CE bridge.
-                CGPoint loc = [skviewPort unzoomedPoint:touch.location];
+                // the Swift getCellCoords and the CE bridge. `reachUnderSidebar`
+                // extends the inverse over the sidebar columns for the held-magnifier
+                // "map under sidebar" drag (the flag rides on the event, so this is
+                // race-free with the finger lifting).
+                CGPoint loc = [skviewPort unzoomedPoint:touch.location reach:touch.reachUnderSidebar];
                 float xInPlay = MAX(float(loc.x) - leftInset, 0.0f);
                 x = COLS * xInPlay / width;
                 y = ROWS * float(loc.y) / height;
@@ -292,6 +306,31 @@ extern "C" void setBrogueExamining(boolean examining) {
     if (examining == last) return;
     last = examining;
     [brogueViewController setExamining:(BOOL)examining];
+}
+
+// iOS port (iBrogue): reports the examine description box's window rect so the iPhone host
+// can zoom to fit it rather than all the way to 1×. Emitted only when a box is shown.
+// Mirrors CE/SE's ceSetExamineBox.
+extern "C" void setBrogueExamineBox(short x, short y, short width, short height) {
+    [brogueViewController setExamineBox:(NSInteger)x y:(NSInteger)y width:(NSInteger)width height:(NSInteger)height];
+}
+
+// iOS port (iBrogue): forwards a modal menu overlay's window rect so the iPhone host can
+// auto-magnify it (title menu, inventory, action menu, dialogs). Mirrors CE/SE's ceSetMenuBox.
+extern "C" void setBrogueMenuBox(short x, short y, short width, short height) {
+    [brogueViewController setMenuBox:(NSInteger)x y:(NSInteger)y width:(NSInteger)width height:(NSInteger)height];
+}
+
+// iOS port (iBrogue): signals no menu overlay is shown, so the host tears the magnify down.
+extern "C" void clearBrogueMenuBox(void) {
+    [brogueViewController clearMenuBox];
+}
+
+// iOS port (iBrogue): the examine loop asks this before drawing a description box; YES means
+// skip it (zoomed-in play-field examine, where the box would tear against the 1× sidebar).
+// Mirrors CE/SE's ceShouldSuppressExamineBox.
+extern "C" boolean brogueShouldSuppressExamineBox(void) {
+    return (boolean)[brogueViewController shouldSuppressExamineBox];
 }
 
 // iOS port (iBrogue): chooseTarget calls this as the aiming loop begins/ends so the

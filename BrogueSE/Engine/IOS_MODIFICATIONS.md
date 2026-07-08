@@ -32,6 +32,569 @@ See `BrogueCE/Engine/IOS_MODIFICATIONS.md` (faithful CE) and
 
 ## Change log
 
+### 2026-07-07 — Item-detail box: reserve room for action buttons so long descriptions keep "call"
+
+**What.** `printTextBox`'s auto-widen only widened until the **text** fit above the flavor/button
+chrome (`ROWS-2`), ignoring the action buttons drawn *below* the text (`apply`/`drop`/`throw`/`call`/
+`relabel`), which wrap to a second double-spaced line. A long description (staff of firebolt / frost,
+etc.) left the text just fitting but pushed the wrapped button line — "call"/"relabel" — onto the
+chrome rows, where it was lost. Now reserves 4 rows (up to two wrapped button lines) in the widen
+loop when `buttonCount > 0`, so the box widens until text **and** buttons fit. Zoom-independent (a
+plain layout fix). Presentational; no RNG / save / recording impact.
+
+### 2026-07-07 — iPhone menu magnify fix: clear on text-input prompts (Save recording / seed entry)
+
+**What.** `IO.c getInputTextString` now calls `ceClearMenuBox()` at its start. A text-input prompt
+(e.g. "Save recording as…", seed entry) is NOT a button menu, so it reports no rect — and the
+save/quit flow reaches it straight from a menu without returning to play, leaving the menu magnify
+engaged on a stale rect, which tore the prompt. Presentational; no RNG / save / recording impact.
+The same `ceClearMenuBox()` is applied at the start of the full-screen **Feats** and
+**Discovered-items** views (`displayFeatsScreen` / `printDiscoveriesScreen`) — also non-menu
+overlays (they `waitForKeystrokeOrMouseClick`, report no rect) that should render at 1×. They also
+set `uiMode = InMenu` for the view's duration (restored on exit) so the host keeps
+`gameplayControlsActive` false and thus suspends the **dungeon pinch-zoom** too — otherwise the view
+is drawn into the zoomed dungeon cells and appears magnified.
+
+### 2026-07-07 — iPhone menu magnify (phase 1): in-game inventory / action menu / dialogs
+
+**What.** Extends the menu magnify (phase 0) to in-game overlays. Rather than hooking each surface,
+the rect is reported from the single choke point every button menu passes through — `buttonInputLoop`
+— so inventory, the action menu, and all `printTextBox`-with-buttons dialogs (item detail, confirms,
+the game-mode dialog) magnify with one call. Presentational; no RNG / save / recording impact.
+
+- **`Buttons.c` `buttonInputLoop`:** right after it sets `uiMode = InMenu`, calls
+  `ceSetMenuBox(...)` with the loop's own window rect, expanded by a 1-cell **horizontal-only** "trim"
+  so a printTextBox dialog's side `rectangularShading` shadow scales with the panel instead of being
+  left behind at 1× (the dark seam beside the box). Vertical trim is deliberately omitted — the tall
+  inventory list has no shadow, so top/bottom trim would only add unneeded rows and shrink its
+  fit-magnify. No clear here:
+  nested menus (inventory → item detail → inventory) just overwrite the rect, and teardown is
+  host-driven when play resumes (see below). This keeps nested navigation flicker-free.
+- **`IO.c` `printTextBox`:** removed the direct `ceSetMenuBox` added in phase 0 — it's redundant now
+  that `printTextBox`'s own `buttonInputLoop` reports the (more accurate, buttons-included) rect.
+- **Host (`BrogueViewController`):** the magnify gate is now just "a menu rect is reported" (dropped
+  the title-only guard). Teardown is anchored to `gameplayControlsActive → true` (uiMode →
+  InNormalPlay), which — because `reportUIModeIfChanged` only pushes on a settled change per
+  event-loop iteration — fires once on true return to play, not on the transient InNormalPlay between
+  nested menus. The teardown runs before the gameplay zoom is restored, so borrowed cells are back in
+  the dungeon container before it re-scales.
+- **Determinism:** read-only reporting; no RNG, no save/recording fields.
+
+### 2026-07-07 — iPhone menu magnify (phase 0): report the title menu's rect to the host
+
+**What.** iPhone renders the whole 100×34 grid stretched onto a narrow screen, so title-menu items are
+too small to read/tap. Rather than pan/zoom the camera, the host now auto-magnifies just the menu region
+to a readable, tappable size — as a panel over the otherwise-untouched 1× title (only the menu cells scale),
+instant, no camera movement. The engine's only job is to tell the host *where* the current menu is
+(window-cell rect); all magnification lives in the platform layer.
+Presentational hint only — nothing here touches RNG, game state, or the recording, so it's determinism-
+and save-safe.
+
+- **`MainMenu.c`:** new `reportTitleMenuBox()` computes the bounding rect of the main-menu buttons (plus
+  the flyout buttons when a flyout is open, and a 1-cell shadow-halo "trim") and calls `ceSetMenuBox(x,y,w,h)`.
+  Called each title redraw in `titleMenu()`'s inner loop (host dedupes identical rects). On `titleMenu()`
+  exit it calls `ceClearMenuBox()` — leaving the title into a game or a sub-screen that reports no rect of
+  its own (file browser, high scores, recordings, seed entry) would otherwise leave the stale magnify
+  engaged, and its borrowed cells corrupt that screen's rendering.
+- **`IO.c` `printTextBox`:** when the box has buttons (a modal menu — e.g. the game-mode dialog), call
+  `ceSetMenuBox(x2, y2, width, lineCount + padLines)` before blocking on input. Button-less boxes (examine /
+  details) are left to the examine path. In-game buttoned boxes also report, but the host only magnifies
+  while at the title, so they're ignored for now (phase 1 extends the gate to inventory).
+- **Bridge:** `SEBridge.mm` defines `ceSetMenuBox` → `[gHost setMenuBox:y:width:height:]` and `ceClearMenuBox`
+  → `[gHost clearMenuBox]`; both host methods were added to the shared `BrogueCEHost` protocol
+  (`BrogueCEHost.h`). CE/Classic hosts that don't magnify menus can ignore them.
+- **Determinism:** read-only reporting; no RNG, no save/recording fields.
+
+### 2026-07-07 — Game handoff: engine recording-version accessor (cross-platform version guard)
+
+**What.** The handoff compatibility guard now compares the engine's recording/save-version string
+(BROGUE_VERSION_STRING) instead of the app version+build — the build number changes every build, so the
+old proxy wrongly blocked cross-device / cross-platform handoff (iPhone→Mac). Bridge/host only. See
+`docs/design/game-handoff.md`.
+
+- **`SEBridge.mm`:** `se_recordingVersion()` returns `brogueVersion` (BROGUE_VERSION_STRING); declared in
+  `BrogueSEHost.h`. The host stamps it into the Handoff `userInfo` and compares it on receipt.
+- **Determinism:** read-only; no RNG, no save fields.
+
+### 2026-07-06 — Game handoff (Phase 4): silent relinquish key (end a handed-off run, no bookkeeping)
+
+**What.** When a run is handed off to another device, the source ends it *silently* so the run lives in
+one place and leaves no trace on the source. Added `HANDOFF_RELINQUISH_KEY` (a synthetic, button-only key
+the host injects on the deep ACK), handled in `executeKeystroke` beside NEW_GAME_KEY/QUIT_KEY. See
+`docs/design/game-handoff.md`.
+
+- **`Rogue.h`:** `#define HANDOFF_RELINQUISH_KEY (128+22)` (beside CONTINUE_TRAVEL_KEY; value shared with CE).
+- **`IO.c` `executeKeystroke`:** the new case ends the run with NO `gameOver` bookkeeping (no death/quit
+  run-history, high score, or saved recording — unlike QUIT_KEY): `remove(currentFilePath)` then blank it
+  (so no later flush recreates the resumable save), `rogue.nextGame = NG_NOTHING`, `rogue.gameHasEnded =
+  true` — the same clean exit NEW_GAME_KEY uses. Declares `extern char currentFilePath[]`.
+- **Host side:** starves input during the transfer (freeze), injects this key on the ACK, then clears the
+  resume marker. No RNG or save-format impact; the relinquish key is never recorded.
+
+### 2026-07-06 — Game handoff (Phase 3b): flush the live recording on demand for the transfer
+
+**What.** The handoff source streams the *exact-state* recording to the receiving device. Added a
+bridge hook that flushes the live recording to `currentFilePath` and returns its bytes, reusing the
+same `flushBufferToFile()` + engine-thread poll pattern as background-suspend (no vendored engine `.c`
+change — bridge/host only). See `docs/design/game-handoff.md`.
+
+- **`SEBridge.mm`:** `se_flushRecordingForHandoff()` (host hook, called off-main) sets
+  `gSEHandoffFlushRequested` and waits on a semaphore; `seTakeBackgroundSnapshotIfRequested` (engine
+  thread, same poll point as the background snapshot) services it with `flushBufferToFile()` and signals,
+  then the hook reads `currentFilePath` and returns the bytes (`NSData`).
+- **`BrogueSEHost.h`:** declares `se_flushRecordingForHandoff`.
+- **Determinism:** read-only with respect to game state (flush + file read); no RNG, no save fields.
+
+### 2026-07-06 — Game handoff (Phase 1b): report live game context (depth/turn/seed) to the host
+
+**What.** `commitDraws` now reports the live game's context to the host so the cross-device Continuity
+**Handoff** activity's banner/metadata (depth/turn/seed) stays current. Part of the game-handoff feature
+(CE + SE only; Classic is excluded — its recordings are desync-prone). Platform wiring lives in the
+bridge + Swift; only the `IO.c` hook is engine C. See `docs/design/game-handoff.md`.
+
+- **`IO.c` `commitDraws`:** after the existing `ceSetTravelPending` call, gated on `!rogue.playbackMode`
+  (skip loading/replay), call `ceSetGameContext(rogue.depthLevel, rogue.playerTurnNumber, rogue.seed)`.
+  Extern declared alongside `ceSetTravelPending` near the top of `IO.c`.
+- **Bridge (`SEBridge.mm`):** `ceSetGameContext` dedupes on depth (forwarded only when the player
+  changes level; per-turn churn is unnecessary since the recording bytes stream live at pickup) and calls
+  the new `BrogueCEHost setGameDepth:turn:seed:`. The depth dedup (`gLastHandoffDepth`) resets when the
+  title reappears (`reportAtTitleIfChanged`) so a new game re-forwards its first depth.
+- **Determinism:** pure outbound signaling — reads engine state, writes nothing to it. No RNG, no save
+  fields, replay-safe.
+
+### 2026-07-05 — Continue-travel command + reactive center d-pad button
+
+**What.** A touch-friendly "continue my interrupted journey" command. Tapping a far tile auto-travels
+there, but any interruption (spotting a monster, etc.) stops you and — on a touch screen — forces you to
+re-select the destination, often re-triggering on the next thing you spot. The engine already remembers
+the destination: `rogue.cursorLoc` survives an interruption (only *arrival*, no-path, and stairs clear
+it) and the route stays drawn from it. The new command just re-runs `travel(rogue.cursorLoc, true)`.
+
+- **Key.** `#define CONTINUE_TRAVEL_KEY (128+21)` in `Rogue.h` — a synthetic, button-only code (no
+  physical-key binding) sitting above `REAPPLY_KEY`/`UNKNOWN_KEY`. Fits a `UInt8` and round-trips cleanly
+  through the keystroke-recording compressor (offset 21 is past `keystrokeCount`, so `compressKeystroke`/
+  `uncompressKeystroke` pass it through unchanged, no `keystrokeTable` collision). The **same value is
+  used in CE and Classic** so the one on-screen button dispatches in every engine.
+- **Dispatch.** `mainInputLoop`'s cursor-confirm (`doEvent`) branch intercepts `CONTINUE_TRAVEL_KEY` and
+  calls `travelRoute(path, steps)` — the exact route already computed and drawn for the cursor *this
+  iteration*, the same fast (~25ms/step) primitive a confirming tap uses, **not** `travel()`→`travelMap`
+  (the slow 500ms/step greedy path reserved for stairs — using it made continue ~20× slower and take a
+  different route than the displayed one). `travelRoute` also marks visible monsters `MB_ALREADY_SEEN`,
+  so it walks past them cleanly. **No explicit `recordKeystroke`** — `travelRoute` drives `playerMoves`,
+  which records each step's direction key, so the journey is captured as its moves (like a tap-travel).
+  Determinism-safe.
+- **Reactive-button state.** `commitDraws` reports whether a journey is pending via a new
+  `ceSetTravelPending(isPosInMap(rogue.cursorLoc))` extern (defined in `SEBridge.mm`, deduped, routed
+  through the `BrogueCEHost` `setTravelPending:` protocol method). The host swaps the center d-pad button
+  between a footprints "continue" glyph and the `zzz` "rest" glyph, sending the continue key vs `z`.
+- **Scope.** Walks past *already-seen* monsters and re-stops only on a *new* disturbance (the
+  `MB_WAS_VISIBLE` gate in `Time.c`) — i.e. exactly what re-clicking the tile already does; no new power,
+  no RNG/save impact. No-op when nothing is pending. Kept identical across Classic / CE / SE.
+
+### 2026-07-05 — Examine description box: report its rect (fit-zoom) + suppress it for zoomed play-field examines
+
+**What.** Two iPhone examine-box hooks (identical hooks added to CE and Classic — see their
+IOS_MODIFICATIONS). (1) *Fit-zoom:* the "zoom out on examine" nicety used to drop the magnified map all the
+way to 1× whenever a description box appeared, shrinking the box text (it's drawn in the magnified dungeon
+cells); the engine now reports the box's window-cell rect so the host can zoom only as far as needed to
+*fit* it. (2) *Suppress:* a description box triggered by a **play-field drag-hold while zoomed** tore
+against the 1× sidebar/chrome (only the dungeon columns magnify); the engine now asks the host and skips
+drawing the box in that case (the sidebar still highlights the entity, and the one-line flavor still shows).
+
+- **`IO.c` `printTextBox`:** after shading the box, stash its rect (`x2, y2, width, lineCount + padLines`)
+  in file-static `gLastTextBox{X,Y,Width,Height}`.
+- **`IO.c` cursor/examine loop (`mainInputLoop`):**
+  - Gate `printMonsterDetails`/`printFloorItemDetails` on `!ceShouldSuppressExamineBox()` (the sidebar
+    `refreshSideBar` highlight still runs before the gate).
+  - Just before `ceSetExamining(textDisplayed)`, when `textDisplayed`, call `ceSetExamineBox(x,y,w,h)` with
+    the stashed rect. Safe because only `printLocationDescription` → `flavorMessage` (a one-line
+    `printString`, not a `printTextBox`) runs between the box and here, so it can't clobber the rect.
+- **Bridge:** `SEBridge.mm` defines `ceSetExamineBox` → `[gHost setExamineBox:y:width:height:]` and
+  `ceShouldSuppressExamineBox` → `[gHost shouldSuppressExamineBox]`; both host methods were added to the
+  shared `BrogueCEHost` protocol and implemented in `CEHost.swift`.
+- **Scope:** applied to all three engines (this file, CE, Classic). Pure presentation; no gameplay/RNG/save
+  impact. iPhone-only in effect (the host consumers are phone-gated); the host suppresses only for a zoomed
+  play-field examine (`gestureOriginZone == .playArea`), never a sidebar tap.
+
+### 2026-07-02 — Cursed-runics: Smoky armor progressive per-enchant sight (post-0.12.0)
+
+**Why.** The cursed Smoky armor's 1-tile blindness was too punishing to *live* with — fine as an opening
+handicap, but it made exploration (finding scrolls of enchanting, etc.) miserable in a dungeon you can't
+see. The rework makes the blindness **ease with every enchant** on the way to the +4 purify, so investment
+is felt continuously rather than only at the finish.
+
+**What.** `emitSmokyArmorCloud()` (`Time.c`) no longer wreathes all 8 neighbors in thick, sight-blocking
+smoke. It now **dithers**: `clearCount` of the 8 neighbors are thinned to sub-threshold smoke
+(`SMOKY_DITHER_THIN_VOLUME` = 10 < `SMOKE_THICK_VOLUME`), which dims but does not block — and clearing a
+neighbor opens the whole sightline past it. The easing is **symmetric** (an open lane lets foes see *in* as
+well), so cursed-Smoky stays a worse deal than the purified +3 stealth aura and never becomes free invisibility.
+
+- **Curve** (`clearByTier`, indexed by `enchant1 + 1`): `-1 → 0` (byte-identical to the old full blindness),
+  `0 → 2`, `+1 → 4`, `+2 → 5`, `+3 → 6` (capped below 8 so +3 still bites). `+4` purifies (cloud gone + the
+  stealth aura, unchanged).
+- **Which cells clear:** `smokyCellHash(x,y)` — a pure, world-anchored spatial hash (no RNG) — ranks the 8
+  neighbors; the `clearCount` lowest are thinned. The lowest-N set ⊂ lowest-(N+1), so enchanting only *adds*
+  lanes (monotonic, no reshuffle), and the open lanes drift organically as you move.
+- **Determinism:** pure functions of `enchant1` and cell `(x,y)`, recomputed each turn — no new save fields,
+  no substantive/cosmetic RNG, replay-safe. Re-stamped at both existing call sites (top-of-turn for monster
+  concealment; pre-vision for the player's FOV) so `updateEnvironment` gas-averaging can't wash out the pattern.
+- **Tuning constant** (`Rogue.h`): `SMOKY_DITHER_THIN_VOLUME`. Info-panel copy for cursed A_SMOKY (`Items.c`)
+  updated to describe the haze thinning per enchant.
+
+### 2026-07-02 — Brogue SE 0.12.0 "C is for Curses": release cut (version + release notes)
+
+**What.** Cut the 0.12.0 release. Headline features since 0.11.0: the **cursed-runics rework** (double-edged
+runics — an always-on upside welded to a downside you either *purify* away with enchant scrolls or *eject*
+early with remove-curse; six curses: Delirium / Recklessness / Clumsiness→Quietus on weapons, Anchor / Smoky /
+Acrophobia on armor) and the **Altars of Divination** reward room, plus the thrown-decoy dwell.
+
+- **Title string:** `BROGUE_VERSION_STRING` → `"C is for Curses 0.12.0 "` (GlobalsBrogue.c).
+- **Release notes** (`seInfoBlocks`, BrogueViewController.swift): new intro + three sections — Cursed Runics,
+  Altars of Divination, Cleaner Distractions. Demoted 0.11.0 "B is for Balance" to the lone Previous Release
+  block (kept its Balance Pass / Smoke & Terrain / Tells & Legibility sections); dropped 0.10.0 "A Is For AAaAH!".
+- **Saves/replay:** recording version is already `"SE 2.2.0"` (`BROGUE_MINOR` 1→2 landed with the divination
+  save break), so 0.11.0 ("SE 2.1.0") saves are cleanly rejected. No further bump; `BROGUE_PATCH` stays 0. No
+  `BROGUE_VERSION_ATLEAST` gates depend on the minor.
+- **Marketing version:** `MARKETING_VERSION` (Xcode app targets) — confirm the App Store version before archiving.
+
+### 2026-07-02 — Cursed-runics rework: Smoky blindness bugfix + curse-test identify scrolls
+
+**What.** (1) Fixed Smoky's self-blind not applying (playtest: "I can see fine, so it's all upside"). The
+per-turn `emitSmokyArmorCloud` ran once at the top of `playerTurnEnded`, but the do-loop then runs
+`updateEnvironment` (two `updateVolumetricMedia` passes that *average* the concentrated cloud below
+`SMOKE_THICK_VOLUME`) **before** the final, player-facing `updateVision(true)` — so the FOV was recomputed
+against thinned smoke and never collapsed. Fix: re-assert the cloud a second time right before that final
+vision pass (the top-of-loop emit still drives monster-awareness concealment). (2) `D_CURSE_TEST_SCROLLS_START`
+now also grants 5 scrolls of identify, alongside the enchanting + remove-curse it already gave.
+
+**Why.** The bug made Smoky pure upside (concealment without the blindness cost). Concealment worked because
+the *intermediate* vision pass (which drives monster awareness) still saw the fresh thick smoke.
+
+**Where.** `Time.c` (second `emitSmokyArmorCloud` before the end-of-loop `updateVision`), `RogueMain.c`
+(identify scrolls in the grant).
+
+### 2026-07-02 — Cursed-runics rework, Phase 2 (armor, part 2): Smoky (armor phase complete)
+
+**What.** The third armor curse (design finalized via a `/grill-me` pass; all Q's landed on the default).
+- **Concealment via smoke, range-only.** While cursed, `emitSmokyArmorCloud` (`Time.c`, called early in
+  `playerTurnEnded` so it lands before FOV/monster-sight) refreshes a **radius-1 thick-smoke cloud**
+  (player + 8 neighbors) — a direct, RNG-free gas write (`layers[GAS]=SMOKE_GAS`, `volume` bumped past
+  `SMOKE_THICK_VOLUME`), never clobbering another gas, skipping `T_OBSTRUCTS_GAS`. The **existing shared
+  `getFOVMask`** (used by both player and monster FOV) does the rest: monsters >1 tile away can't see you
+  (sneak past / can't be targeted / **sneak-attack openers**), adjacent monsters still can, and your own
+  FOV collapses to ~1 tile. Cells you leave dissipate into a short trail (escape cover). Noise system still
+  hears you (the counter).
+- **Purify → stealth aura (a sidegrade, by design).** Purified, the smoke is gone and you gain
+  `SMOKY_STEALTH_BONUS` (3) — applied fresh at the two consumption sites (`Time.c` stealth range +
+  `Monsters.c` player noise) via `smokyPurifyStealthBonus()`, so it's correct regardless of when you
+  purify (avoids the `updateRingBonuses`-not-called-after-armor-enchant trap). So you trade absolute
+  at-range sight-block (+ blindness) for see-normally + harder-to-spot-and-quieter. Keeping it cursed is a
+  legitimate blind-assassin niche.
+- Reveals on equip (`equipItem`). Description by purify state; playtest grant `D_SMOKY_ARMOR_START`.
+
+**Why.** Completes the armor phase. The range-only model + purify sidegrade resolve the long-standing
+"one-way invisibility" balance question (we never grant see-through-your-own-smoke).
+
+**Gas interaction (intended, verified):** the Smoky cloud is low-volume (~21). Real gas clouds are far
+denser (confusion trap 300, dewars 20000, caustic likewise), and the gas-mix rule (Time.c: denser gas
+wins the cell, weaker capped at 3) means a real cloud *overwhelms* your smoke — you lose concealment AND
+take the gas effect. So Smoky grants **no** gas protection (no respiration overlap); gas clouds are a
+natural hard counter to the smoke-assassin. Your smoke only displaces feeble/residual gas (~<21).
+
+**Where.** `Time.c` (`emitSmokyArmorCloud` + call, stealth-range site), `Monsters.c` (noise site),
+`Items.c` (`smokyPurifyStealthBonus`, equip reveal, description), `Rogue.h` (constant + flag + decl),
+`RogueMain.c` (grant).
+
+### 2026-07-02 — Cursed-runics rework, Phase 2 (armor, part 1): Acrophobia + Anchor
+
+**What.** Two of the three armor curses (effects + info-panel descriptions + playtest grants). Both are
+passive/contextual (not the reactive `applyArmorRunicEffect` slot), gated on the shared `runicCurseActive`.
+- **Acrophobia** (`A_ACROPHOBIA`): always-on **fall immunity** (guarded in the fall path, `Time.c`) and
+  **dive-at-will** (suppresses the "Dive into the depths?" prompt for an identified wearer, `Movement.c`,
+  same pattern as `A_RESPIRATION`); while cursed, standing adjacent to a chasm inflicts **vertigo**
+  (per-turn `STATUS_CONFUSED` refresh in `decrementPlayerStatus`). Reveals on the first vertigo or the
+  first cushioned fall. (Its purify reward is simply the fear lifting — fall-immunity is binary, so
+  there's nothing to scale; and there's no player "forced into a chasm" source to guard.)
+- **Anchor** (`A_ANCHOR`): always-on **+defense** (`ANCHOR_DEFENSE_BONUS`, in `recalculateEquipmentBonuses`);
+  while cursed, a **move-only slow** (`ANCHOR_MOVE_SLOW_PCT` extra ticks in the non-attack turn-cost path,
+  `Time.c` — attacks add ticks elsewhere, so attack speed is untouched). Reveals on the first dragging step.
+  **Purify reward — immovable:** immune to knockback (`MA_ATTACKS_STAGGER`, e.g. ogres) and to being seized
+  (`MA_SEIZES`, e.g. bog monsters), gated on purify via `playerHasImmovableAnchor` (`Combat.c`). (We verified
+  these are the *only* things that displace the player — explosion knockback is gated off, and nothing
+  beckons/shoves the player — so beckon / forced-into-chasm immunity were dropped as no-ops.)
+
+Tuning `#defines` in `Rogue.h`. Playtest grants (default 0): `D_ACROPHOBIA_ARMOR_START`,
+`D_ANCHOR_ARMOR_START` (cursed −1 runic leather).
+
+**Why.** Phase 2 of the rework. **Smoky remains** — its concealment is an FOV/smoke-emission problem
+(and the flagged "one open balance question": purify → one-way sight advantage), so it gets a focused pass.
+
+**Where.** `Time.c` (fall immunity, vertigo, move-slow), `Movement.c` (dive prompt), `Items.c`
+(defense bonus, both armor descriptions), `Rogue.h` (constants + grant flags), `RogueMain.c` (grants).
+
+### 2026-07-02 — Cursed-runics rework, Phase 3 (weapons): item-panel descriptions
+
+**What.** Real info-panel descriptions for the three weapon curses, replacing the Phase-0 `[name]`
+placeholders. Added custom description blocks in `itemDetails` (`Items.c`, alongside the `W_SLAYING`/
+`W_MULTIPLICITY` special cases) because the generic "X% of the time it hits, …" frame doesn't fit them:
+- **Delirium** — described by purify state (cursed: hallucination + acid-mound warning + confusion proc
+  + purify hint; purified: weakness proc, no cost).
+- **Recklessness** — passive, so it bypasses the proc frame entirely (+damage dealt / +damage taken,
+  purify removes the vulnerability).
+- **Clumsiness** — decap proc + the fumble downside + purify→quietus hint (cursed-only; the purified
+  `W_QUIETUS` uses the stock Quietus description).
+
+Precise numbers are gated on `ITEM_IDENTIFIED` (as the generic path does), so an un-ID'd enchant isn't
+leaked via the shown proc %. The `weaponRunicEffectDescriptions[]` table entries for these three are now
+dead (kept as `[name]` fallbacks; the custom blocks handle all display).
+
+**Why.** Phase 3 polish — the panels were showing bracket placeholders now that the curses surface.
+
+**Where.** `Items.c` (`itemDetails` runic-description chain; the effect-descriptions table).
+
+### 2026-07-02 — Cursed-runics rework, Phase 1: the three weapon-curse effects
+
+**What.** Implemented the effects for the three weapon curses (design: `docs/design/cursed-runics-rework.md`).
+Shared helper `runicCurseActive(item)` (`Items.c`, declared in `Rogue.h`) = "bad runic below its purify
+threshold" — the single gate for all cursed-phase behavior. **All three effects scale with enchant** (so
+purifying-and-enchanting is a real upgrade, matching how good runics scale). Tuning constants in `Rogue.h`:
+`DELIRIUM_PROC_FLOOR` (8) + `DELIRIUM_PROC_PER_ENCHANT` (3); `CLUMSINESS_DECAP_PCT` (4, flat cursed decap
+AND the purified-Quietus floor); `CLUMSINESS_FUMBLE_PCT`/`_STR_RELIEF`/`_STUN_TURNS`;
+`RECKLESSNESS_DAMAGE_DEALT_BASE` (20) + `_PER_ENCHANT` (1); `RECKLESSNESS_DAMAGE_TAKEN_PCT` (50, flat).
+- **Delirium** (`W_DELIRIUM`): dual-mode on-hit proc in `magicWeaponHit` keyed on `runicCurseActive` —
+  **confusion** while cursed (the "venom", reuses `weaponConfusionDuration`), **weakness** once purified
+  (`weaken()`). Downside: while cursed, a per-turn refresh in `decrementPlayerStatus` keeps
+  `STATUS_HALLUCINATING` topped up (permanent hallucination while wielded). Reveals on equip
+  (`autoIdentify` + hallucination start in `equipItem`). The "real curse" (blind acid-mound corrosion)
+  falls out for free from the existing `degradesAttackerWeapon` path; protect-weapon counters it.
+- **Recklessness** (`W_RECKLESSNESS`): passive, no on-hit proc (`runicWeaponChance` returns 0 for it).
+  +`RECKLESSNESS_DAMAGE_DEALT_PCT`% damage dealt (always, even purified) in `attack()`; +`…_TAKEN_PCT`%
+  damage taken while cursed in `inflictDamage` (all sources). Reveals on first connecting attack.
+- **Clumsiness** (`W_CLUMSINESS`): on-hit **decapitate** (`CLUMSINESS_DECAP_PCT` via `runicWeaponChance`;
+  mirrors `W_QUIETUS` lethal path) in `magicWeaponHit`; while cursed, a pre-hit **fumble** in `attack()`
+  (auto-miss + `STATUS_PARALYZED` self-stun, chance reduced by strength over the weapon's requirement).
+  Reveals on first proc. (Purify → `W_QUIETUS` already handled in Phase 0b.)
+
+**Why.** Phase 1 of the rework: the sim-able combat curses, ready for Fight-Simulator tuning of the
+constants above.
+
+**Where.** `Rogue.h` (constants + `runicCurseActive` decl), `Items.c` (`runicCurseActive` def, `equipItem`
+Delirium reveal), `Combat.c` (`magicWeaponHit` Delirium/Clumsiness, `attack()` fumble + Recklessness-dealt,
+`inflictDamage` Recklessness-taken, the Clumsiness decap flare), `PowerTables.c` (`runicWeaponChance`
+per-runic), `Time.c` (`decrementPlayerStatus` hallucination refresh).
+
+**Notes.** No `STATUS_STUNNED` exists in this engine — the fumble uses `STATUS_PARALYZED` (the engine's
+stun, as water-shock does); the constant is raw (the end-of-turn decrement eats 1 → ~1 lost turn). All
+rolls use `rand_percent`/`rand_range` (deterministic, replay-safe). Armor curses (Anchor/Smoky/Acrophobia)
+remain Phase 2.
+
+**Effect scaling (post-sim decision).** All three effects scale with enchant (parity with how good runics
+scale, so purifying-and-enchanting is a real upgrade): Delirium proc `= DELIRIUM_PROC_FLOOR + max(0,e)*_PER_ENCHANT`;
+Recklessness dealt `= _DEALT_BASE + max(0,e)*_PER_ENCHANT`; Clumsiness's cursed decap stays flat 4% but its
+purified `W_QUIETUS` scales via the runic table and is floored at 4%. Verified with the fightsim `--cursecurve`
+mode: cursed phases are a survivable handicap (Clumsiness harshest via the fumble), purify is a clean step-up,
+nothing degenerate.
+
+**Playtest grants (`RogueMain.c`, flags in `Rogue.h`, default 0).** `D_DELIRIUM_WEAPON_START` /
+`D_RECKLESSNESS_WEAPON_START` / `D_CLUMSINESS_WEAPON_START` each grant an unidentified, cursed −1 runic sword;
+`D_CURSE_TEST_SCROLLS_START` grants 12 enchanting + 3 remove-curse to drive the purify/shatter loop. Same
+deterministic-grant pattern as the other `D_*_START` flags.
+
+### 2026-07-01 — Cursed-runics rework, Phase 0 follow-ups: deferred shatter-on-unequip; array fix
+
+**What.** The eject consequence for a cursed double-edged runic (design finalized via a grilling pass;
+Q-decisions in `docs/design/cursed-runics-rework.md`):
+- **Cleansing lifts the weld, it does not destroy** (`uncurse()`): remove-curse / protect clear
+  `ITEM_CURSED` on an *equipped* bad runic only (remove-curse's pack sweep leaves unworn cursed runics
+  alone). The item drops into a "pending shatter" state (bad runic, unwelded, below purify threshold).
+- **Shatter fires on any player-initiated unequip** (`unequipItem`, `force == false` — explicit
+  unequip, swap, drop, throw), behind a `confirm()` that warns it shatters the runes *and* pierces the
+  nearby walls. Engine-forced unequips never shatter. On confirm: strip the runic, then `crystalize(9)`
+  (full wall-breach — opens walls, kills wall-embedded monsters, frees captives) + a `NOISE_BOOMING`
+  environmental noise.
+- **Noise gap fixed:** scroll of shattering and charm of shattering were silent (`crystalize` emits no
+  noise, and scroll-reads emit no player-noise spike). Added `emitEnvironmentalNoise(.., NOISE_BOOMING)`
+  at all three shatter sources (eject + scroll + charm), at the call sites — `crystalize()` stays a
+  pure terrain function (it is NOT used by staff of obstruction; its only callers are these three).
+- Fixed `effectColors[NUMBER_WEAPON_RUNIC_KINDS]` in `magicWeaponHit` (10 initializers for the now-11
+  element array left the `W_CLUMSINESS` slot NULL).
+
+**Why.** Accidental scroll reads are common; making eject destructive-on-read would punish a blind
+read. Deferring the shatter to the deliberate unequip (with a confirm) keeps an accidental cleanse
+harmless while still closing the "remove-curse, shelve, hoard scrolls, re-equip clean" abuse — purity
+must be earned by *wearing* the curse to threshold. Residual (accepted): identify-in-pack then
+shelf-enchant, self-gated by the extra identify scroll.
+
+**Where.** `Items.c` (`uncurse()`, `unequipItem()`, `SCROLL_SHATTERING`, `CHARM_SHATTERING`),
+`Combat.c` (`effectColors`).
+
+**Notes.** Purify never routes through `uncurse()` (it uses `purifyRunicIfReady`), so enchanting toward
+threshold never shatters. Swap-to-a-better-item can trigger the shatter confirm (declining aborts the
+swap). Rings keep vanilla uncurse (lift unconditionally).
+
+### 2026-07-01 — Cursed-runics rework, Phase 0b/0c: weld lifecycle + generation (save break)
+
+**What.** Decoupled the weld from enchant sign and reworked cursed weapon/armor generation.
+- **Generation** (`Items.c`, weapon + armor `makeItemInto`): a negative roll now splits into a
+  *double-edged runic curse* (55%, was 33%) — welds (`ITEM_CURSED | ITEM_RUNIC`), starts at **exactly
+  −1** — or a plain *inferior* item (45%) — random −1…−3, **no runic and no `ITEM_CURSED`**, so it is
+  freely removable.
+- **Weld lifecycle:** a cursed runic stays welded until **purified** (enchanted to its threshold:
+  weapon +6 / armor +4, `WEAPON_RUNIC_PURIFY_ENCHANT` / `ARMOR_RUNIC_PURIFY_ENCHANT` in `Rogue.h`) or
+  **ejected** (remove-curse / protect scroll → `uncurse()`, weld lifts but the downside stays). New
+  helpers `isBadRunic`, `runicPurifyThreshold`, `purifyRunicIfReady` (`Items.c`, above
+  `checkForDisenchantment`). Purify lifts `ITEM_CURSED` and tempers `W_CLUMSINESS` → `W_QUIETUS`.
+- **Enchant scroll path** (`SCROLL_ENCHANTING`): cursed runics no longer uncurse on the first
+  enchant — the weld holds until the threshold, then a purge message (a bespoke one for clumsiness).
+  Non-runic / rings keep the vanilla `uncurse()` behavior.
+- **`checkForDisenchantment`:** the old "any enchant ≥ 0 lifts the curse" clause replaced by
+  `purifyRunicIfReady`.
+
+**Why.** Fixes the core complaint (plain-negative weapons/armor being stuck) by making only *runic*
+curses weld, and gives cursed runics a purify path. Model in `docs/design/cursed-runics-rework.md`.
+The **downside** is not applied yet (Phase 1/2) — the effect code will gate it on
+`enchant1 < runicPurifyThreshold`, so purify's raised enchant switches it off automatically while
+the weld lift + clumsiness→quietus are the visible transition.
+
+**Where.** `Rogue.h` (threshold `#define`s), `Items.c` (`isBadRunic`/`runicPurifyThreshold`/
+`purifyRunicIfReady`, `checkForDisenchantment`, `SCROLL_ENCHANTING`, weapon + armor generation).
+
+**Notes.** `itemMagicPolarity` already flags negatives via `enchant1 < 0`, so inferior items losing
+`ITEM_CURSED` does **not** break detect-magic / polarity tells. Rings unchanged (still 16% cursed,
+weld, no runic). Approx frequencies now: double-edged runic ≈ 11%, inferior ≈ 9% of weapons/armor.
+
+### 2026-07-01 — Cursed-runics rework, Phase 0a: swap the malevolent runic tail (save break)
+
+**What.** Replaced the pure-downside malevolent runics with the placeholders for the new
+double-edged curse set. Weapon `weaponEnchants`: `W_MERCY, W_PLENTY` → `W_DELIRIUM,
+W_RECKLESSNESS, W_CLUMSINESS` (`NUMBER_WEAPON_RUNIC_KINDS` 10 → 11). Armor `armorEnchants`:
+`A_BURDEN, A_VULNERABILITY, A_IMMOLATION` → `A_ANCHOR, A_SMOKY, A_ACROPHOBIA` (count unchanged at
+11). Old on-hit/on-absorb effects removed and **stubbed to no-ops** — the actual behaviors land in
+Phase 1 (weapons) / Phase 2 (armor).
+
+**Why.** First step of the cursed-runics rework (design: `docs/design/cursed-runics-rework.md`):
+turn cursed weapons/armor from pure "identification noise" into double-edged bargains (always-on
+upside + a downside you purify away). This sub-step is the compile-safe rename foundation; weld
+lifecycle (0b) and generation (0c) follow. Enum reordering breaks save-compat (SE bumps freely).
+
+**Where.** `Rogue.h` (both enums + `NUMBER_GOOD_*` markers), `Globals.c`
+(`weaponRunicNames`/`armorRunicNames`), `PowerTables.c` (`effectChances` rows — bad runics return
+early, rows unused), `Combat.c` (`magicWeaponHit` + `applyArmorRunicEffect` dispatch stubbed; the
+`A_BURDEN` post-hit `strengthCheck` hook removed), `Items.c` (`weaponRunicEffectDescriptions` +
+the weapon/armor runic description switches, interim `[name]` copy pending Phase 2). Marked in-code
+`// iOS port (Brogue SE):`.
+
+**Notes.** `Wizard.c`'s create-item runic menu is count-driven
+(`NUMBER_*_RUNIC_KINDS − NUMBER_GOOD_*`) and needed no change. Left in place but now unused:
+`gameConst.onHitMercyHealPercent` (field + `GlobalsBrogue.c` init) and `DF_ARMOR_IMMOLATION` (enum +
+catalog entry) — retire in a later cleanup. No generation/weld changes yet, so cursed items still
+weld and still roll −1…−3; only the runic identities changed.
+
+### 2026-07-01 — Altars of Divination replace the deprecated Altars of Insight (new content; save break)
+
+**What.** A new guaranteed reward room — a central **statue** with up to four one-use **altars of divination**
+arranged in a cross (one per cardinal direction, one tile out). Place an unidentified item on an active altar
+and it is **fully identified** (`identify()`); the altar then **arms** (holds the revealed item) and **seals
+shut** when you lift the item (`TM_PROMOTES_ON_ITEM_PICKUP` → `DF_DIVINATION_ALTAR_CLOSE`). "Fire only if it
+helps": a known item is a no-op (lift it back freely), so junk can't defuse the room.
+
+**The push-your-luck loop.** Each identify (room-scoped `rogue.divinationAltarUses`) rolls an escalating
+chance to awaken the statue's single guardian: **0 / 25 / 50 / 75 %** for uses 1/2/3/4 (`DIVINATION_AWAKEN_*`).
+Use 1 is always safe. On an awaken, a tiered monster whose strength scales with *which* use triggered it
+**replaces the statue** — **use 2 → Ogre, use 3 → Troll, use 4 → Underworm** (`spawnDivinationGuardian`,
+Monsters.c) — the statue cell is cleared and the guardian stands where it stood, emulating the vanilla
+`STATUE_DORMANT` shatter (we runtime-spawn rather than activate a pre-placed dormant monster because the kind
+depends on the trigger use). **Every unused altar shatters** (a previously-armed altar still holding a revealed
+item is spared, so no item is destroyed). One guardian per room; the awaken ends it. The monster emerges **"off balance"**: a large
+`ticksUntilTurn` (`DIVINATION_OFFBALANCE_TIER1/2/3` = 200/300/400) delays its first action and surfaces the
+existing derived **"(Off balance)"** sidebar tell ([IO.c](IO.c) `ticksUntilTurn > player.ticksUntilTurn +
+movementSpeed`). Deadlier tier = longer grace; the Underworm is also natively slow, so the scariest guardian is
+the most escapable. Two-channel flavor: the statue escalates each use (*stirs → groans → cracks → shudders
+violently*) with a tail clause reporting the roll (*"…but the statue falls silent."* on a safe pull).
+
+**Placement.** Guaranteed **once per run**, force-built with carry-forward from `DIVINATION_ALTAR_MIN_DEPTH`
+(D7), abandoned past `DIVINATION_ALTAR_MAX_DEPTH` (D22) — the exact mechanism that built the insight altars,
+**retargeted** here (`addMachines`, Architect.c). `roomSize {10,30}`, `BP_IMPREGNABLE` (the guardian can't
+tunnel out). The blueprint builds only the carpeted room; `placeAltarCrossInRoom` (Architect.c) lays the statue
+at the room-center and an altar one tile out in each cardinal direction (falls back to adjacent).
+
+**Deprecation.** The Altars of Insight **no longer generate** — their `addMachines` carry-forward was replaced
+by the divination room. `MT_INSIGHT_ALTAR`, its blueprint, terrain (`INSIGHT_ALTAR_*`), and trigger
+(`performInsightSacrifice`) remain in the tree, unreferenced by generation (marked deprecated). Transfer altars
+stay disabled (freq 0).
+
+**Save break.** Removing insight generation + adding the new room changes level generation, so old input-replay
+saves would desync. Bumped `BROGUE_MINOR` 1 → 2 (recording version "SE 2.1.0" → "SE 2.2.0"), which cleanly
+rejects 0.11.0 saves. The title-screen release string / marketing version / release notes are **not** bumped
+here — that's the separate release-cut step. (No `BROGUE_VERSION_ATLEAST` gates depend on the minor.)
+
+**Where.** `Rogue.h` — 4 tiles (`DIVINATION_ALTAR`/`_ARMED`/`_CLOSED`, `DIVINATION_STATUE`),
+`DF_DIVINATION_ALTAR_CLOSE`, `TM_DIVINATION_ACTIVATION` (Fl(28)), `MT_DIVINATION_ALTARS`, tuning constants,
+`rogue.divinationAltar{Built,Uses,Awakened}`, the `BROGUE_MINOR` bump, `spawnDivinationGuardian` proto.
+`Globals.c` — the 4 tile defs + the close DF. `GlobalsBrogue.c` — the blueprint. `Architect.c` —
+`placeAltarCrossInRoom` + the retargeted carry-forward. `Items.c` — the `updateFloorItems` trigger block +
+`performDivination`. `Monsters.c` — `spawnDivinationGuardian`. All marked `// iOS port (Brogue SE):`.
+
+**Determinism.** Awaken via substantive `rand_percent`; guardian kind + grace are pure functions of the use
+count; generation/placement use the substantive RNG; all `rogue` fields set deterministically → replay-safe
+(reconstructed by replay, no explicit serialization, as with `insightAltarsBuilt`). SE-only gameplay. Docs:
+`MACHINES_AUDIT.md`, `IDENTIFICATION_AUDIT.md`, `docs/design/altars-of-divination.md`.
+
+### 2026-07-01 — Noise system: a claimed thrown decoy makes the monster loiter (the "slip by" window)
+
+**What.** A monster investigating a **thrown decoy** used to reach the item, consume it, and immediately
+turn back — but on that arrival turn it was still `MB_INVESTIGATING`, so it rolled the **proximity spot
+curve** (~50–65% at 3–4 tiles) and reliably re-oriented onto a nearby player: it reached the wrong place
+but grabbed you anyway. Now, on claiming the decoy the creature **dwells on the cell** for a seeded
+`rand_range(NOISE_INVESTIGATE_DWELL_MIN..MAX)` (4–8, ~6) turns. While dwelling it holds position and drops
+from the proximity curve back to the **flat 25% ambient roll** (absorbed by the object, not scanning for
+you), keeping `MB_INVESTIGATING` so the `?` blink / `(Investigating)` sidebar persist. That is the "slip
+by" window the decoy was meant to buy: the monster is pinned at the wrong place while you break LoS / move
+through the space it vacated.
+
+**Scoped to thrown decoys** — the dwell keys on a claimed `ITEM_THROWN_DISTRACTION` (a fixation needs a
+physical object). A **player-made-noise** investigate targets an empty cell (`investigateLoc = player.loc`),
+finds nothing, and gives up at once, unchanged — that object-vs-empty-cell split *is* the divergence between
+investigating a thrown item and investigating a noise you made. Point-blank still bites (25% floor stands),
+so a decoy at your own feet is not a free freeze (principle #3). The **approach is unchanged** (proximity
+curve en route) — positioning the throw so its path doesn't pass near you stays the player's job.
+
+**Interruptible.** A LOUD hear, a successful spot, damage, or a **louder/closer new noise** all end the
+dwell early — each resets `investigateDwell` (the two re-target sites in `checkPlayerHeard` /
+`emitEnvironmentalNoise`, and `alertMonster`). Chaining decoys to keep a monster pinned costs one item per
+dwell (consume-on-arrival already fired), so it stays a resource drain, not free CC. Only the creature that
+*claims* the item dwells; a later investigator arriving at the now-empty cell gives up immediately (emerges
+from the item-presence trigger).
+
+**Where.** `Rogue.h` — new `NOISE_INVESTIGATE_DWELL_MIN`/`_MAX` (4/8) levers; new `creature.investigateDwell`
+field. `Monsters.c` — init (`initializeMonster`), clear in `alertMonster`, reset at the two re-target sites,
+the `awareOfTarget` proximity branch now gated on `investigateDwell == 0` (dwellers fall through to 25%), and
+the dwell counter set/decrement + hold-position in the WANDERING arrival block. All marked
+`// iOS port (Brogue SE):`.
+
+**Determinism.** Dwell length via a substantive `rand_range`; all state set deterministically → save/replay-
+safe, no save-version bump (saves are input replays). SE-only gameplay, gated by `NOISE_SYSTEM_ENABLED`.
+Docs: `PERCEPTION_AUDIT.md` §3.2.7 + §7 lever table; `docs/design/environmental-sounds.md` §3.5.1 / §8 (Slice 9a).
+
+### 2026-06-29 — 0.11.0 "B is for Balance": release string + save/recording version bump
+
+**What.** Cut the 0.11.0 release. Two version surfaces moved:
+- **Title-screen / `--version`:** `GlobalsBrogue.c` `BROGUE_VERSION_STRING` → `"B is for Balance 0.11.0 "`
+  (display-only, as documented in the 2026-06-13 release-string entry below; trailing space intentional).
+- **Save/recording version:** `Rogue.h` `BROGUE_MINOR` 0 → 1 and `BROGUE_PATCH` 1 → 0, so the recording
+  version string becomes `"SE 2.1.0"` (from `"SE 2.0.1"`).
+
+**Why bump MINOR, not PATCH.** 0.11.0's balance/terrain changes alter how a seed + input stream evolves,
+so 0.10.0 (`"SE 2.0.1"`) recordings/saves would go **out-of-sync** if replayed. The loader
+(`Recordings.c` ~507) accepts a recording when the patch-pattern `"SE 2.1.%hu"` matches *and* its patch ≤
+ours, **or** the version strings are exactly equal. A MINOR bump makes the pattern match fail for old
+`"SE 2.0.x"` saves (and the exact-match too), so they are **cleanly rejected** with the "cannot be opened
+in version X" dialog rather than loading and desyncing. (A PATCH bump would *not* reject them — patch
+bumps are reserved for replay-safe changes; the prior 0.9.0 → 0.10.0 transition only patch-bumped, which
+is why 0.9.0 saves could load into 0.10.0 and desync.) Verified safe: `BROGUE_VERSION_ATLEAST` has **zero
+usages** in the engine, so bumping the version flips no gameplay gate. Recording version string stays ≤ 16
+chars. Marked `// iOS port (Brogue SE):` at the version defines.
+
 ### 2026-06-27 — Remove the Rapid Brogue and Bullet Brogue game variants (SE only)
 
 **What.** SE now ships a single game variant (Brogue). The `VARIANT_RAPID_BROGUE` and
@@ -278,6 +841,13 @@ relocated (knockback returns a moved/not-moved boolean). Per design call: the **
 lava/a chasm** ("everything flung equally"), and a wall/creature slam deals the frost push's momentum
 damage. Deterministic (geometry + flat force, no RNG), so input-replay saves are unaffected. Marked
 `// iOS port (Brogue SE):`.
+
+**Gated OFF for 0.11.0 (2026-06-29).** Shipped disabled behind `SE_EXPLOSION_KNOCKBACK` (Rogue.h, a
+"single kill switch" alongside `NOISE_SYSTEM_ENABLED`). `knockCreatureFromExplosion` early-returns `false`
+under `#if !SE_EXPLOSION_KNOCKBACK`, so the two `Time.c` call sites fall through to the normal tile effects
+— the blast still burns/damages, it just doesn't fling anyone. Kept as a knob rather than reverted so a
+future release can flip it back on without untangling the eight later commits that touch `Combat.c`/`Time.c`.
+A feature that never fires can't perturb the substantive RNG stream, so leaving it off is seed/replay-safe.
 
 ### 2026-06-25 — Ring of transference also transfers afflictions on hit (new content)
 
@@ -2525,6 +3095,15 @@ ignition message and the `STATUS_CONFUSED`-expiry message (in `playerTurnEnded`)
 `STATUS_CONFUSED` special case in the sidebar status loop renders "Panic" when burning. No RNG drawn;
 deterministic, no save/replay impact. CE-only.
 
+**Player exempted (2026-07-02).** Fire-panic is now **monster-only** — catching fire no longer confuses
+the player. The `STATUS_CONFUSED` assignment in `exposeCreatureToFire` is guarded by `monst != &player`,
+so the hero still catches fire and burns but is not disoriented (fleeing to water stays under the
+player's control). Follow-on cleanups: the ignition message reverts to plain "you catch fire" (no
+"panic"); the `STATUS_CONFUSED`-expiry message in `playerTurnEnded` reverts to the plain "you no longer
+feel confused." (the player can now only be confused by other sources, never fire); and the `IO.c`
+"Panic" sidebar label is scoped to `monst != &player` so a player confused by gas/trap *while* burning
+still reads "Confused". Monsters are unchanged — they still panic on ignition and show "Panic".
+
 ### 2026-06-11 — Subtle progress bars behind inventory rows (new content)
 
 **What.** Each inventory row can now show a faint progress bar tinted into the cells *behind* the
@@ -3357,20 +3936,25 @@ untouched.
 > `applyPolarityInsightToRandomItem(SCROLL, …)` helper. The selection now consumes RNG (action-triggered,
 > replay-safe) — no longer "no RNG" as originally described below.
 
-**What.** Eating a meal (`eat` returning true) while **nothing is hunting you** reveals the polarity
-(benevolent/malevolent) of the first still-unknown scroll in your pack, with a colored message
-("you study a scroll intently while eating; it radiates a … aura."). Polarity only, never a full ID. One
-scroll per safe meal; if something is hunting you (any creature in the `MONSTER_TRACKING_SCENT` /
-"(Hunting)" state) or you hold no unknown scroll, the meal proceeds normally with no reveal.
+**What.** Eating a meal (`eat` returning true) reveals the polarity (benevolent/malevolent) of a
+still-unknown scroll in your pack, with a colored message ("you study a scroll intently while eating; it
+radiates a … aura."). Polarity only (or a full ID of an already-sensed scroll — see the 2026-06-11 update
+above). One scroll per meal; if you hold no eligible scroll, the meal proceeds normally with no reveal.
+
+> **Updated 2026-07-02 — no longer safety-gated.** The old "nothing is hunting you" requirement was
+> removed: eating now **always** polarity-checks a scroll if one is available, regardless of whether any
+> monster is aware of / hunting you. The `MONSTER_TRACKING_SCENT` scan at the top of
+> `gainScrollInsightFromEating` is gone. The `Globals.c` `foodTable` flavor text was updated to match
+> (dropped "with nothing on the hunt for you" / "when eaten undisturbed"); the reward is a plain "any
+> meal" effect now.
 
 **Why.** Companion to the rest-insight feature: a calm moment to study a scroll while you eat. Meals are
 scarce and the reward is safety-gated, so it eases scroll identification without removing the gamble.
 
 **Where.** `Items.c` — a new `void gainScrollInsightFromEating(void)` defined just after
-`gainPolarityInsightFromRest` (iterates `monsters` for the Hunting gate, then the pack for the first
-unknown-polarity scroll; reuses `detectMagicOnItem` + `tryIdentifyLastItemKinds(SCROLL)` + `itemMagicPolarity`
-+ `itemMagicPolarityIsKnown`), called from `eat()` just before its `return true`. Prototype in `Rogue.h`.
-All vanilla symbols.
+`gainPolarityInsightFromRest` (as of 2026-07-02 it no longer scans `monsters`; it goes straight to
+`applyPolarityInsightToRandomItem(SCROLL, …)`), called from `eat()` just before its `return true`.
+Prototype in `Rogue.h`. All vanilla symbols.
 
 **Flavor (added 2026-06-10).** Both `foodTable` descriptions in `Globals.c` (the shared catalog — the
 feature is not variant-gated, so the hint is accurate in every variant) now hint at this: the ration of

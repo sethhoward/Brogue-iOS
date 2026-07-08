@@ -28,6 +28,131 @@ covers the separate Classic engine that ships in the app target).
 
 ## Change log
 
+### 2026-07-07 — Item-detail box: reserve room for action buttons so long descriptions keep "call"
+
+**What.** `printTextBox`'s auto-widen only widened until the **text** fit above the flavor/button
+chrome (`ROWS-2`), ignoring the action buttons drawn *below* the text, which wrap to a second
+double-spaced line. A long description left the text just fitting but pushed the wrapped button line
+("call"/"relabel") onto the chrome rows, where it was lost. Now reserves 4 rows in the widen loop
+when `buttonCount > 0`, so the box widens until text **and** buttons fit. Presentational; no RNG /
+save / recording impact.
+
+### 2026-07-07 — iPhone menu magnify fix: clear on text-input prompts (Save recording / seed entry)
+
+**What.** `IO.c getInputTextString` now calls `ceClearMenuBox()` at its start. A text-input prompt
+(e.g. "Save recording as…", seed entry) is NOT a button menu, so it reports no rect — and the
+save/quit flow reaches it straight from a menu without returning to play, leaving the menu magnify
+engaged on a stale rect, which tore the prompt. Presentational; no RNG / save / recording impact.
+The same `ceClearMenuBox()` is applied at the start of the full-screen **Feats** and
+**Discovered-items** views (`displayFeatsScreen` / `printDiscoveriesScreen`) — also non-menu
+overlays (they `waitForKeystrokeOrMouseClick`, report no rect) that should render at 1×. They also
+set `uiMode = InMenu` for the view's duration (restored on exit) so the host keeps
+`gameplayControlsActive` false and thus suspends the **dungeon pinch-zoom** too — otherwise the view
+is drawn into the zoomed dungeon cells and appears magnified.
+
+### 2026-07-07 — iPhone menu magnify: report menu rects to the host (title / inventory / dialogs)
+
+**What.** Ports the iPhone "menu magnify" (already in Brogue SE) to CE: the host magnifies just a
+menu's cells to a readable, tappable size over the untouched 1× screen. The engine only reports the
+menu's window-cell rect; all magnification lives in the platform layer. Presentational; no RNG /
+save / recording impact. Host, `BrogueCEHost` protocol, and `CEHost.swift` are shared and already
+carry the `setMenuBox`/`clearMenuBox` plumbing, so this is engine + bridge only.
+
+- **`Buttons.c` `buttonInputLoop`:** after it sets `uiMode = InMenu`, calls `ceSetMenuBox(...)` with
+  the loop's window rect, expanded by a 1-cell "trim" so a printTextBox dialog's shadow scales with
+  the panel. Single choke point → covers inventory, action menu, and all buttoned dialogs.
+- **`MainMenu.c`:** new `reportTitleMenuBox()` reports the main-menu (+ flyout) union rect each title
+  redraw in `titleMenu()`; `ceClearMenuBox()` on `titleMenu()` exit (so a following sub-screen that
+  reports no rect isn't corrupted by stale borrowed cells). Also raised the flame title
+  (`MENU_TITLE_OFFSET_Y` −2 → −5) and moved the "CE" badge to follow it (`ceBaseY` 9 → 6), matching SE.
+- **`CEBridge.mm`:** `ceSetMenuBox` → `[gHost setMenuBox:…]`, `ceClearMenuBox` → `[gHost clearMenuBox]`.
+- **Determinism:** read-only reporting; no RNG, no save/recording fields. Title-offset/badge are cosmetic.
+
+### 2026-07-07 — Game handoff: engine recording-version accessor (cross-platform version guard)
+
+**What.** The CE half (see `BrogueSE/Engine/IOS_MODIFICATIONS.md` for the rationale). The handoff guard
+compares the engine recording version (BROGUE_VERSION_STRING) instead of the app version+build, so
+differing build numbers no longer block cross-device / cross-platform handoff. Bridge/host only.
+
+- **`CEBridge.mm`:** `ce_recordingVersion()` returns `brogueVersion`; declared in `BrogueCEHost.h`.
+- **Determinism:** read-only; no RNG, no save fields.
+
+### 2026-07-06 — Game handoff (Phase 4): silent relinquish key (end a handed-off run, no bookkeeping)
+
+**What.** The CE half of the handoff relinquish (see `BrogueSE/Engine/IOS_MODIFICATIONS.md` for the full
+rationale). `HANDOFF_RELINQUISH_KEY`, injected by the host on the deep ACK, ends a handed-off run silently
+so it leaves no trace on the source. See `docs/design/game-handoff.md`.
+
+- **`Rogue.h`:** `#define HANDOFF_RELINQUISH_KEY (128+22)` (beside CONTINUE_TRAVEL_KEY; value shared with SE).
+- **`IO.c` `executeKeystroke`:** the new case ends the run with NO `gameOver` bookkeeping (unlike QUIT_KEY):
+  `remove(currentFilePath)` then blank it, `rogue.nextGame = NG_NOTHING`, `rogue.gameHasEnded = true` — the
+  clean NEW_GAME_KEY exit path. Declares `extern char currentFilePath[]`.
+- **Host side:** freezes input during the transfer, injects this key on the ACK, then clears the resume
+  marker. No RNG or save-format impact; the relinquish key is never recorded.
+
+### 2026-07-06 — Game handoff (Phase 3b): flush the live recording on demand for the transfer
+
+**What.** The CE half of the handoff recording flush (see `BrogueSE/Engine/IOS_MODIFICATIONS.md` for the
+full rationale). A bridge hook flushes the live recording to `currentFilePath` and returns its bytes,
+reusing the background-suspend `flushBufferToFile()` + engine-thread poll pattern (no vendored engine
+`.c` change — bridge/host only). See `docs/design/game-handoff.md`.
+
+- **`CEBridge.mm`:** `ce_flushRecordingForHandoff()` sets `gCEHandoffFlushRequested` + waits on a
+  semaphore; `ceTakeBackgroundSnapshotIfRequested` services it with `flushBufferToFile()` and signals,
+  then reads `currentFilePath` and returns the bytes.
+- **`BrogueCEHost.h`:** declares `ce_flushRecordingForHandoff`.
+- **Determinism:** read-only with respect to game state; no RNG, no save fields.
+
+### 2026-07-06 — Game handoff (Phase 1b): report live game context (depth/turn/seed) to the host
+
+**What.** The CE half of the game-handoff game-context hook (see `BrogueSE/Engine/IOS_MODIFICATIONS.md`
+for the full rationale). `commitDraws` reports the live game's depth/turn/seed to the host so the
+cross-device Continuity **Handoff** activity stays current. Added identically to CE and SE (Classic is
+excluded — desync-prone recordings); only the `IO.c` hook is engine C. See `docs/design/game-handoff.md`.
+
+- **`IO.c` `commitDraws`:** after `ceSetTravelPending`, gated on `!rogue.playbackMode`, call
+  `ceSetGameContext(rogue.depthLevel, rogue.playerTurnNumber, rogue.seed)`; extern declared near the top
+  of `IO.c` beside `ceSetTravelPending`.
+- **Bridge (`CEBridge.mm`):** `ceSetGameContext` dedupes on depth → new `BrogueCEHost
+  setGameDepth:turn:seed:`; the depth dedup resets at the title (`reportAtTitleIfChanged`).
+- **Determinism:** pure outbound signaling; no RNG, no save fields, replay-safe.
+
+### 2026-07-05 — Continue-travel command + reactive center d-pad button
+
+**What.** The CE half of the touch-friendly "continue my interrupted journey" command (see
+`BrogueSE/Engine/IOS_MODIFICATIONS.md` for the full rationale). An iOS-platform QoL feature, added
+identically to all three engines and committed separately so CE stays cherry-pickable against upstream.
+
+- **Key.** `#define CONTINUE_TRAVEL_KEY (128+21)` in `Rogue.h` — synthetic, button-only code; value
+  matches SE and Classic so the single on-screen button code dispatches in every engine. Round-trips
+  cleanly through the keystroke compressor (offset 21 is past CE's 18-entry `keystrokeTable`).
+- **Dispatch.** `mainInputLoop`'s cursor-confirm (`doEvent`) branch intercepts `CONTINUE_TRAVEL_KEY` →
+  `travelRoute(path, steps)` (the exact displayed route; the fast primitive a confirming tap uses, not
+  `travel()`→`travelMap`, which is slow and takes a different path). No explicit `recordKeystroke`:
+  `travelRoute`→`playerMoves` records each step's direction key, so the journey replays as its moves
+  (like a tap-travel). Determinism-safe.
+- **Reactive-button state.** `commitDraws` calls a new `ceSetTravelPending(isPosInMap(rogue.cursorLoc))`
+  extern (defined in `CEBridge.mm`, deduped, routed via the `BrogueCEHost` `setTravelPending:` method) so
+  the host can swap the center d-pad button between the footprints "continue" glyph and the `zzz` glyph.
+- **Scope.** Walks past *already-seen* monsters and re-stops on a *new* disturbance (`MB_WAS_VISIBLE`
+  gate in `Time.c`) — same as re-clicking; no new power, no RNG/save impact. No-op when idle.
+
+### 2026-07-05 — Examine description box: report its rect (fit-zoom) + suppress it for zoomed play-field examines
+
+**What.** iPhone examine-box hooks, identical to SE's (see `BrogueSE/Engine/IOS_MODIFICATIONS.md` for the
+full rationale). (1) `printTextBox` stashes its rect (`x2, y2, width, lineCount + padLines`) in file-static
+`gLastTextBox{X,Y,Width,Height}`; the cursor/examine loop reports it via a new `ceSetExamineBox(x,y,w,h)`
+extern just before `ceSetExamining` so the host can zoom to *fit* the box instead of dropping to 1×.
+(2) The loop gates `printMonsterDetails`/`printFloorItemDetails` on `!ceShouldSuppressExamineBox()` so a
+box triggered by a zoomed play-field drag-hold (which would tear against the 1× sidebar) is skipped — the
+sidebar highlight + one-line flavor still show.
+
+- **Bridge:** `CEBridge.mm` defines `ceSetExamineBox` (→ `[gHost setExamineBox:…]`) and
+  `ceShouldSuppressExamineBox` (→ `[gHost shouldSuppressExamineBox]`); both were added to the shared
+  `BrogueCEHost` protocol and implemented in `CEHost.swift`.
+- **Scope:** pure presentation; no gameplay/RNG/save impact. iPhone-only in effect (host consumers are
+  phone-gated). Kept identical across CE / SE / Classic so it stays cherry-pickable.
+
 ### 2026-06-19 — File management: debug "Import" button (CE/SE)
 
 **What.** The Manage Files screen gains an "Import" button (left bar, beside Edit) that opens the

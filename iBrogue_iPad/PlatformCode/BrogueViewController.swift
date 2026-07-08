@@ -88,13 +88,15 @@ extension UIDevice {
     }
 }
 
-@MainActor fileprivate func getCellCoords(at point: CGPoint, viewport: SKViewPort?) -> CGPoint {
+@MainActor fileprivate func getCellCoords(at point: CGPoint, viewport: SKViewPort?, reach: Bool = false) -> CGPoint {
     let screenH = UIScreen.main.bounds.size.height
     let screenW = UIScreen.main.bounds.size.width
     // When the dungeon map is pinch-zoomed, invert the zoom transform so a
     // touch resolves to the cell actually under the finger. No-op at 1× and
     // for points outside the zoomable map (sidebar, messages, button bar).
-    let point = viewport?.unzoomedPoint(point) ?? point
+    // `reach` extends the inverse over the sidebar columns for the held-magnifier
+    // "map under sidebar" drag (see SKViewPort.unzoomedPoint(_:reach:)).
+    let point = viewport?.unzoomedPoint(point, reach: reach) ?? point
     let effectiveHeight = viewport?.effectiveHeightPoints ?? screenH
     let effectiveWidth = viewport?.effectiveWidthPoints ?? screenW
     let leftInset = viewport?.leftInsetPoints ?? 0
@@ -117,17 +119,26 @@ extension String {
 @objc class UIBrogueTouchEvent: NSObject, NSCopying {
     @objc let phase: UITouch.Phase
     @objc let location: CGPoint
-    
+    /// True when this touch belongs to a held-magnifier drag reaching under the
+    /// translucent sidebar ("map under sidebar"): the bridge must then invert the zoom
+    /// over the sidebar columns so the commit lands on the magnified map cell rather than
+    /// a sidebar entity. Carried per-event (not a shared flag) because the bridge resolves
+    /// coordinates on the engine thread at dequeue time — a main-thread flag would race the
+    /// commit as the finger lifts. Stamped in `addTouchEvent`; read by the CE/SE host stash
+    /// and by the Classic RogueDriver bridge.
+    @objc var reachUnderSidebar: Bool = false
+
     required init(phase: UITouch.Phase, location: CGPoint) {
         self.phase = phase
         self.location = location
     }
-    
+
     required init(touchEvent: UIBrogueTouchEvent) {
         phase = touchEvent.phase
         location = touchEvent.location
+        reachUnderSidebar = touchEvent.reachUnderSidebar
     }
-    
+
     func copy(with zone: NSZone? = nil) -> Any {
         return type(of:self).init(touchEvent: self)
     }
@@ -166,6 +177,20 @@ final class BrogueViewController: UIViewController {
     private var ceHost: CEHost?
     /// The engine currently running on `engineThread`.
     private var currentEngine: EngineKind = .classic
+    /// Advertises the in-progress CE / Brogue SE run to the user's other nearby devices via
+    /// Continuity Handoff. Classic is never advertised (its recordings are desync-prone and
+    /// unsafe to replay). See docs/design/game-handoff.md.
+    private let gameHandoff = GameHandoff()
+    /// Set when a received handoff is waiting for the engine to reach its title so it can be booted
+    /// into the run (consumed in `setCEAtTitle`). See docs/design/game-handoff.md.
+    private var handoffResumePending: EngineKind?
+    /// True on the SOURCE while a handoff transfer is in flight: input is starved so the run can't
+    /// advance a turn that would be lost on relinquish. See docs/design/game-handoff.md.
+    private var handoffInFlight = false
+    /// Matches HANDOFF_RELINQUISH_KEY in each engine's Rogue.h — injected to end the run silently once
+    /// the receiver confirms (deep ACK).
+    private static let handoffRelinquishKey: UInt8 = 128 + 22
+    private weak var handoffOverlay: UIView?
     /// The background thread running the active engine's `rogueMain`.
     private var engineThread: Thread?
     /// Set while a title-screen engine swap is in flight (awaiting clean exit).
@@ -184,7 +209,12 @@ final class BrogueViewController: UIViewController {
     /// description of the selected engine's key features.
     private var infoButton: UIButton?
     /// True while the active engine is showing its title screen (chooser visible).
-    private var atTitle = false { didSet { updateVersionChooserVisibility(); updateTitleOptionsVisibility() } }
+    private var atTitle = false { didSet {
+        updateVersionChooserVisibility(); updateTitleOptionsVisibility()
+        // Menu magnify is only ever engaged while at the title, so leaving it (to a run, High
+        // Scores, recordings, death, …) is the single point that must always tear it down.
+        if !atTitle { tearDownMenuMagnify() }
+    } }
     fileprivate var touchEvents = [UIBrogueTouchEvent]()
     fileprivate var lastTouchLocation = CGPoint()
     @objc fileprivate var directionsViewController: DirectionControlsViewController?
@@ -244,12 +274,19 @@ final class BrogueViewController: UIViewController {
     /// remapping and means re-apply in every scheme.
     private static let reapplyKeyCode: UInt8 = 128 + 20
 
+    /// Synthetic key for "Continue travel" — resume the interrupted journey. Matches
+    /// CONTINUE_TRAVEL_KEY (128+21) in all three engines; the engine re-runs travel to the
+    /// still-pending destination (rogue.cursorLoc). Not a physical key. Present in every engine
+    /// (no `seOnly`/`ceOnly`), so the one button code dispatches wherever it's loaded.
+    private static let continueTravelKeyCode: UInt8 = 128 + 21
+
     /// Commands a side button may be bound to. Names mirror printHelpScreen().
     private static let commandCatalog: [Command] = [
         // Stairs & Travel
         Command(key: ">".ascii, name: "Descend",           category: "Stairs & Travel"),
         Command(key: "<".ascii, name: "Ascend",            category: "Stairs & Travel"),
         Command(key: "x".ascii, name: "Auto-explore",      category: "Stairs & Travel"),
+        Command(key: continueTravelKeyCode, name: "Continue travel", category: "Stairs & Travel"),
         // Resting & Waiting
         Command(key: "z".ascii, name: "Rest once",         category: "Resting & Waiting"),
         Command(key: "Z".ascii, name: "Rest until better", category: "Resting & Waiting"),
@@ -276,6 +313,7 @@ final class BrogueViewController: UIViewController {
         ">".ascii: "arrow.down.to.line",
         "<".ascii: "arrow.up.to.line",
         "x".ascii: "map",
+        continueTravelKeyCode: "shoeprints.fill",
         "z".ascii: "zzz",
         "Z".ascii: "bed.double.fill",
         "s".ascii: "magnifyingglass",
@@ -296,11 +334,22 @@ final class BrogueViewController: UIViewController {
         commandSymbols[key] ?? "circle.slash"
     }
 
+    /// Rebind-menu row title. Printable-ASCII commands show their key, e.g. "Throw (t)";
+    /// synthetic commands (Continue travel, Re-apply staff) have no meaningful character, so
+    /// they show just the name rather than a control-character glyph in parentheses.
+    private static func commandMenuTitle(_ command: Command) -> String {
+        if command.key >= 32 && command.key < 127 {
+            return "\(command.name) (\(Character(UnicodeScalar(command.key))))"
+        }
+        return command.name
+    }
+
     /// Point size / weight for button-face glyphs, matched to the old text scale.
     private static let buttonSymbolConfig = UIImage.SymbolConfiguration(pointSize: 20, weight: .semibold)
 
-    /// Default key per slot (top→bottom): throw, auto-explore, search, rest-until-better.
-    private static let defaultSideButtonKeys: [UInt8] = ["t".ascii, "x".ascii, "s".ascii, "Z".ascii]
+    /// Default key per slot (top→bottom): throw, apply/use, rest-until-better, descend.
+    /// (Auto-explore and search are omitted here — they have dedicated bottom-row buttons.)
+    private static let defaultSideButtonKeys: [UInt8] = ["t".ascii, "a".ascii, "Z".ascii, ">".ascii]
     private static let sideButtonKeysDefaultsKey = "sideButtonKeys"
 
     /// Current key bound to each of the four slots; persisted to UserDefaults.
@@ -315,12 +364,20 @@ final class BrogueViewController: UIViewController {
 
     /// Sentinel binding meaning the center button does nothing when tapped.
     private static let centerButtonNothing: UInt8 = 0
-    /// Center button's out-of-box binding: "Rest once" (z).
-    private static let centerButtonDefaultKey: UInt8 = "z".ascii
+    /// Center button's out-of-box binding: "Continue travel" — the reactive continue/rest button.
+    /// When bound to this key the center button continues a pending journey and falls back to Rest
+    /// once when idle (see `centerButtonEffectiveKey`). Only affects players who have never rebound
+    /// the center button; the stored binding is honored otherwise (loadCenterButtonKey).
+    private static let centerButtonDefaultKey: UInt8 = continueTravelKeyCode
     private static let centerButtonKeyDefaultsKey = "directionCenterButtonKey"
 
     /// Key bound to the center button; `centerButtonNothing` (0) = unbound.
     private var centerButtonKey: UInt8 = BrogueViewController.loadCenterButtonKey()
+
+    /// Whether the engine currently has a pending travel destination (reported per-turn by the
+    /// bridge via `setTravelPending`). Drives the reactive center button: continue when true,
+    /// Rest once when false.
+    private var isTravelPending = false
 
     // ── Directional-pad position ─────────────────────────────────────────
     // The pad can be two-finger-dragged. We persist that offset (one key,
@@ -345,6 +402,13 @@ final class BrogueViewController: UIViewController {
     /// under the cutout. Recomputed on launch and on rotation; never saved, so the
     /// user's flush/default placement is preserved in the non-notch orientation.
     private var dpadNotchAvoidance: CGFloat = 0
+
+    /// Resting opacity of the directional pad (semi-transparent so the map shows
+    /// through). Also the alpha the pad fades back to after a sidebar-scrub fade-out.
+    private static let dpadRestingAlpha: CGFloat = 0.3
+    /// True while the d-pad is faded out for an in-progress sidebar scrub, so the fade
+    /// fires once per scrub and the restore is a no-op when nothing was faded.
+    private var dpadFadedForSidebarScrub = false
 
     /// Extra points the notch-avoidance nudge clears the safe-area inset by.
     /// Higher = pad sits further from the cutout; can go to 0 (flush to the inset)
@@ -537,6 +601,23 @@ final class BrogueViewController: UIViewController {
     /// description box isn't clipped while zoomed. Toggleable in Options.
     private var examineZoomEnabled: Bool = RogueScene.isExamineZoomEnabledSetting
 
+    /// When on (default), the zoomed dungeon renders full-width under a translucent
+    /// sidebar and a held-magnifier drag can reach the map cells behind it. Toggleable
+    /// in Options; iPhone-only (the reveal only applies while zoomed).
+    private var mapUnderSidebarEnabled: Bool = RogueScene.isMapUnderSidebarEnabledSetting
+
+    /// Latched true while a held-magnifier drag is permitted to reach map cells under the
+    /// sidebar: set when the loupe arms over a play-area-origin gesture with the reveal
+    /// active (zoomed + enabled), cleared on finger-lift / a fresh touch. Stamped onto each
+    /// enqueued touch event (`addTouchEvent`) so the commit resolves in map space even
+    /// after this flag is cleared, and mirrored to `magView.sidebarReach` for the loupe.
+    private var sidebarReachLatched = false {
+        didSet {
+            guard oldValue != sidebarReachLatched else { return }
+            magView?.sidebarReach = sidebarReachLatched
+        }
+    }
+
     /// True once this process has gone to the background at least once. Distinguishes a warm
     /// foreground (we backgrounded earlier and the process survived) from a cold launch (a fresh
     /// process after an OS kill, where didBecomeActive also fires). The background suspend/resume
@@ -582,10 +663,27 @@ final class BrogueViewController: UIViewController {
             if !examineBoxShown {
                 examineArmDebounce?.cancel()                  // box gone → drop a pending arm
                 examineArmed = false                          // …and require a fresh sidebar tap
+                examineBox = nil                              // …and forget its rect
+                examineFromSidebar = false                    // …and its sidebar-tap provenance
             }
             isExamining = examineBoxShown && examineArmed
         }
     }
+    /// The window-cell rect of the on-screen examine description box, reported by SE just
+    /// before `setExamining:true` (see setExamineBox). Lets the examine zoom fit the box
+    /// rather than dropping all the way to 1×. nil when no box is shown or the engine didn't
+    /// report one (CE / Classic) — those keep the 1× zoom-out.
+    private struct ExamineBox { let x: Int; let y: Int; let w: Int; let h: Int }
+    private var examineBox: ExamineBox?
+
+    /// iOS port (iBrogue): window-cell rect of the currently-shown modal menu overlay, reported by
+    /// the engine (setMenuBox). Phase 0 uses it to auto-magnify the title menu / its dialogs to a
+    /// readable, tappable size on iPhone — instantly, no camera movement. nil when no menu is up.
+    private struct MenuBox: Equatable { let x: Int; let y: Int; let w: Int; let h: Int }
+    private var menuBox: MenuBox?
+    /// True while the full-grid menu magnify is engaged, so apply/clear are idempotent and we know
+    /// to tear it down when leaving the title.
+    private var menuMagnifyEngaged = false
     /// Set only by a sidebar single-tap; gates the zoom-suspend so deliberate sidebar
     /// selections suspend but auto-appearing boxes (auto-explore stopping on an item, a
     /// tap-to-move over a monster) do not. Cleared when the box ends and on competing inputs.
@@ -595,6 +693,15 @@ final class BrogueViewController: UIViewController {
             isExamining = examineBoxShown && examineArmed
         }
     }
+    /// True the instant a sidebar single-tap selects an entity, until that examine ends or a
+    /// fresh input arrives. Unlike `examineArmed` (deferred 0.3s for double-tap protection),
+    /// this is set immediately, so it's already true when the engine draws the box a frame
+    /// later — the box is drawn once and `moveCursor` then blocks, so a deferred flag would
+    /// suppress it forever. It's the "show this box" signal: a deliberate sidebar tap shows
+    /// (and zooms out); every *other* box while zoomed — auto-explore stopping on an entity,
+    /// a play-field drag-hold, hover, tab-cycle — is suppressed (it would tear against the
+    /// 1× sidebar). See `shouldSuppressExamineBox`.
+    private var examineFromSidebar = false
     /// Deferred arm: a sidebar single-tap schedules arming after the double-tap window
     /// so a double-tap (attack/run toward) cancels it first and never zooms out.
     private var examineArmDebounce: DispatchWorkItem?
@@ -616,6 +723,23 @@ final class BrogueViewController: UIViewController {
     private static let zoomMinScale: CGFloat = 1.0
     private static let zoomMaxScale: CGFloat = 2.5
     private static let zoomRubberBandFloor: CGFloat = 0.8
+    /// Cap for the examine fit-zoom (see examineFitZoom). Below zoomMaxScale so a small
+    /// description box doesn't blow up to full magnification (which read as "too far") —
+    /// it keeps the box legible while leaving surrounding map context. Tunable.
+    private static let examineMaxScale: CGFloat = 1.8
+    /// User-adjustable cap for the menu fit-magnify (see menuFitZoom), set via Options ▸ Menu size.
+    /// The value IS the maximum magnification the menu panels use: menuScaleMin (1.0) turns the
+    /// magnify off (menus render at 1×), up to menuScaleMax. On a portrait phone the vertical fit
+    /// often binds below this anyway. Persisted; absent key → menuScaleDefault.
+    static let menuScaleDefaultsKey = "menuMagnifyScale"
+    static let menuScaleDefault: CGFloat = 1.3
+    static let menuScaleMin: CGFloat = 1.0
+    static let menuScaleMax: CGFloat = 1.4
+    static var menuMagnifyScaleSetting: CGFloat {
+        let defaults = UserDefaults.standard
+        guard defaults.object(forKey: menuScaleDefaultsKey) != nil else { return menuScaleDefault }
+        return min(menuScaleMax, max(menuScaleMin, CGFloat(defaults.double(forKey: menuScaleDefaultsKey))))
+    }
     /// Fractional finger-spread change required before a pinch starts zooming.
     /// Below this, a two-finger drag is treated as a pure pan (Photos-style).
     private static let zoomActivationThreshold: CGFloat = 0.20   // 10%
@@ -743,7 +867,9 @@ final class BrogueViewController: UIViewController {
     }
     @IBOutlet fileprivate weak var inputTextField: UITextField!
     @IBOutlet fileprivate weak var showInventoryButton: UIButton!
-    @IBOutlet fileprivate weak var leaderBoardButton: UIButton!
+    // Optional: the Game Center leaderboard button was removed from Main.storyboard, so this outlet
+    // may be unconnected. All accesses use optional-chaining so its absence can't crash launch.
+    @IBOutlet fileprivate weak var leaderBoardButton: UIButton?
     @IBOutlet fileprivate weak var seedButton: UIButton!
 
     /// Title-screen-only button (created in code, no art asset) that opens the
@@ -763,13 +889,13 @@ final class BrogueViewController: UIViewController {
                     self.inputTextField.resignFirstResponder()
                     self.showInventoryButton.isHidden = true
                     // Game Center + File Management moved into the Classic title menu.
-                    self.leaderBoardButton.isHidden = true
-                    self.seedButton.isHidden = false
+                    self.leaderBoardButton?.isHidden = true
+                    self.seedButton.isHidden = true
                     self.escButtonWanted = false
                     self.refreshEscButtonVisibility()
                     self.resetZoom()
                 case .startNewGame, .openGame, .beginOpenGame:
-                    self.leaderBoardButton.isHidden = true
+                    self.leaderBoardButton?.isHidden = true
                     self.seedButton.isHidden = true
                     self.manageFilesButton?.isHidden = true
                     self.seedKeyDown = false
@@ -812,6 +938,24 @@ final class BrogueViewController: UIViewController {
     override func viewDidLoad() {
         super.viewDidLoad()
 
+        // Handoff (Continuity): a pickup can arrive while we're running (notification) or via a cold
+        // launch (stashed in GameHandoff.pendingReceive, drained in viewDidAppear). See docs/design/game-handoff.md.
+        NotificationCenter.default.addObserver(self, selector: #selector(handoffDidArrive),
+                                               name: GameHandoff.didReceiveNotification, object: nil)
+        // Handoff (Continuity): source-side confirmation when a pickup finishes serving (Phase 3a).
+        gameHandoff.onServeBegan = { [weak self] in self?.beginHandoffFreeze() }
+        gameHandoff.onServeComplete = { [weak self] ok, detail in
+            guard let self = self else { return }
+            if ok {
+                // Receiver has the run — relinquish here so it lives in one place (drops to title).
+                self.relinquishAfterHandoff()
+            } else {
+                self.endHandoffFreeze()
+                self.presentHandoffAlert(title: "Handoff Interrupted",
+                                         message: "The transfer didn't complete; your run is untouched.\n\(detail)")
+            }
+        }
+
         currentEngine = BrogueViewController.persistedEngine()
         setupVersionChooser()
         setupOptionsButton()
@@ -826,7 +970,7 @@ final class BrogueViewController: UIViewController {
         let panGesture = UIPanGestureRecognizer(target: self, action: #selector(draggedView(_:)))
         panGesture.minimumNumberOfTouches = 2
         dContainerView.addGestureRecognizer(panGesture)
-        dContainerView.alpha = 0.3
+        dContainerView.alpha = BrogueViewController.dpadRestingAlpha
 
         setupZoomGestures()
         setupHoverGesture()
@@ -918,6 +1062,8 @@ final class BrogueViewController: UIViewController {
         applyNotchInsets()
         updateDpadNotchAvoidance()
         applyMacWindowSizeRestrictionsIfNeeded()
+        // Handoff (Continuity): drain a pickup that arrived before we were on screen (cold launch).
+        processPendingHandoff()
     }
 
     /// iOS port (iBrogue): Mac Catalyst only — stop the window from being resized so small the
@@ -1186,11 +1332,23 @@ final class BrogueViewController: UIViewController {
         refreshCenterButtonAppearance()
     }
 
-    /// Center button shows the SF Symbol for its bound command; when set to
-    /// "Nothing" it shows a slashed circle so it stays visible and long-pressable.
+    /// The key the center button acts as *right now*. Normally its bound key, but when bound to
+    /// "Continue travel" it becomes a smart button: continue while a journey is pending, else Rest
+    /// once. Only the center button is reactive — a side button bound to Continue travel stays pure
+    /// (always sends the continue key, which the engine no-ops when nothing is pending).
+    private var centerButtonEffectiveKey: UInt8 {
+        if centerButtonKey == BrogueViewController.continueTravelKeyCode && !isTravelPending {
+            return "z".ascii   // idle → Rest once
+        }
+        return centerButtonKey
+    }
+
+    /// Center button shows the SF Symbol for its effective command (footprints while a journey is
+    /// pending, zzz when it will rest instead); when set to "Nothing" it shows a slashed circle so
+    /// it stays visible and long-pressable.
     private func refreshCenterButtonAppearance() {
         guard let button = directionsViewController?.centerShortcutButton else { return }
-        let name = BrogueViewController.symbolName(for: centerButtonKey)
+        let name = BrogueViewController.symbolName(for: centerButtonEffectiveKey)
         button.setImage(UIImage(systemName: name, withConfiguration: BrogueViewController.buttonSymbolConfig), for: .normal)
         button.alpha = 1.0
     }
@@ -1198,7 +1356,20 @@ final class BrogueViewController: UIViewController {
     @objc private func centerButtonTapped() {
         guard centerButtonKey != BrogueViewController.centerButtonNothing else { return }
         fireHaptic()
-        addKeyEvent(event: centerButtonKey)
+        addKeyEvent(event: centerButtonEffectiveKey)
+    }
+
+    /// Host callback (fires on the engine thread): the engine reports whether a travel destination
+    /// is currently pending. Hop to main for UIKit (matches `setExamining`). Only the reactive
+    /// continue binding changes its face with pending state, so we only repaint in that case.
+    @objc func setTravelPending(_ pending: Bool) {
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self, self.isTravelPending != pending else { return }
+            self.isTravelPending = pending
+            if self.centerButtonKey == BrogueViewController.continueTravelKeyCode {
+                self.refreshCenterButtonAppearance()
+            }
+        }
     }
 
     /// Lays the buttons out along the trailing (cutout) edge: the first half of
@@ -1385,7 +1556,7 @@ final class BrogueViewController: UIViewController {
 
             // CE renders its own menu (New Game / Play / View); hide the Classic
             // overlay buttons (leaderboard is Game Center — Classic only).
-            self.leaderBoardButton.isHidden = true
+            self.leaderBoardButton?.isHidden = true
             self.seedButton.isHidden = true
             self.manageFilesButton?.isHidden = true
             self.showInventoryButton.isHidden = true
@@ -1393,6 +1564,15 @@ final class BrogueViewController: UIViewController {
             // Directional pad + action bar only during normal play. The d-pad is additionally
             // hidden when a hardware keyboard is attached; see refreshDirectionPadVisibility().
             self.gameplayControlsActive = inPlay
+
+            // iOS port (iBrogue): the menu magnify is valid ONLY while a button menu is up
+            // (uiMode == InMenu, 0). Every other state — normal play, or an escape/keyboard prompt
+            // (Save recording, seed entry, the "call" name/inscribe prompts, confirmations) — must
+            // drop it, else it lingers on a stale menu rect and tears that overlay. Nested button
+            // menus stay InMenu (the bridge dedups the transient InNormalPlay between them), so this
+            // never flickers mid-menu. This is the general teardown for CE/SE (Classic uses events).
+            if uiMode != 0 { self.tearDownMenuMagnify() }
+
             self.refreshDirectionPadVisibility()
             self.updateActionButtonVisibility()
 
@@ -1452,6 +1632,41 @@ final class BrogueViewController: UIViewController {
         }
     }
 
+    /// SE reports the examine description box's window-cell rect here, just before
+    /// `setExamining:true` (main-queue FIFO keeps it ahead of the isExamining flip). Stored
+    /// for the iPhone fit-zoom in updateZoomForGameState. No effect on iPad (that path is
+    /// phone-gated) or on CE/Classic (which never call this → 1× zoom-out).
+    @objc func setExamineBox(_ x: Int, y: Int, width: Int, height: Int) {
+        DispatchQueue.main.async { [weak self] in
+            self?.examineBox = ExamineBox(x: x, y: y, w: width, h: height)
+        }
+    }
+
+    /// iOS port (iBrogue): the engine reports the window-cell rect of a modal menu overlay here.
+    /// Phase 0: driven from the SE title menu (main menu / flyout / variant & mode dialogs). On
+    /// iPhone, while at the title, this auto-magnifies that rect to a readable/tappable size —
+    /// instantly, no camera movement. Reports overwrite each other as the active menu changes
+    /// (e.g. main menu → dialog → back), so no explicit per-menu clear is needed; the magnify is
+    /// torn down when we leave the title (see resetZoom / restoreStoredZoom). No-op off iPhone.
+    @objc func setMenuBox(_ x: Int, y: Int, width: Int, height: Int) {
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self else { return }
+            // The title loop re-reports every animation frame; skip the redundant re-apply unless
+            // the rect actually changed (or we aren't yet engaged, so a first report always lands).
+            let box = MenuBox(x: x, y: y, w: width, h: height)
+            guard self.menuBox != box || !self.menuMagnifyEngaged else { return }
+            self.menuBox = box
+            self.applyMenuMagnify()
+        }
+    }
+
+    /// iOS port (iBrogue): the engine reports that no menu overlay is shown. Tears down any menu
+    /// magnify. (Phase 0 mostly relies on the leave-title teardown; this is the explicit path used
+    /// when a menu closes without a state change — and by later phases, e.g. closing inventory.)
+    @objc func clearMenuBox() {
+        DispatchQueue.main.async { [weak self] in self?.tearDownMenuMagnify() }
+    }
+
     /// Moves the esc button to the lower-left safe-area corner during targeting,
     /// restoring its resting position afterward. Uses a transform (rather than
     /// touching .center) so it composes with the storyboard layout, matching how
@@ -1477,6 +1692,226 @@ final class BrogueViewController: UIViewController {
         }
     }
 
+    /// Lineage tag for the Handoff payload / save-dir routing: "ce", "se", or "classic".
+    private var engineLineageString: String {
+        switch currentEngine {
+        case .classic: return "classic"
+        case .ce: return "ce"
+        case .se: return "se"
+        }
+    }
+
+    /// The current engine's last-known game seed (persisted by the bridge's
+    /// `cePersistLastSeed`). Best-effort display metadata for the Handoff banner; 0 if unset.
+    private var lastPersistedSeed: UInt64 {
+        let key = (currentEngine == .se) ? "se last game seed" : "ce last game seed"
+        return (UserDefaults.standard.object(forKey: key) as? NSNumber)?.uint64Value ?? 0
+    }
+
+    /// Called by the CE/SE bridge (deduped on depth change) with the live game's context, so the
+    /// Handoff activity's banner/metadata stays current. Runs on the engine thread → hop to main.
+    func setGameContext(depth: Int, turn: Int, seed: UInt64) {
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self, !self.atTitle, self.currentEngine != .classic else { return }
+            self.gameHandoff.advertise(lineage: self.engineLineageString,
+                                       seed: seed, depth: depth, turn: turn)
+        }
+    }
+
+    // MARK: - Handoff receive (Phase 2: parse + guard; transfer/resume land in Phase 3)
+
+    /// A Handoff pickup arrived while the app is already running.
+    @objc private func handoffDidArrive() {
+        DispatchQueue.main.async { [weak self] in self?.processPendingHandoff() }
+    }
+
+    /// Drains a pending Handoff pickup (from a live notification or a cold launch): parse the payload
+    /// and run the compatibility guard, then surface the result. The stream transfer + resume land in
+    /// Phase 3. See docs/design/game-handoff.md.
+    private func processPendingHandoff() {
+        // Only act once we're on screen so we can present; otherwise viewDidAppear retries.
+        guard viewIfLoaded?.window != nil else { return }
+        guard let activity = GameHandoff.pendingActivity else { return }
+        GameHandoff.pendingActivity = nil
+        let info = activity.userInfo ?? [:]
+
+        let lineage = (info["lineage"] as? String) ?? ""
+        let theirVersion = (info["version"] as? String) ?? "?"
+
+        // Guard 1 — lineage must be a replay-safe engine (CE or SE; Classic is never advertised).
+        guard lineage == "ce" || lineage == "se" else {
+            presentHandoffAlert(title: "Can't Continue",
+                                message: "This game isn't from a compatible engine.")
+            return
+        }
+        // Guard 2 — engine recording/save-compatibility version must match (the token the engine writes
+        // into save headers and checks on load). It's stable across app builds/platforms, so cross-device
+        // handoff isn't blocked by differing build numbers. The engine's own load-time check backstops it.
+        let ourVersion = GameHandoff.recordingVersion(lineage: lineage)
+        guard theirVersion == ourVersion else {
+            presentHandoffAlert(title: "Update Needed",
+                                message: "That game is from a different version of Brogue (\(theirVersion)); this device runs \(ourVersion). Update both to the same version to hand off.")
+            return
+        }
+
+        // Pull the payload over the continuation streams, then write it + resume.
+        var streamsArrived = false
+        activity.getContinuationStreams { [weak self] input, output, error in
+            DispatchQueue.main.async {
+                guard let self = self else { return }
+                streamsArrived = true
+                guard let input = input, let output = output, error == nil else {
+                    self.presentHandoffAlert(title: "Handoff Failed",
+                                             message: "Couldn't open the transfer channel: \(error?.localizedDescription ?? "no streams").")
+                    return
+                }
+                HandoffTransfer.receive(input: input, output: output) { data, commit in
+                    self.installAndResumeHandoff(data: data, lineage: lineage, commit: commit)
+                }
+            }
+        }
+        // Watchdog: if getContinuationStreams never calls back (silent hang seen on Mac), surface it.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 20) { [weak self] in
+            guard let self = self, !streamsArrived else { return }
+            self.presentHandoffAlert(title: "Handoff Timed Out",
+                                     message: "The transfer channel never opened. Keep the sending device on its game screen; both must share one Apple ID.")
+        }
+    }
+
+    private func presentHandoffAlert(title: String, message: String) {
+        let alert = UIAlertController(title: title, message: message, preferredStyle: .alert)
+        alert.addAction(UIAlertAction(title: "OK", style: .default))
+        present(alert, animated: true)
+    }
+
+    /// 3c: write the received recording into the target engine's save dir, set that engine's resume
+    /// marker, and boot the engine so `initializeLaunchArguments` cold-resumes it (`NG_OPEN_GAME`).
+    /// The engine renames the file to LastGame + deletes this source on load. No relinquish on the
+    /// source yet (Phase 4). See docs/design/game-handoff.md.
+    private func installAndResumeHandoff(data: Data, lineage: String, commit: @escaping (Bool) -> Void) {
+        let target: EngineKind = (lineage == "se") ? .se : .ce
+        // Deep ACK: only accept (commit(true) → ACK → the source relinquishes) if we can actually resume
+        // right now — i.e. this device is at its title (no live game to clobber, and performHandoffBoot
+        // can restart cleanly). If it's anywhere in its own game (playing OR in a menu — both leave
+        // `atTitle` false), REFUSE (commit(false) → NAK) and write nothing, so the source keeps its run:
+        // no data loss, no fork. Refusing-when-unsure is the safe direction; on a cold launch the ~1s
+        // transfer gives the engine time to reach its title first. (Phase 5 will auto persist-before-
+        // replace instead of refusing.) See docs/design/game-handoff.md.
+        guard atTitle, !switchPending else {
+            commit(false)
+            presentHandoffAlert(title: "Finish Your Game First",
+                                message: "This device isn't at its title screen. Return to the title, then hand off again — your other device kept its run.")
+            return
+        }
+        let subfolder = (target == .se) ? "se" : "ce"
+        let dir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent(subfolder)
+        do {
+            try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+            let name = uniqueHandoffFileName(in: dir)
+            try data.write(to: dir.appendingPathComponent(name))
+            // Relative filename: the engine chdir's to Documents/<subfolder>, so it resolves on boot.
+            UserDefaults.standard.set(name, forKey: (target == .se) ? "se resume path" : "ce resume path")
+            commit(true)                 // ACK the source → it relinquishes; we're committed to resuming
+            performHandoffBoot(target)
+        } catch {
+            commit(false)                // couldn't save → don't take the source's run
+            presentHandoffAlert(title: "Handoff Failed",
+                                message: "Couldn't save the received game: \(error.localizedDescription)")
+        }
+    }
+
+    /// A collision-free save name in `dir` (the engine renames it to LastGame on load, so it's transient).
+    private func uniqueHandoffFileName(in dir: URL) -> String {
+        let base = "Handoff", ext = "broguesave"
+        var name = "\(base).\(ext)"
+        var n = 2
+        while FileManager.default.fileExists(atPath: dir.appendingPathComponent(name).path) {
+            name = "\(base) \(n).\(ext)"
+            n += 1
+        }
+        return name
+    }
+
+    /// Restart (or switch to) `target` so a fresh `rogueMain` consumes the resume marker. Unlike
+    /// `requestEngineSwitch`, allows `target == currentEngine` (the common iPad-SE → SE handoff). The
+    /// engine's terminate hook lives in its title loop, so if we're not at the title yet, defer until
+    /// `setCEAtTitle` reports it.
+    private func performHandoffBoot(_ target: EngineKind) {
+        guard atTitle, !switchPending else { handoffResumePending = target; return }
+        switchPending = true
+        pendingTargetEngine = target
+        switch currentEngine {
+        case .ce: ce_requestTermination()
+        case .se: se_requestTermination()
+        case .classic: setClassicTerminationRequested(true)
+        }
+    }
+
+    // MARK: - Handoff source: freeze during transfer, relinquish on ACK (Phase 4)
+
+    /// Freeze the run while a handoff transfer is in flight: starve input so no turn advances (a turn
+    /// taken mid-transfer would be lost on relinquish), and show a "Handing off…" overlay.
+    private func beginHandoffFreeze() {
+        synchronized {
+            handoffInFlight = true
+            keyEvents.removeAll()
+            touchEvents.removeAll()
+        }
+        showHandoffOverlay()
+    }
+
+    /// Transfer failed/aborted — unfreeze and resume in place; nothing was lost.
+    private func endHandoffFreeze() {
+        synchronized {
+            handoffInFlight = false
+            keyEvents.removeAll()
+            touchEvents.removeAll()
+        }
+        hideHandoffOverlay()
+    }
+
+    /// Receiver confirmed (deep ACK) — relinquish: inject the relinquish key so the engine ends the run
+    /// silently, deletes its save, and drops to title; also clear this engine's resume marker.
+    private func relinquishAfterHandoff() {
+        synchronized {
+            keyEvents.removeAll()
+            touchEvents.removeAll()
+            handoffInFlight = false   // let the injected relinquish key through
+            keyEvents.append(QueuedKeyEvent(code: Self.handoffRelinquishKey, shift: false, control: false, raw: false))
+        }
+        switch currentEngine {
+        case .se: se_clearResumeMarker()
+        case .ce: ce_clearResumeMarker()
+        case .classic: break
+        }
+        hideHandoffOverlay()
+    }
+
+    private func showHandoffOverlay() {
+        guard handoffOverlay == nil else { return }
+        let overlay = UIView(frame: view.bounds)
+        overlay.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        overlay.backgroundColor = UIColor.black.withAlphaComponent(0.6)
+        let label = UILabel()
+        label.text = "Handing off…"
+        label.textColor = .white
+        label.font = .systemFont(ofSize: 20, weight: .semibold)
+        label.translatesAutoresizingMaskIntoConstraints = false
+        overlay.addSubview(label)
+        NSLayoutConstraint.activate([
+            label.centerXAnchor.constraint(equalTo: overlay.centerXAnchor),
+            label.centerYAnchor.constraint(equalTo: overlay.centerYAnchor),
+        ])
+        view.addSubview(overlay)
+        handoffOverlay = overlay
+    }
+
+    private func hideHandoffOverlay() {
+        handoffOverlay?.removeFromSuperview()
+        handoffOverlay = nil
+    }
+
     /// Called by the CE bridge: true only while the CE title screen is showing.
     @objc func setCEAtTitle(_ value: Bool) {
         DispatchQueue.main.async { [weak self] in
@@ -1490,6 +1925,23 @@ final class BrogueViewController: UIViewController {
             // (a game is starting/resuming) restores the player's remembered zoom — the
             // first player-cell report then animates it in, recentered on the player.
             if value { self.resetZoom() } else { self.restoreStoredZoom() }
+
+            // Handoff (Continuity): advertise the run while in play; stop at the title. Driven
+            // here because this is the CE/SE begin/end signal (Classic never calls setCEAtTitle,
+            // so it's excluded for free). Phase 1 advertises with best-effort metadata; live
+            // depth/turn arrive via a game-context push in a later phase. See docs/design/game-handoff.md.
+            if value {
+                self.gameHandoff.stop()
+                // A received handoff waiting for the title can now boot into its run (see performHandoffBoot).
+                if let target = self.handoffResumePending {
+                    self.handoffResumePending = nil
+                    self.performHandoffBoot(target)
+                }
+            } else if self.currentEngine != .classic {
+                self.gameHandoff.advertise(lineage: self.engineLineageString,
+                                           seed: self.lastPersistedSeed,
+                                           depth: 0, turn: 0)
+            }
         }
     }
 
@@ -1515,12 +1967,16 @@ final class BrogueViewController: UIViewController {
 
     private static let engineDefaultsKey = "selectedEngine"
 
-    /// The engine to boot on launch — the last one played, defaulting to Classic.
+    /// The engine to boot on launch — the last one played, defaulting to Brogue SE
+    /// when the user hasn't picked one yet (fresh install / no stored preference).
+    /// An explicit Classic choice is honored via the `"classic"` case; only a missing
+    /// or unrecognized value falls through to SE.
     private static func persistedEngine() -> EngineKind {
         switch UserDefaults.standard.string(forKey: engineDefaultsKey) {
+        case "classic": return .classic
         case "ce": return .ce
         case "se": return .se
-        default: return .classic
+        default: return .se
         }
     }
 
@@ -1689,6 +2145,28 @@ final class BrogueViewController: UIViewController {
                 self?.toggleExamineZoom()
             }
             children.append(examineZoom)
+            // Extends the magnified map behind the translucent interface (sidebar, message
+            // log, flavor line), and lets a held-magnifier drag reach the cells behind it.
+            let mapUnderSidebar = UIAction(title: "Map behind interface",
+                                           image: UIImage(systemName: "rectangle.inset.filled"),
+                                           state: mapUnderSidebarEnabled ? .on : .off) { [weak self] _ in
+                self?.toggleMapUnderSidebar()
+            }
+            children.append(mapUnderSidebar)
+            // Magnification applied to the title / menu / inventory panels (iPhone menu magnify).
+            // The value is the max scale; 1.0× turns it off. Stepped submenu over the useful range
+            // (a slider can't live in a UIMenu, and 5 steps are easier to hit than a tiny slider).
+            let current = BrogueViewController.menuMagnifyScaleSetting
+            let steps: [CGFloat] = [1.0, 1.1, 1.2, 1.3, 1.4]   // explicit to avoid FP stride drift
+            let sizeItems: [UIMenuElement] = steps.map { step in
+                UIAction(title: String(format: "%.1f×", Double(step)),
+                         state: abs(step - current) < 0.05 ? .on : .off) { [weak self] _ in
+                    self?.setMenuMagnifyScale(step)
+                }
+            }
+            children.append(UIMenu(title: "Menu size",
+                                   image: UIImage(systemName: "textformat.size"),
+                                   children: sizeItems))
         }
 
         children.append(resetDirections)
@@ -1716,6 +2194,27 @@ final class BrogueViewController: UIViewController {
         }
         fireHaptic()
         optionsButton?.menu = optionsMenu()
+    }
+
+    /// Flips "map under sidebar" (translucent sidebar + full-width zoomed map + held-
+    /// magnifier reach), persists it, applies it to the live scene (restoring the opaque
+    /// sidebar at once if turned off mid-zoom), and rebuilds the menu.
+    private func toggleMapUnderSidebar() {
+        mapUnderSidebarEnabled.toggle()
+        UserDefaults.standard.set(mapUnderSidebarEnabled, forKey: RogueScene.mapUnderSidebarEnabledDefaultsKey)
+        skViewPort.rogueScene.setMapUnderSidebarEnabled(mapUnderSidebarEnabled)
+        fireHaptic()
+        optionsButton?.menu = optionsMenu()
+    }
+
+    /// Sets the menu-magnify scale (Options ▸ Menu size), persists it, rebuilds the menu so the
+    /// checkmark updates, and re-applies live to the currently-shown menu (the title menu is up
+    /// while Options is open) at the new scale. 1.0× tears the magnify down (menus render at 1×).
+    private func setMenuMagnifyScale(_ scale: CGFloat) {
+        UserDefaults.standard.set(Double(scale), forKey: BrogueViewController.menuScaleDefaultsKey)
+        fireHaptic()
+        optionsButton?.menu = optionsMenu()
+        applyMenuMagnify()   // re-fit the current menuBox at the new scale (or tear down at 1.0×)
     }
 
     /// Flips the haptics setting, persists it, gives confirming feedback if it was
@@ -1912,13 +2411,62 @@ final class BrogueViewController: UIViewController {
         ]
     }
 
-    /// Brogue SE release notes — player-facing highlights for the current release.
+    /// Brogue SE release notes — player-facing highlights for the current release,
+    /// followed by every prior release archived under a "📦 Previous Release —" heading.
     /// Curated for the info panel; the full technical log lives in
-    /// BrogueSE/Engine/IOS_MODIFICATIONS.md. Keep in sync with new content.
+    /// BrogueSE/Engine/IOS_MODIFICATIONS.md. When shipping a new release, PREPEND the new
+    /// section and DEMOTE the current one to a Previous Release block — never delete an old
+    /// release; the full history is intentionally kept here. Keep in sync with new content.
     private static func seInfoBlocks() -> [InfoBlock] {
         return [
             .link("Support", "https://github.com/sethhoward/Brogue-iPad"),
-            .note("Brogue SE — an experimental fork of BrogueCE with original items, monsters, and mechanics. Release 0.10.0, \"A Is For AAaAH!\", is all about sound: the dungeon can finally hear you — and you can hear it. Here's what's new:"),
+            .note("Brogue SE — an experimental fork of BrogueCE with original items, monsters, and mechanics. Release 0.12.0, \"C is for Curses\", turns cursed gear from a dead end into a decision — a cursed runic now pairs a real, always-on power with its bite — and adds a shrine that will identify your pack, if you dare wake what guards it. Here's what's new:"),
+            .heading("🔮 Cursed Runics, Reworked"),
+            .bullets([
+                "A curse is a bargain, not a trap — A cursed runic now grants a genuine, always-on power alongside its drawback, welded to you until you deal with it. Every downside has a counter you can lean into, so keeping a cursed item can be the smart play.",
+                "Two ways to break the weld — Pour enchant scrolls in to the purify threshold and the drawback burns away while the power stays (weapons at +6, armor at +4); or read remove-curse to pry it off early, drawback and all.",
+                "Maddening, reckless, and clumsy blades — Delirium confounds what you strike but leaves you hallucinating; Recklessness trades the damage you take for the damage you deal; a Clumsy blade fumbles and stuns you — until you purify it into a true executioner's blade.",
+                "Anchor, Smoky, and Acrophobia armor — Anchor steels your defense but drags your step (purify to stand immovable); Smoky armor wraps you in concealing haze at the cost of your own sight (purify for a quiet stealth aura); Acrophobia makes you fearless of pits but dizzy at their edge.",
+            ]),
+            .heading("🗿 Altars of Divination"),
+            .bullets([
+                "Reveal your unknowns — A new shrine replaces the Altar of Insight, watched over by a looming statue, fully identifies any unidentified item you set on one of its altars — and the first one is always safe.",
+                "Press your luck — Each further item you reveal risks waking the statue's guardian, and the greedier you get the deadlier it is: Take what you dare.",
+            ]),
+            .heading("🎣 Cleaner Distractions"),
+            .bullets([
+                "Thrown lures buy real time — A monster that goes to investigate a thrown item now lingers over it for a few turns before losing interest, opening a genuine window to slip past.",
+            ]),
+            .heading("🎮 Quality of Life"),
+            .bullets([
+                "Fire no longer rattles you — Catching fire used to throw you into a brief panic; now that disorientation strikes only monsters. It still burns — but your wits, and your next move, stay yours.",
+                "Study a scroll even while hunted — Sitting down to a meal always lets you puzzle out an unidentified scroll now, even with something on your trail; the old \"only when nothing's hunting you\" restriction is gone.",
+            ]),
+            .heading("📦 Previous Release — 0.11.0 \"B is for Balance\""),
+            .note("Retuned the arsenal — heavier trade-offs on weapons, staffs, and rings, with clearer status tells to read the fight at a glance:"),
+            .heading("⚖️ Balance Pass"),
+            .bullets([
+                "Broadsword & war axe, soft-capped — The two late-game staples no longer scale forever: enchanting pays full value only through +10, and each point beyond returns about a quarter of its old kick. Still top-tier, no longer an automatic win.",
+                "War pike, slowed — The pike's strength was always its throughput — reach-2 and a thrust that pierces a whole line — so it now takes twice as long to recover after each attack. Trade tempo for that reach.",
+                "Flail, less of a lawnmower — The flail's signature hits on enemies you sweep past while moving now land for half damage, so wading through a crowd isn't free.",
+                "Bare-knuckle scaling — Unarmed attacks now grow with your strength, so being caught between weapons isn't hopeless.",
+                "Staffs come into their own — Lightning and firebolt get a real power bump once enchanted to +5 and beyond, rewarding committing to a single staff or a hybrid heavy weapon and stave approach.",
+                "Ring of Transference, reworked — It now drains life from whatever you strike and bleeds a share of your own harmful afflictions onto the target — turning your suffering against your enemy.",
+            ]),
+            .heading("💨 Smoke & Terrain"),
+            .bullets([
+                "Where there's fire, there's smoke — Burning terrain now breathes a vision-obscuring haze that drifts and thins over time, so a blaze can blind as much as it burns.",
+                "Traps suit their surroundings — Fire traps nestle in dry grass, caustic traps among scattered bones — the dungeon hints at what's waiting.",
+                "Douse the burning — Fiery creatures are snuffed out by water or frost, so the right element can put out a walking bonfire.",
+            ]),
+            .heading("👁️ Tells & Legibility"),
+            .bullets([
+                "Read the battlefield — A small glyph now blinks over any creature (and you) that's confused, burning, stunned, protected, hasted, or healing, so you can size up the situation.",
+                "Clairvoyance reads the floor — On arriving at a new depth, a worn Ring of Clairvoyance senses whether items on the level are helpful or harmful — as many as the ring's enchant level.",
+                "A sharper ear — The noise system is clearer: a pack raises a rallying cry when one of them rouses the others, submerged creatures fall silent, and close threats are easier to hear.",
+            ]),
+            .heading("📦 Previous Release — 0.10.0 \"A Is For AAaAH!\""),
+            .note("The sound update — the dungeon learned to hear you, and you learned to hear it:"),
             .heading("🔊 The Dungeon Can Hear You"),
             .bullets([
                 "Make noise, get noticed — Footsteps, fighting, and the terrain you cross all send sound rippling through the dungeon. It bends around corners and muffles through closed doors, so unseen monsters can now hear you coming and slip away to investigate the racket.",
@@ -1951,7 +2499,7 @@ final class BrogueViewController: UIViewController {
             .heading("👹 Monsters & Allies"),
             .bullets([
                 "The Gold Goblin — A skittish treasure-hoarder that flees toward the stairs, scattering a trail of gold. Chase it down and corner it before it escapes to the next floor.",
-                "Cleverer thieves — Monkeys and imps now target the items they actually covet, not just whatever's handy. #849 gimballock",
+                "Cleverer thieves — Monkeys and imps now target the items they actually covet, not just whatever's handy.",
                 "Better allies — Allies keep a safe distance from invulnerable monsters, and the Ring of Light can rally and embolden the companions fighting beside you.",
             ]),
             .heading("🔍 A New Way to Identify Items"),
@@ -2057,8 +2605,7 @@ extension BrogueViewController: UIContextMenuInteractionDelegate {
             let actions = catalog
                 .filter { $0.category == category }
                 .map { command -> UIAction in
-                    let keyChar = String(UnicodeScalar(command.key))
-                    let action = UIAction(title: "\(command.name) (\(keyChar))",
+                    let action = UIAction(title: BrogueViewController.commandMenuTitle(command),
                                           image: UIImage(systemName: BrogueViewController.symbolName(for: command.key))) { [weak self] _ in
                         self?.bindSideButton(slot: slot, to: command.key)
                     }
@@ -2114,8 +2661,7 @@ extension BrogueViewController: UIContextMenuInteractionDelegate {
             let actions = catalog
                 .filter { $0.category == category }
                 .map { command -> UIAction in
-                    let keyChar = String(UnicodeScalar(command.key))
-                    let action = UIAction(title: "\(command.name) (\(keyChar))",
+                    let action = UIAction(title: BrogueViewController.commandMenuTitle(command),
                                           image: UIImage(systemName: BrogueViewController.symbolName(for: command.key))) { [weak self] _ in
                         self?.bindCenterButton(to: command.key)
                     }
@@ -2248,7 +2794,11 @@ extension BrogueViewController: UIPopoverPresentationControllerDelegate {
 
         let label = UILabel()
         label.translatesAutoresizingMaskIntoConstraints = false
-        label.text = "Tip: pinch to zoom the map. Two-finger double-tap to zoom all the way out, and again to zoom back in."
+        var tip = "Tip: pinch to zoom the map. Two-finger double-tap to zoom all the way out, and again to zoom back in."
+        if mapUnderSidebarEnabled {
+            tip += " While zoomed, hold to inspect, then drag under the interface (sidebar, log, flavor line) to reach the map behind it."
+        }
+        label.text = tip
         label.numberOfLines = 0
         label.font = .preferredFont(forTextStyle: .subheadline)
         label.textColor = .label
@@ -2561,9 +3111,11 @@ extension BrogueViewController: UIGestureRecognizerDelegate {
     }
 
     /// Clamps the origin so the magnified map always fully covers the dungeon
-    /// frame (no empty gutters). Below 1× there's nothing to clamp.
+    /// frame (no empty gutters). At ≤ 1× the map fills the frame, so the origin is pinned
+    /// to .zero — there's nothing to pan, and this prevents a stray pinch-out origin from
+    /// leaving the map shifted at "fully zoomed out".
     private func clampedOrigin(_ origin: CGPoint, scale: CGFloat) -> CGPoint {
-        guard scale > 1.0 else { return origin }
+        guard scale > 1.0 else { return .zero }
         let f = dungeonFramePoints()
         let xLo = f.maxX * (1 - scale), xHi = f.minX * (1 - scale)
         let yLo = f.maxY * (1 - scale), yHi = f.minY * (1 - scale)
@@ -2596,6 +3148,139 @@ extension BrogueViewController: UIGestureRecognizerDelegate {
         let py = (playerCell.y + 0.5) * ch
         // Want player at frame center: f.mid = scale·p + origin.
         return CGPoint(x: f.midX - zoomScale * px, y: f.midY - zoomScale * py)
+    }
+
+    /// Scale + origin that fit the on-screen examine description box within the viewport
+    /// (with a small margin), centered like auto-follow — so examining zooms only as far as
+    /// needed to show the box instead of dropping to 1×, keeping the box text as large as
+    /// legibly fits. Never zooms in past the current zoom, never below 1×. Returns nil when
+    /// no box rect was reported (CE / Classic) or the box needs a full 1× zoom-out anyway,
+    /// so the caller falls back to the plain 1× behavior.
+    private func examineFitZoom() -> (scale: CGFloat, origin: CGPoint)? {
+        guard let box = examineBox, box.w > 0, box.h > 0 else { return nil }
+        // If the box starts left of the dungeon (window col 21 = mapToWindowX(0)), part of
+        // it is drawn in the sidebar cells, which don't live in the zoom container and stay
+        // 1× — magnifying would tear the box. Fall back to a plain 1× zoom-out instead.
+        guard box.x >= 21 else { return nil }
+        let w = skViewPort.effectiveWidthPoints
+        let h = skViewPort.effectiveHeightPoints
+        guard w > 0, h > 0 else { return nil }
+        let cw = w / CGFloat(COLS)
+        let ch = h / CGFloat(ROWS)
+        let li = skViewPort.leftInsetPoints
+        let boxW = CGFloat(box.w) * cw
+        let boxH = CGFloat(box.h) * ch
+        let f = dungeonFramePoints()   // the dungeon rect: rows 3–31, cols 21–99
+        // Fit within the DUNGEON rect (not the whole screen), so the magnified box can't
+        // spill up into the message log or down into the flavor / button rows. Centring on
+        // f.mid then keeps it inside those bounds.
+        let margin: CGFloat = 10       // TWEAK ME: gap kept around the box
+        let fitThatFits = min((f.width - 2 * margin) / boxW, (f.height - 2 * margin) / boxH)
+        // Cap below full zoom so a small box doesn't blow up (felt "too far").
+        let scale = max(1.0, min(zoomScale, BrogueViewController.examineMaxScale, fitThatFits))
+        guard scale > 1.0 else { return nil }   // fits only at ~1× → let the plain 1× path run
+        // Box centre in 1× view points; centre it in the dungeon frame (f.mid = scale·c + origin).
+        let boxCenterX = li + (CGFloat(box.x) + CGFloat(box.w) / 2) * cw
+        let boxCenterY = (CGFloat(box.y) + CGFloat(box.h) / 2) * ch
+        return (scale, CGPoint(x: f.midX - scale * boxCenterX, y: f.midY - scale * boxCenterY))
+    }
+
+    /// iOS port (iBrogue): scale + origin that fit the reported menu rect into the FULL viewport
+    /// (with a margin), centered — the phase-0 title-menu magnify. Unlike examineFitZoom (which
+    /// fits within the dungeon rect so an in-map box can't spill into the HUD), a menu owns the
+    /// whole screen, so it fits/centers against the entire viewport. Capped at menuMaxScale; never
+    /// below 1×. Returns nil when it only fits at ~1× (nothing worth magnifying).
+    private func menuFitZoom(_ box: MenuBox) -> (scale: CGFloat, origin: CGPoint)? {
+        guard box.w > 0, box.h > 0 else { return nil }
+        let w = skViewPort.effectiveWidthPoints
+        let h = skViewPort.effectiveHeightPoints
+        guard w > 0, h > 0 else { return nil }
+        let cw = w / CGFloat(COLS)
+        let ch = h / CGFloat(ROWS)
+        let li = skViewPort.leftInsetPoints        // 0 at the title (padding disabled there)
+        let boxW = CGFloat(box.w) * cw
+        let boxH = CGFloat(box.h) * ch
+        let margin: CGFloat = 14                    // TWEAK ME: gap kept around the menu
+        let fit = min((w - 2 * margin) / boxW, (h - 2 * margin) / boxH)
+        let scale = max(1.0, min(BrogueViewController.menuMagnifyScaleSetting, fit))
+        guard scale > 1.0 else { return nil }
+        // Box centre in 1× view points; centre it in the viewport (center = scale·c + origin).
+        let boxCenterX = li + (CGFloat(box.x) + CGFloat(box.w) / 2) * cw
+        let boxCenterY = (CGFloat(box.y) + CGFloat(box.h) / 2) * ch
+        var ox = li + w / 2 - scale * boxCenterX
+        var oy = h / 2 - scale * boxCenterY
+        // Clamp the origin to the range that keeps the (virtual) grid extent covering the viewport,
+        // so the magnified menu stays fully on-screen. For a menu flush against a grid edge (the
+        // main menu sits at cols ~80–99) this right-aligns it against that edge rather than centring
+        // it half-off; a menu nearer the middle is unaffected and stays centred. Forward map is
+        // screenPt = scale·u + origin, grid 1× extent u ∈ [li, li+w] × [0, h].
+        ox = min(li * (1 - scale), max((li + w) * (1 - scale), ox))
+        oy = min(0, max(h * (1 - scale), oy))
+        return (scale, CGPoint(x: ox, y: oy))
+    }
+
+    /// iOS port (iBrogue): apply the menu magnify for the current `menuBox` — the title menu, and
+    /// (phase 1) in-game overlays: inventory, the action menu, and buttoned dialogs. iPhone only;
+    /// instant (no animation). Scales ONLY the menu cells (a panel over the untouched 1× grid), not
+    /// the whole grid. The gate is simply "a menu rect is reported": the engine reports one only
+    /// while a button menu is up (reportTitleMenuBox / buttonInputLoop) and it's torn down on return
+    /// to play. If the box only fits at ~1× it tears any prior magnify down instead, so a wide
+    /// dialog following a narrow menu doesn't stay wrongly zoomed.
+    private func applyMenuMagnify() {
+        guard isPhoneIdiom, let box = menuBox, let fit = menuFitZoom(box) else {
+            tearDownMenuMagnify()
+            return
+        }
+        skViewPort.rogueScene.applyMenuMagnify(
+            colMin: box.x, colMax: box.x + box.w - 1,
+            rowMin: box.y, rowMax: box.y + box.h - 1,
+            scale: fit.scale, originXPoints: fit.origin.x, originYPoints: fit.origin.y)
+        menuMagnifyEngaged = true
+    }
+
+    /// iOS port (iBrogue): tear down any menu magnify, returning the borrowed cells to the flat
+    /// grid. Idempotent. The gameplay zoom transform is never touched by the menu path.
+    private func tearDownMenuMagnify() {
+        guard menuMagnifyEngaged else { return }
+        menuMagnifyEngaged = false
+        menuBox = nil
+        skViewPort.rogueScene.endMenuMagnify()
+    }
+
+    /// Whether the examine box is already fully on-screen at the *current* displayed
+    /// transform — in which case examine leaves the view exactly as-is (no pan, no zoom).
+    /// At ≤1× the box renders at its designed 1× position, which the engine already fit on
+    /// screen, so it's always visible there — fully/low zoom gets no bells & whistles. When
+    /// zoomed in, maps the box's 1× rect through the applied transform (p = u·scale + origin)
+    /// and checks it's inside the play viewport, so a box that's clipped off-screen still
+    /// gets fitted.
+    private func examineBoxFullyVisible(_ box: ExamineBox) -> Bool {
+        guard appliedScale > 1.0 else { return true }
+        let w = skViewPort.effectiveWidthPoints
+        let h = skViewPort.effectiveHeightPoints
+        guard w > 0, h > 0 else { return true }
+        let cw = w / CGFloat(COLS)
+        let ch = h / CGFloat(ROWS)
+        let li = skViewPort.leftInsetPoints
+        let s = appliedScale, o = appliedOrigin
+        let left   = (li + CGFloat(box.x) * cw) * s + o.x
+        let right  = (li + CGFloat(box.x + box.w) * cw) * s + o.x
+        let top    = (CGFloat(box.y) * ch) * s + o.y
+        let bottom = (CGFloat(box.y + box.h) * ch) * s + o.y
+        return left >= li && right <= li + w && top >= 0 && bottom <= h
+    }
+
+    /// Whether the engine should skip drawing the examine description box for the *current*
+    /// cursor examine. True when zoomed in on screen AND the examine did NOT come from a
+    /// sidebar tap — i.e. a play-field drag-hold, auto-explore stopping on an entity, hover,
+    /// or tab-cycle — where the box, drawn into the magnified dungeon cells, would tear
+    /// against the 1× sidebar/chrome. A deliberate sidebar tap (`examineFromSidebar`) is NOT
+    /// suppressed: it zooms out to show the box readably. Inverting the test (suppress unless
+    /// sidebar) is what catches the no-touch cases like auto-explore that a positive
+    /// "finger on the play field" test missed. Queried by all three engines' examine loops
+    /// via the bridge. iPhone-only. Presentational — a one-frame stale read is harmless.
+    @objc func shouldSuppressExamineBox() -> Bool {
+        return isPhoneIdiom && appliedScale > 1.0 && !examineFromSidebar
     }
 
     /// Centers the player's window cell in the dungeon frame (auto-follow), instantly.
@@ -2662,10 +3347,31 @@ extension BrogueViewController: UIGestureRecognizerDelegate {
         // Aiming a throw/zap is map interaction — keep the zoom. An examine
         // description box is treated like an overlay — suspend to 1× so it isn't clipped.
         let onMap = (gameplayControlsActive || isTargeting) && !isExamining
+        if onMap {
+            // Returning to map play — drop any in-game menu magnify FIRST, so its borrowed cells
+            // are back in the dungeon container before the gameplay zoom is (re)applied below;
+            // otherwise the container would scale while missing them and tear the map. This is the
+            // reliable teardown for inventory/menu close (uiMode → InNormalPlay). Idempotent.
+            tearDownMenuMagnify()
+        }
         guard onMap, zoomScale > 1.0 else {
-            // Overlay up (or not zoomed): animate the displayed map to 1×. The stored
-            // zoomScale / zoomOriginPt are deliberately left untouched. (While a launch
-            // zoom is still pending the display is already 1×, so this is a no-op.)
+            // Examining a description box: if it's already fully on-screen at the current
+            // zoom (always true at ≤1×), leave the view exactly as-is — no pan, no zoom.
+            // Fully / lightly zoomed views get no bells & whistles (iPad/macOS-like). If the
+            // box is clipped, fit it (zoom only as far as needed, keeping the text as large
+            // as legibly fits); a box that can't fit magnified (too big, or spanning the
+            // sidebar) drops to 1× via the fall-through. The stored zoom is left untouched,
+            // so ending the examine restores the player-centered zoom.
+            if isExamining, let box = examineBox {
+                if examineBoxFullyVisible(box) { return }
+                if let fit = examineFitZoom() {
+                    animateZoom(toScale: fit.scale, toOrigin: fit.origin)
+                    return
+                }
+            }
+            // Overlay/menu, or an examine box that must drop to 1×: settle the display to 1×,
+            // but only if something is actually magnified — never pan an already-1× view.
+            guard appliedScale > 1.0 || zoomScale > 1.0 else { return }
             animateZoom(toScale: 1.0, toOrigin: .zero)
             return
         }
@@ -2694,6 +3400,7 @@ extension BrogueViewController: UIGestureRecognizerDelegate {
     /// preference (storedZoomScale) is untouched, so the next run still restores it.
     private func resetZoom() {
         guard isPhoneIdiom else { return }
+        tearDownMenuMagnify()   // reparent any menu-magnified cells back before resetting
         zoomScale = 1.0
         zoomOriginPt = .zero
         manualPanActive = false
@@ -2721,6 +3428,7 @@ extension BrogueViewController: UIGestureRecognizerDelegate {
     /// land on the map center instead of the player. `resetZoom` (title/death) clears it.
     private func restoreStoredZoom() {
         guard isPhoneIdiom else { return }
+        tearDownMenuMagnify()   // leaving the title into a run — drop the menu magnify first
         manualPanActive = false
         zoomScale = storedZoomScale
         zoomOriginPt = .zero
@@ -2872,6 +3580,22 @@ extension BrogueViewController {
             // zone (see `gestureOriginZone`). Captured here, before the pinch/band
             // early-returns, and only for the primary finger so a pinch can't clobber it.
             gestureOriginZone = originZone(for: touches.first!.location(in: view))
+            // Map-under-sidebar: latch reach for any gesture that STARTS on the dungeon
+            // while the reveal is on screen, so a drag left into the translucent sidebar
+            // reaches the map behind it — even a fast drag that beats the 0.3s magnifier
+            // delay (otherwise the boundary-cross is dropped in touchesMoved, killing the
+            // loupe timer and freezing the selection at the sidebar edge). Non-dungeon
+            // origins latch false, keeping raw-coordinate routing (sidebar entity taps).
+            // Harmless for gestures that never leave the map (reach ≡ no-reach in cols
+            // 21…99). Gated on appliedScale (on-screen zoom), not the canonical zoomScale,
+            // which stays high behind a 1× menu.
+            sidebarReachLatched = gestureOriginZone == .playArea
+                && pinchZoomActive && mapUnderSidebarEnabled && appliedScale > 1.0
+            // Fresh gesture: drop any prior sidebar-tap examine provenance. A sidebar
+            // single-tap re-sets it in touchesEnded; anything else (incl. tapping the
+            // Explore button, which kicks off auto-explore) leaves it false so that box is
+            // suppressed while zoomed.
+            examineFromSidebar = false
         }
 
         // iPhone (zoom on): a second finger means a pinch / two-finger pan is
@@ -2934,10 +3658,21 @@ extension BrogueViewController {
         // examine hovers. Gated on gameplayControlsActive so it never touches menu /
         // inventory interaction, where item rows sit above the play area (rows <= 3)
         // and must stay selectable by tap or drag.
+        let moveLoc = touches.first!.location(in: view)
         if gameplayControlsActive, gestureOriginZone != .sidebar,
-           !pointIsInPlayArea(point: touches.first!.location(in: view)) {
+           !pointIsInPlayArea(point: moveLoc),
+           !(sidebarReachLatched && pointIsInReachRegion(point: moveLoc)) {
             hideMagnifier()
             return
+        }
+
+        // A sidebar scrub has begun to move (a plain tap never reaches touchesMoved):
+        // fade the d-pad out so its lower-left overlap stops hiding and blocking the
+        // bottom sidebar entities. Disables the pad's touches immediately, so the
+        // hit-test guard below passes on this same event and the scrub reaches the cells
+        // behind it. Restored on release (touchesEnded / touchesCancelled).
+        if gameplayControlsActive, gestureOriginZone == .sidebar {
+            setDpadFadedForSidebarScrub(true)
         }
 
         guard dContainerView.hitTest(touches.first!.location(in: dContainerView), with: event) == nil else { return }
@@ -2955,8 +3690,9 @@ extension BrogueViewController {
         super.touchesEnded(touches, with: event)
 
         // Release the latched origin zone once every finger has lifted, on every path.
+        // Fade the d-pad back in too (no-op unless a sidebar scrub faded it out).
         let allFingersUp = activeTouchCount(event) == 0
-        defer { if allFingersUp { gestureOriginZone = nil } }
+        defer { if allFingersUp { gestureOriginZone = nil; setDpadFadedForSidebarScrub(false) } }
 
         // A multi-touch gesture (pinch / two-finger pan) was in progress: never
         // commit a tap on release — that's what produced the view "snap." Reset
@@ -3010,6 +3746,12 @@ extension BrogueViewController {
                     addTouchEvent(event: UIBrogueTouchEvent(phase: .ended, location: lastTouchLocation))
                 } else {
                     // Single-tap selects an entity → the engine shows its description box.
+                    // Mark it a sidebar-tap examine immediately (before the deferred arm) so
+                    // the box isn't suppressed when the engine draws it a frame later — this
+                    // is the deliberate "show it" case (auto-explore / play-field boxes stay
+                    // suppressed while zoomed). Set regardless of examineZoomEnabled: a
+                    // sidebar tap always shows the box; the zoom-out is the separate arm.
+                    examineFromSidebar = true
                     // Defer arming past the double-tap window so a follow-up double-tap
                     // cancels it; only a lone single tap actually suspends the zoom.
                     examineArmDebounce?.cancel()
@@ -3045,6 +3787,7 @@ extension BrogueViewController {
         if activeTouchCount(event) == 0 {
             multiTouchGestureActive = false
             gestureOriginZone = nil
+            setDpadFadedForSidebarScrub(false)   // fade the d-pad back if a scrub faded it out
         }
     }
 
@@ -3071,6 +3814,16 @@ extension BrogueViewController {
         return false
     }
 
+    /// The region a latched held-magnifier reach may inspect once the map is revealed behind
+    /// the interface: the full HUD frame — cols 0…99, rows 0…32 (ROWS-2) — which covers the
+    /// sidebar, the message log (top), and the flavor line (bottom). The button row (33) is
+    /// excluded so a reach drag can't stray onto it. Raw (non-reach) cell coords: we're
+    /// classifying where the finger physically is, not where it resolves to.
+    private func pointIsInReachRegion(point: CGPoint) -> Bool {
+        let cellCoord = getCellCoords(at: point, viewport: skViewPort)
+        return cellCoord.x >= 0 && cellCoord.x <= 99 && cellCoord.y >= 0 && cellCoord.y <= 32
+    }
+
     /// iOS port (iBrogue): classify a touch-down location into the zone that owns the
     /// gesture. `isBandTouch` is checked first because it already carries the
     /// `gameplayControlsActive` guard — so `.band` is only ever latched during active
@@ -3085,6 +3838,11 @@ extension BrogueViewController {
     
     private func addTouchEvent(event: UIBrogueTouchEvent) {
         lastTouchLocation = event.location
+        // Stamp the reach decision onto the event so the bridge resolves it in map space
+        // at dequeue time (engine thread) even after the latch is cleared on lift. Only
+        // ever true during a genuine reach drag; the sidebar-examine and double-tap paths
+        // enqueue with the latch false, so their coordinates stay untouched.
+        event.reachUnderSidebar = sidebarReachLatched
         synchronized {
             // only want the last moved event, no point caching them all
             if let lastEvent = touchEvents.last, lastEvent.phase == .moved, !touchEvents.isEmpty {
@@ -3124,7 +3882,7 @@ extension BrogueViewController {
     }
 
     @objc func hasTouchEvent() -> Bool {
-        synchronized { !touchEvents.isEmpty }
+        synchronized { !handoffInFlight && !touchEvents.isEmpty }
     }
 }
 
@@ -3134,6 +3892,8 @@ extension BrogueViewController {
             magView.showMagnifier(at: lastTouchLocation)
             // Magnifier is now up: stop any in-progress d-pad press (kills its
             // repeat timer so a held button can't keep moving) and hide the pad.
+            // (Sidebar reach is latched earlier, at gesture start in touchesBegan, so a
+            // fast drag across the boundary isn't dropped before the loupe arms.)
             directionsViewController?.cancel()
             setDpadHiddenForMagnifier(true)
         }
@@ -3157,15 +3917,22 @@ extension BrogueViewController {
         let engineAllowsMagnifier = currentEngine.isCEFamily
             ? (gameplayControlsActive || isTargeting)
             : lastBrogueGameEvent.canShowMagnifyingGlass
-        guard engineAllowsMagnifier, pointIsInPlayArea(point: point) else {
+        // Normally the loupe only appears over the map (cols 21…99, dungeon rows). While a
+        // reach drag is latched, also allow it anywhere in the reveal frame (over the
+        // sidebar, message log, and flavor line), so it keeps tracking as the finger crosses
+        // under the translucent interface.
+        let reachAllowed = sidebarReachLatched && pointIsInReachRegion(point: point)
+        guard engineAllowsMagnifier, pointIsInPlayArea(point: point) || reachAllowed else {
             return false
         }
         // iPhone: suppress the magnifier over the chrome rows — the flavor line
         // (row 32) and the button bar (row 33) — so it doesn't pop up when the
-        // player is aiming for a button. Row 31 is now pure dungeon (the bottom
-        // map row), so the magnifier is allowed there. Not suppressed while
-        // targeting, when the buttons are hidden.
-        if UIDevice.current.userInterfaceIdiom == .phone, !isTargeting {
+        // player is aiming for a button. Row 31 is pure dungeon (the bottom map
+        // row), so the magnifier is allowed there. Not suppressed while targeting
+        // (buttons hidden), nor during a reach drag — there the reveal exposes the
+        // map behind the flavor line (row 32), and pointIsInReachRegion already
+        // excludes the button row (33).
+        if UIDevice.current.userInterfaceIdiom == .phone, !isTargeting, !sidebarReachLatched {
             let cell = getCellCoords(at: point, viewport: skViewPort)
             if cell.y >= 32 {
                 return false
@@ -3215,6 +3982,32 @@ extension BrogueViewController {
             refreshDirectionPadVisibility()
         }
     }
+
+    /// Fades the directional pad out for the duration of a sidebar scrub, then fades it
+    /// back on release. The pad's lower-left corner overlaps the bottom sidebar entities;
+    /// while scrubbing the entity list that overlap both hides them (it's semi-opaque) and
+    /// eats their touches (the touchesMoved hit-test guard bails over the pad), so the
+    /// lowest entities can't be browsed or selected. Distinct from the magnifier's instant
+    /// hide (setDpadHiddenForMagnifier): a scrub is a continuous gesture, so this animates
+    /// to match the loupe's polish. Interaction is disabled *immediately* (not after the
+    /// fade) so the hit-test guard passes on the very same event and the scrub reaches the
+    /// cells behind the pad. Restoring hands final visibility back to
+    /// refreshDirectionPadVisibility() (the source of truth for gameplay-state / hardware-
+    /// keyboard presence); this only manages the transient alpha. The guard makes the
+    /// fade fire once per scrub and the restore a no-op when nothing was faded.
+    private func setDpadFadedForSidebarScrub(_ faded: Bool) {
+        guard faded != dpadFadedForSidebarScrub else { return }
+        dpadFadedForSidebarScrub = faded
+        if faded {
+            dContainerView.isUserInteractionEnabled = false   // pass scrub touches through NOW
+            UIView.animate(withDuration: 0.2) { self.dContainerView.alpha = 0 }
+        } else {
+            UIView.animate(withDuration: 0.2) {
+                self.dContainerView.alpha = BrogueViewController.dpadRestingAlpha
+            }
+            refreshDirectionPadVisibility()                   // restore isHidden / interaction per state
+        }
+    }
 }
 
 extension BrogueViewController {
@@ -3260,6 +4053,10 @@ extension BrogueViewController {
 
     // iOS port (iBrogue): full hardware-key enqueue carrying modifiers and the `raw` (scheme-eligible) flag.
     fileprivate func addKeyEvent(code: UInt8, shift: Bool, control: Bool, raw: Bool) {
+        // Any key command (move, rest, explore, inventory, …) means the next examine box
+        // isn't a sidebar-tap one, so it should suppress while zoomed. Covers auto-explore
+        // triggered by a hardware key (button taps are covered by touchesBegan).
+        examineFromSidebar = false
         synchronized {
             keyEvents.append(QueuedKeyEvent(code: code, shift: shift, control: control, raw: raw))
         }
@@ -3285,7 +4082,7 @@ extension BrogueViewController {
     }
 
     @objc func hasKeyEvent() -> Bool {
-        synchronized { !keyEvents.isEmpty }
+        synchronized { !handoffInFlight && !keyEvents.isEmpty }
     }
 }
 
@@ -3619,6 +4416,20 @@ final class SKMagView: SKView {
     /// No effect on iPad (which hovers the magnifier above the touch).
     var leftHandMode: Bool = false
 
+    /// Mirrors BrogueViewController.sidebarReachLatched: when true, the loupe resolves the
+    /// cell under the finger with the zoom inverse extended over the sidebar columns, so it
+    /// shows the magnified map behind the translucent sidebar rather than the sidebar cells.
+    var sidebarReach: Bool = false
+
+    /// Where the loupe sits relative to the finger. Tracked so a *change* (e.g. flipping
+    /// from beside the finger to above it when it reaches an edge) glides instead of
+    /// snapping, while same-placement finger tracking stays instant.
+    private enum LoupePlacement { case beside, above, below }
+    private var lastPlacement: LoupePlacement = .beside
+    /// While a placement glide is in flight, tracking sets are suppressed until this time so
+    /// they don't yank the animation. `CACurrentMediaTime` clock.
+    private var repositionUntil: CFTimeInterval = 0
+
     // Half-extents (cells out from the center) of the magnified block.
     // `xHalf` is the horizontal axis (2*xHalf+1 cells wide), `yHalf` the
     // vertical (2*yHalf+1 cells tall). The centering math in cellsAtTouch
@@ -3676,17 +4487,50 @@ final class SKMagView: SKView {
     
     func showMagnifier(at point: CGPoint) {
         cells = cellsAtTouch(point: point)
-        center = positionedCenter(forTouch: point)
+        let positioned = positionedCenter(forTouch: point)
+        setLoupeCenter(positioned.center, placement: positioned.placement)
         isHidden = false
     }
 
-    /// On iPad the magnifier hovers above the touch, flipping to the LEFT only
-    /// when that would clip off the top. On iPhone it ALWAYS sits to the left
-    /// of the finger — never above and never under it, so the finger never
-    /// occludes the magnified content. Always clamped to the parent's safe area
-    /// so it never sits under the iPhone notch / dynamic island or off the
-    /// leading edge.
-    private func positionedCenter(forTouch point: CGPoint) -> CGPoint {
+    /// Move the loupe to `newCenter`. Track the finger instantly while the placement is
+    /// unchanged, but GLIDE (animate) when the placement flips — e.g. from beside the finger
+    /// to above it when the loupe reaches an edge, so it never snaps. During the glide,
+    /// same-placement tracking sets are suppressed so they don't yank the animation. The
+    /// first show after being hidden always sets directly, so the loupe appears in place.
+    private func setLoupeCenter(_ newCenter: CGPoint, placement: LoupePlacement) {
+        // iPad keeps its original snap-to-position magnifier untouched; the glide-on-
+        // reposition (paired with the iPhone lift placement) is an iPhone-only nicety.
+        guard UIDevice.current.userInterfaceIdiom == .phone else {
+            center = newCenter
+            return
+        }
+        let firstShow = isHidden
+        let now = CACurrentMediaTime()
+        if !firstShow && placement != lastPlacement {
+            lastPlacement = placement
+            repositionUntil = now + 0.2
+            UIView.animate(withDuration: 0.2, delay: 0,
+                           options: [.curveEaseOut, .beginFromCurrentState]) {
+                self.center = newCenter
+            }
+            return
+        }
+        lastPlacement = placement
+        if firstShow || now >= repositionUntil {
+            center = newCenter
+        }
+    }
+
+    /// Where to place the loupe, and its placement mode (for glide-vs-track above). On iPhone
+    /// it stays on the user's preferred side — left by default, right in left-handed mode — so
+    /// the finger never occludes the magnified content. It tracks beside the finger until the
+    /// finger nears the loupe's centre horizontally (reaching hard against the leading edge,
+    /// e.g. under the translucent sidebar); then, *keeping the same side*, it lifts vertically
+    /// — up by default, down when near the top — along a smooth circular arc, so the touched
+    /// cell at the centre clears the fingertip without any jarring beside↔above flip or
+    /// oscillation. On iPad it hovers above the touch, flipping left only when that would clip
+    /// the top. Always clamped to the parent's safe area (notch / dynamic island / edges).
+    private func positionedCenter(forTouch point: CGPoint) -> (center: CGPoint, placement: LoupePlacement) {
         let radius = size.width / 2
         let parent = superview
         let viewBounds = parent?.bounds ?? UIScreen.main.bounds
@@ -3699,51 +4543,52 @@ final class SKMagView: SKView {
         )
 
         let isPhone = UIDevice.current.userInterfaceIdiom == .phone
-
-        // Default placement: above the touch (offset.height is negative).
-        var c = CGPoint(
-            x: point.x + size.width / 2 - offset.width,
-            y: point.y - size.height / 2 + offset.height
-        )
-
-        // iPhone: ALWAYS place beside the finger — to the left by default, or to
-        // the right in left-handed mode (so the gripping hand never covers it).
-        // iPad: only flip left when the above-touch default would clip the top.
-        // Either way the magnifier sits beside the finger, never under it.
-        //
-        // TWEAK ME: `flipPadding` is the gap between the finger and the nearer
-        // edge of the magnifier when it sits beside it. Bigger = further away.
+        // TWEAK ME: gap between the finger and the nearer edge of the loupe.
         let flipPadding: CGFloat = 38
-        if isPhone && leftHandMode {
-            c.x = point.x + radius + flipPadding   // to the RIGHT of the finger
-            c.y = point.y
-        } else if isPhone || c.y - radius < bounds.minY {
-            c.x = point.x - radius - flipPadding    // to the LEFT of the finger
-            c.y = point.y
+        var c: CGPoint
+        var placement: LoupePlacement
+
+        if isPhone {
+            // Preferred side, clamped horizontally to the safe area.
+            var cx = leftHandMode ? point.x + radius + flipPadding    // RIGHT of finger
+                                  : point.x - radius - flipPadding      // LEFT of finger
+            if cx - radius < bounds.minX { cx = bounds.minX + radius }
+            else if cx + radius > bounds.maxX { cx = bounds.maxX - radius }
+
+            // As the finger nears the loupe's centre horizontally, lift the loupe off it so
+            // the centre cell stays visible. The lift follows a circle of radius `clearance`,
+            // so it's zero while the finger is comfortably to the side and grows smoothly to
+            // `clearance` as the finger reaches the centre — continuous, never a snap.
+            // TWEAK ME: `clearance` is how far the finger is kept from the loupe centre.
+            let clearance: CGFloat = 52
+            let dx = abs(point.x - cx)
+            let lift = dx < clearance ? (clearance * clearance - dx * dx).squareRoot() : 0
+            // Direction is chosen from the finger's height alone (stable as it moves
+            // sideways): lift down only when too near the top for an upward lift to fit.
+            let liftDown = point.y - clearance - radius < bounds.minY
+            c = CGPoint(x: cx, y: liftDown ? point.y + lift : point.y - lift)
+            placement = liftDown ? .below : .above
+        } else {
+            // iPad: hover above the touch, flipping left only when that clips the top.
+            c = CGPoint(x: point.x + size.width / 2 - offset.width,
+                        y: point.y - size.height / 2 + offset.height)
+            if c.y - radius < bounds.minY {
+                c = CGPoint(x: point.x - radius - flipPadding, y: point.y)
+                placement = .beside
+            } else {
+                placement = .above
+            }
         }
 
-        // Clamp horizontally so it doesn't spill past either side or under
-        // the notch. This is what enforces "can't go out of bounds toward
-        // the left" — if the finger is too close to the leading edge for
-        // the magnifier to fit beside it, we clamp it to the leading inset
-        // (the magnifier will partially overlap the finger, which is
-        // acceptable; staying visible is the priority).
-        if c.x - radius < bounds.minX {
-            c.x = bounds.minX + radius
-        } else if c.x + radius > bounds.maxX {
-            c.x = bounds.maxX - radius
-        }
+        // Final clamp to the safe area (notch / dynamic island / edges).
+        if c.x - radius < bounds.minX { c.x = bounds.minX + radius }
+        else if c.x + radius > bounds.maxX { c.x = bounds.maxX - radius }
+        if c.y - radius < bounds.minY { c.y = bounds.minY + radius }
+        else if c.y + radius > bounds.maxY { c.y = bounds.maxY - radius }
 
-        // Final vertical clamp.
-        if c.y - radius < bounds.minY {
-            c.y = bounds.minY + radius
-        } else if c.y + radius > bounds.maxY {
-            c.y = bounds.maxY - radius
-        }
-
-        return c
+        return (c, placement)
     }
-    
+
     func updateMagnifier(at point: CGPoint) {
         showMagnifier(at: point)
     }
@@ -3771,7 +4616,7 @@ final class SKMagView: SKView {
         guard let viewToMagnify = viewToMagnify else { return [Cell]() }
        
         let magnification: CGFloat = 1.0
-        let currentCellXY = getCellCoords(at: point, viewport: viewToMagnify)
+        let currentCellXY = getCellCoords(at: point, viewport: viewToMagnify, reach: sidebarReach)
         // Local aliases for the block half-extents (see xHalf/yHalf). `rows` is
         // the x-axis, `cols` the y-axis — the names are flipped historically.
         let rows = xHalf
@@ -3850,7 +4695,7 @@ final class SKMagView: SKView {
             // index is in 1× space — using `point` here would put the content
             // wildly off-center. Un-zoom the point so both agree; across one
             // on-screen (zoomed) cell the un-zoomed point sweeps exactly one cell.
-            let unzoomed = viewToMagnify.unzoomedPoint(point)
+            let unzoomed = viewToMagnify.unzoomedPoint(point, reach: sidebarReach)
             let xMouseOffset = (unzoomed.x - leftInset - (currentCellXY.x * (viewToMagnify.rogueScene.cells[0][0].size.width / screenScale))) * magnificationOffset
             let yMouseOffset = (unzoomed.y - (currentCellXY.y * (viewToMagnify.rogueScene.cells[0][0].size.height / screenScale))) * magnificationOffset
             
@@ -3863,7 +4708,321 @@ final class SKMagView: SKView {
         
         // offset needs to be offset by the appropriate cellsize.
         parentNode.position = position
-        
+
         return cells.flatMap { $0 }
+    }
+}
+
+/// Owns the Continuity **Handoff** `NSUserActivity` that advertises an in-progress
+/// CE / Brogue SE run to the user's other nearby devices (same Apple ID).
+///
+/// Phase 1 (current): advertise only — the Handoff affordance appears on a second device
+/// while a game is in play. Phases 2–3 add the receive/route handler (`SceneDelegate`) and
+/// the continuation-stream transfer + deep-ACK relinquish. Classic is never advertised (its
+/// recordings are desync-prone and unsafe to replay). See docs/design/game-handoff.md.
+///
+/// (Lives here for now to avoid a pbxproj entry; extract to `GameHandoff.swift` in Phase 2
+/// when the `SceneDelegate` continue-handler lands.)
+final class GameHandoff: NSObject, NSUserActivityDelegate {
+    /// Reverse-DNS activity type. Must exactly match the `NSUserActivityTypes` entry in
+    /// Info.plist and be identical across devices (one app) for Handoff to pair.
+    static let activityType = "SethHoward.iBrogue.continueGame"
+
+    /// Posted when a Handoff pickup arrives; the payload is also stashed in `pendingReceive` so a
+    /// cold launch (no live observer yet) can drain it once the receiving VC appears.
+    static let didReceiveNotification = Notification.Name("GameHandoffDidReceive")
+
+    /// The most recent incoming pickup's activity, awaiting processing. Retained so the receiver can
+    /// call `getContinuationStreams`; read-and-cleared by the VC.
+    static var pendingActivity: NSUserActivity?
+
+    /// The app's version+build — the pre-transfer compatibility proxy carried in the payload. Two
+    /// devices on the same app build run the same engine, so matching versions ⟹ replay-compatible.
+    /// (The engine's own load-time version check is the exact backstop once the recording streams.)
+    static var appVersion: String {
+        let info = Bundle.main.infoDictionary
+        let short = (info?["CFBundleShortVersionString"] as? String) ?? "?"
+        let build = (info?["CFBundleVersion"] as? String) ?? "?"
+        return "\(short) (\(build))"
+    }
+
+    /// The engine's recording/save-compatibility version for `lineage` — identical across all builds of
+    /// the same source (unlike the app version+build), so it's the correct cross-device handoff guard
+    /// token. See docs/design/game-handoff.md.
+    static func recordingVersion(lineage: String) -> String {
+        guard let c = (lineage == "se") ? se_recordingVersion() : ce_recordingVersion() else { return "?" }
+        return String(cString: c)
+    }
+
+    /// Deliver an incoming Handoff activity (from `scene(_:continue:)` or a cold launch). Validates
+    /// the type, stashes the payload, and notifies any live receiver.
+    static func deliver(_ activity: NSUserActivity) {
+        guard activity.activityType == activityType else { return }
+        pendingActivity = activity
+        NotificationCenter.default.post(name: didReceiveNotification, object: nil)
+    }
+
+    /// Called (on main) when the source begins serving a pickup — freeze the run until it resolves.
+    var onServeBegan: (() -> Void)?
+
+    /// Called (on main) after the source finishes serving a pickup — `ok` true if the receiver ACKed;
+    /// `detail` carries the failure reason otherwise (for diagnosing device-only bugs).
+    var onServeComplete: ((_ ok: Bool, _ detail: String) -> Void)?
+
+    private var activity: NSUserActivity?
+    /// Lineage ("ce"/"se") of the run being advertised — tells the source-side stream delegate which
+    /// engine's recording to flush. Set in `advertise`.
+    private var currentLineage = "se"
+
+    /// Begin/refresh advertising the current run. `lineage` is "ce" or "se". `seed`/`depth`/
+    /// `turn` are display + (future) routing metadata; the recording bytes themselves are
+    /// streamed live at pickup, not stored here. Must be called on the main thread.
+    func advertise(lineage: String, seed: UInt64, depth: Int, turn: Int) {
+        currentLineage = lineage
+        let activity = self.activity ?? NSUserActivity(activityType: Self.activityType)
+        activity.isEligibleForHandoff = true
+        activity.supportsContinuationStreams = true   // Phase 3: the receiver pulls the payload over these
+        activity.delegate = self                      // source side: userActivity(_:didReceive:outputStream:)
+        activity.userInfo = [
+            "lineage": lineage,
+            "version": Self.recordingVersion(lineage: lineage),   // engine save-compat token (stable across builds)
+            "seed": String(seed),          // string to preserve full 64-bit fidelity across the plist round-trip
+            "depth": depth,
+            "turn": turn,
+        ]
+        activity.title = Self.bannerTitle(lineage: lineage, depth: depth)
+        self.activity = activity
+        activity.becomeCurrent()
+    }
+
+    /// Stop advertising — returned to title, game over, or nothing resumable.
+    /// Must be called on the main thread.
+    func stop() {
+        activity?.invalidate()
+        activity = nil
+    }
+
+    // MARK: NSUserActivityDelegate (source side)
+
+    /// The receiver called `getContinuationStreams`; serve the payload over the pair. Phase 3a sends a
+    /// placeholder to prove the channel end-to-end; Phase 3b streams the flushed recording bytes.
+    func userActivity(_ userActivity: NSUserActivity, didReceive inputStream: InputStream, outputStream: OutputStream) {
+        DispatchQueue.main.async { [weak self] in self?.onServeBegan?() }   // freeze the source run
+        // Flushing the recording is engine-thread work + a file read, so do it off the main thread,
+        // then stream the exact-state bytes to the receiver.
+        let lineage = currentLineage
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            let data = (lineage == "se") ? se_flushRecordingForHandoff() : ce_flushRecordingForHandoff()
+            guard let data = data, !data.isEmpty else {
+                // No live recording to send; the receiver's watchdog times out and it keeps nothing.
+                DispatchQueue.main.async { self?.onServeComplete?(false, "couldn't read the current recording") }
+                return
+            }
+            HandoffTransfer.send(data, input: inputStream, output: outputStream) { result in
+                let ok: Bool; let detail: String
+                switch result {
+                case .success: ok = true; detail = ""
+                case .failure(let e): ok = false; detail = "\(e)"
+                }
+                DispatchQueue.main.async { self?.onServeComplete?(ok, detail) }
+            }
+        }
+    }
+
+    private static func bannerTitle(lineage: String, depth: Int) -> String {
+        let engine = (lineage == "se") ? "Brogue SE" : "Brogue CE"
+        return depth > 0 ? "\(engine) — Depth \(depth)" : engine
+    }
+}
+
+/// Drives one side of a Handoff continuation-stream transfer on a private background-thread runloop
+/// (continuation streams need a live runloop to pump their events). Retains itself for the duration,
+/// so callers fire-and-forget. Phase 3a proves the bidirectional channel + a 1-byte ACK with a
+/// placeholder payload; Phase 3b/3c carry the real recording bytes and the destination save/load.
+/// See docs/design/game-handoff.md.
+final class HandoffTransfer: NSObject, StreamDelegate {
+    enum TransferError: Error, CustomStringConvertible {
+        case timeout(String), closedEarly(String), stream(String), declined
+        var description: String {
+            switch self {
+            case .timeout(let s):     return "timeout — \(s)"
+            case .closedEarly(let s): return "closed early — \(s)"
+            case .stream(let s):      return "stream error — \(s)"
+            case .declined:           return "receiver declined (it kept its own run)"
+            }
+        }
+    }
+
+    private enum Mode { case send, receive }
+    private static let ackByte: UInt8 = 0x06
+    private static let nakByte: UInt8 = 0x15
+    private static let timeoutSeconds: TimeInterval = 15
+    private static var active = Set<HandoffTransfer>()   // main-thread only
+
+    private let input: InputStream
+    private let output: OutputStream
+    private let mode: Mode
+    private let completion: ((Result<Data, Error>) -> Void)?
+    // receive: called (main) once the full payload arrives. The caller installs it, then calls the
+    // supplied commit closure — true → ACK (source relinquishes), false → NAK (source keeps its run).
+    // This is the DEEP ACK: the source only lets go after the destination commits to resuming.
+    private let onReady: ((Data, @escaping (Bool) -> Void) -> Void)?
+
+    // send: framed [UInt32 big-endian length][payload], consumed as it's written; then read the reply byte.
+    private var outbox: Data
+    private var sentAll = false
+    // receive: accumulate raw bytes, parse the length prefix, assemble the payload; reply (ACK/NAK) is
+    // sent only after the caller commits.
+    private var inbox = Data()
+    private var expectedLen: Int?
+    private var payload = Data()
+    private var delivered = false
+    private var reply: UInt8?          // ACK/NAK to send, set by commit(); drained in tryWriteReply()
+
+    private var finished = false
+    private var watchdog: Timer?
+
+    private init(input: InputStream, output: OutputStream, mode: Mode, framed: Data,
+                 completion: ((Result<Data, Error>) -> Void)?,
+                 onReady: ((Data, @escaping (Bool) -> Void) -> Void)?) {
+        self.input = input
+        self.output = output
+        self.mode = mode
+        self.outbox = framed
+        self.completion = completion
+        self.onReady = onReady
+        super.init()
+    }
+
+    /// Source: write a length-prefixed `payload`, then read a 1-byte reply (ACK → success, NAK → the
+    /// receiver kept nothing). Framing by length (not stream close) so completion never depends on EOF
+    /// propagating across the continuation-stream pair.
+    static func send(_ payload: Data, input: InputStream, output: OutputStream,
+                     completion: @escaping (Result<Data, Error>) -> Void) {
+        var len = UInt32(payload.count).bigEndian
+        var framed = Data()
+        withUnsafeBytes(of: &len) { framed.append(contentsOf: $0) }
+        framed.append(payload)
+        launch(HandoffTransfer(input: input, output: output, mode: .send, framed: framed, completion: completion, onReady: nil))
+    }
+
+    /// Destination: read the length-prefixed payload, deliver it via `onReady`, and hold the channel
+    /// open. The caller invokes the commit closure once it has committed to resuming (true → ACK) or
+    /// can't (false → NAK). Deep ACK — no auto-ACK on receipt, so a destination that can't resume never
+    /// makes the source relinquish.
+    static func receive(input: InputStream, output: OutputStream,
+                        onReady: @escaping (Data, @escaping (Bool) -> Void) -> Void) {
+        launch(HandoffTransfer(input: input, output: output, mode: .receive, framed: Data(), completion: nil, onReady: onReady))
+    }
+
+    private static func launch(_ t: HandoffTransfer) {
+        // Pump on the MAIN runloop (always live under UIKit), NOT a private-thread runloop.
+        DispatchQueue.main.async {
+            active.insert(t)
+            t.input.delegate = t
+            t.output.delegate = t
+            t.input.schedule(in: .main, forMode: .common)
+            t.output.schedule(in: .main, forMode: .common)
+            t.input.open()
+            t.output.open()
+            t.watchdog = Timer.scheduledTimer(withTimeInterval: timeoutSeconds, repeats: false) { [weak t] _ in
+                guard let t = t else { return }
+                t.finish(.failure(TransferError.timeout(t.progress)))
+            }
+        }
+    }
+
+    /// Human-readable transfer state — surfaced in failure alerts so a device-only bug is diagnosable.
+    private var progress: String {
+        mode == .send
+            ? "send sentAll=\(sentAll) remaining=\(outbox.count)"
+            : "recv len=\(expectedLen.map(String.init) ?? "nil") payload=\(payload.count) raw=\(inbox.count)"
+    }
+
+    func stream(_ aStream: Stream, handle eventCode: Stream.Event) {
+        switch eventCode {
+        case .hasSpaceAvailable where aStream === output: pumpOutput()
+        case .hasBytesAvailable where aStream === input:  pumpInput()
+        case .endEncountered where aStream === input:     inputEnded()
+        case .errorOccurred:
+            finish(.failure(TransferError.stream("\(aStream.streamError?.localizedDescription ?? "?") [\(progress)]")))
+        default: break
+        }
+    }
+
+    private func pumpOutput() {
+        switch mode {
+        case .send:
+            guard !outbox.isEmpty else { sentAll = true; return }
+            let n = outbox.withUnsafeBytes { raw in
+                output.write(raw.bindMemory(to: UInt8.self).baseAddress!, maxLength: outbox.count)
+            }
+            if n > 0 { outbox.removeFirst(n) }
+            else if n < 0 { finish(.failure(TransferError.stream("write [\(progress)]"))); return }
+            if outbox.isEmpty { sentAll = true }
+        case .receive:
+            tryWriteReply()   // drains a pending ACK/NAK once the caller has committed
+        }
+    }
+
+    private func pumpInput() {
+        switch mode {
+        case .send:
+            var b: UInt8 = 0
+            let n = input.read(&b, maxLength: 1)
+            if n == 1 {
+                if b == HandoffTransfer.ackByte { finish(.success(Data())) }
+                else { finish(.failure(TransferError.declined)) }   // NAK: receiver kept its own run
+            } else if n < 0 { finish(.failure(TransferError.stream("read reply [\(progress)]"))) }
+        case .receive:
+            var buf = [UInt8](repeating: 0, count: 8192)
+            let n = input.read(&buf, maxLength: buf.count)
+            if n > 0 { inbox.append(buf, count: n) }
+            else if n < 0 { finish(.failure(TransferError.stream("read [\(progress)]"))); return }
+            parseReceive()
+        }
+    }
+
+    private func parseReceive() {
+        if expectedLen == nil, inbox.count >= 4 {
+            expectedLen = Int(inbox.prefix(4).reduce(UInt32(0)) { ($0 << 8) | UInt32($1) })
+        }
+        if let len = expectedLen, inbox.count >= 4 + len, !delivered {
+            delivered = true
+            payload = inbox.subdata(in: 4 ..< 4 + len)
+            onReady?(payload) { [weak self] ok in self?.commit(ok) }   // caller installs, then commits
+        }
+    }
+
+    /// Caller's decision after installing the payload: true → ACK (source relinquishes), false → NAK
+    /// (source keeps its run). Sends the reply byte, then finishes.
+    private func commit(_ ok: Bool) {
+        guard !finished, reply == nil else { return }
+        reply = ok ? HandoffTransfer.ackByte : HandoffTransfer.nakByte
+        tryWriteReply()
+    }
+
+    private func tryWriteReply() {
+        guard var b = reply, !finished, output.hasSpaceAvailable else { return }
+        if output.write(&b, maxLength: 1) == 1 {
+            finish(b == HandoffTransfer.ackByte ? .success(payload) : .failure(TransferError.declined))
+        }
+    }
+
+    private func inputEnded() {
+        // Length-framed, so EOF isn't our completion signal; seeing it before we're done is an early close.
+        if mode == .send { finish(.failure(TransferError.closedEarly("no reply [\(progress)]"))) }
+        else if !delivered { finish(.failure(TransferError.closedEarly(progress))) }
+    }
+
+    private func finish(_ result: Result<Data, Error>) {
+        guard !finished else { return }
+        finished = true
+        watchdog?.invalidate(); watchdog = nil
+        input.close(); output.close()
+        input.remove(from: .main, forMode: .common)
+        output.remove(from: .main, forMode: .common)
+        completion?(result)
+        HandoffTransfer.active.remove(self)
     }
 }

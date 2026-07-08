@@ -47,19 +47,20 @@ void exposeCreatureToFire(creature *monst) {
             player.info.foreColor = &torchLightColor;
             refreshDungeonCell(player.loc);
             //updateVision(); // this screws up the firebolt visual effect by erasing it while a message is displayed
-            // iOS port (iBrogue): the message names the panic so the "Panic" status bar (and its
-            // expiry message below) has an on-screen cause; the shock confuses for FIRE_CONFUSION_DURATION.
-            combatMessage("you catch fire and panic", &badMessageColor);
+            combatMessage("you catch fire", &badMessageColor);
         } else if (canDirectlySeeMonster(monst)) {
             monsterName(buf, monst, true);
             sprintf(buf2, "%s catches fire", buf);
             combatMessage(buf2, messageColorFromVictim(monst));
         }
-        // iOS port (iBrogue): the shock of catching fire confuses for FIRE_CONFUSION_DURATION turns.
-        // Inside the "initially set on fire" branch, so it applies once on ignition (not every burning
-        // turn), to the player too. Same status path as the confusion weapon runic.
-        monst->status[STATUS_CONFUSED] = monst->maxStatus[STATUS_CONFUSED] =
-            max(monst->status[STATUS_CONFUSED], FIRE_CONFUSION_DURATION);
+        // iOS port (iBrogue): the shock of catching fire panics a monster (STATUS_CONFUSED, surfaced as
+        // "Panic" while it burns) for FIRE_CONFUSION_DURATION turns. Inside the "initially set on fire"
+        // branch, so it applies once on ignition, not every burning turn. The player is exempt -- fire
+        // hurts but does not disorient the hero (removed 2026-07-02); monsters still panic.
+        if (monst != &player) {
+            monst->status[STATUS_CONFUSED] = monst->maxStatus[STATUS_CONFUSED] =
+                max(monst->status[STATUS_CONFUSED], FIRE_CONFUSION_DURATION);
+        }
     }
     monst->status[STATUS_BURNING] = monst->maxStatus[STATUS_BURNING] = max(monst->status[STATUS_BURNING], 7);
 }
@@ -882,6 +883,7 @@ short currentStealthRange() {
         // Subtract your bonuses from rings of stealth.
         // (Cursed rings of stealth will end up adding here.)
         stealthRange -= rogue.stealthBonus;
+        stealthRange -= smokyPurifyStealthBonus(); // iOS port (Brogue SE): cursed-runics rework -- purified Smoky's stealth aura
 
         // Can't go below 2 unless you just rested.
         if (stealthRange < 2 && !rogue.justRested) {
@@ -1293,7 +1295,13 @@ static void playerFalls() {
         startLevel(rogue.depthLevel - 1, 0);
         damage = randClumpedRange(gameConst->fallDamageMin, gameConst->fallDamageMax, 2);
         boolean killed = false;
-        if (terrainFlags(player.loc) & T_IS_DEEP_WATER) {
+        // iOS port (Brogue SE): cursed-runics rework -- Acrophobia armor negates fall damage (always on,
+        // even while cursed): the chasm becomes a dependable escape hatch / descent tool, and landing
+        // unharmed reveals the runic.
+        if (rogue.armor && (rogue.armor->flags & ITEM_RUNIC) && rogue.armor->enchant2 == A_ACROPHOBIA) {
+            messageWithColor("You alight from the fall, unharmed.", &itemMessageColor, 0);
+            autoIdentify(rogue.armor);
+        } else if (terrainFlags(player.loc) & T_IS_DEEP_WATER) {
             messageWithColor("You fall into deep water, unharmed.", &badMessageColor, 0);
         } else {
             if (cellHasTMFlag(player.loc, TM_ALLOWS_SUBMERGING)) {
@@ -2359,6 +2367,38 @@ static void decrementPlayerStatus() {
         }
     }
 
+    // iOS port (Brogue SE): cursed-runics rework -- a wielded, unpurified Delirium keeps you
+    // permanently hallucinating: top it up so the decrement below never expires it while in hand.
+    // (Unequip or purify stops the refresh, and it fades naturally.)
+    if (rogue.weapon && (rogue.weapon->flags & ITEM_RUNIC) && rogue.weapon->enchant2 == W_DELIRIUM
+        && runicCurseActive(rogue.weapon)) {
+        player.status[STATUS_HALLUCINATING] = max(player.status[STATUS_HALLUCINATING], 2);
+        player.maxStatus[STATUS_HALLUCINATING] = max(player.maxStatus[STATUS_HALLUCINATING], player.status[STATUS_HALLUCINATING]);
+    }
+
+    // iOS port (Brogue SE): cursed-runics rework -- Acrophobia armor: while cursed, standing next to a
+    // chasm grips you with vertigo (confusion), refreshed each turn you linger at the brink; it fades
+    // once you step away or purify (enchant >= threshold). Fall-immunity + dive-at-will (the upside) are
+    // handled in the fall/movement paths. First vertigo reveals the runic.
+    if (rogue.armor && (rogue.armor->flags & ITEM_RUNIC) && rogue.armor->enchant2 == A_ACROPHOBIA
+        && runicCurseActive(rogue.armor)) {
+        const short chasmDirs[8][2] = {{-1,-1},{0,-1},{1,-1},{-1,0},{1,0},{-1,1},{0,1},{1,1}};
+        boolean nearChasm = false;
+        for (short d = 0; d < 8 && !nearChasm; d++) {
+            short cx = player.loc.x + chasmDirs[d][0], cy = player.loc.y + chasmDirs[d][1];
+            if (coordinatesAreInMap(cx, cy) && cellHasTerrainFlag((pos){ cx, cy }, T_AUTO_DESCENT)) {
+                nearChasm = true;
+            }
+        }
+        if (nearChasm) {
+            if (!(rogue.armor->flags & ITEM_RUNIC_IDENTIFIED)) {
+                autoIdentify(rogue.armor);
+            }
+            player.status[STATUS_CONFUSED] = max(player.status[STATUS_CONFUSED], 2);
+            player.maxStatus[STATUS_CONFUSED] = max(player.maxStatus[STATUS_CONFUSED], player.status[STATUS_CONFUSED]);
+        }
+    }
+
     if (player.status[STATUS_HALLUCINATING] > 0 && !--player.status[STATUS_HALLUCINATING]) {
         displayLevel();
         message("your hallucinations fade.", 0);
@@ -2369,11 +2409,9 @@ static void decrementPlayerStatus() {
     }
 
     if (player.status[STATUS_CONFUSED] > 0 && !--player.status[STATUS_CONFUSED]) {
-        // iOS port (iBrogue): catching fire inflicts STATUS_CONFUSED but reads as "Panic" while still
-        // burning (see exposeCreatureToFire and the sidebar in IO.c). Mirror that label on expiry so the
-        // recovery message matches the status the player was watching. Panic (3 turns) always ends while
-        // burning (7 turns) is still active, so this reliably distinguishes fire-panic from real confusion.
-        message(player.status[STATUS_BURNING] > 0 ? "you regain your composure." : "you no longer feel confused.", 0);
+        // iOS port (iBrogue): the player no longer panics from catching fire (fire-panic is monster-only;
+        // see exposeCreatureToFire), so the player's confusion is always ordinary confusion here.
+        message("you no longer feel confused.", 0);
     }
 
     if (player.status[STATUS_NAUSEOUS] > 0 && !--player.status[STATUS_NAUSEOUS]) {
@@ -2619,6 +2657,79 @@ static void recordCurrentCreatureHealths() {
 // It hands control over to monsters until they've all expended their accumulated ticks,
 // updating the environment (gas spreading, flames spreading and burning out, etc.) every
 // 100 ticks.
+// iOS port (Brogue SE): cursed-runics rework -- Smoky armor: while cursed, wreathe the player in a
+// radius-1 thick-smoke cloud each turn. The shared getFOVMask then blocks sight both ways -- distant
+// monsters can't see you (sneak past / can't be targeted), and your own view collapses to ~1 tile.
+// Refreshed on the player + 8 neighbors (the minimal cloud that hides you from every non-adjacent
+// monster); cells you leave dissipate into a short trail (escape cover). Never clobbers another gas,
+// skips gas-blocking terrain, draws no RNG (replay-safe). Purify swaps this for a passive stealth aura.
+// iOS port (Brogue SE): world-anchored spatial hash (no RNG) -- ranks the Smoky armor's neighbor
+// cells so the haze thins the same cells first for a given position. Any stable mix of (x,y) works;
+// this one scatters adjacent cells well so the open lanes don't clump.
+static unsigned long smokyCellHash(short x, short y) {
+    unsigned long h = (unsigned long)((int)x * 73856093) ^ (unsigned long)((int)y * 19349663);
+    h ^= (h >> 13);
+    h *= 0x5bd1e995UL;
+    h ^= (h >> 15);
+    return h;
+}
+
+static void emitSmokyArmorCloud(void) {
+    if (!(rogue.armor && (rogue.armor->flags & ITEM_RUNIC) && rogue.armor->enchant2 == A_SMOKY
+          && runicCurseActive(rogue.armor))) {
+        return;
+    }
+    // iOS port (Brogue SE): cursed-runics rework -- progressive per-enchant sight. Rather than
+    // wreathing all 8 neighbors in thick, sight-blocking smoke, we thin `clearCount` of them into
+    // wispy (sub-threshold) smoke that lets sight pass BOTH ways (symmetric: you see out, foes see
+    // in). Clearing a neighbor opens the whole sightline past it, so a couple of open lanes restores
+    // real exploration. The cursed enchant range is -1..+3 (ARMOR_RUNIC_PURIFY_ENCHANT purifies at
+    // +4); relief is front-loaded and capped below 8 so +3 still bites. Deterministic (pure functions
+    // of enchant1 and cell (x,y)); recomputed each turn, so no save fields and no replay drift.
+    static const short clearByTier[5] = {0, 2, 4, 5, 6}; // index = enchant1 + 1, for enchant1 -1..+3
+    const short clearCount = clearByTier[clamp((short)(rogue.armor->enchant1 + 1), 0, 4)];
+
+    const short dirs[8][2] = {{-1,-1},{0,-1},{1,-1},{-1,0},{1,0},{-1,1},{0,1},{1,1}};
+    unsigned long hash[8];
+    short order[8];
+    for (short d = 0; d < 8; d++) {
+        hash[d] = smokyCellHash(player.loc.x + dirs[d][0], player.loc.y + dirs[d][1]);
+        order[d] = d;
+    }
+    // Rank the 8 neighbors by hash and thin the `clearCount` lowest (tiny fixed-n selection sort).
+    // The lowest-N set is a subset of the lowest-(N+1) set, so enchanting only ever ADDS open lanes
+    // (never reshuffles), and the lanes drift organically as the (world-anchored) neighbor coords change.
+    for (short a = 0; a < clearCount; a++) {
+        for (short b = a + 1; b < 8; b++) {
+            if (hash[order[b]] < hash[order[a]]) {
+                const short t = order[a]; order[a] = order[b]; order[b] = t;
+            }
+        }
+    }
+    boolean thin[8] = {false};
+    for (short k = 0; k < clearCount && k < 8; k++) {
+        thin[order[k]] = true;
+    }
+
+    // Stamp own cell (always thick -- doesn't blind outbound sight, since the block is on seeing PAST
+    // a cell) plus the 8 neighbors (thick or thinned per the dither). Re-stamped every turn at both
+    // call sites so gas-averaging in updateEnvironment can't wash the pattern below/above the threshold.
+    for (short d = -1; d < 8; d++) {
+        const short cx = player.loc.x + (d < 0 ? 0 : dirs[d][0]);
+        const short cy = player.loc.y + (d < 0 ? 0 : dirs[d][1]);
+        if (!coordinatesAreInMap(cx, cy)) continue;
+        if (cellHasTerrainFlag((pos){ cx, cy }, T_OBSTRUCTS_GAS)) continue;
+        if (pmap[cx][cy].layers[GAS] != NOTHING && pmap[cx][cy].layers[GAS] != SMOKE_GAS) continue;
+        pmap[cx][cy].layers[GAS] = SMOKE_GAS;
+        if (d >= 0 && thin[d]) {
+            pmap[cx][cy].volume = SMOKY_DITHER_THIN_VOLUME;   // open lane: dims but does not block sight
+        } else if (pmap[cx][cy].volume < SMOKE_THICK_VOLUME + 6) {
+            pmap[cx][cy].volume = SMOKE_THICK_VOLUME + 6;     // comfortably thick; survives a turn of dissipation
+        }
+        refreshDungeonCell((pos){ cx, cy });
+    }
+}
+
 void playerTurnEnded() {
     short soonestTurn, damage, turnsRequiredToShore, turnsToShore;
     char buf[COLS], buf2[COLS];
@@ -2646,6 +2757,7 @@ void playerTurnEnded() {
     monstersFall();
 
     showEmptyBottleCaptureHint(); // iOS port (iBrogue): empty-bottle v2 -- once-per-kind hint naming what the tile underfoot would capture into
+    emitSmokyArmorCloud(); // iOS port (Brogue SE): cursed-runics rework -- refresh the Smoky cloud at the new position before FOV/monster-sight
 
     do {
         if (rogue.gameHasEnded) {
@@ -2744,6 +2856,16 @@ void playerTurnEnded() {
 
         if (player.ticksUntilTurn == 0) { // attacking adds ticks elsewhere
             player.ticksUntilTurn += player.movementSpeed;
+            // iOS port (Brogue SE): cursed-runics rework -- Anchor drags at your legs while cursed: extra
+            // move-cost. This block is the non-attack turn cost (attacks add ticks elsewhere), so attack
+            // speed is untouched. First drag reveals the runic; purify (enchant >= threshold) lifts it.
+            if (rogue.armor && (rogue.armor->flags & ITEM_RUNIC) && rogue.armor->enchant2 == A_ANCHOR
+                && runicCurseActive(rogue.armor)) {
+                player.ticksUntilTurn += player.movementSpeed * ANCHOR_MOVE_SLOW_PCT / 100;
+                if (!(rogue.armor->flags & ITEM_RUNIC_IDENTIFIED)) {
+                    autoIdentify(rogue.armor);
+                }
+            }
         } else if (player.ticksUntilTurn < 0) { // if he gets a free turn
             player.ticksUntilTurn = 0;
         }
@@ -2915,6 +3037,12 @@ void playerTurnEnded() {
         // DEBUG displayLevel();
         //checkForDungeonErrors();
 
+        // iOS port (Brogue SE): cursed-runics rework -- re-assert the Smoky cloud AFTER updateEnvironment
+        // (which averages gas twice, thinning the concentrated cloud below the thick threshold) and just
+        // before this final, player-facing vision pass -- otherwise the FOV is recomputed against the
+        // thinned smoke and never collapses (the bug: "I can see fine, so it's all upside"). The earlier
+        // pass at the top of the loop keeps monster-awareness concealment; this one restores your blindness.
+        emitSmokyArmorCloud();
         updateVision(true);
         rogue.stealthRange = currentStealthRange();
         if (rogue.displayStealthRangeMode) {

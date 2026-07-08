@@ -102,9 +102,40 @@ NS_ASSUME_NONNULL_BEGIN
 // examine loop), so the host can suspend pinch-zoom to 1× and not clip the box.
 - (void)setExamining:(BOOL)examining;
 
+// Reports the examine description box's WINDOW-cell rect so the iPhone host can zoom to
+// *fit* the box instead of dropping all the way to 1× — keeping the map and box text as
+// large as legibly fits. Emitted just before setExamining:YES; hosts that don't
+// implement the fit behavior can ignore it and keep the 1× zoom-out.
+- (void)setExamineBox:(NSInteger)x y:(NSInteger)y width:(NSInteger)width height:(NSInteger)height;
+
+// Reports the WINDOW-cell rect of a modal menu overlay (title menu / dialogs; later inventory
+// and in-game menus), so an iPhone host can auto-magnify it to a readable, tappable size —
+// instantly, no camera movement. Reports overwrite as the active menu changes. clearMenuBox
+// signals no menu is shown. Hosts that don't magnify menus can ignore both.
+- (void)setMenuBox:(NSInteger)x y:(NSInteger)y width:(NSInteger)width height:(NSInteger)height;
+- (void)clearMenuBox;
+
+// Asked by the cursor examine loop before drawing a description box. Returns YES when the
+// box should be skipped — the iPhone map is zoomed in and this examine came from a
+// play-field drag-hold, where the box (drawn in the magnified dungeon cells) would tear
+// against the 1× sidebar/chrome. The entity is still highlighted in the sidebar. A sidebar
+// tap returns NO (it zooms out to show the box instead).
+- (BOOL)shouldSuppressExamineBox;
+
 // Reports the player's WINDOW cell (already mapToWindow-converted) after each
 // screen refresh, so the host's iPhone pinch-zoom can keep the player centered.
 - (void)setPlayerWindowX:(short)x y:(short)y;
+
+// Reports whether a travel destination is currently pending (the engine still remembers where
+// you were headed after an interruption), so the host can swap the reactive center d-pad button
+// between "continue journey" and "rest". Deduped in the bridge; forwarded only on change.
+- (void)setTravelPending:(BOOL)pending;
+
+// iOS port (iBrogue): reports the live game's context (current depth, input turn, master seed) so the
+// host can keep the cross-device Continuity Handoff activity's banner/metadata current. Deduped in the
+// bridge on depth change (per-turn churn is unnecessary; the recording bytes are streamed live at
+// pickup). Emitted only during live play, not playback. See docs/design/game-handoff.md.
+- (void)setGameDepth:(NSInteger)depth turn:(long)turn seed:(uint64_t)seed;
 
 // --- Game Center ------------------------------------------------------------
 // Invoked at game over with the final score, for the CE leaderboard. The bridge
@@ -143,6 +174,15 @@ void ce_setHardwareKeyboardConnected(int connected);
 // See docs/design/background-suspend-resume.md.
 void ce_requestBackgroundSave(void);
 void ce_clearResumeMarker(void);
+
+// iOS port (iBrogue): game handoff. Called OFF the main thread by the handoff source: flushes the
+// live recording on the engine thread, then returns the exact-state save bytes to stream to the
+// receiving device. nil if there's no live game or the flush times out. See docs/design/game-handoff.md.
+NSData * _Nullable ce_flushRecordingForHandoff(void);
+
+// iOS port (iBrogue): the engine's recording/save-compatibility version (BROGUE_VERSION_STRING),
+// identical across builds of the same source — the handoff version-guard token. See docs/design/game-handoff.md.
+const char *ce_recordingVersion(void);
 
 #ifdef __cplusplus
 }

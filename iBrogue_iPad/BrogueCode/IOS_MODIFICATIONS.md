@@ -23,6 +23,81 @@ future maintainers (human or AI) don't mistake an intentional port change for a 
 
 ## Change log
 
+### 2026-07-07 — Item-detail box: reserve room for action buttons so long descriptions keep "call"
+
+**What.** `printTextBox`'s auto-widen only widened until the **text** fit above the flavor/button
+chrome (`ROWS-2`), ignoring the action buttons drawn *below* the text, which wrap to a second
+double-spaced line. A long description left the text just fitting but pushed the wrapped button line
+("call"/"relabel") onto the chrome rows, where it was lost. Now reserves 4 rows in the widen loop
+when `buttonCount > 0`, so the box widens until text **and** buttons fit. Presentational; no RNG /
+save / recording impact.
+
+### 2026-07-07 — iPhone menu magnify fix: clear on text-input prompts (Save recording / seed entry)
+
+**What.** `IO.c getInputTextString` now calls `clearBrogueMenuBox()` at its start. A text-input
+prompt (e.g. "Save recording as…", seed entry) is NOT a button menu, so it reports no rect — and the
+save/quit flow reaches it straight from a menu without returning to play, leaving the menu magnify
+engaged on a stale rect, which tore the prompt. Presentational; no RNG / save / recording impact.
+The same `clearBrogueMenuBox()` is applied at the start of the full-screen **Discovered-items** view
+(`printDiscoveriesScreen`) — also a non-menu overlay (`waitForKeystrokeOrMouseClick`, no rect) that
+should render at 1×. (Classic 1.7.5 has no Feats screen.)
+
+### 2026-07-07 — iPhone menu magnify: report menu rects to the host (title / inventory / dialogs)
+
+**What.** Ports the iPhone "menu magnify" (from Brogue SE/CE) to Classic: the host magnifies just a
+menu's cells to a readable, tappable size over the untouched 1× screen. The engine only reports the
+menu's window-cell rect. Classic uses the `RogueDriver.mm` bridge (not the `BrogueCEHost` protocol),
+so it gets its own bridge functions; the host gate ("a rect is reported") and teardown (return to
+play, which Classic's game events already drive) are shared and work as-is. Presentational; no RNG /
+save / recording impact.
+
+- **`RogueDriver.mm`:** new `setBrogueMenuBox(x,y,w,h)` → `[brogueViewController setMenuBox:…]` and
+  `clearBrogueMenuBox()` → `[brogueViewController clearMenuBox]`, mirroring `setBrogueExamineBox`.
+- **`Buttons.c` `buttonInputLoop`:** after `initializeButtonState`, calls `setBrogueMenuBox(...)` with
+  the loop's window rect + a 1-cell shadow trim. Single choke point → covers inventory (Items.c),
+  action menu and dialogs (IO.c).
+- **`MainMenu.c` `titleMenu`:** reports the flat title menu's rect each redraw (it uses
+  `processButtonInput`, not `buttonInputLoop`), and `clearBrogueMenuBox()` on exit so a following
+  native/engine screen isn't corrupted by stale cells. Raised the flame title
+  (`MENU_TITLE_OFFSET_Y` −2 → −5) to match SE/CE. Classic has no edition badge.
+- **Determinism:** read-only reporting; no RNG, no save/recording fields. Title offset is cosmetic.
+
+### 2026-07-05 — Continue-travel command + reactive center d-pad button
+
+**What.** The Classic half of the touch-friendly "continue my interrupted journey" command (see
+`BrogueSE/Engine/IOS_MODIFICATIONS.md` for the full rationale), using Classic's coordinate-array and
+`ios*` naming. An iOS-platform QoL feature added identically to all three engines.
+
+- **Key.** `#define CONTINUE_TRAVEL_KEY (128+21)` in `Rogue.h` — synthetic, button-only code; value
+  matches CE and SE. Round-trips cleanly through Classic's keystroke compressor (149 is above
+  `UNKNOWN_KEY`, so `compressKeystroke`/`uncompressKeystroke` pass it through as a raw byte).
+- **Dispatch.** `mainInputLoop`'s cursor-confirm (`doEvent`) branch intercepts `CONTINUE_TRAVEL_KEY` →
+  `travelRoute(path, steps)` (Classic's `short path[1000][2]`) — the exact displayed route, the fast
+  primitive a confirming tap uses, not `travel()`→`travelMap` (slow, different path). No explicit
+  `recordKeystroke`: `travelRoute`→`playerMoves` records each step's direction key, so the journey
+  replays as its moves. Determinism-safe.
+- **Reactive-button state.** `refreshScreen` calls a new
+  `iosSetTravelPending(coordinatesAreInMap(rogue.cursorLoc[0], rogue.cursorLoc[1]))` extern (defined in
+  `RogueDriver.mm`, deduped, → `[brogueViewController setTravelPending:]`) so the host can swap the
+  center d-pad button between the footprints "continue" glyph and the `zzz` glyph.
+- **Scope.** Walks past *already-seen* monsters and re-stops on a *new* disturbance — same as
+  re-clicking; no new power, no RNG/save impact. No-op when idle. Kept identical across Classic / CE / SE.
+
+### 2026-07-05 — Examine description box: report its rect (fit-zoom) + suppress it for zoomed play-field examines
+
+**What.** iPhone examine-box hooks, identical to CE/SE's (see `BrogueSE/Engine/IOS_MODIFICATIONS.md` for the
+full rationale), using Classic's `setBrogue*` naming. (1) `printTextBox` stashes its rect (`x2, y2, width,
+lineCount + padLines`) in file-static `gLastTextBox{X,Y,Width,Height}`; the cursor/examine loop reports it
+via a new `setBrogueExamineBox(x,y,w,h)` extern just before `setBrogueExamining` so the host can zoom to
+*fit* the box instead of dropping to 1×. (2) The loop gates `printMonsterDetails`/`printFloorItemDetails`
+(Classic's `(monst, rbuf)` / `(theItem, rbuf)` signatures) on `!brogueShouldSuppressExamineBox()` so a box
+triggered by a zoomed play-field drag-hold is skipped — the sidebar highlight + one-line flavor still show.
+
+- **Bridge:** `RogueDriver.mm` defines `setBrogueExamineBox` (→ `[brogueViewController setExamineBox:…]`)
+  and `brogueShouldSuppressExamineBox` (→ `[brogueViewController shouldSuppressExamineBox]`).
+- **Scope:** pure presentation; no gameplay/RNG/save impact. iPhone-only in effect (host consumers are
+  phone-gated). Kept identical across Classic / CE / SE.
+
 ### 2026-06-16 — On-screen ESC button during targeting (parity with CE/SE)
 
 **What.** While aiming a throw/zap, Classic now shows the on-screen ESC button so a touch player can

@@ -101,6 +101,32 @@ extension CGSize {
         return defaults.bool(forKey: examineZoomEnabledDefaultsKey)
     }
 
+    /// UserDefaults key for "extend the magnified dungeon under a translucent sidebar."
+    @objc public static let mapUnderSidebarEnabledDefaultsKey = "mapUnderSidebarEnabled"
+
+    /// Whether the zoomed dungeon renders full-width under a translucent sidebar (so the
+    /// map shows behind the stats/monster list) and a magnifier-drag can reach the cells
+    /// there. **Default ON**; absent key → default, stored value (on/off) respected.
+    @objc public static var isMapUnderSidebarEnabledSetting: Bool {
+        let defaults = UserDefaults.standard
+        if defaults.object(forKey: mapUnderSidebarEnabledDefaultsKey) == nil { return true }
+        return defaults.bool(forKey: mapUnderSidebarEnabledDefaultsKey)
+    }
+
+    /// Whether the "map under sidebar" reveal is permitted (the user's Options toggle).
+    /// The reveal is *applied* only when also zoomed in — see `updateSidebarReveal`.
+    /// Seeded from the persisted setting; flipped live by `setMapUnderSidebarEnabled`.
+    private var mapUnderSidebarEnabled: Bool = RogueScene.isMapUnderSidebarEnabledSetting
+    /// Latched state of whether the reveal is currently applied (zoomed AND enabled), so
+    /// the mask-widen + sidebar-wash are re-applied only when it flips — not every zoom
+    /// tick (the engine thread's per-step auto-follow calls setZoom constantly).
+    private var sidebarRevealActive = false
+
+    /// Fraction of opacity kept on the sidebar cell backgrounds while the reveal is
+    /// active (glyphs stay fully opaque). Lower = more map shows through, at the cost of
+    /// text contrast. Tunable.
+    private static let sidebarWashAlpha: CGFloat = 0.4
+
     private var dungeonCrop: SKCropNode?
     private var dungeonContainer: SKNode?
     private var dungeonMask: SKSpriteNode?
@@ -110,6 +136,24 @@ extension CGSize {
     /// Container origin in UIKit points (see setZoom). Read by unzoomedPoint.
     private(set) var zoomOriginXPoints: CGFloat = 0
     private(set) var zoomOriginYPoints: CGFloat = 0
+
+    /// iOS port (iBrogue): menu magnify (phase 0: the title menu & its dialogs). Unlike the
+    /// gameplay pinch-zoom (which scales the dungeon container), this scales ONLY the reported
+    /// menu cells — pulled into a dedicated `menuContainer` drawn above the flat grid — so the menu
+    /// enlarges as a panel over an otherwise-untouched 1× title. Read by SKViewPort.unzoomedPoint,
+    /// which inverts taps landing within the magnified menu's screen rect and passes the rest
+    /// through 1×.
+    private(set) var menuMagnifyActive = false
+    /// The menu-magnify transform (view-point space, same convention as zoomScale/zoomOrigin) and
+    /// the magnified cell bounds, so SKViewPort can invert taps over just the menu.
+    private(set) var menuMagnifyScale: CGFloat = 1.0
+    private(set) var menuMagnifyOriginXPoints: CGFloat = 0
+    private(set) var menuMagnifyOriginYPoints: CGFloat = 0
+    private(set) var menuColMin = 0, menuColMax = 0, menuRowMin = 0, menuRowMax = 0
+    /// Holds just the magnified menu cells, above the flat grid (zPosition). Built lazily.
+    private var menuContainer: SKNode?
+    /// The borrowed cell nodes and the parent each came from, to restore on teardown.
+    private var menuBorrowedNodes: [(node: SKNode, parent: SKNode)] = []
 
     /// Per-frame batch captured off the main thread (the engine thread's `commitDraws`)
     /// and flushed together in the next `update(_:)`, on the main thread, right before the
@@ -195,6 +239,13 @@ extension RogueScene {
 
         if let glyph = UnicodeScalar(code) {
             cells[x][y].glyph = getTexture(glyph: String(glyph))
+        }
+
+        // While the "map behind interface" reveal is active, keep this chrome cell's wash in
+        // sync with its (possibly new) colour: a health/status/nutrition bar that just
+        // filled or emptied should stay fully opaque, an empty cell stays translucent.
+        if sidebarRevealActive, isChromeRevealCell(x, y) {
+            cells[x][y].background.alpha = chromeCellBackgroundAlpha(cells[x][y].bgcolor)
         }
     }
     
@@ -351,19 +402,97 @@ extension RogueScene {
         }
     }
 
-    /// The dungeon-map rectangle (window cols 21…99, rows 3…30) in scene pixels,
-    /// derived from the live cell layout so it tracks rotations / inset changes.
+    /// iOS port (iBrogue): magnify ONLY the reported menu cells (window-cell rect colMin…colMax ×
+    /// rowMin…rowMax) by `scale`, positioned by the view-point origin (same transform convention as
+    /// the gameplay zoom — see applyZoomToContainer). The cells are borrowed into a dedicated
+    /// container drawn above the flat grid, so the menu enlarges as a panel while the rest of the
+    /// title stays untouched at 1×. Re-applying with a new rect (e.g. a flyout opening) restores the
+    /// previous cells first. iPhone-only; MAIN THREAD only (it mutates the node tree).
+    func applyMenuMagnify(colMin: Int, colMax: Int, rowMin: Int, rowMax: Int,
+                          scale: CGFloat, originXPoints: CGFloat, originYPoints: CGFloat) {
+        guard zoomEnabled else { return }
+        if menuMagnifyActive { restoreBorrowedMenuCells() }   // drop a previous rect first
+        let container = menuContainerOrBuild()
+        let cMin = max(0, colMin), cMax = min(cells.count - 1, colMax)
+        let rMin = max(0, rowMin), rMax = min((cells.first?.count ?? 1) - 1, rowMax)
+        guard cMin <= cMax, rMin <= rMax else { return }
+        for x in cMin...cMax {
+            for y in rMin...rMax {
+                for node in [cells[x][y].background, cells[x][y].foreground] {
+                    let parent = node.parent ?? self
+                    menuBorrowedNodes.append((node, parent))
+                    node.removeFromParent()
+                    container.addChild(node)
+                }
+            }
+        }
+        menuMagnifyActive = true
+        menuMagnifyScale = scale
+        menuMagnifyOriginXPoints = originXPoints
+        menuMagnifyOriginYPoints = originYPoints
+        menuColMin = cMin; menuColMax = cMax; menuRowMin = rMin; menuRowMax = rMax
+        let pixelScale = UIScreen.main.scale
+        container.setScale(scale)
+        container.position = CGPoint(
+            x: pixelScale * originXPoints,
+            y: size.height * (1 - scale) - pixelScale * originYPoints
+        )
+    }
+
+    /// iOS port (iBrogue): tear down the menu magnify — return the borrowed cells to their original
+    /// parents and reset the container to identity. iPhone-only; MAIN THREAD only.
+    func endMenuMagnify() {
+        guard menuMagnifyActive else { return }
+        restoreBorrowedMenuCells()
+        menuContainer?.setScale(1.0)
+        menuContainer?.position = .zero
+        menuMagnifyActive = false
+        menuMagnifyScale = 1.0
+        menuMagnifyOriginXPoints = 0
+        menuMagnifyOriginYPoints = 0
+    }
+
+    private func restoreBorrowedMenuCells() {
+        for (node, parent) in menuBorrowedNodes {
+            node.removeFromParent()
+            parent.addChild(node)
+        }
+        menuBorrowedNodes.removeAll(keepingCapacity: true)
+    }
+
+    private func menuContainerOrBuild() -> SKNode {
+        if let c = menuContainer { return c }
+        let c = SKNode()
+        c.position = .zero
+        c.zPosition = 100   // above the flat 1× grid, so the enlarged menu reads as a panel on top
+        addChild(c)
+        menuContainer = c
+        return c
+    }
+
+    /// Bottom row of the reveal: the flavor-text line (ROWS-2). The button bar (ROWS-1)
+    /// stays opaque chrome below the reveal, so a reach drag can't stray onto it.
+    private var revealRowMax: Int { gridSize.rows - 2 }
+
+    /// The crop-mask rectangle in scene pixels, derived from the live cell layout so it
+    /// tracks rotations / inset changes. Normally spans just the dungeon (window cols 21…99,
+    /// rows 3…31). While the "map behind the interface" reveal is active it widens to the
+    /// full HUD frame — cols 0…99, rows 0…(ROWS-2) — so the magnified map shows under the
+    /// translucent sidebar, the message log (top), and the flavor line (bottom); only the
+    /// button row is excluded. The auto-follow pan clamp (BrogueViewController.dungeonFrame
+    /// Points) is unaffected and stays on the dungeon rect, so framing/centering is unchanged
+    /// — the extra rows/cols are a bonus reveal that shows black only hard against a map edge.
     private func dungeonFrameInScene() -> CGRect {
         let layout = currentLayout()
-        let cols = CGFloat(RogueScene.zoomColMax - RogueScene.zoomColMin + 1) // 79
-        let rows = CGFloat(RogueScene.zoomRowMax - RogueScene.zoomRowMin + 1) // 28
-        let minX = layout.xOffset + CGFloat(RogueScene.zoomColMin) * layout.cell.width
-        // Bottom edge of the lowest zoomed row (row 30), measured bottom-up.
-        let minY = layout.yOffset
-            + CGFloat(gridSize.rows - RogueScene.zoomRowMax - 1) * layout.cell.height
-        return CGRect(x: minX, y: minY,
-                      width: cols * layout.cell.width,
-                      height: rows * layout.cell.height)
+        let colMin = sidebarRevealActive ? 0 : RogueScene.zoomColMin
+        let rowMin = sidebarRevealActive ? 0 : RogueScene.zoomRowMin
+        let rowMax = sidebarRevealActive ? revealRowMax : RogueScene.zoomRowMax
+        let minX = layout.xOffset + CGFloat(colMin) * layout.cell.width
+        // Bottom edge of the lowest revealed row, measured bottom-up.
+        let minY = layout.yOffset + CGFloat(gridSize.rows - rowMax - 1) * layout.cell.height
+        let width = CGFloat(RogueScene.zoomColMax - colMin + 1) * layout.cell.width
+        let height = CGFloat(rowMax - rowMin + 1) * layout.cell.height
+        return CGRect(x: minX, y: minY, width: width, height: height)
     }
 
     /// Builds the crop + container once, before cells are parented (didMove).
@@ -434,6 +563,79 @@ extension RogueScene {
             x: pixelScale * originXPoints,
             y: size.height * (1 - scale) - pixelScale * originYPoints
         )
+        // Cross the zoomed/1× threshold on the same (main) thread that applies the
+        // transform, so the sidebar reveal flips in lockstep with the magnification.
+        updateSidebarReveal()
+    }
+
+    // MARK: - Map-under-sidebar reveal
+
+    /// Flip the Options toggle live (called from BrogueViewController). Re-applies the
+    /// reveal immediately so turning it off mid-zoom restores the opaque sidebar.
+    @objc public func setMapUnderSidebarEnabled(_ enabled: Bool) {
+        guard mapUnderSidebarEnabled != enabled else { return }
+        mapUnderSidebarEnabled = enabled
+        updateSidebarReveal()
+    }
+
+    /// Recompute whether the reveal should be applied (zoomed in AND enabled AND iPhone)
+    /// and, only when that latched state flips, re-mask the crop to full/partial width and
+    /// wash/unwash the sidebar backgrounds. Idempotent and cheap on the common no-flip path
+    /// (the engine thread's per-step auto-follow drives applyZoomToContainer constantly).
+    /// Must run on the main thread — it mutates the mask + cell nodes.
+    private func updateSidebarReveal() {
+        let active = zoomEnabled && mapUnderSidebarEnabled && zoomScale > 1.0
+        guard active != sidebarRevealActive else { return }
+        sidebarRevealActive = active
+        if let mask = dungeonMask {
+            let frame = dungeonFrameInScene()   // active-aware: full width while revealed
+            mask.size = frame.size
+            mask.position = frame.origin
+        }
+        applySidebarWash(active)
+    }
+
+    /// Max colour channel below which a chrome cell's background counts as "empty" and gets
+    /// washed. At/above it the cell is a coloured background — a health / status / nutrition
+    /// bar (whose unfilled part is a *dim tint*, not black — see printProgressBar) — and
+    /// stays fully opaque. Uses max(r,g,b), not luminance, so a saturated-but-dark hue (a
+    /// blue bar) still reads as "coloured".
+    private static let chromeBarChannelFloor: CGFloat = 0.05
+
+    /// A chrome cell in the reveal frame? — cols 0…99, rows 0…(ROWS-2), excluding the dungeon
+    /// cells (cols 21…99, rows 3…31), which live in the crop container.
+    private func isChromeRevealCell(_ x: Int, _ y: Int) -> Bool {
+        guard x <= RogueScene.zoomColMax, y <= revealRowMax else { return false }
+        return !(x >= RogueScene.zoomColMin && y >= RogueScene.zoomRowMin && y <= RogueScene.zoomRowMax)
+    }
+
+    /// The alpha a chrome cell's background should have now: fully opaque when the reveal is
+    /// off, or when the cell is a coloured bar (so health / status / nutrition bars are never
+    /// dimmed); washed (translucent, so the map shows through) only for an empty/dark cell.
+    private func chromeCellBackgroundAlpha(_ bg: SKColor) -> CGFloat {
+        guard sidebarRevealActive else { return 1.0 }
+        var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
+        bg.getRed(&r, green: &g, blue: &b, alpha: &a)
+        return max(r, max(g, b)) < RogueScene.chromeBarChannelFloor ? RogueScene.sidebarWashAlpha : 1.0
+    }
+
+    /// Fade the *empty* HUD-chrome cell backgrounds inside the reveal frame — the sidebar
+    /// (cols 0…20), the message log (rows 0…2), and the flavor line (row ROWS-2) — so the
+    /// magnified map shows behind them, and lift them above the crop (glyphs, at zPosition 1,
+    /// stay on top and fully opaque). Coloured bar cells stay opaque (see
+    /// chromeCellBackgroundAlpha). Dungeon cells (in the crop container) and the button row
+    /// are skipped. Restores opaque + base z-order when inactive.
+    private func applySidebarWash(_ active: Bool) {
+        guard !cells.isEmpty else { return }
+        let z: CGFloat = active ? 0.4 : 0.0   // above crop (0), below glyph (1)
+        for x in 0...RogueScene.zoomColMax {              // cols 0…99
+            for y in 0...revealRowMax {                    // rows 0…(ROWS-2)
+                if !isChromeRevealCell(x, y) { continue }
+                let cell = cells[x][y]
+                cell.background.alpha = chromeCellBackgroundAlpha(cell.bgcolor)
+                cell.background.zPosition = z
+            }
+        }
     }
 
     /// SpriteKit calls this on the main thread at the top of every frame, immediately
