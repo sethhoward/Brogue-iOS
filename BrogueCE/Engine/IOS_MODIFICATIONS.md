@@ -28,6 +28,46 @@ covers the separate Classic engine that ships in the app target).
 
 ## Change log
 
+### 2026-07-07 — Item-detail box: reserve room for action buttons so long descriptions keep "call"
+
+**What.** `printTextBox`'s auto-widen only widened until the **text** fit above the flavor/button
+chrome (`ROWS-2`), ignoring the action buttons drawn *below* the text, which wrap to a second
+double-spaced line. A long description left the text just fitting but pushed the wrapped button line
+("call"/"relabel") onto the chrome rows, where it was lost. Now reserves 4 rows in the widen loop
+when `buttonCount > 0`, so the box widens until text **and** buttons fit. Presentational; no RNG /
+save / recording impact.
+
+### 2026-07-07 — iPhone menu magnify fix: clear on text-input prompts (Save recording / seed entry)
+
+**What.** `IO.c getInputTextString` now calls `ceClearMenuBox()` at its start. A text-input prompt
+(e.g. "Save recording as…", seed entry) is NOT a button menu, so it reports no rect — and the
+save/quit flow reaches it straight from a menu without returning to play, leaving the menu magnify
+engaged on a stale rect, which tore the prompt. Presentational; no RNG / save / recording impact.
+The same `ceClearMenuBox()` is applied at the start of the full-screen **Feats** and
+**Discovered-items** views (`displayFeatsScreen` / `printDiscoveriesScreen`) — also non-menu
+overlays (they `waitForKeystrokeOrMouseClick`, report no rect) that should render at 1×. They also
+set `uiMode = InMenu` for the view's duration (restored on exit) so the host keeps
+`gameplayControlsActive` false and thus suspends the **dungeon pinch-zoom** too — otherwise the view
+is drawn into the zoomed dungeon cells and appears magnified.
+
+### 2026-07-07 — iPhone menu magnify: report menu rects to the host (title / inventory / dialogs)
+
+**What.** Ports the iPhone "menu magnify" (already in Brogue SE) to CE: the host magnifies just a
+menu's cells to a readable, tappable size over the untouched 1× screen. The engine only reports the
+menu's window-cell rect; all magnification lives in the platform layer. Presentational; no RNG /
+save / recording impact. Host, `BrogueCEHost` protocol, and `CEHost.swift` are shared and already
+carry the `setMenuBox`/`clearMenuBox` plumbing, so this is engine + bridge only.
+
+- **`Buttons.c` `buttonInputLoop`:** after it sets `uiMode = InMenu`, calls `ceSetMenuBox(...)` with
+  the loop's window rect, expanded by a 1-cell "trim" so a printTextBox dialog's shadow scales with
+  the panel. Single choke point → covers inventory, action menu, and all buttoned dialogs.
+- **`MainMenu.c`:** new `reportTitleMenuBox()` reports the main-menu (+ flyout) union rect each title
+  redraw in `titleMenu()`; `ceClearMenuBox()` on `titleMenu()` exit (so a following sub-screen that
+  reports no rect isn't corrupted by stale borrowed cells). Also raised the flame title
+  (`MENU_TITLE_OFFSET_Y` −2 → −5) and moved the "CE" badge to follow it (`ceBaseY` 9 → 6), matching SE.
+- **`CEBridge.mm`:** `ceSetMenuBox` → `[gHost setMenuBox:…]`, `ceClearMenuBox` → `[gHost clearMenuBox]`.
+- **Determinism:** read-only reporting; no RNG, no save/recording fields. Title-offset/badge are cosmetic.
+
 ### 2026-07-07 — Game handoff: engine recording-version accessor (cross-platform version guard)
 
 **What.** The CE half (see `BrogueSE/Engine/IOS_MODIFICATIONS.md` for the rationale). The handoff guard

@@ -315,6 +315,17 @@ extern "C" void setBrogueExamineBox(short x, short y, short width, short height)
     [brogueViewController setExamineBox:(NSInteger)x y:(NSInteger)y width:(NSInteger)width height:(NSInteger)height];
 }
 
+// iOS port (iBrogue): forwards a modal menu overlay's window rect so the iPhone host can
+// auto-magnify it (title menu, inventory, action menu, dialogs). Mirrors CE/SE's ceSetMenuBox.
+extern "C" void setBrogueMenuBox(short x, short y, short width, short height) {
+    [brogueViewController setMenuBox:(NSInteger)x y:(NSInteger)y width:(NSInteger)width height:(NSInteger)height];
+}
+
+// iOS port (iBrogue): signals no menu overlay is shown, so the host tears the magnify down.
+extern "C" void clearBrogueMenuBox(void) {
+    [brogueViewController clearMenuBox];
+}
+
 // iOS port (iBrogue): the examine loop asks this before drawing a description box; YES means
 // skip it (zoomed-in play-field examine, where the box would tear against the 1× sidebar).
 // Mirrors CE/SE's ceShouldSuppressExamineBox.

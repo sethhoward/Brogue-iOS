@@ -2762,6 +2762,10 @@ void executeKeystroke(signed long keystroke, boolean controlKey, boolean shiftKe
     rogue.cautiousMode = false;
 }
 
+// iOS port (iBrogue): a text-input prompt isn't a button menu (reports no rect); clear the iPhone
+// menu magnify at its start so a stale magnify from a preceding menu doesn't tear the prompt.
+extern void clearBrogueMenuBox(void);
+
 boolean getInputTextString(char *inputText,
                            const char *prompt,
                            short maxLength,
@@ -2773,7 +2777,9 @@ boolean getInputTextString(char *inputText,
     char keystroke, suffix[100];
     const short textEntryBounds[TEXT_INPUT_TYPES][2] = {{' ', '~'}, {' ', '~'}, {'0', '9'}};
     cellDisplayBuffer dbuf[COLS][ROWS], rbuf[COLS][ROWS];
-    
+
+    clearBrogueMenuBox();   // iOS port (iBrogue): drop any stale menu magnify before drawing the prompt
+
     // x and y mark the origin for text entry.
     if (useDialogBox) {
         x = (COLS - max(maxLength, strLenWithoutEscapes(prompt))) / 2;
@@ -3993,6 +3999,7 @@ void printDiscoveries(short category, short count, unsigned short itemCharacter,
 }
 
 void printDiscoveriesScreen() {
+    clearBrogueMenuBox();   // iOS port (iBrogue): full-screen view — drop the iPhone menu magnify (render at 1×)
     short i, j, y;
     cellDisplayBuffer dbuf[COLS][ROWS], rbuf[COLS][ROWS];
     
@@ -4866,7 +4873,12 @@ short printTextBox(char *textBuf, short x, short y, short width,
         x2 = x;
     }
     
-    while (((lineCount = wrapText(NULL, textBuf, width)) + y2) >= ROWS - 2 && width < COLS-5) {
+    // iOS port (iBrogue): reserve room for the action buttons drawn below the text. They can wrap
+    // to a second (double-spaced) line, so without this a long description leaves the text just
+    // fitting but pushes the wrapped button line — "call"/"relabel" — onto the flavor/button chrome
+    // rows, where it's lost. Widen the box until text + buttons fit.
+    const short buttonReserve = (buttonCount > 0) ? 4 : 0;
+    while (((lineCount = wrapText(NULL, textBuf, width)) + y2 + buttonReserve) >= ROWS - 2 && width < COLS-5) {
         // While the text doesn't fit and the width doesn't fill the screen, increase the width.
         width++;
         if (x2 + (width / 2) > COLS / 2) {

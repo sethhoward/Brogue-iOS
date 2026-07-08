@@ -326,6 +326,12 @@ short processButtonInput(buttonState *state, boolean *canceled, rogueEvent *even
 // Returns the index number of the chosen button, or -1 if the user cancels.
 // A window region is described by winX, winY, winWidth and winHeight.
 // Clicking outside of that region will constitute canceling.
+// iOS port (iBrogue): report the active menu's window rect to the host for the iPhone menu
+// magnify. buttonInputLoop is the single choke point for every button menu (inventory, action
+// menu, dialogs), so reporting here covers them all. Teardown is host-driven when play resumes
+// (Classic's game events flip gameplayControlsActive on the host).
+extern void setBrogueMenuBox(short x, short y, short width, short height);
+
 short buttonInputLoop(brogueButton *buttons,
 					  short buttonCount,
 					  short winX,
@@ -345,7 +351,18 @@ short buttonInputLoop(brogueButton *buttons,
 	x = y = -1;
 	
 	initializeButtonState(&state, buttons, buttonCount, winX, winY, winWidth, winHeight);
-	
+
+	// iOS port (iBrogue): iPhone menu magnify — report this menu's rect with a 1-cell HORIZONTAL
+	// trim only, so a printTextBox dialog's side shadow scales with the panel (no dark 1× seam).
+	// NOT vertical: the tall inventory list has no shadow, so top/bottom trim would just add
+	// unneeded rows and shrink the fit scale.
+	{
+		const short trim = 1;
+		short mx = max(0, winX - trim);
+		short mw = min(COLS - 1, winX + winWidth - 1 + trim) - mx + 1;
+		setBrogueMenuBox(mx, winY, mw, winHeight);
+	}
+
     //	short i, j;
     //	for (i=0; i<COLS; i++) {
     //		for (j=0; j<COLS; j++) {

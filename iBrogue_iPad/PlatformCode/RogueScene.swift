@@ -137,6 +137,24 @@ extension CGSize {
     private(set) var zoomOriginXPoints: CGFloat = 0
     private(set) var zoomOriginYPoints: CGFloat = 0
 
+    /// iOS port (iBrogue): menu magnify (phase 0: the title menu & its dialogs). Unlike the
+    /// gameplay pinch-zoom (which scales the dungeon container), this scales ONLY the reported
+    /// menu cells — pulled into a dedicated `menuContainer` drawn above the flat grid — so the menu
+    /// enlarges as a panel over an otherwise-untouched 1× title. Read by SKViewPort.unzoomedPoint,
+    /// which inverts taps landing within the magnified menu's screen rect and passes the rest
+    /// through 1×.
+    private(set) var menuMagnifyActive = false
+    /// The menu-magnify transform (view-point space, same convention as zoomScale/zoomOrigin) and
+    /// the magnified cell bounds, so SKViewPort can invert taps over just the menu.
+    private(set) var menuMagnifyScale: CGFloat = 1.0
+    private(set) var menuMagnifyOriginXPoints: CGFloat = 0
+    private(set) var menuMagnifyOriginYPoints: CGFloat = 0
+    private(set) var menuColMin = 0, menuColMax = 0, menuRowMin = 0, menuRowMax = 0
+    /// Holds just the magnified menu cells, above the flat grid (zPosition). Built lazily.
+    private var menuContainer: SKNode?
+    /// The borrowed cell nodes and the parent each came from, to restore on teardown.
+    private var menuBorrowedNodes: [(node: SKNode, parent: SKNode)] = []
+
     /// Per-frame batch captured off the main thread (the engine thread's `commitDraws`)
     /// and flushed together in the next `update(_:)`, on the main thread, right before the
     /// renderer samples the node tree. Both the cell glyph/colour writes AND the
@@ -382,6 +400,74 @@ extension RogueScene {
             applyCell(x: key / stride, y: key % stride,
                       code: pc.code, bgColor: pc.bgColor, fgColor: pc.fgColor)
         }
+    }
+
+    /// iOS port (iBrogue): magnify ONLY the reported menu cells (window-cell rect colMin…colMax ×
+    /// rowMin…rowMax) by `scale`, positioned by the view-point origin (same transform convention as
+    /// the gameplay zoom — see applyZoomToContainer). The cells are borrowed into a dedicated
+    /// container drawn above the flat grid, so the menu enlarges as a panel while the rest of the
+    /// title stays untouched at 1×. Re-applying with a new rect (e.g. a flyout opening) restores the
+    /// previous cells first. iPhone-only; MAIN THREAD only (it mutates the node tree).
+    func applyMenuMagnify(colMin: Int, colMax: Int, rowMin: Int, rowMax: Int,
+                          scale: CGFloat, originXPoints: CGFloat, originYPoints: CGFloat) {
+        guard zoomEnabled else { return }
+        if menuMagnifyActive { restoreBorrowedMenuCells() }   // drop a previous rect first
+        let container = menuContainerOrBuild()
+        let cMin = max(0, colMin), cMax = min(cells.count - 1, colMax)
+        let rMin = max(0, rowMin), rMax = min((cells.first?.count ?? 1) - 1, rowMax)
+        guard cMin <= cMax, rMin <= rMax else { return }
+        for x in cMin...cMax {
+            for y in rMin...rMax {
+                for node in [cells[x][y].background, cells[x][y].foreground] {
+                    let parent = node.parent ?? self
+                    menuBorrowedNodes.append((node, parent))
+                    node.removeFromParent()
+                    container.addChild(node)
+                }
+            }
+        }
+        menuMagnifyActive = true
+        menuMagnifyScale = scale
+        menuMagnifyOriginXPoints = originXPoints
+        menuMagnifyOriginYPoints = originYPoints
+        menuColMin = cMin; menuColMax = cMax; menuRowMin = rMin; menuRowMax = rMax
+        let pixelScale = UIScreen.main.scale
+        container.setScale(scale)
+        container.position = CGPoint(
+            x: pixelScale * originXPoints,
+            y: size.height * (1 - scale) - pixelScale * originYPoints
+        )
+    }
+
+    /// iOS port (iBrogue): tear down the menu magnify — return the borrowed cells to their original
+    /// parents and reset the container to identity. iPhone-only; MAIN THREAD only.
+    func endMenuMagnify() {
+        guard menuMagnifyActive else { return }
+        restoreBorrowedMenuCells()
+        menuContainer?.setScale(1.0)
+        menuContainer?.position = .zero
+        menuMagnifyActive = false
+        menuMagnifyScale = 1.0
+        menuMagnifyOriginXPoints = 0
+        menuMagnifyOriginYPoints = 0
+    }
+
+    private func restoreBorrowedMenuCells() {
+        for (node, parent) in menuBorrowedNodes {
+            node.removeFromParent()
+            parent.addChild(node)
+        }
+        menuBorrowedNodes.removeAll(keepingCapacity: true)
+    }
+
+    private func menuContainerOrBuild() -> SKNode {
+        if let c = menuContainer { return c }
+        let c = SKNode()
+        c.position = .zero
+        c.zPosition = 100   // above the flat 1× grid, so the enlarged menu reads as a panel on top
+        addChild(c)
+        menuContainer = c
+        return c
     }
 
     /// Bottom row of the reveal: the flavor-text line (ROWS-2). The button bar (ROWS-1)

@@ -32,6 +32,79 @@ See `BrogueCE/Engine/IOS_MODIFICATIONS.md` (faithful CE) and
 
 ## Change log
 
+### 2026-07-07 — Item-detail box: reserve room for action buttons so long descriptions keep "call"
+
+**What.** `printTextBox`'s auto-widen only widened until the **text** fit above the flavor/button
+chrome (`ROWS-2`), ignoring the action buttons drawn *below* the text (`apply`/`drop`/`throw`/`call`/
+`relabel`), which wrap to a second double-spaced line. A long description (staff of firebolt / frost,
+etc.) left the text just fitting but pushed the wrapped button line — "call"/"relabel" — onto the
+chrome rows, where it was lost. Now reserves 4 rows (up to two wrapped button lines) in the widen
+loop when `buttonCount > 0`, so the box widens until text **and** buttons fit. Zoom-independent (a
+plain layout fix). Presentational; no RNG / save / recording impact.
+
+### 2026-07-07 — iPhone menu magnify fix: clear on text-input prompts (Save recording / seed entry)
+
+**What.** `IO.c getInputTextString` now calls `ceClearMenuBox()` at its start. A text-input prompt
+(e.g. "Save recording as…", seed entry) is NOT a button menu, so it reports no rect — and the
+save/quit flow reaches it straight from a menu without returning to play, leaving the menu magnify
+engaged on a stale rect, which tore the prompt. Presentational; no RNG / save / recording impact.
+The same `ceClearMenuBox()` is applied at the start of the full-screen **Feats** and
+**Discovered-items** views (`displayFeatsScreen` / `printDiscoveriesScreen`) — also non-menu
+overlays (they `waitForKeystrokeOrMouseClick`, report no rect) that should render at 1×. They also
+set `uiMode = InMenu` for the view's duration (restored on exit) so the host keeps
+`gameplayControlsActive` false and thus suspends the **dungeon pinch-zoom** too — otherwise the view
+is drawn into the zoomed dungeon cells and appears magnified.
+
+### 2026-07-07 — iPhone menu magnify (phase 1): in-game inventory / action menu / dialogs
+
+**What.** Extends the menu magnify (phase 0) to in-game overlays. Rather than hooking each surface,
+the rect is reported from the single choke point every button menu passes through — `buttonInputLoop`
+— so inventory, the action menu, and all `printTextBox`-with-buttons dialogs (item detail, confirms,
+the game-mode dialog) magnify with one call. Presentational; no RNG / save / recording impact.
+
+- **`Buttons.c` `buttonInputLoop`:** right after it sets `uiMode = InMenu`, calls
+  `ceSetMenuBox(...)` with the loop's own window rect, expanded by a 1-cell **horizontal-only** "trim"
+  so a printTextBox dialog's side `rectangularShading` shadow scales with the panel instead of being
+  left behind at 1× (the dark seam beside the box). Vertical trim is deliberately omitted — the tall
+  inventory list has no shadow, so top/bottom trim would only add unneeded rows and shrink its
+  fit-magnify. No clear here:
+  nested menus (inventory → item detail → inventory) just overwrite the rect, and teardown is
+  host-driven when play resumes (see below). This keeps nested navigation flicker-free.
+- **`IO.c` `printTextBox`:** removed the direct `ceSetMenuBox` added in phase 0 — it's redundant now
+  that `printTextBox`'s own `buttonInputLoop` reports the (more accurate, buttons-included) rect.
+- **Host (`BrogueViewController`):** the magnify gate is now just "a menu rect is reported" (dropped
+  the title-only guard). Teardown is anchored to `gameplayControlsActive → true` (uiMode →
+  InNormalPlay), which — because `reportUIModeIfChanged` only pushes on a settled change per
+  event-loop iteration — fires once on true return to play, not on the transient InNormalPlay between
+  nested menus. The teardown runs before the gameplay zoom is restored, so borrowed cells are back in
+  the dungeon container before it re-scales.
+- **Determinism:** read-only reporting; no RNG, no save/recording fields.
+
+### 2026-07-07 — iPhone menu magnify (phase 0): report the title menu's rect to the host
+
+**What.** iPhone renders the whole 100×34 grid stretched onto a narrow screen, so title-menu items are
+too small to read/tap. Rather than pan/zoom the camera, the host now auto-magnifies just the menu region
+to a readable, tappable size — as a panel over the otherwise-untouched 1× title (only the menu cells scale),
+instant, no camera movement. The engine's only job is to tell the host *where* the current menu is
+(window-cell rect); all magnification lives in the platform layer.
+Presentational hint only — nothing here touches RNG, game state, or the recording, so it's determinism-
+and save-safe.
+
+- **`MainMenu.c`:** new `reportTitleMenuBox()` computes the bounding rect of the main-menu buttons (plus
+  the flyout buttons when a flyout is open, and a 1-cell shadow-halo "trim") and calls `ceSetMenuBox(x,y,w,h)`.
+  Called each title redraw in `titleMenu()`'s inner loop (host dedupes identical rects). On `titleMenu()`
+  exit it calls `ceClearMenuBox()` — leaving the title into a game or a sub-screen that reports no rect of
+  its own (file browser, high scores, recordings, seed entry) would otherwise leave the stale magnify
+  engaged, and its borrowed cells corrupt that screen's rendering.
+- **`IO.c` `printTextBox`:** when the box has buttons (a modal menu — e.g. the game-mode dialog), call
+  `ceSetMenuBox(x2, y2, width, lineCount + padLines)` before blocking on input. Button-less boxes (examine /
+  details) are left to the examine path. In-game buttoned boxes also report, but the host only magnifies
+  while at the title, so they're ignored for now (phase 1 extends the gate to inventory).
+- **Bridge:** `SEBridge.mm` defines `ceSetMenuBox` → `[gHost setMenuBox:y:width:height:]` and `ceClearMenuBox`
+  → `[gHost clearMenuBox]`; both host methods were added to the shared `BrogueCEHost` protocol
+  (`BrogueCEHost.h`). CE/Classic hosts that don't magnify menus can ignore them.
+- **Determinism:** read-only reporting; no RNG, no save/recording fields.
+
 ### 2026-07-07 — Game handoff: engine recording-version accessor (cross-platform version guard)
 
 **What.** The handoff compatibility guard now compares the engine's recording/save-version string
