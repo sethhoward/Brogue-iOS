@@ -32,6 +32,76 @@ See `BrogueCE/Engine/IOS_MODIFICATIONS.md` (faithful CE) and
 
 ## Change log
 
+### 2026-07-09 — Divination room reliably places 4 altars (was 2–3 in ~20% of seeds)
+
+**What.** An altar-of-divination room sometimes generated with only **2 or 3 altars** and a lot of empty
+carpet, behind a locked door — it read as "an empty room you needed a key for." Repro: seed 4/9/10 gave 2
+altars, seed 6/11/19 gave 3 (seed 43004854, the report's seed, happened to roll a clean 4). Now every seed
+places the statue + **4 altars** inside the divination room.
+
+**Cause.** The divination `buildAMachine` is a *cascade*: the reward room **plus** a locked-door vestibule
+(frequency-100 vestibule) **plus** an outsourced key-guard sub-machine — and that key-guard room is itself a
+carpeted commutation room. `placeAltarCrossInRoom` matched interior cells by `machineNumber >
+preDivinationMachineNumber`, i.e. *any* machine built during the cascade. When the key-guard room was
+carpeted, its cells qualified too, so the centroid was averaged across **two separate rooms**; the statue
+landed off-centre and the strict N/S/E/W cross stranded the directions that pointed at walls/the gap → 2–3
+altars. (This is also why it always coincided with a locked door: the locked-door vestibule is the very
+feature whose outsourced key-guard room polluted the cell set.)
+
+**Fix (`Architect.c`).**
+- New `divCellIsOpen(x,y,machineNumber)` matches the divination room's **exact** machine number instead of a
+  `>` floor. The room is `preDivinationMachineNumber + 1` — `buildAMachine` reserves the primary room's number
+  (`++rogue.machineNumber`, ~line 1232) *before* its feature loop spawns the vestibule/key-guard siblings, so
+  they take strictly higher numbers. The call site now passes that exact number.
+- `placeAltarCrossInRoom` centres the statue on the interior cell admitting the **most** cardinal altars
+  (tie-broken toward the centroid), then, if the cross still stranded a direction in an irregular room, **fills
+  the shortfall from the nearest open interior cells** — guaranteeing four altars.
+
+Deterministic (fixed scan order, no RNG), so seeded runs stay deterministic and the sibling key-guard rooms are
+left untouched. Verified with a headless dungeon generator (SE engine + fightsim stubs) over seeds 1–200: 4
+altars on every divination floor. The locked-door gating is unchanged (intended). See MACHINES_AUDIT §7f.
+
+### 2026-07-09 — Altar of divination reveals runics, exactly like a scroll of identify
+
+**What.** Placing a runic weapon/armor whose base kind+enchant were already known — but whose **runic was
+still hidden** — on an altar of divination did nothing: the altar skipped it and never revealed the runic.
+A scroll of identify handles the same item fine. Now the altar completes the runic ID too.
+
+**Cause.** `performDivination` (`Items.c`) gated eligibility on `!itemIdentityFullyKnown(anItem)`, and
+`itemIdentityFullyKnown` returns true as soon as `ITEM_IDENTIFIED` is set — but for a runic weapon/armor,
+`ITEM_IDENTIFIED` (base kind+enchant) does **not** imply the runic is known (that's `ITEM_RUNIC_IDENTIFIED`).
+The scroll of identify instead gates on `ITEM_CAN_BE_IDENTIFIED`, which `updateIdentifiableItem` keeps set on
+runic gear until the runic itself is identified.
+
+**Fix.** The altar's gate now mirrors the scroll: refresh the candidate floor item via
+`updateIdentifiableItem(anItem)` (the flag can be stale — the scroll calls `updateIdentifiableItems()` before
+prompting for the same reason), then require `ITEM_CAN_BE_IDENTIFIED`. The reveal itself was already a full
+`identify()` (which sets `ITEM_RUNIC_IDENTIFIED` on runic items), so no change there. The "fire only if it
+helps / don't block another altar" contract is preserved — a truly-known item has the flag cleared and is
+still skipped. Marked `// iOS port (Brogue SE):`. See IDENTIFICATION_AUDIT.md §5e′.
+
+### 2026-07-09 — Force-shoved creatures slide (animated) instead of teleporting
+
+**What.** A frozen creature shoved by the staff of frost (and, when enabled, any creature flung by the
+explosion knockback) now **skates cell-by-cell along the shove path** to its rest cell rather than
+popping there instantly — the same "launched creature" read that the force *weapon* gets from its
+`zap(BOLT_BLINKING)` blink. The victim's own rendered glyph (frozen tint included) slides, mirroring the
+per-cell glyph animation used by thrown items / bolts (`getCellAppearance` → `plotCharWithColor` →
+`pauseAnimation(16)` → `refreshDungeonCell`).
+
+**Where.** Added `animateForceShove` and wired it into `shoveCreatureAlong` (`Combat.c`) — the shared
+force-shove primitive — so both `pushFrozenCreature` and `knockCreatureFromExplosion` inherit it with no
+per-caller code. The loop records the traversed cells into a small `path[]` (bounded by
+`FROST_PUSH_MAX_DISTANCE`), then plays them back just before the existing `setMonsterLocation` relocation.
+
+**Why it's safe.** Purely cosmetic: it consumes **no RNG** and changes **no game state** — the rest cell,
+slam target, momentum/strength damage, and hazard-deposit are all still decided by `shoveCreatureAlong`'s
+unchanged geometry, and `setMonsterLocation` still does the one real relocation. So seeded runs and
+input-replay saves are untouched. Bails out immediately when the player can't see the slide or during
+fast-forward playback. To avoid a ghost/duplicate, the victim's flag is cleared from its origin cell for
+the duration of the slide and re-added at the destination by `setMonsterLocation`. Marked
+`// iOS port (Brogue SE):`.
+
 ### 2026-07-08 — Bloodwort soothing vapors: soft afflictions tick 2× in the healing cloud
 
 **What.** Brings BrogueCE issue #514 to SE in its non-overpowered form: the bloodwort healing cloud
