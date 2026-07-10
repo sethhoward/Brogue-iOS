@@ -2179,7 +2179,7 @@ static void processIncrementalAutoID() {
                     identify(theItem);
                 }
                 updateIdentifiableItems();
-                createFlare(player.loc.x, player.loc.y, IDENTIFY_FLARE_LIGHT); // iOS port (Brogue SE): gold "now familiar" flare
+                cosmeticSpawnItemTell(player.loc, ITEM_TELL_IDENTIFY); // iOS port (Brogue SE): gold "now familiar" star ripple
 
                 itemName(theItem, theItemName, true, true, NULL);
                 sprintf(buf, "%s %s.", (theItem->quantity > 1 ? "they are" : "it is"), theItemName);
@@ -2239,15 +2239,15 @@ void rechargeItemsIncrementally(short multiplier) {
                 itemName(theItem, theItemName, false, false, NULL);
                 sprintf(buf, "your %s has recharged.", theItemName);
                 messageWithColor(buf, &teal, 0);
-                createFlare(player.loc.x, player.loc.y, RECHARGE_FLARE_LIGHT);
+                cosmeticSpawnItemTell(player.loc, ITEM_TELL_RECHARGE);
             }
         } else if ((theItem->category & CHARM) && (theItem->charges > 0)) {
             theItem->charges = clamp(theItem->charges - multiplier, 0, charmRechargeDelay(theItem->kind, theItem->enchant1));
             if (theItem->charges == 0) {
                 itemName(theItem, theItemName, false, false, NULL);
                 sprintf(buf, "your %s has recharged.", theItemName);
-                messageWithColor(buf, &teal, 0); // iOS port (Brogue SE): cyan log, matching the recharge flare
-                createFlare(player.loc.x, player.loc.y, RECHARGE_FLARE_LIGHT); // iOS port (Brogue SE): cyan "usable again" flare
+                messageWithColor(buf, &teal, 0); // iOS port (Brogue SE): cyan log, matching the recharge star ripple
+                cosmeticSpawnItemTell(player.loc, ITEM_TELL_RECHARGE); // iOS port (Brogue SE): cyan "usable again" star ripple
             }
         }
     }
@@ -3204,7 +3204,6 @@ void playerTurnEnded() {
                 // you watch helplessly. Spawn it and tick the cosmetic layer across the watch-pause (a few
                 // short sub-pauses instead of one dead 25-frame pause) so it actually blinks.
                 cosmeticRefreshStatusBlinks();
-                cosmeticRefreshLightBreathes(); // iOS port (Brogue SE): keep breathing lights alive across the watch-pause too
                 for (short ticks = 0; ticks < 5 && !fastForward; ticks++) {
                     advanceCosmeticAnimations();
                     fastForward = rogue.playbackFastForward || pauseAnimation(5, PAUSE_BEHAVIOR_DEFAULT);
@@ -3260,8 +3259,6 @@ void playerTurnEnded() {
     cosmeticRefreshInvestigateBlinks();
     // (3b) rebuild the confused/on-fire/stunned status-blink overlays (player + visible monsters).
     cosmeticRefreshStatusBlinks();
-    // (3c) rebuild the breathing-light overlays (visible TM_LIGHT_BREATHES sources, e.g. wall torches).
-    cosmeticRefreshLightBreathes();
     // (4) advance the '!' alert-blinks: follow each to its monster's new cell and count down its turn life.
     cosmeticTickAlertBlinks();
     // (5) safety net for the automation wake-tell capture (MB_HEARD_DURING_AUTOMATION): travel/auto-explore

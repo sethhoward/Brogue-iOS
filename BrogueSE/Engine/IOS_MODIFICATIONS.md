@@ -67,16 +67,26 @@ reflects bolts, and stabs approaching foes with a short reach weapon. The `MONST
 ### 2026-07-10 — Color-coded "check your inventory" flares for passive item events (new content)
 
 **What.** Several momentous item events currently just scroll a message by, with no visual cue to open the
-pack. Each now also fires a **color-coded flare on the player** (reusing the existing `createFlare` system):
+pack. Each now also fires a **color-coded "star ripple"** on the player — a radial 8-ray burst on the cosmetic
+layer, shaped so it can't be confused with the box/wave **noise ripples**:
 - **Gold** — something identified: auto-ID by use, a worn/used item becoming familiar, or a weapon/armor
   **runic** revealing itself.
 - **Red** — a **curse** revealed the instant you equip a cursed item.
 - **Green** — a cursed double-edged **runic purified** (its weld releases).
 - **Cyan** — a fully-spent **staff or charm becomes usable again**.
 
-**How.** Four new flare light types (`IDENTIFY_/CURSE_/PURIFY_/RECHARGE_FLARE_LIGHT`) + matching colors
-(`identifyFlareColor`, …) in `Rogue.h`/`Globals.c` (enum order kept aligned with the `lightCatalog` rows).
-Flares fire at `player.loc` from the passive event chokes:
+**How.** A new `CE_STAR_RIPPLE` cosmetic effect + `cosmeticSpawnItemTell(loc, kind)` (`IO.c`): a transient
+8-ray burst (tip + trailing cell per ray, bright center flash, fading as it expands) in a kind-keyed 0-100
+color (`cosmeticStar*Color`). Chosen over the first cut (`createFlare` radiant burst) because that *expanded
+outward like a noise ripple* and read as one; the star's shape reads as distinct. *(The `*_FLARE_LIGHT`
+lights/colors from that first cut are now unused — pending removal.)*
+
+**Priority + completion.** The overlay has no explicit priority flag — cell precedence is the render order
+plus a first-claim rule (`cosmeticMarkCell`: the first effect to paint a cell each frame wins it). The star is
+painted **before** the noise ripples, so it claims its cells and a ripple sweeping over it paints *around* it
+(no holes) rather than overwriting it. Completion is inherent: transient effects carry a `frameLife` and
+nothing cancels the star early, so it always runs its full burst. Fired at `player.loc` from the passive
+event chokes:
 - `autoIdentify()` (`Items.c`) — one gold flare covers runic discovery **and** auto-ID-by-use across its 10+
   call sites; gated on an actual reveal (`revealed` flag), so a no-op call doesn't flash.
 - The worn-timer "now familiar" identify (`Time.c` ~L2181) and the weapon-kills familiar
@@ -98,56 +108,9 @@ charm "has recharged" line recolored, and a matching teal staff line added on th
 printed nothing before). Flare colors themselves are HDR light values, too bright for text, so the log reuses
 readable message-palette colors of the same hue rather than the flare color objects.
 
-**Determinism / saves.** Flares are display-only (the flare animation consumes no game RNG; the events driving
-them are already deterministic) and fast-replay-safe via `animateFlares`. No game-state or save impact.
+**Determinism / saves.** The star ripple rides the cosmetic layer (`RNG_COSMETIC`, hard-suppressed under
+playback fast-forward); the events driving it are already deterministic. No game-state or save impact.
 Marked `// iOS port (Brogue SE):`.
-
-### 2026-07-10 — Sunlight comes alive + a reusable breathing-light primitive (new content)
-
-**What.** Sunlit rooms were a dead-flat bright patch. Now the light *plays*: (1) the `SUNLIGHT_POOL` floor
-**dapples** — each sunlit cell shimmers independently, like sun filtered through vegetation; (2) the cast
-sunlight gently **flickers**; and (3) a new **reusable breathing-light** overlay makes point light sources
-pulse a slow warm halo — demonstrated on **wall torches**, opt-in for any light tile.
-
-**How.**
-- **Dapple (#1)** — `SUNLIGHT_POOL` used the flat static `floorFore/BackColor`. New warm `sunlitFloorForeColor`
-  / `sunlitFloorBackColor` (`Globals.c`) have `colorDances` + rand, so the *existing* `shuffleTerrainColors`
-  idle shimmer (which sets `TERRAIN_COLORS_DANCING` off any dancing tile color, `IO.c` ~L1088) animates each
-  cell independently. Zero new code paths — just color defs.
-- **Flicker (#2)** — `sunLightColor` (used only by the `SUN_LIGHT` light entry) gained small rand +
-  `colorDances`, so the baked illumination varies gently instead of being dead-static.
-- **Breathe (#3, reusable)** — new mechanical flag `TM_LIGHT_BREATHES` (`Rogue.h`, `Fl(29)`) + a new
-  `CE_LIGHT_BREATHE` cosmetic kind. `cosmeticRefreshLightBreathes()` (`IO.c`, sibling to
-  `cosmeticRefreshStatusBlinks`, called from the same three per-turn rebuild sites) keeps one persistent
-  overlay per VISIBLE flagged source, keyed by position. The render (`advanceCosmeticAnimations`) pulses a
-  warm halo (`cosmeticLightBreatheColor`) via a triangle wave on `gCosmeticBlinkTick`, **phase-offset by the
-  source's coords** so a row of torches breathes out of unison. The halo radius is **derived per-source from
-  that light's own footprint** (`lightCatalog[glowLight].lightRadius ÷ 100` tiles) so a torch breathes over
-  its wide glow and a candle over its small one, **capped at `CE_LIGHT_BREATHE_MAX_RADIUS` (4)** so a 10-tile
-  torch light can't blow the 1024-cell/frame paint budget. Tunables: `CE_LIGHT_BREATHE_PERIOD/STRENGTH/MAX_RADIUS`.
-  Flagged on `TORCH_WALL`; any light tile opts in by adding `TM_LIGHT_BREATHES` (candle-lit altars, glyphs, …).
-
-  *Note — the cast light itself is still baked per-turn (`updateLighting`), not on the idle clock, so this is a
-  brightness overlay over the footprint, not a physical expand/contract of the lit radius. Making the pool
-  visibly grow/shrink would require continuous idle re-lighting (flare-style, `Light.c` ~L359) — a larger,
-  separate change, deliberately not taken here.*
-- **Burning entities reuse the same breathe (creature-keyed).** A creature ON FIRE — the player included —
-  now wears the same `CE_LIGHT_BREATHE` halo, but keyed to the creature (`channel = creature*`) instead of a
-  tile, so it *follows* the burning entity. `cosmeticEnsureBurningBreathe()` spawns it and the existing
-  status-blink lifecycle (`cosmeticRefreshStatusBlinks`) follows/despawns it — the same per-turn creature loop
-  that rides the `🔥` glyph tell, so no new iteration. Gated exactly like that tell: a real `STATUS_BURNING`,
-  **not** the `MONST_FIERY` trait. Radius from `BURNING_CREATURE_LIGHT` (capped 4); hot `cosmeticBurnColor`
-  tint. The two spawners share one effect kind and never stomp: terrain breathes are `channel==NULL` (owned by
-  `cosmeticRefreshLightBreathes`), creature breathes are `channel!=NULL` (owned by the status-blink refresh).
-
-**Why a point-source primitive, not applied to sunlight.** A breathe is one pulsing source; sunlight is an
-*area* of many glowing cells, so flagging it would spawn dozens of overlapping breathes (and blow the
-64-effect pool). Sunlight therefore uses dapple + flicker; the breathe primitive serves point sources.
-
-**Determinism / saves.** All three are cosmetic: the dapple/flicker ride `shuffleTerrainColors` and the light
-bake; the breathe rides the `RNG_COSMETIC` cosmetic layer, is hard-suppressed under playback fast-forward,
-dropped by `clearCosmeticAnimations` on level change, and degrades gracefully when the effect pool is full.
-No game-state or save impact. Marked `// iOS port (Brogue SE):`.
 
 ### 2026-07-10 — Living dungeon: tracks & traces, large-creature signs, lair dressing (new content)
 
