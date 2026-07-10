@@ -4085,7 +4085,13 @@ static void spawnGoldGoblin(void) {
 
     creature *monst = generateMonster(MK_GOLD_GOBLIN, false, false);
     monst->loc = loc;
-    monst->info.maxHP = 35 + 6 * rogue.depthLevel; // depth-scaled so the chase stays ~6-10 hits across 5-24
+    // iOS port (iBrogue): depth-scaled HP, SUPERLINEAR (a quadratic term). The old linear 35 + 6*depth kept
+    // pace early but fell behind late-game player burst -- and the once-per-run 5%/level roll puts the median
+    // first sighting near depth 18, so most encounters are exactly where it felt weakest. The goblin never
+    // fights back and flees, so it can afford to be a pure damage sponge; the quadratic keeps the chase at
+    // ~6-10 hits against a strong weapon deep down (e.g. ~73 HP @ d5, ~128 @ d10, ~200 @ d15, ~371 @ d24)
+    // while staying catchable early. Deterministic (depthLevel only) -> replay-safe.
+    monst->info.maxHP = 35 + 6 * rogue.depthLevel + (rogue.depthLevel * rogue.depthLevel) / 3;
     monst->currentHP = monst->info.maxHP;
     monst->creatureState = MONSTER_WANDERING; // dormant; its custom turn logic keeps it still until struck
     // looter.isBearer is set in initializeMonster (true for any creature with a lootProfile); clones clear it.
