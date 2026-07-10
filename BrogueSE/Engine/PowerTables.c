@@ -107,6 +107,8 @@ fixpt ringWisdomMultiplier(fixpt enchant) {
 short charmHealing(fixpt enchant)              {return ((int) clamp(charmEffectTable[CHARM_HEALTH].effectMagnitudeMultiplier * (enchant) / FP_FACTOR, 0, 100));}
 short charmShattering(fixpt enchant)           {return ((int) (charmEffectTable[CHARM_SHATTERING].effectMagnitudeConstant + (enchant / FP_FACTOR)));}
 short charmGuardianLifespan(fixpt enchant)     {return ((int) (charmEffectTable[CHARM_GUARDIAN].effectMagnitudeConstant + charmEffectTable[CHARM_GUARDIAN].effectMagnitudeMultiplier * (enchant / FP_FACTOR)));}
+// iOS port (Brogue SE): number of guardians the charm summons — 1 at base, +1 per 2 enchant levels, capped at 3.
+short charmGuardianCount(fixpt enchant)        {return ((int) clamp(1 + ((enchant / FP_FACTOR) - 1) / 2, 1, 3));}
 short charmNegationRadius(fixpt enchant)       {return ((int) (charmEffectTable[CHARM_NEGATION].effectMagnitudeConstant + charmEffectTable[CHARM_NEGATION].effectMagnitudeMultiplier * (enchant / FP_FACTOR)));}
 int charmProtection(fixpt enchant) {
     const fixpt POW_CHARM_PROTECTION[] = {

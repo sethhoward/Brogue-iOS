@@ -32,6 +32,38 @@ See `BrogueCE/Engine/IOS_MODIFICATIONS.md` (faithful CE) and
 
 ## Change log
 
+### 2026-07-10 — Charm of guardian rework: the immobile "ward" (gameplay)
+
+**Why.** The guardian charm was near-useless: it summoned a single mobile `MK_CHARM_GUARDIAN` ally that
+lived only `4 + 2*e` turns, and — because it is `MONST_IMMUNE_TO_WEAPONS` but *not* immobile —
+`monsterFleesFrom` (`Monsters.c`) made every enemy keep 6+ tiles away from it. So it could rarely reach
+anyone before expiring. Reworked into a **ward**: an immovable spectral guardian that holds a chokepoint,
+reflects bolts, and stabs approaching foes with a short reach weapon. The `MONST_IMMOBILE` exemption in
+`monsterFleesFrom` means enemies *stop* fleeing it and actually engage.
+
+**What / how.**
+- **Immobile + armed** (`Globals.c`, `MK_CHARM_GUARDIAN`): added `MONST_IMMOBILE` and gave it `{BOLT_PIKE}`.
+  Immobile creatures take their turn via the "abilities only" path (`monstersTurn` → `monstUseMagic` →
+  `monstUseBolt`, `Monsters.c:4646`), so the pike *is* how it attacks; with `MONST_ALWAYS_USE_ABILITY` it
+  fires deterministically (no `rand_percent` gate) whenever an enemy is in range.
+- **New `BOLT_PIKE`** (`Rogue.h` boltType enum, appended after `BOLT_FREEZE`; catalog row appended to
+  `boltCatalog_Brogue` in `GlobalsBrogue.c`). Mirrors the whip: `BE_ATTACK` (deals the caster's own weapon
+  damage), `BF_TARGET_ENEMIES | BF_NEVER_REFLECTS | BF_NOT_LEARNABLE | BF_DISPLAY_CHAR_ALONG_LENGTH`. Its
+  **2-cell range** is enforced in `specificallyValidBoltTarget` (`Monsters.c`, `BE_ATTACK` case): reject the
+  target if `distanceBetween > 2` — same idiom `BE_BECKONING` already uses.
+- **Count scales with enchant** (`charmGuardianCount(e) = clamp(1 + (e-1)/2, 1, 3)`, new in `PowerTables.c` +
+  decl in `Rogue.h`): 1 ward at base, 2 at +3, 3 at +5.
+- **Lifespan buffed** `4 + 2*e` → `14 + 2*e` (`charmEffectTable` `effectMagnitudeConstant` 4→14,
+  `GlobalsBrogue.c`) so a ward lasts a real fight.
+- **`summonGuardian` rewrite** (`Items.c`): loops `charmGuardianCount` times, placing each ward via
+  `getQualifyingPathLocNear` (mirroring the horde-summon place/`killCreature`-abort pattern). Includes an
+  **anti-softlock guard** (`playerFreeAdjacentCells`): a ward is never planted on the player's last free
+  adjacent cell, so the immobile guardians can't box the player in. Count-aware summon message; recharge
+  unchanged. Info tooltip (`Items.c`) now reports the guardian count.
+
+**Determinism.** Count/lifespan derive from `netEnchant`; placement RNG and combat rolls are substantive;
+`MONST_ALWAYS_USE_ABILITY` bypasses the firing `rand_percent`. Replay-safe.
+
 ### 2026-07-10 — Color-coded "check your inventory" flares for passive item events (new content)
 
 **What.** Several momentous item events currently just scroll a message by, with no visual cue to open the

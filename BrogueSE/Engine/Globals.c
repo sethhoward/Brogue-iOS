@@ -1377,8 +1377,10 @@ creatureType monsterCatalog[NUMBER_MONSTER_KINDS] = {
         (MONST_INANIMATE | MONST_NEVER_SLEEPS | MONST_ALWAYS_HUNTING | MONST_IMMUNE_TO_FIRE | MONST_IMMUNE_TO_WEAPONS | MONST_WILL_NOT_USE_STAIRS | MONST_DIES_IF_NEGATED | MONST_ALWAYS_USE_ABILITY | MONST_GETS_TURN_ON_ACTIVATION), (MA_REFLECT_100)},
     {0, "winged guardian",G_WINGED_GUARDIAN, &blue,   1000,   0,      200,    {12, 17, 2},    0,  100,    100,    DF_RUBBLE,      0,    false,      100,      DF_SILENT_GLYPH_GLOW, {BOLT_BLINKING},
         (MONST_INANIMATE | MONST_NEVER_SLEEPS | MONST_ALWAYS_HUNTING | MONST_IMMUNE_TO_FIRE | MONST_IMMUNE_TO_WEAPONS | MONST_WILL_NOT_USE_STAIRS | MONST_DIES_IF_NEGATED | MONST_GETS_TURN_ON_ACTIVATION | MONST_ALWAYS_USE_ABILITY), (MA_REFLECT_100)},
-    {0, "guardian spirit",G_GUARDIAN, &spectralImageColor,1000,0,200,  {5, 12, 2},     0,  100,    100,    0,              SPECTRAL_IMAGE_LIGHT,    false,100,0,     {0},
-        (MONST_INANIMATE | MONST_NEVER_SLEEPS | MONST_IMMUNE_TO_FIRE | MONST_IMMUNE_TO_WEAPONS | MONST_DIES_IF_NEGATED | MONST_ALWAYS_USE_ABILITY), (MA_REFLECT_100)},
+    {0, "guardian spirit",G_GUARDIAN, &spectralImageColor,1000,0,200,  {5, 12, 2},     0,  100,    100,    0,              SPECTRAL_IMAGE_LIGHT,    false,100,0,     {BOLT_PIKE},
+        // iOS port (Brogue SE): guardian charm ward. Now MONST_IMMOBILE — it holds its post (so enemies no longer flee it,
+        // per monsterFleesFrom) and blocks the tile — and strikes approaching foes with a 2-cell BOLT_PIKE reach attack.
+        (MONST_INANIMATE | MONST_NEVER_SLEEPS | MONST_IMMOBILE | MONST_IMMUNE_TO_FIRE | MONST_IMMUNE_TO_WEAPONS | MONST_DIES_IF_NEGATED | MONST_ALWAYS_USE_ABILITY), (MA_REFLECT_100)},
     {0, "Warden of Yendor",G_WARDEN, &yendorLightColor,1000,   0,    300,    {12, 17, 2},    0,  200,    200,    DF_RUBBLE,      YENDOR_LIGHT,    true,  100, 0,           {0},
         (MONST_NEVER_SLEEPS | MONST_ALWAYS_HUNTING | MONST_INVULNERABLE | MONST_NO_POLYMORPH)},
     {0, "eldritch totem",G_TOTEM, &glyphColor,80,    0,      0,      {0, 0, 0},      0,  100,    100,    DF_RUBBLE_BLOOD,0,    false,      0,      0,              {0},
