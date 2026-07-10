@@ -248,6 +248,14 @@ const color scrollEnchantmentColor ={250,   225,    300,    0,      0,          
 const color potionStrengthColor =   {1000,  0,      400,    600,    0,          0,          0,      true};
 const color empowermentFlashColor = {500,   1000,   600,    0,      500,        0,          0,      true};
 const color genericFlashColor =     {800,   800,    800,    0,      0,          0,          0,      false};
+// iOS port (Brogue SE): color-coded "check your inventory" flares centered on the player (createFlare) for
+// passive events that otherwise only scroll a message: gold = something identified (auto-ID / familiar timer
+// / runic), red = a curse revealed on equip, green = a cursed runic purified (weld released), cyan = a spent
+// staff/charm usable again. Distinct hues so the meaning reads before you open the pack.
+const color identifyFlareColor =    {750,   580,    150,    0,      0,          0,          0,      false};
+const color curseFlareColor =       {800,   90,     50,     0,      0,          0,          0,      false};
+const color purifyFlareColor =      {150,   780,    320,    0,      0,          0,          0,      false};
+const color rechargeFlareColor =    {130,   560,    800,    0,      0,          0,          0,      false};
 const color summoningFlashColor =   {0,     0,      0,      600,    0,          1200,       0,      true};
 const color fireFlashColor =        {750,   225,    0,      100,    50,         0,          0,      true};
 const color explosionFlareColor =   {10000, 6000,   1000,   0,      0,          0,          0,      false};
@@ -1130,6 +1138,11 @@ const lightSource lightCatalog[NUMBER_LIGHT_KINDS] = {
     {&quietusFlashColor,    {300, 300, 1},          0,      true},      // quietus activation flare
     {&slayingFlashColor,    {300, 300, 1},          0,      true},      // slaying activation flare
     {&lightningColor,       {800, 800, 1},          0,      false},     // electric crystal activates
+    // iOS port (Brogue SE): player-centered "check your inventory" flares (see the color defs above).
+    {&identifyFlareColor,   {350, 350, 1},          0,      true},      // item identified (auto-ID / familiar / runic)
+    {&curseFlareColor,      {350, 350, 1},          0,      true},      // a curse revealed on equip
+    {&purifyFlareColor,     {350, 350, 1},          0,      true},      // a cursed runic purified (weld released)
+    {&rechargeFlareColor,   {300, 300, 1},          0,      true},      // a spent staff/charm usable again
 
     // glowing terrain:
     {&torchLightColor,      {1000, 1000, 1},        50,     false},     // torch

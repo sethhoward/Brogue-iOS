@@ -1173,6 +1173,7 @@ static boolean purifyRunicIfReady(item *theItem) {
     if ((theItem->category & WEAPON) && theItem->enchant2 == W_CLUMSINESS) {
         theItem->enchant2 = W_QUIETUS;
     }
+    createFlare(player.loc.x, player.loc.y, PURIFY_FLARE_LIGHT); // iOS port (Brogue SE): green "curse lifted" flare
     return true;
 }
 
@@ -6999,6 +7000,7 @@ void identifyItemKind(item *theItem) {
 void autoIdentify(item *theItem) {
     short quantityBackup;
     char buf[COLS * 3], oldName[COLS * 3], newName[COLS * 3];
+    boolean revealed = false; // iOS port (Brogue SE): fire one gold "check your inventory" flare if anything is revealed here
 
     if (tableForItemCategory(theItem->category)
         && !tableForItemCategory(theItem->category)[theItem->kind].identified) {
@@ -7012,6 +7014,7 @@ void autoIdentify(item *theItem) {
                 ((theItem->category & (POTION | SCROLL)) ? "have been" : "be"),
                 newName);
         messageWithColor(buf, &itemMessageColor, 0);
+        revealed = true;
     }
 
     if ((theItem->category & (WEAPON | ARMOR))
@@ -7023,6 +7026,14 @@ void autoIdentify(item *theItem) {
         itemName(theItem, newName, true, true, NULL);
         sprintf(buf, "(Your %s must be %s.)", oldName, newName);
         messageWithColor(buf, &itemMessageColor, 0);
+        revealed = true;
+    }
+
+    // iOS port (Brogue SE): a passive identification (auto-ID by use, runic discovery) just landed -- flash a
+    // gold flare on the player so the scroll-by message isn't the only cue to open the pack. See createFlare
+    // / identifyFlareColor. Display-only (flares consume no game RNG); fast-replay-safe via animateFlares.
+    if (revealed) {
+        createFlare(player.loc.x, player.loc.y, IDENTIFY_FLARE_LIGHT);
     }
 }
 
@@ -8683,7 +8694,7 @@ boolean readScroll(item *theItem) {
                     } else {
                         sprintf(buf2, "the curse is purged from your %s -- only its gift remains.", buf);
                     }
-                    messageWithColor(buf2, &goodMessageColor, 0);
+                    messageWithColor(buf2, &advancementMessageColor, 0); // iOS port (Brogue SE): green log, matching the purify flare
                 }
             } else if (uncurse(theItem)) {
                 sprintf(buf2, "a malevolent force leaves your %s.", buf);
@@ -10420,7 +10431,8 @@ boolean equipItem(item *theItem, boolean force, item *unequipHint) {
                     sprintf(buf1, "your %s seizes you with a malevolent force.", buf2);
                     break;
             }
-            messageWithColor(buf1, &itemMessageColor, 0);
+            messageWithColor(buf1, &badMessageColor, 0); // iOS port (Brogue SE): red log, matching the curse flare below
+            createFlare(player.loc.x, player.loc.y, CURSE_FLARE_LIGHT); // iOS port (Brogue SE): red "it's cursed" flare
         }
 
         // iOS port (Brogue SE): cursed-runics rework -- Delirium's hallucination is unmistakable the

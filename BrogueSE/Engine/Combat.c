@@ -1336,6 +1336,7 @@ static void decrementWeaponAutoIDTimer() {
         itemName(rogue.weapon, buf2, true, true, NULL);
         sprintf(buf, "%s %s.", (rogue.weapon->quantity > 1 ? "they are" : "it is"), buf2);
         messageWithColor(buf, &itemMessageColor, 0);
+        createFlare(player.loc.x, player.loc.y, IDENTIFY_FLARE_LIGHT); // iOS port (Brogue SE): gold "now familiar" flare
     }
 }
 

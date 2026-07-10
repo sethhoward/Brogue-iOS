@@ -1150,6 +1150,10 @@ enum lightType {
     QUIETUS_FLARE_LIGHT,
     SLAYING_FLARE_LIGHT,
     CHARGE_FLASH_LIGHT,
+    IDENTIFY_FLARE_LIGHT,   // iOS port (Brogue SE): player "check inventory" flares (see lightCatalog + createFlare sites)
+    CURSE_FLARE_LIGHT,      // iOS port (Brogue SE)
+    PURIFY_FLARE_LIGHT,     // iOS port (Brogue SE)
+    RECHARGE_FLARE_LIGHT,   // iOS port (Brogue SE)
 
     TORCH_LIGHT,
     LAVA_LIGHT,

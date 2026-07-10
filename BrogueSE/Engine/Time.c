@@ -2179,6 +2179,7 @@ static void processIncrementalAutoID() {
                     identify(theItem);
                 }
                 updateIdentifiableItems();
+                createFlare(player.loc.x, player.loc.y, IDENTIFY_FLARE_LIGHT); // iOS port (Brogue SE): gold "now familiar" flare
 
                 itemName(theItem, theItemName, true, true, NULL);
                 sprintf(buf, "%s %s.", (theItem->quantity > 1 ? "they are" : "it is"), theItemName);
@@ -2210,6 +2211,7 @@ void rechargeItemsIncrementally(short multiplier) {
 
     for (theItem = packItems->nextItem; theItem != NULL; theItem = theItem->nextItem) {
         if (theItem->category & STAFF) {
+            const short staffChargesBefore = theItem->charges; // iOS port (Brogue SE): detect the 0->usable transition
             if (theItem->charges < theItem->enchant1 && rechargeIncrement > 0
                 || theItem->charges > 0 && rechargeIncrement < 0) {
 
@@ -2230,12 +2232,22 @@ void rechargeItemsIncrementally(short multiplier) {
                 }
                 theItem->enchant2 -= staffRechargeDuration;
             }
+            // iOS port (Brogue SE): a fully-spent staff just became usable again -- cyan flare + matching cyan
+            // log line (0->1 only, not every incremental charge, so it doesn't strobe during combat). The teal
+            // message mirrors the charm "has recharged" line below, so both recharge tells share one color.
+            if (staffChargesBefore == 0 && theItem->charges > 0) {
+                itemName(theItem, theItemName, false, false, NULL);
+                sprintf(buf, "your %s has recharged.", theItemName);
+                messageWithColor(buf, &teal, 0);
+                createFlare(player.loc.x, player.loc.y, RECHARGE_FLARE_LIGHT);
+            }
         } else if ((theItem->category & CHARM) && (theItem->charges > 0)) {
             theItem->charges = clamp(theItem->charges - multiplier, 0, charmRechargeDelay(theItem->kind, theItem->enchant1));
             if (theItem->charges == 0) {
                 itemName(theItem, theItemName, false, false, NULL);
                 sprintf(buf, "your %s has recharged.", theItemName);
-                message(buf, 0);
+                messageWithColor(buf, &teal, 0); // iOS port (Brogue SE): cyan log, matching the recharge flare
+                createFlare(player.loc.x, player.loc.y, RECHARGE_FLARE_LIGHT); // iOS port (Brogue SE): cyan "usable again" flare
             }
         }
     }

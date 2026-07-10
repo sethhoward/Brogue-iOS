@@ -32,6 +32,44 @@ See `BrogueCE/Engine/IOS_MODIFICATIONS.md` (faithful CE) and
 
 ## Change log
 
+### 2026-07-10 — Color-coded "check your inventory" flares for passive item events (new content)
+
+**What.** Several momentous item events currently just scroll a message by, with no visual cue to open the
+pack. Each now also fires a **color-coded flare on the player** (reusing the existing `createFlare` system):
+- **Gold** — something identified: auto-ID by use, a worn/used item becoming familiar, or a weapon/armor
+  **runic** revealing itself.
+- **Red** — a **curse** revealed the instant you equip a cursed item.
+- **Green** — a cursed double-edged **runic purified** (its weld releases).
+- **Cyan** — a fully-spent **staff or charm becomes usable again**.
+
+**How.** Four new flare light types (`IDENTIFY_/CURSE_/PURIFY_/RECHARGE_FLARE_LIGHT`) + matching colors
+(`identifyFlareColor`, …) in `Rogue.h`/`Globals.c` (enum order kept aligned with the `lightCatalog` rows).
+Flares fire at `player.loc` from the passive event chokes:
+- `autoIdentify()` (`Items.c`) — one gold flare covers runic discovery **and** auto-ID-by-use across its 10+
+  call sites; gated on an actual reveal (`revealed` flag), so a no-op call doesn't flash.
+- The worn-timer "now familiar" identify (`Time.c` ~L2181) and the weapon-kills familiar
+  (`decrementWeaponAutoIDTimer`, `Combat.c`) — gold.
+- The equip-time curse block in `equipItem` (`Items.c`) — red.
+- `purifyRunicIfReady()` on the transition (`Items.c`) — green.
+- `rechargeItemsIncrementally()` (`Time.c`): staff **0→usable** transition (captured before/after, so it does
+  **not** flash on every incremental charge — no combat strobe) and the charm "has recharged" moment — cyan.
+
+**Scope note — passive only.** Deliberately hooked the *automatic* reveals (timers, runic, curse-on-equip),
+**not** `identify()` generically — that also fires on scroll-of-identify / divination altars, where you
+*initiated* the ID and are already looking at inventory. No flare there.
+
+**Log colors matched to flare hues (learned association).** Each event's message text now shares its flare's
+hue, so the color becomes the tell: gold identify messages already used `itemMessageColor` (unchanged); the
+equip-curse message moved gold→**red** (`badMessageColor`); the purify message moved blue-ish
+`goodMessageColor`→**green** (`advancementMessageColor`); and recharge messages use **cyan** (`teal`) — the
+charm "has recharged" line recolored, and a matching teal staff line added on the 0→usable transition (staffs
+printed nothing before). Flare colors themselves are HDR light values, too bright for text, so the log reuses
+readable message-palette colors of the same hue rather than the flare color objects.
+
+**Determinism / saves.** Flares are display-only (the flare animation consumes no game RNG; the events driving
+them are already deterministic) and fast-replay-safe via `animateFlares`. No game-state or save impact.
+Marked `// iOS port (Brogue SE):`.
+
 ### 2026-07-10 — Sunlight comes alive + a reusable breathing-light primitive (new content)
 
 **What.** Sunlit rooms were a dead-flat bright patch. Now the light *plays*: (1) the `SUNLIGHT_POOL` floor
