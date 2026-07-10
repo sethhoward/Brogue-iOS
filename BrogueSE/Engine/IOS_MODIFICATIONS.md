@@ -32,6 +32,45 @@ See `BrogueCE/Engine/IOS_MODIFICATIONS.md` (faithful CE) and
 
 ## Change log
 
+### 2026-07-10 — Living dungeon: tracks & traces, large-creature signs, lair dressing (new content)
+
+**What.** Three cosmetic "the world records passage" features, all composed from existing machinery:
+
+1. **Tracks & traces.** A creature (or the player) that steps off water, blood or mud onto bare dry
+   floor leaves a short trail of fading footprints — wet (bluish), bloody, or muddy — that promote to
+   a shared faint smudge and then vanish (the `EMBERS→ASH` fade). A readable clue that something
+   passed and which way, plus atmosphere. Data-driven via a `spoorRules` table + `layCreatureSpoor()`.
+2. **Large-creature signs.** A creature flagged `isLarge` mats open `GRASS`/`DEAD_GRASS` flat into a
+   `FLATTENED_GRASS` swath that regrows like trampled foliage — a "something big came through here"
+   tell (small creatures leave grass untouched; dense foliage already trampled for everyone).
+3. **Lair dressing.** Extended the jackal-den `hordeType.spawnDF` hook to ogres (bones+rubble den),
+   spiders (prey husks), phantoms (glowing ectoplasm haunt) and dragons (charred-bone roost), so a
+   room reads as inhabited before its occupant is seen.
+
+**Why.** Make the dungeon feel alive without touching balance. Scope was deliberately pinned to
+"readable clue + flavor": the print tiles carry **no `T_*` gameplay flags and no monster reads them**
+(a one-way tell — you can read tracks, but nothing tracks you), and the new lairs use **cosmetic
+residue only** (no entangling webs / vision-blocking foliage beyond the pre-existing jackal den).
+
+**Where.**
+- New `tileType`s `WET_FOOTPRINTS`/`BLOODY_FOOTPRINTS`/`MUDDY_FOOTPRINTS`/`FADING_TRACKS`/
+  `FLATTENED_GRASS` (appended at enum end, no index shift) + `DF_*` counterparts and six
+  `DF_*_DEN/ROOST/HUSKS/ECTOPLASM` lair DFs (`Rogue.h`); matching `tileCatalog` and
+  `dungeonFeatureCatalog` rows (`Globals.c`).
+- Creature runtime fields `spoorType`/`spoorCharge` (`Rogue.h`), set deterministically from movement.
+- `layCreatureSpoor()` + `spoorRules`/`isBloodTile`/`isMudTile`/`isTrackableFloor` and the single call
+  in `setMonsterLocation()` — the one seam every creature *and* the player route through (`Monsters.c`).
+- `isConductiveWater()` renamed to the shared, non-static `isWetTile()` (`Items.c`, prototype in
+  `Rogue.h`) so electrified water and the spoor system share one water definition and never drift.
+- `.spawnDF` rows on the ogre/spider/phantom/dragon hordes (`GlobalsBrogue.c`).
+
+**Gating / determinism.** Footprint placement is a deterministic function of deterministic movement
+and consumes **no** RNG (DFs use `startProbability 0` = origin-only, no spread rolls); the fade rides
+the existing substantive promote loop, so everything replays from the seed exactly like the jackal
+den. New creature fields are save-safe (saves are input replays). Lairs spawn generation-only (gated
+on `!levels[...].visited`), so a horde wandering into explored dungeon never conjures one. SE is
+Game-Center-silent, so perturbing the substantive stream via the fade carries no leaderboard risk.
+
 ### 2026-07-10 — Sticky mud/bog: T_SLOWS_MOVEMENT slows steps (not fighting) (new content)
 
 **What.** Mud/bog terrain now drags at your legs: a non-attack step that *ends* on a bog tile costs extra

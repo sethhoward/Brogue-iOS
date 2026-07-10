@@ -5021,6 +5021,81 @@ boolean knownToPlayerAsPassableOrSecretDoor(pos loc) {
             || ((TMFlags & TM_IS_SECRET) && !(discoveredTerrainFlagsAtLoc(loc) & T_OBSTRUCTS_PASSABILITY)));
 }
 
+// iOS port (Brogue SE): "tracks & traces." When a creature (or the player) steps off water, blood or mud
+// onto bare dry floor it leaves a short, self-erasing trail of footprints -- a readable clue that
+// something passed, and which way, plus pure atmosphere. Data-driven (spoorRules): standing on a source
+// tile (re)charges the creature's spoor; each subsequent dry step lays one fading print and spends a
+// charge. Cosmetic only -- the print tiles carry no gameplay flags and no monster reads them (a
+// deliberately one-way tell). Placement is a deterministic function of movement and consumes no RNG
+// (startProb 0 in the DFs); the fade rides the existing substantive promote loop, so it replays from the
+// seed like the jackal den. Driven from the single all-creature seam, setMonsterLocation (just below).
+static boolean isBloodTile(pos loc) {
+    const enum tileType s = pmapAt(loc)->layers[SURFACE];
+    return (s == RED_BLOOD || s == GREEN_BLOOD || s == PURPLE_BLOOD || s == WORM_BLOOD);
+}
+
+static boolean isMudTile(pos loc) {
+    return (pmapAt(loc)->layers[LIQUID] == MUD);
+}
+
+static const struct {
+    boolean (*matches)(pos loc);
+    enum dungeonFeatureTypes footprintDF;
+    short charge;
+} spoorRules[] = {
+    { isWetTile,   DF_WET_FOOTPRINTS,    4 },  // isWetTile is shared with electrified water (Items.c)
+    { isBloodTile, DF_BLOODY_FOOTPRINTS, 3 },
+    { isMudTile,   DF_MUDDY_FOOTPRINTS,  3 },
+};
+
+// A bare, dry, standable floor cell -- the only place a footprint may be laid, so tracks never clobber
+// grass/blood/webs (the surface layer must be empty) and never sit on water, lava or chasms.
+static boolean isTrackableFloor(pos loc) {
+    return (pmapAt(loc)->layers[SURFACE] == NOTHING
+            && !cellHasTMFlag(loc, TM_ALLOWS_SUBMERGING)
+            && !cellHasTerrainFlag(loc, (T_OBSTRUCTS_SURFACE_EFFECTS | T_LAVA_INSTA_DEATH | T_AUTO_DESCENT)));
+}
+
+static void layCreatureSpoor(creature *monst, pos loc) {
+    short i;
+    const short ruleCount = sizeof(spoorRules) / sizeof(spoorRules[0]);
+
+    // Only a grounded creature touches the ground: levitating/flying leaves no tracks and mats no grass
+    // (mirrors creatureContactsWater's grounded test for electrified water). A bird over a pool stays dry.
+    if (monst->status[STATUS_LEVITATING] || (monst->info.flags & MONST_FLIES)) {
+        return;
+    }
+
+    // Standing on a marking tile (re)charges the creature's spoor; don't print on the source itself.
+    for (i = 0; i < ruleCount; i++) {
+        if (spoorRules[i].matches(loc)) {
+            monst->spoorType = spoorRules[i].footprintDF;
+            monst->spoorCharge = spoorRules[i].charge;
+            break;
+        }
+    }
+    if (i == ruleCount && monst->spoorCharge > 0 && monst->spoorType) {
+        // Not on a source: spend a charge, laying a print if this cell is bare dry floor.
+        if (isTrackableFloor(loc)) {
+            spawnDungeonFeature(loc.x, loc.y, &dungeonFeatureCatalog[monst->spoorType], true, false);
+        }
+        monst->spoorCharge--;
+        if (monst->spoorCharge <= 0) {
+            monst->spoorType = 0;
+        }
+    }
+
+    // iOS port (Brogue SE): a large creature (isLarge) mats open grass flat into a visible, slowly
+    // regrowing swath -- a "something big came through here" tell. Dense foliage already tramples for
+    // everyone (TM_PROMOTES_ON_STEP); this extends that idea to open grass, but only for heavy monsters.
+    if (monst->info.isLarge) {
+        const enum tileType s = pmapAt(loc)->layers[SURFACE];
+        if (s == GRASS || s == DEAD_GRASS) {
+            spawnDungeonFeature(loc.x, loc.y, &dungeonFeatureCatalog[DF_FLATTENED_GRASS], true, false);
+        }
+    }
+}
+
 void setMonsterLocation(creature *monst, pos newLoc) {
     unsigned long creatureFlag = (monst == &player ? HAS_PLAYER : HAS_MONSTER);
     pmapAt(monst->loc)->flags &= ~creatureFlag;
@@ -5038,6 +5113,9 @@ void setMonsterLocation(creature *monst, pos newLoc) {
         discover(newLoc.x, newLoc.y); // if you see a monster use a secret door, you discover it
     }
     refreshDungeonCell(newLoc);
+    // iOS port (Brogue SE): tracks & traces + large-creature grass flattening. Before instant tile
+    // effects, which may kill the creature (lava/traps) and free it -- the spoor only reads loc + tiles.
+    layCreatureSpoor(monst, newLoc);
     applyInstantTileEffectsToCreature(monst);
     if (monst == &player) {
         updateVision(true);

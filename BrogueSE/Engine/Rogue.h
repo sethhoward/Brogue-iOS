@@ -1098,6 +1098,20 @@ enum tileType {
     DIVINATION_ALTAR_CLOSED,   // sealed/inert (a used altar's graceful close, or an unused one shattered on awaken)
     DIVINATION_STATUE,         // the central statue; its guardian bursts out beside it on an awaken
 
+    // iOS port (Brogue SE): "tracks & traces." Fading spoor a creature leaves when it steps off water,
+    // blood or mud onto bare floor. Pure cosmetic SURFACE overlays (no T_* gameplay flags): a readable,
+    // self-erasing clue that something passed, and which way. Each fresh print promotes to a shared
+    // faint smudge and then vanishes (the EMBERS->ASH fade). Appended at enum end so no existing tile
+    // index shifts. See layCreatureSpoor (Monsters.c).
+    WET_FOOTPRINTS,
+    BLOODY_FOOTPRINTS,
+    MUDDY_FOOTPRINTS,
+    FADING_TRACKS,
+
+    // iOS port (Brogue SE): a swath of open grass matted flat by a large creature's passage (isLarge);
+    // regrows to grass like trampled foliage. A "something big came through here" tell.
+    FLATTENED_GRASS,
+
     NUMBER_TILETYPES,
 };
 
@@ -1766,6 +1780,7 @@ boolean cellHasThickSmoke(pos loc); // iOS port (Brogue SE): thick smoke blocks 
 boolean cellHasTMFlag(pos loc, unsigned long flagMask);
 
 boolean cellHasTerrainType(pos loc, enum tileType terrain);
+boolean isWetTile(pos loc); // iOS port (Brogue SE): deep/shallow water; shared by electrified-water and the tracks/traces spoor system
 
 static inline boolean coordinatesAreInMap(short x, short y) {
     return (x >= 0 && x < DCOLS && y >= 0 && y < DROWS);
@@ -2345,6 +2360,28 @@ enum dungeonFeatureTypes {
     // iOS port (Brogue SE): an armed divination altar seals shut when its revealed item is lifted
     // (promoteType fired by TM_PROMOTES_ON_ITEM_PICKUP -> lays DIVINATION_ALTAR_CLOSED).
     DF_DIVINATION_ALTAR_CLOSE,
+
+    // iOS port (Brogue SE): "tracks & traces" spoor -- each lays a single fading footprint tile at the
+    // creature's cell (no spread). The fresh print's tile promotes to FADING_TRACKS, which then vanishes.
+    // See layCreatureSpoor (Monsters.c).
+    DF_WET_FOOTPRINTS,
+    DF_BLOODY_FOOTPRINTS,
+    DF_MUDDY_FOOTPRINTS,
+    DF_FADING_TRACKS,
+
+    // iOS port (Brogue SE): a large creature's flattened-grass swath, and its slow regrowth back to grass.
+    DF_FLATTENED_GRASS,
+    DF_FLATTENED_GRASS_REGROW,
+
+    // iOS port (Brogue SE): "signs of life" -- lairs dressed at level generation via hordeType.spawnDF
+    // (the jackal-den pattern, generation-only). Cosmetic residue only (bones/rubble/ectoplasm/ash), so a
+    // room reads as inhabited before its occupant is seen, without adding a gameplay hazard. Core + apron.
+    DF_OGRE_DEN_BONES,
+    DF_OGRE_DEN_RUBBLE,
+    DF_SPIDER_HUSKS,
+    DF_PHANTOM_ECTOPLASM,
+    DF_DRAGON_ROOST_BONES,
+    DF_DRAGON_ROOST_ASH,
 
     NUMBER_DUNGEON_FEATURES,
 };
@@ -3005,6 +3042,8 @@ typedef struct creature {
     short totalPowerCount;              // how many times has the monster been empowered? Used to recover abilities when negated.
     fleerState fleer;                   // iOS port (iBrogue): reusable flee-component runtime state (gold goblin etc.)
     lootState looter;                   // iOS port (iBrogue): reusable loot-component runtime state (gold goblin etc.)
+    enum dungeonFeatureTypes spoorType; // iOS port (Brogue SE): tracks & traces -- which footprint DF this creature currently leaves (0 = none)
+    short spoorCharge;                  // iOS port (Brogue SE): tracks & traces -- steps of trail remaining after leaving water/blood/mud
 
     struct creature *leader;                 // only if monster is a follower
     struct creature *carriedMonster; // when vampires turn into bats, one of the bats restores the vampire when it dies

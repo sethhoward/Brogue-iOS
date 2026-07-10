@@ -103,6 +103,13 @@ steal (`monkeyStealProfile` / `impStealProfile` via the catalog `steal` field). 
 spawn** remains entity-specific, the *next* extraction candidate — to be lifted on next reuse, per
 [ADR 0001](../adr/0001-deterministic-component-based-content.md), not speculatively.
 
+**The "tracks & traces" spoor behavior is a fourth reusable component** (built 2026-07-10): a creature
+leaves fading footprints keyed to the terrain it walked through, driven by a `spoorRules` table (source
+predicate → footprint `DF_*` + step charge) + a `layCreatureSpoor()` shared helper + `spoorType`/
+`spoorCharge` runtime state on `creature`, called from the single all-creature seam `setMonsterLocation`.
+A new spoor source (e.g. ash, ectoplasm) is one table row. Cosmetic (no gameplay flags, no AI reads it),
+deterministic, and RNG-free to place.
+
 | Behavior | Status | Reusable form |
 |---|---|---|
 | Flee toward a target, swinging wide around the player | ✅ **built** | `monsterStepTowardAvoidingPlayer(monst, target, berth, berthCost)` (+ `monsterFleeDistanceMap`) |
@@ -116,9 +123,11 @@ spawn** remains entity-specific, the *next* extraction candidate — to be lifte
 | Per-hit shed + one-time near-death bonus | ✅ **built** | `monsterShedLootOnHit(monst, attacker, damage)` |
 | Death hoard (marquee + gold burst + thrown stack), config-driven | ✅ **built** | `monsterDropDeathLoot(monst)` + `lootState` runtime + `lootProfile` config |
 | Theft preference: which pack item a thief snatches | ✅ **built** | `rateItemStealDesirability(thief, item)` reads `stealProfile` (`STEAL_ADDITIVE`/`STEAL_EXCLUSIVE` + weighted `stealRule[]` + tunable random hedge), via the catalog `steal` field |
+| Leave fading footprints when stepping off water/blood/mud | ✅ **built** | `layCreatureSpoor(monst, loc)` reads the `spoorRules` table (source predicate → footprint `DF_*` + charge) + `spoorType`/`spoorCharge` runtime; laid at `setMonsterLocation`. Add a source = one row. Cosmetic, one-way (nothing reads the tracks). |
+| Large creatures flatten open grass into a visible swath | ✅ **built** | `isLarge` branch in `layCreatureSpoor` → `DF_FLATTENED_GRASS` (regrows to grass like trampled foliage); a "something big passed" tell. |
 | Use a stolen item against the player (zap/throw/quaff) | candidate | not built — a separate turn-time behavior keyed off `carriedItem`; build with the first thief that needs it |
 | Once-per-run pinned spawn | candidate | `spawnUniqueNear(MK_*, anchor, depthRange, chance, &flag)` (now `spawnGoldGoblin`) |
-| Dress a horde's spawn site with terrain (a "lair") | ✅ **built** | catalog `hordeType.spawnDF` (a `DF_*`); `spawnHorde` lays it at the leader's cell **at level-gen only** (`!levels[…].visited`). Core+apron composes via the DF's own `subsequentDF` chain — no helper. Reference consumer: jackal pack → `DF_JACKAL_DEN_FOLIAGE` (`{MK_JACKAL,+members}` row). A second lair monster is one catalog value. |
+| Dress a horde's spawn site with terrain (a "lair") | ✅ **built** | catalog `hordeType.spawnDF` (a `DF_*`); `spawnHorde` lays it at the leader's cell **at level-gen only** (`!levels[…].visited`). Core+apron composes via the DF's own `subsequentDF` chain — no helper. Reference consumer: jackal pack → `DF_JACKAL_DEN_FOLIAGE` (`{MK_JACKAL,+members}` row); also ogre (`DF_OGRE_DEN_BONES`), spider (`DF_SPIDER_HUSKS`), phantom (`DF_PHANTOM_ECTOPLASM`), dragon (`DF_DRAGON_ROOST_BONES`). A new lair monster is one catalog value. |
 | Dress an autogenerator's spawn site with companion terrain | ✅ **built** | catalog `autoGenerator.companionDF` + `companionChance`; `runAutogenerators` rolls the chance and spreads the DF from an **offset** cell (`getQualifyingLocNear` with the foundation blocked). The trap/autogenerator-side twin of `hordeType.spawnDF`. Reference consumers: fire trap → `DF_TRAP_DRY_GRASS`, caustic trap → `DF_BONES`. The rest of the "world feel alive" backlog is config on a row. |
 
 ---

@@ -630,6 +630,14 @@ const floorTileType tileCatalog[NUMBER_TILETYPES] = {
  /*DIVINATION_ALTAR_ARMED*/  {G_ORB_ALTAR,&altarForeColor,      &goldAltarBackColor, 17, 0,  0,0,DF_DIVINATION_ALTAR_CLOSE,0,CANDLE_LIGHT,  (T_OBSTRUCTS_SURFACE_EFFECTS), (TM_PROMOTES_ON_ITEM_PICKUP | TM_VANISHES_UPON_PROMOTION | TM_LIST_IN_SIDEBAR | TM_VISUALLY_DISTINCT), "a divining altar",       "the revealed item rests here; lift it and the altar will seal shut."},
  /*DIVINATION_ALTAR_CLOSED*/ {G_ORB_ALTAR,&black,               &goldAltarBackColor, 17, 0,  0,0,0,                      0,  NO_LIGHT,       (T_OBSTRUCTS_SURFACE_EFFECTS), (TM_LIST_IN_SIDEBAR | TM_VISUALLY_DISTINCT),                                                       "a sealed altar",         "the altar has sealed shut, its stone cold and silent."},
  /*DIVINATION_STATUE*/       {G_STATUE,   &wallBackColor,       &statueBackColor,    17, 0,  0,0,0,                      0,  CANDLE_LIGHT,   (T_OBSTRUCTS_PASSABILITY | T_OBSTRUCTS_ITEMS | T_OBSTRUCTS_GAS | T_OBSTRUCTS_SURFACE_EFFECTS), (TM_LIST_IN_SIDEBAR | TM_VISUALLY_DISTINCT), "a looming statue",       "a weathered stone statue looms over the altars; something seems to stir within it."},
+ // iOS port (Brogue SE): "tracks & traces" spoor. Cosmetic SURFACE overlays (no T_* flags). A fresh print
+ // promotes to the shared FADING_TRACKS smudge (~5 turns) and then vanishes (~5 more); ~20%/turn = 2000.
+ /*WET_FOOTPRINTS*/           {G_FLOOR_ALT,&lightBlue,           0,                  80, 0,  0,0,DF_FADING_TRACKS,             2000,  NO_LIGHT,       (0), (TM_STAND_IN_TILE | TM_VANISHES_UPON_PROMOTION),                                               "wet footprints",       "wet footprints glisten on the floor, already beginning to dry."},
+ /*BLOODY_FOOTPRINTS*/       {G_FLOOR_ALT,&humanBloodColor,     0,                  80, 0,  0,0,DF_FADING_TRACKS,             2000,  NO_LIGHT,       (0), (TM_STAND_IN_TILE | TM_VANISHES_UPON_PROMOTION),                                               "bloody footprints",    "bloody footprints are tracked across the floor."},
+ /*MUDDY_FOOTPRINTS*/        {G_FLOOR_ALT,&brown,               0,                  80, 0,  0,0,DF_FADING_TRACKS,             2000,  NO_LIGHT,       (0), (TM_STAND_IN_TILE | TM_VANISHES_UPON_PROMOTION),                                               "muddy tracks",         "muddy tracks are smeared across the floor."},
+ /*FADING_TRACKS*/           {G_FLOOR_ALT,&gray,                0,                  80, 0,  0,0,0,                            2000,  NO_LIGHT,       (0), (TM_STAND_IN_TILE | TM_VANISHES_UPON_PROMOTION),                                               "faint tracks",         "a faint smudge of tracks, nearly gone."},
+ // iOS port (Brogue SE): grass matted flat by a large creature; regrows to grass over ~100 turns.
+ /*FLATTENED_GRASS*/         {G_GRASS,    &deadGrassColor,      0,                  60, 15, DF_PLAIN_FIRE,0,DF_FLATTENED_GRASS_REGROW, 100, NO_LIGHT,       (T_IS_FLAMMABLE), (TM_STAND_IN_TILE | TM_VANISHES_UPON_PROMOTION),                                 "flattened grass",      "the grass here has been crushed flat by something large."},
 };
 
 unsigned long terrainFlags(pos p) {
@@ -1036,6 +1044,23 @@ dungeonFeature dungeonFeatureCatalog[NUMBER_DUNGEON_FEATURES] = {
     // iOS port (Brogue SE): an armed divination altar seals shut (-> DIVINATION_ALTAR_CLOSED) when its
     // revealed item is lifted. Fired via TM_PROMOTES_ON_ITEM_PICKUP -> promoteTile -> this promoteType DF.
     {DIVINATION_ALTAR_CLOSED,   DUNGEON,    0,      0,      0},
+    // iOS port (Brogue SE): tracks & traces -- single-cell fading spoor (startProb 0 = origin only, no
+    // spread, no RNG). Fresh prints promote to FADING_TRACKS then vanish. See layCreatureSpoor (Monsters.c).
+    {WET_FOOTPRINTS,            SURFACE,    0,      0,      0},
+    {BLOODY_FOOTPRINTS,         SURFACE,    0,      0,      0},
+    {MUDDY_FOOTPRINTS,          SURFACE,    0,      0,      0},
+    {FADING_TRACKS,             SURFACE,    0,      0,      0},
+    // iOS port (Brogue SE): a large creature's flattened-grass swath, and its regrowth back to grass.
+    {FLATTENED_GRASS,           SURFACE,    0,      0,      0},
+    {GRASS,                     SURFACE,    0,      0,      (DFF_BLOCKED_BY_OTHER_LAYERS)},
+    // iOS port (Brogue SE): "signs of life" lair dressing (generation-only, cosmetic). See spawnHorde's
+    // spawnDF block (Monsters.c) and the hordeCatalog_Brogue rows (GlobalsBrogue.c). Contained core + apron.
+    {BONES,                     SURFACE,    90,     40,     (DFF_BLOCKED_BY_OTHER_LAYERS),  "", 0,  0,  0,      0,          DF_OGRE_DEN_RUBBLE},
+    {RUBBLE,                    SURFACE,    60,     25,     (DFF_BLOCKED_BY_OTHER_LAYERS)},
+    {BONES,                     SURFACE,    80,     40,     (DFF_BLOCKED_BY_OTHER_LAYERS)},
+    {ECTOPLASM,                 SURFACE,    85,     35,     (DFF_BLOCKED_BY_OTHER_LAYERS)},
+    {BONES,                     SURFACE,    90,     35,     (DFF_BLOCKED_BY_OTHER_LAYERS),  "", 0,  0,  0,      0,          DF_DRAGON_ROOST_ASH},
+    {ASH,                       SURFACE,    70,     25,     (DFF_BLOCKED_BY_OTHER_LAYERS)},
 };
 
 const dungeonProfile dungeonProfileCatalog[NUMBER_DUNGEON_PROFILES] = {

@@ -5418,11 +5418,12 @@ static void detonateBolt(bolt *theBolt, creature *caster, short x, short y, bool
 #define WATER_SHOCK_MAX_RINGS       128 // safety cap on precomputed falloff table
 #define WATER_SHOCK_STUN_DURATION   3   // turns of paralysis inflicted on anything the shock damages
 
-// iOS port (iBrogue): a tile conducts the shock iff it is water (deep or shallow). Both deep
-// and shallow water carry TM_ALLOWS_SUBMERGING and TM_EXTINGUISHES_FIRE; bog, lava, cooling
-// lava and the sacrificial pit share TM_ALLOWS_SUBMERGING but not TM_EXTINGUISHES_FIRE, so the
-// pair of flags excludes them while matching deep/shallow/sloshing/luminescent water.
-static boolean isConductiveWater(pos loc) {
+// iOS port (Brogue SE): a "wet" tile = water (deep or shallow). Both deep and shallow water carry
+// TM_ALLOWS_SUBMERGING and TM_EXTINGUISHES_FIRE; bog, lava, cooling lava and the sacrificial pit share
+// TM_ALLOWS_SUBMERGING but not TM_EXTINGUISHES_FIRE, so the pair of flags excludes them while matching
+// deep/shallow/sloshing/luminescent water. Shared by electrified water (which conducts through it) and
+// the tracks & traces spoor system (wet feet leave footprints) -- one definition so the two never drift.
+boolean isWetTile(pos loc) {
     return cellHasTMFlag(loc, TM_ALLOWS_SUBMERGING) && cellHasTMFlag(loc, TM_EXTINGUISHES_FIRE);
 }
 
@@ -5433,7 +5434,7 @@ static boolean creatureContactsWater(creature *monst) {
     return monst
         && !(monst->status[STATUS_LEVITATING])
         && !(monst->info.flags & MONST_FLIES)
-        && isConductiveWater(monst->loc);
+        && isWetTile(monst->loc);
 }
 
 // iOS port (iBrogue): spread an electric bolt's charge through the connected body of water and
@@ -5468,7 +5469,7 @@ static void electrifyWater(bolt *theBolt, creature *caster, const pos *sources, 
     fillGrid(dist, -1);
 
     for (i = 0; i < numSources; i++) {
-        if (isConductiveWater(sources[i]) && dist[sources[i].x][sources[i].y] < 0) {
+        if (isWetTile(sources[i]) && dist[sources[i].x][sources[i].y] < 0) {
             dist[sources[i].x][sources[i].y] = 0;
             queue[qTail++] = sources[i];
         }
@@ -5484,7 +5485,7 @@ static void electrifyWater(bolt *theBolt, creature *caster, const pos *sources, 
             for (ny = cur.y - 1; ny <= cur.y + 1; ny++) {
                 if (coordinatesAreInMap(nx, ny)
                     && dist[nx][ny] < 0
-                    && isConductiveWater((pos){ nx, ny })) {
+                    && isWetTile((pos){ nx, ny })) {
 
                     dist[nx][ny] = d + 1;
                     if (d + 1 > maxRing) {
