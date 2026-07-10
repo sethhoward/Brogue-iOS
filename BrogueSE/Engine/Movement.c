@@ -1643,6 +1643,7 @@ static void showTravelEndNoiseFeedback(void) {
     rogue.playerNoise = NOISE_PLAYER_SILENT;
     cosmeticRefreshInvestigateBlinks();
     cosmeticRefreshStatusBlinks();
+    cosmeticRefreshLightBreathes(); // iOS port (Brogue SE): breathing lights (TM_LIGHT_BREATHES sources)
     //   (3) Event-edge wake tells ('!' / off-screen '?') captured per-monster during the suppressed steps,
     //       re-emitted once by current state, with a single condensed haptic.
     flushAutomationHeardTells();

@@ -95,6 +95,8 @@ explosive). The instant per-turn application of these to creatures happens in
 | `TM_EXPLOSIVE_PROMOTE` | 21 | when surrounded by fire/explosion, promotes (methane → explosion) |
 | `TM_SWAP_ENCHANTS_ACTIVATION` | 25 | commutation altar |
 | `TM_INSIGHT_ACTIVATION` / `TM_TRANSFER_ENCHANT_ACTIVATION` | 26–27 | **iOS-port** insight / transfer altars |
+| `TM_DIVINATION_ACTIVATION` | 28 | **SE** divination altar |
+| `TM_LIGHT_BREATHES` | 29 | **SE**: point light source whose glow gently breathes (slow warm pulse over a small halo, phase-offset per source). Cosmetic overlay only (`CE_LIGHT_BREATHE`, `RNG_COSMETIC`); set on `TORCH_WALL`, opt any light tile in. Sunlight instead uses dancing-color dapple (area, not a point source). |
 
 ---
 

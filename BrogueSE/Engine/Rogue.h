@@ -2599,6 +2599,7 @@ enum terrainMechanicalFlagCatalog {
     TM_INSIGHT_ACTIVATION           = Fl(26),       // iOS port (iBrogue): in machine, when the insight + payment altars both hold items, reveal the insight item and consume the payment, then activate
     TM_TRANSFER_ENCHANT_ACTIVATION  = Fl(27),       // iOS port (iBrogue): in machine, when the donor + recipient altars both hold items, pour the donor's enchantment into the recipient, consume the donor, then activate
     TM_DIVINATION_ACTIVATION        = Fl(28),       // iOS port (Brogue SE): an active divination altar -- when it holds an unidentified item, identify it, arm the altar, and roll the statue's awaken (see performDivination)
+    TM_LIGHT_BREATHES               = Fl(29),       // iOS port (Brogue SE): a point light source (wall torch, candle-lit altar, ...) whose glow gently breathes -- a slow warm pulse over a small halo, phase-offset per source. Cosmetic overlay only (CE_LIGHT_BREATHE, RNG_COSMETIC); opt any light tile in by adding this flag.
 
     TM_PROMOTES_ON_STEP             = (TM_PROMOTES_ON_CREATURE | TM_PROMOTES_ON_ITEM),
 };
@@ -3898,6 +3899,7 @@ extern "C" {
     void cosmeticSpawnRippleAggravate(pos source, short radius); // iOS port (Brogue SE): cosmetic layer -- level-wide aggravate ripple (alarm trap / aggravate scroll)
     void cosmeticRefreshInvestigateBlinks(void); // iOS port (Brogue SE): cosmetic layer -- per-turn '?' blink rebuild
     void cosmeticRefreshStatusBlinks(void); // iOS port (Brogue SE): cosmetic layer -- per-turn confused/burning/stun/healing blink rebuild
+    void cosmeticRefreshLightBreathes(void); // iOS port (Brogue SE): cosmetic layer -- per-turn rebuild of breathing-light overlays (TM_LIGHT_BREATHES sources)
     void cosmeticMarkHealed(const creature *monst); // iOS port (Brogue SE): cosmetic layer -- flag a creature as just-healed so the '♥' tell blinks for a couple turns
     void advanceCosmeticAnimations(void);   // iOS port (Brogue SE): cosmetic layer -- one tick (from the platform idle loop)
     void clearCosmeticAnimations(void);     // iOS port (Brogue SE): cosmetic layer -- drop all (level/playback reset)

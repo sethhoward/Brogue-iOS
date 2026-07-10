@@ -3192,6 +3192,7 @@ void playerTurnEnded() {
                 // you watch helplessly. Spawn it and tick the cosmetic layer across the watch-pause (a few
                 // short sub-pauses instead of one dead 25-frame pause) so it actually blinks.
                 cosmeticRefreshStatusBlinks();
+                cosmeticRefreshLightBreathes(); // iOS port (Brogue SE): keep breathing lights alive across the watch-pause too
                 for (short ticks = 0; ticks < 5 && !fastForward; ticks++) {
                     advanceCosmeticAnimations();
                     fastForward = rogue.playbackFastForward || pauseAnimation(5, PAUSE_BEHAVIOR_DEFAULT);
@@ -3247,6 +3248,8 @@ void playerTurnEnded() {
     cosmeticRefreshInvestigateBlinks();
     // (3b) rebuild the confused/on-fire/stunned status-blink overlays (player + visible monsters).
     cosmeticRefreshStatusBlinks();
+    // (3c) rebuild the breathing-light overlays (visible TM_LIGHT_BREATHES sources, e.g. wall torches).
+    cosmeticRefreshLightBreathes();
     // (4) advance the '!' alert-blinks: follow each to its monster's new cell and count down its turn life.
     cosmeticTickAlertBlinks();
     // (5) safety net for the automation wake-tell capture (MB_HEARD_DURING_AUTOMATION): travel/auto-explore
