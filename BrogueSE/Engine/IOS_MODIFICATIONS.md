@@ -32,6 +32,43 @@ See `BrogueCE/Engine/IOS_MODIFICATIONS.md` (faithful CE) and
 
 ## Change log
 
+### 2026-07-10 — Poisoned creatures: sickly green body tint + pulsing ☠ status-blink (new content)
+
+**What.** Any poisoned creature — the player's `@` included — now takes a sickly toxic-green cast *and* wears
+a pulsing `☠` skull overlay, so the poison DoT is legible at a glance on the map, not only in the
+sidebar/health readout. Two complementary tells: the tint recolors the creature's own glyph (always on); the
+skull rides above it, blinking in the global unison phase like the other status tells.
+
+**How — the body tint.** Two `applyColorAverage(..., &poisonTintColor, 50)` calls in `getCellAppearance`
+(`IO.c`), gated on `status[STATUS_POISONED] > 0`: one in the `HAS_MONSTER` branch (right after the existing
+frost/slow body tints, so it composes over them) and one in the `HAS_PLAYER` branch (which previously took no
+status tint at all). New plain color `poisonTintColor` in `GlobalsBase.c`/`.h` — a yellow-leaning green kept
+distinct from the bluer, minty protective-green of the shielded tell. Exact pattern as the staff-of-frost
+`STATUS_FROZEN`/`STATUS_SLOWED` tints: a persistent, deterministic **read** of game state on the display path
+— no RNG, no game-state write, no save impact. `poisonTintColor` carries no shimmer fields precisely so it
+pulls nothing from the substantive RNG when baked in this path.
+
+**How — the ☠ status-blink.** Reuses the existing `CE_STATUS_BLINK` overlay system (the 2026-06-25 entry): a
+`STATUS_POISONED` case added to `statusBlinkGlyphFor` at priority `burning > paralyzed > confused > `**`poison`**` >
+shielded > healing` (an affliction, so above the buffs, but below the urgent control effects). New glyph
+`G_POISON_SKULL` (enum tail, cosmetic-only → save-safe) → `U_SKULL_CROSSBONES` (`0x2620`) in `SEBridge.mm`'s
+glyph→unicode mapper → routed through ArialUnicodeMS in `RogueScene.swift` (`\u{2620}` added beside ★/♥/◈,
+since Monaco lacks it). Tint = new `cosmeticPoisonColor` (toxic yellow-green, family-consistent with the other
+cosmetic tints). No new effect kind — it's config on the proven blink infra.
+
+**Pulse still tabled.** The *skull* pulses (it's a blink), but the green *body tint* itself stays steady. To
+make the tint pulse would need a dedicated `CE_POISON_PULSE` kind that keeps the cell in the per-tick redraw
+set and oscillates the blend on `gCosmeticBlinkTick` (`getCellAppearance` is time-less and isn't re-run for a
+still creature each idle tick). Deferred; noted at the tint seam in `IO.c`.
+
+**Frost NOT given a glyph (deliberate).** Considered a ❄ frost blink alongside this; skipped because frozen
+already has a strong icy body tint in `getCellAppearance` (and was excluded from the blink system for exactly
+that reason on 2026-06-25). Easy to add later (❄ = `U+2744`, same 4 touchpoints) if wanted.
+
+**Determinism / saves.** Body tint is a deterministic display-path state read; the skull rides the cosmetic
+layer (`RNG_COSMETIC`, hard-suppressed under playback fast-forward). Both display-only, replay-safe. New glyph
+enum value is appended at the tail and cosmetic-only, so it's never recorded. Marked `// iOS port (Brogue SE):`.
+
 ### 2026-07-09 — Divination room reliably places 4 altars (was 2–3 in ~20% of seeds)
 
 **What.** An altar-of-divination room sometimes generated with only **2 or 3 altars** and a lot of empty
@@ -1096,6 +1133,28 @@ leaves them alone and they don't hide the trap (the trap's lower `drawPriority` 
 **Determinism / saves.** Chance roll + offset pick + spread all run on substantive RNG during generation, so
 they replay from the seed. New struct/DF fields are static catalog data — save/replay-safe. Shifts generation
 for existing seeds (expected for new content; SE is Game Center–silent). Marked `// iOS port (Brogue SE):`.
+
+### 2026-07-10 — Trap-anchored thematic terrain, cont.: glowing fungus at confusion traps (new content)
+
+**What.** Extends the `companionDF` mechanic above to the confusion trap (`GAS_TRAP_CONFUSION` /
+`_HIDDEN`): a ~40% chance to sit amid a patch of glowing luminescent fungus, whose eerie pale glow lures
+you toward the psychotropic-gas plate. Pure config on the existing seam — no new mechanism.
+
+**How.**
+- `GlobalsBrogue.c` — the two confusion-trap rows set `companionDF = DF_TRAP_LUMINESCENT_FUNGUS`,
+  `companionChance = 40` (revealed + hidden, matching fire/caustic).
+- `Globals.c` / `Rogue.h` — one new DF, `DF_TRAP_LUMINESCENT_FUNGUS` (`LUMINESCENT_FUNGUS`, contained
+  `60/22` vs open-field `DF_LUMINESCENT_FUNGUS`'s `60/8` sprawl).
+
+**#832 interaction / why fungus, not a fungal forest.** `LUMINESCENT_FUNGUS` is a grass-type surface — it
+casts `FUNGUS_LIGHT` but is **not** `T_OBSTRUCTS_VISION`, so like the grass/bones companions it never hides
+the trap nor gets stripped by the fillSpawnMap trap guard. The taller "luminescent fungal forest"
+(`FUNGUS_FOREST`) was rejected as the companion precisely because it *does* obstruct vision (would
+reintroduce the #832 hide-the-trap problem). The glow is flavor only — it illuminates ambient floor, not
+the still-secret trap glyph, so the soft-tell level matches the unlit grass/bones cases.
+
+**Determinism / saves.** Same as the parent entry — substantive-RNG generation, static catalog data,
+replay-safe. Marked `// iOS port (Brogue SE):`.
 
 ### 2026-06-23 — Noise system: a pack's rallying cry (ripple + message when a creature rouses its companions)
 

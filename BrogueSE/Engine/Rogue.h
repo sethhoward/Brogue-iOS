@@ -730,7 +730,8 @@ enum displayGlyph {
     G_STUN_STAR, // iOS port (Brogue SE): a true star glyph for the paralyzed/stunned status-blink overlay (was an ASCII '*', which collided with the gold-pile glyph). Cosmetic-only and appended at the enum tail, so it is never recorded and stays save-safe.
     G_INVERTED_QUESTION, // iOS port (Brogue SE): an inverted '¿' for the confused status-blink overlay, so its shape (not just its purple tint) differs from the white noise-system investigate '?'. Cosmetic-only, appended at the enum tail -> save-safe.
     G_HEART, // iOS port (Brogue SE): a '♥' for the healing status-blink overlay (creature being healed, or standing in bloodwort spores). Cosmetic-only, appended at the enum tail -> save-safe. Like G_STUN_STAR, not in Monaco -> rendered via ArialUnicodeMS.
-    G_SHIELD_CREST // iOS port (Brogue SE): a '◈' crest for the protected (STATUS_SHIELDED) status-blink overlay. Cosmetic-only, appended at the enum tail -> save-safe. Not in Monaco -> rendered via ArialUnicodeMS.
+    G_SHIELD_CREST, // iOS port (Brogue SE): a '◈' crest for the protected (STATUS_SHIELDED) status-blink overlay. Cosmetic-only, appended at the enum tail -> save-safe. Not in Monaco -> rendered via ArialUnicodeMS.
+    G_POISON_SKULL // iOS port (Brogue SE): a '☠' skull for the poisoned status-blink overlay (rides the green body tint in getCellAppearance). Cosmetic-only, appended at the enum tail -> save-safe. Not in Monaco -> rendered via ArialUnicodeMS.
 };
 
 enum graphicsModes {
@@ -2334,6 +2335,11 @@ enum dungeonFeatureTypes {
     // iOS port (Brogue SE): a contained patch of dry (flammable) grass laid near a fire trap as a
     // companion DF -- tighter than open-field DF_DEAD_GRASS and, unlike it, chains no dead foliage.
     DF_TRAP_DRY_GRASS,
+
+    // iOS port (Brogue SE): a contained patch of glowing luminescent fungus laid near a confusion trap
+    // as a companion DF -- tighter than open-field DF_LUMINESCENT_FUNGUS. Grass-type (no vision block),
+    // so it stays a soft tell that never hides the trap; the eerie glow just lures you toward the plate.
+    DF_TRAP_LUMINESCENT_FUNGUS,
 
     // iOS port (Brogue SE): an armed divination altar seals shut when its revealed item is lifted
     // (promoteType fired by TM_PROMOTES_ON_ITEM_PICKUP -> lays DIVINATION_ALTAR_CLOSED).

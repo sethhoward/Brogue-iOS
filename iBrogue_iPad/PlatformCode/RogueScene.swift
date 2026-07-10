@@ -805,7 +805,8 @@ fileprivate extension RogueScene {
                     self = .weapon
                 case "\u{2605}", // Brogue SE G_STUN_STAR ★ (paralyzed status-blink)
                      "\u{2665}", // Brogue SE G_HEART ♥ (healing status-blink)
-                     "\u{25C8}": // Brogue SE G_SHIELD_CREST ◈ (protected status-blink)
+                     "\u{25C8}", // Brogue SE G_SHIELD_CREST ◈ (protected status-blink)
+                     "\u{2620}": // Brogue SE G_POISON_SKULL ☠ (poisoned status-blink)
                     self = .arialSymbol
                 default:
                     self = .glyph

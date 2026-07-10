@@ -1351,6 +1351,11 @@ void getCellAppearance(pos loc, enum displayGlyph *returnChar, color *returnFore
         if (pmapAt(loc)->flags & HAS_PLAYER) {
             cellChar = player.info.displayChar;
             cellForeColor = *(player.info.foreColor);
+            // iOS port (Brogue SE): the player's @ takes the same sickly green cast when poisoned (mirrors the
+            // monster body tint above). Deterministic state read, no RNG.
+            if (player.status[STATUS_POISONED] > 0) {
+                applyColorAverage(&cellForeColor, &poisonTintColor, 50);
+            }
             needDistinctness = true;
         } else if (((pmapAt(loc)->flags & HAS_ITEM) && (pmapAt(loc)->flags & ITEM_DETECTED)
                     && itemMagicPolarity(theItem)
@@ -1409,6 +1414,18 @@ void getCellAppearance(pos loc, enum displayGlyph *returnChar, color *returnFore
                         applyColorAverage(&cellBackColor, &lightBlue, 40);
                     } else if (monst->status[STATUS_SLOWED]) {
                         applyColorAverage(&cellForeColor, &lightBlue, 30);
+                    }
+                    // iOS port (Brogue SE): poisoned creatures wear a sickly green cast (persistent state tint,
+                    // like the frost/slow tints above -- a deterministic read of game state, no RNG). Composes
+                    // over the frost/slow tint if both apply. See the matching HAS_PLAYER branch for the player.
+                    // A pulsing '☠' status-blink tell now rides poisoned creatures too (statusBlinkGlyphFor ~L2701),
+                    // so poison has a steady body tint PLUS a pulsing glyph. TODO (tabled): to make this GREEN BODY
+                    // TINT itself pulse, don't animate here -- getCellAppearance is a pure, time-less function and a
+                    // still creature's cell isn't re-run each idle tick. That needs a dedicated cosmetic kind
+                    // (CE_POISON_PULSE) + a cosmeticRefresh* sibling that keeps the cell in the per-tick redraw set
+                    // and oscillates this blend weight on gCosmeticBlinkTick.
+                    if (monst->status[STATUS_POISONED] > 0) {
+                        applyColorAverage(&cellForeColor, &poisonTintColor, 50);
                     }
                 }
                 //DEBUG if (monst->bookkeepingFlags & MB_LEADER) applyColorAverage(&cellBackColor, &purple, 50);
@@ -2294,6 +2311,7 @@ static const color cosmeticConfusedColor = {60, 25, 75, 35, 15, 45, 0, true}; //
 static const color cosmeticHasteColor    = {30, 90, 100, 20, 10, 0, 0, true}; // electric cyan -- the hasted "blink dash" contrail
 static const color cosmeticHealColor     = {100, 40, 60, 0, 20, 20, 0, true}; // bright rose-pink -- warm/wort family but far lighter + pinker than the dim darkRed {50,0,0} healing cloud, so the heart separates from the spores it sits in
 static const color cosmeticShieldColor   = {20, 85, 40, 15, 20, 15, 0, true}; // protective green (STATUS_SHIELDED)
+static const color cosmeticPoisonColor   = {50, 90, 10, 20, 20,  0, 0, true}; // sickly toxic yellow-green (STATUS_POISONED) -- leans yellow to stay distinct from the bluer protective-green shield crest
 
 typedef struct {
     boolean active;
@@ -2683,9 +2701,9 @@ void cosmeticRefreshInvestigateBlinks(void) {
 
 // iOS port (Brogue SE): pick the status-blink glyph + tint for a creature, by priority (one tell at a time):
 // on fire (NOT the MONST_FIERY trait -- only a real STATUS_BURNING, matching the light/extinguish systems) >
-// paralyzed/stunned > confused > shielded > healing. Returns false if the creature has no tell-worthy status.
-// (Buffs rank below threats/afflictions; among buffs, shielded -- "my damage is absorbed" -- outranks healing
-// -- "it's topping up".)
+// paralyzed/stunned > confused > poisoned > shielded > healing. Returns false if no tell-worthy status.
+// (Afflictions rank above buffs; poison sits below the urgent control effects (burning/paralyzed/confused)
+// but above the buffs. Among buffs, shielded -- "my damage is absorbed" -- outranks healing -- "topping up".)
 static boolean statusBlinkGlyphFor(const creature *m, enum displayGlyph *glyph, const color **tint) {
     if (m->status[STATUS_BURNING] > 0 && !(m->info.flags & MONST_FIERY)) {
         *glyph = G_FIRE;
@@ -2700,6 +2718,11 @@ static boolean statusBlinkGlyphFor(const creature *m, enum displayGlyph *glyph, 
     if (m->status[STATUS_CONFUSED] > 0) {
         *glyph = G_INVERTED_QUESTION; // inverted '¿' + purple tint -- distinct in BOTH shape and color from the white investigate '?'
         *tint = &cosmeticConfusedColor;
+        return true;
+    }
+    if (m->status[STATUS_POISONED] > 0) {
+        *glyph = G_POISON_SKULL; // '☠' + toxic green -- reinforces the poisoned body tint (getCellAppearance)
+        *tint = &cosmeticPoisonColor;
         return true;
     }
     if (m->status[STATUS_SHIELDED] > 0) {

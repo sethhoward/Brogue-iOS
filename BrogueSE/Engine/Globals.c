@@ -1028,6 +1028,11 @@ dungeonFeature dungeonFeatureCatalog[NUMBER_DUNGEON_FEATURES] = {
     // 75/5 sprawl) and chains no dead foliage -- just flammable grass that the trap's flame can ignite.
     {DEAD_GRASS,                SURFACE,    75,     25,     (DFF_BLOCKED_BY_OTHER_LAYERS)},
 
+    // iOS port (Brogue SE): companion glowing fungus for a confusion trap. Contained (60/22, vs open
+    // DF_LUMINESCENT_FUNGUS's 60/8 sprawl). Grass-type surface -- casts a pale glow but doesn't obstruct
+    // vision, so (like the grass/bones companions) it never hides the trap nor gets stripped off it.
+    {LUMINESCENT_FUNGUS,        SURFACE,    60,     22,     (DFF_BLOCKED_BY_OTHER_LAYERS)},
+
     // iOS port (Brogue SE): an armed divination altar seals shut (-> DIVINATION_ALTAR_CLOSED) when its
     // revealed item is lifted. Fired via TM_PROMOTES_ON_ITEM_PICKUP -> promoteTile -> this promoteType DF.
     {DIVINATION_ALTAR_CLOSED,   DUNGEON,    0,      0,      0},
