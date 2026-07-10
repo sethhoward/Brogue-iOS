@@ -2300,7 +2300,7 @@ static const char gCosmeticImpactRippleChannel = 0;
 
 // Effect kinds hosted by the layer. RIPPLE_* paint via hiliteCell (color overlay); ALERT/BLINK via a
 // glyph (plotCharWithColor). (File-local; promote to Rogue.h if a spawner ever needs a kind parameter.)
-enum cosmeticEffectKind { CE_ALERT_GLYPH, CE_RIPPLE_MONSTER, CE_RIPPLE_PLAYER, CE_RIPPLE_IMPACT, CE_RIPPLE_AGGRAVATE, CE_INVESTIGATE_BLINK, CE_ALERT_BLINK, CE_STATUS_BLINK, CE_SPEED_TRAIL, CE_LIGHT_BREATHE };
+enum cosmeticEffectKind { CE_ALERT_GLYPH, CE_RIPPLE_MONSTER, CE_RIPPLE_PLAYER, CE_RIPPLE_IMPACT, CE_RIPPLE_AGGRAVATE, CE_INVESTIGATE_BLINK, CE_ALERT_BLINK, CE_STATUS_BLINK, CE_SPEED_TRAIL, CE_STAR_RIPPLE };
 
 // iOS port (Brogue SE): tints for the status-blink overlays (a glyph that rides a confused/burning/stunned
 // creature, the player included). Flame = fireForeColor's warm flicker; stun = dazed yellow "stars";
@@ -2312,13 +2312,16 @@ static const color cosmeticHasteColor    = {30, 90, 100, 20, 10, 0, 0, true}; //
 static const color cosmeticHealColor     = {100, 40, 60, 0, 20, 20, 0, true}; // bright rose-pink -- warm/wort family but far lighter + pinker than the dim darkRed {50,0,0} healing cloud, so the heart separates from the spores it sits in
 static const color cosmeticShieldColor   = {20, 85, 40, 15, 20, 15, 0, true}; // protective green (STATUS_SHIELDED)
 static const color cosmeticPoisonColor   = {50, 90, 10, 20, 20,  0, 0, true}; // sickly toxic yellow-green (STATUS_POISONED) -- leans yellow to stay distinct from the bluer protective-green shield crest
-static const color cosmeticLightBreatheColor = {70, 55, 20, 0, 0, 0, 0, false}; // warm amber halo for the breathing-light overlay (CE_LIGHT_BREATHE)
-// iOS port (Brogue SE): breathing-light tuning. Period ~a slow 2-3s in/out; STRENGTH = peak hilite (0-100).
-// The halo radius is derived per-source from the light's own footprint (lightCatalog radius, in tiles),
-// capped at MAX_RADIUS so a wide torch (10-tile light) can't blow the 1024-cell/frame paint budget.
-#define CE_LIGHT_BREATHE_PERIOD    160
-#define CE_LIGHT_BREATHE_STRENGTH   14
-#define CE_LIGHT_BREATHE_MAX_RADIUS  4
+// iOS port (Brogue SE): the color-coded item-event "star ripple" (CE_STAR_RIPPLE) -- an 8-ray radial burst at
+// the player. Distinct in SHAPE from the box/wave noise ripples. Colors keyed by itemTellKind (0-100 range so
+// hiliteCell doesn't clamp them to white like the HDR flare-lights would).
+static const color cosmeticStarIdentifyColor = {95, 80, 25, 0, 0, 0, 0, false}; // gold: something identified
+static const color cosmeticStarCurseColor    = {95, 22, 28, 0, 0, 0, 0, false}; // red: a curse revealed
+static const color cosmeticStarPurifyColor   = {30, 95, 45, 0, 0, 0, 0, false}; // green: a curse purified
+static const color cosmeticStarRechargeColor  = {30, 82, 98, 0, 0, 0, 0, false}; // cyan: a staff/charm usable again
+#define CE_STAR_RIPPLE_STEP_FRAMES   2  // idle frames per ray-tip step outward
+#define CE_STAR_RIPPLE_MAX_RADIUS    4  // rays reach this far, then the burst expires
+#define CE_STAR_RIPPLE_STRENGTH     55  // peak hilite at the ray tip (fades as it expands)
 
 typedef struct {
     boolean active;
@@ -2547,6 +2550,35 @@ void cosmeticSpawnRipplePlayer(short radius) {
     gCosmeticEffects[i].channel = &gCosmeticPlayerRippleChannel;
     gCosmeticEffects[i].frameAge = 0;
     gCosmeticEffects[i].frameLife = radius * CE_RIPPLE_EXPAND_FRAMES;
+}
+
+// iOS port (Brogue SE): spawn the color-coded item-event "star ripple" -- a transient 8-ray radial burst at
+// loc, in the kind's color. Shape (a star, not a ring/box) keeps it clearly distinct from the noise ripples.
+void cosmeticSpawnItemTell(pos loc, enum itemTellKind kind) {
+    if (rogue.playbackFastForward || !coordinatesAreInMap(loc.x, loc.y)) {
+        return;
+    }
+    const color *tint;
+    switch (kind) {
+        case ITEM_TELL_CURSE:    tint = &cosmeticStarCurseColor;    break;
+        case ITEM_TELL_PURIFY:   tint = &cosmeticStarPurifyColor;   break;
+        case ITEM_TELL_RECHARGE: tint = &cosmeticStarRechargeColor; break;
+        case ITEM_TELL_IDENTIFY:
+        default:                 tint = &cosmeticStarIdentifyColor; break;
+    }
+    short i = cosmeticFreeSlot();
+    if (i < 0) {
+        return; // pool full -- a missed tell is harmless
+    }
+    gCosmeticEffects[i].active = true;
+    gCosmeticEffects[i].kind = CE_STAR_RIPPLE;
+    gCosmeticEffects[i].origin = loc;
+    gCosmeticEffects[i].glyph = 0;
+    gCosmeticEffects[i].tint = tint;
+    gCosmeticEffects[i].maxRadius = CE_STAR_RIPPLE_MAX_RADIUS;
+    gCosmeticEffects[i].channel = NULL;
+    gCosmeticEffects[i].frameAge = 0;
+    gCosmeticEffects[i].frameLife = CE_STAR_RIPPLE_MAX_RADIUS * CE_STAR_RIPPLE_STEP_FRAMES; // transient; ages out
 }
 
 // iOS port (Brogue SE): retire any in-flight player sound-footprint ripple. The ripple is a single-turn
@@ -2799,41 +2831,6 @@ static void cosmeticEnsureStatusBlink(creature *m) {
     gCosmeticEffects[i].turnsLeft = 0;
 }
 
-// iOS port (Brogue SE): ensure a VISIBLE creature that is ON FIRE has exactly one breathing-light halo --
-// the SAME CE_LIGHT_BREATHE component the wall torches use, but keyed to the creature (channel = creature*)
-// so it follows the burning entity, spawned/followed/despawned by the status-blink lifecycle below. Gated
-// like the '🔥' status tell: a real STATUS_BURNING, NOT the MONST_FIERY trait (an innately fiery monster has
-// its own light and isn't "caught on fire"). Radius from the burning-creature light, capped; hot fire tint.
-static void cosmeticEnsureBurningBreathe(creature *m) {
-    short i;
-    if (!((m == &player) || canSeeMonster(m))
-        || m->status[STATUS_BURNING] <= 0
-        || (m->info.flags & MONST_FIERY)) {
-        return;
-    }
-    for (i = 0; i < MAX_COSMETIC_EFFECTS; i++) {
-        if (gCosmeticEffects[i].active && gCosmeticEffects[i].kind == CE_LIGHT_BREATHE
-            && gCosmeticEffects[i].channel == (const void *)m) {
-            return; // already has one (the lifecycle pass keeps its origin current)
-        }
-    }
-    i = cosmeticFreeSlot();
-    if (i < 0) {
-        return; // pool full -- harmless
-    }
-    const short litRadius = lightCatalog[BURNING_CREATURE_LIGHT].lightRadius.upperBound / 100;
-    gCosmeticEffects[i].active = true;
-    gCosmeticEffects[i].kind = CE_LIGHT_BREATHE;
-    gCosmeticEffects[i].origin = m->loc;
-    gCosmeticEffects[i].glyph = 0;
-    gCosmeticEffects[i].tint = &cosmeticBurnColor; // the flame color the '🔥' tell uses -- ties the halo to the fire
-    gCosmeticEffects[i].maxRadius = clamp(litRadius, 1, CE_LIGHT_BREATHE_MAX_RADIUS);
-    gCosmeticEffects[i].channel = (const void *)m; // creature-keyed: identity + follow
-    gCosmeticEffects[i].frameAge = 0;
-    gCosmeticEffects[i].frameLife = 0; // persistent; the status-blink lifecycle manages it
-    gCosmeticEffects[i].turnsLeft = 0;
-}
-
 // iOS port (Brogue SE): rebuild the status-blink overlays -- a glyph that rides any VISIBLE creature (the
 // player included) carrying a confused / on-fire / paralyzed / ... status (one tell at a time, by priority).
 // Sibling to cosmeticRefreshInvestigateBlinks: called once per turn, blinks in the same global unison phase,
@@ -2849,9 +2846,7 @@ void cosmeticRefreshStatusBlinks(void) {
     short i;
     if (rogue.playbackFastForward) {
         for (i = 0; i < MAX_COSMETIC_EFFECTS; i++) {
-            if (gCosmeticEffects[i].active
-                && (gCosmeticEffects[i].kind == CE_STATUS_BLINK
-                    || (gCosmeticEffects[i].kind == CE_LIGHT_BREATHE && gCosmeticEffects[i].channel != NULL))) {
+            if (gCosmeticEffects[i].active && gCosmeticEffects[i].kind == CE_STATUS_BLINK) {
                 gCosmeticEffects[i].active = false;
             }
             gHealMarks[i].c = NULL;
@@ -2886,29 +2881,10 @@ void cosmeticRefreshStatusBlinks(void) {
             e->active = false;
         }
     }
-    // Lifecycle: creature-keyed burning breathes (the CE_LIGHT_BREATHE halo riding a creature on fire). Follow
-    // the burning creature; drop it when doused, gone, or out of view. (Terrain breathes -- channel==NULL --
-    // are owned by cosmeticRefreshLightBreathes and skipped here.)
-    for (i = 0; i < MAX_COSMETIC_EFFECTS; i++) {
-        cosmeticEffect *e = &gCosmeticEffects[i];
-        if (!e->active || e->kind != CE_LIGHT_BREATHE || e->channel == NULL) {
-            continue;
-        }
-        creature *c = cosmeticCreatureForChannel(e->channel);
-        if (c && ((c == &player) || canSeeMonster(c))
-            && c->status[STATUS_BURNING] > 0 && !(c->info.flags & MONST_FIERY)) {
-            e->origin = c->loc;
-        } else {
-            e->active = false;
-        }
-    }
-    // Spawn for the player and any visible monster newly carrying a status / newly on fire.
+    // Spawn for the player and any visible monster newly carrying a status.
     cosmeticEnsureStatusBlink(&player);
-    cosmeticEnsureBurningBreathe(&player);
     for (creatureIterator it = iterateCreatures(monsters); hasNextCreature(it);) {
-        creature *m = nextCreature(&it);
-        cosmeticEnsureStatusBlink(m);
-        cosmeticEnsureBurningBreathe(m);
+        cosmeticEnsureStatusBlink(nextCreature(&it));
     }
     // (No heal-marker decrement here: the heart's lifetime is a window on absoluteTurnNumber, debounced against
     // this function running several times per turn -- see gHealMarks / cosmeticRecentlyHealed.)
@@ -3011,77 +2987,6 @@ void clearCosmeticAnimations(void) {
     gCosmeticBlinkTick = 0;
 }
 
-// iOS port (Brogue SE): rebuild the breathing-light overlays -- one persistent CE_LIGHT_BREATHE per VISIBLE
-// tile flagged TM_LIGHT_BREATHES (wall torches today; any light tile opts in by adding the flag). Sibling to
-// cosmeticRefreshStatusBlinks: called once per turn, keyed by the source's position (not a creature pointer,
-// since terrain doesn't move). The render pulses a warm halo on the global clock, phase-offset per source so
-// a row of torches breathes out of sync. Hard-suppressed only during fast replay. Cosmetic (RNG_COSMETIC).
-void cosmeticRefreshLightBreathes(void) {
-    short i, x, y;
-    if (rogue.playbackFastForward) {
-        for (i = 0; i < MAX_COSMETIC_EFFECTS; i++) {
-            if (gCosmeticEffects[i].active && gCosmeticEffects[i].kind == CE_LIGHT_BREATHE
-                && gCosmeticEffects[i].channel == NULL) { // terrain breathes only; creature ones are managed by the status-blink refresh
-                gCosmeticEffects[i].active = false;
-            }
-        }
-        return;
-    }
-    // Despawn breathes whose source is no longer a visible breathing-light tile (out of view, or the tile
-    // changed -- e.g. a torch that burned out or a wall that was dug through). channel==NULL => terrain-keyed;
-    // creature-keyed burning breathes (channel!=NULL) are owned by cosmeticRefreshStatusBlinks, so skip them.
-    for (i = 0; i < MAX_COSMETIC_EFFECTS; i++) {
-        cosmeticEffect *e = &gCosmeticEffects[i];
-        if (!e->active || e->kind != CE_LIGHT_BREATHE || e->channel != NULL) {
-            continue;
-        }
-        if (!playerCanSeeOrSense(e->origin.x, e->origin.y)
-            || !cellHasTMFlag(e->origin, TM_LIGHT_BREATHES)) {
-            e->active = false;
-        }
-    }
-    // Spawn for visible breathing-light tiles that don't have one yet.
-    for (x = 0; x < DCOLS; x++) {
-        for (y = 0; y < DROWS; y++) {
-            if (!cellHasTMFlag((pos){ x, y }, TM_LIGHT_BREATHES) || !playerCanSeeOrSense(x, y)) {
-                continue;
-            }
-            boolean has = false;
-            for (i = 0; i < MAX_COSMETIC_EFFECTS; i++) {
-                if (gCosmeticEffects[i].active && gCosmeticEffects[i].kind == CE_LIGHT_BREATHE
-                    && gCosmeticEffects[i].channel == NULL
-                    && posEq(gCosmeticEffects[i].origin, (pos){ x, y })) {
-                    has = true;
-                    break;
-                }
-            }
-            if (has) {
-                continue;
-            }
-            i = cosmeticFreeSlot();
-            if (i < 0) {
-                return; // pool full -- a missed breathe is harmless
-            }
-            // Derive the halo radius from the source's OWN light footprint (so a torch breathes over its
-            // wide glow, a candle over its small one), capped for the per-frame paint budget. The flag lives
-            // on the light-emitting tile, so read that layer's glowLight -> lightCatalog radius (÷100 = tiles).
-            const enum dungeonLayers lyr = layerWithTMFlag(x, y, TM_LIGHT_BREATHES);
-            const short glow = (lyr == NO_LAYER) ? 0 : tileCatalog[pmap[x][y].layers[lyr]].glowLight;
-            const short litRadius = glow ? (lightCatalog[glow].lightRadius.upperBound / 100) : 1;
-            gCosmeticEffects[i].active = true;
-            gCosmeticEffects[i].kind = CE_LIGHT_BREATHE;
-            gCosmeticEffects[i].origin = (pos){ x, y };
-            gCosmeticEffects[i].glyph = 0;
-            gCosmeticEffects[i].tint = &cosmeticLightBreatheColor;
-            gCosmeticEffects[i].maxRadius = clamp(litRadius, 1, CE_LIGHT_BREATHE_MAX_RADIUS);
-            gCosmeticEffects[i].channel = NULL; // identity is origin+kind (terrain doesn't move)
-            gCosmeticEffects[i].frameAge = 0;
-            gCosmeticEffects[i].frameLife = 0; // persistent; this rebuild manages its lifetime
-            gCosmeticEffects[i].turnsLeft = 0;
-        }
-    }
-}
-
 // iOS port (Brogue SE): one tick of the cosmetic layer -- age/expire effects, then DIRTY-CELL recomposite:
 // paint this frame's active-effect cells over the base, and restore any cell painted last frame but not
 // this one. Scoped strictly to effect cells (never the button-bar row), so the commitDraws diff is
@@ -3114,6 +3019,42 @@ void advanceCosmeticAnimations(void) {
     memset(gCosmeticPaintedNow, 0, sizeof(gCosmeticPaintedNow));
     nowIdx = 1 - gCosmeticCur;
     gCosmeticCellCount[nowIdx] = 0;
+
+    // 2a(pre). item-event STAR RIPPLE, painted BEFORE the noise ripples so it CLAIMS its cells first (the
+    // first painter of a cell each frame wins it via cosmeticMarkCell; later effects skip it). That gives the
+    // star priority: a noise ripple sweeping over it paints AROUND it instead of punching holes, so the star
+    // reads cleanly and runs to completion (frameLife). An 8-ray radial burst at the player -- rays shoot
+    // outward (tip + a dimmer trailing cell), fading as they expand, with a bright center flash on step 1. Its
+    // star shape (not a box/wave) already sets it apart from the noise ripples; the claim-first gives priority.
+    for (i = 0; i < MAX_COSMETIC_EFFECTS; i++) {
+        cosmeticEffect *e = &gCosmeticEffects[i];
+        if (!e->active || e->kind != CE_STAR_RIPPLE) {
+            continue;
+        }
+        const short waveR = e->frameAge / CE_STAR_RIPPLE_STEP_FRAMES + 1; // current ray-tip radius
+        if (waveR > e->maxRadius) {
+            continue; // fully expanded; the age loop will retire it
+        }
+        const short strength = CE_STAR_RIPPLE_STRENGTH * (e->maxRadius - waveR + 1) / e->maxRadius;
+        // bright center flash for the first step (the "pop")
+        if (e->frameAge < CE_STAR_RIPPLE_STEP_FRAMES && cosmeticMarkCell(e->origin, nowIdx)) {
+            hiliteCell(e->origin.x, e->origin.y, e->tint, CE_STAR_RIPPLE_STRENGTH, false);
+        }
+        static const short starX[8] = {0, 0, -1, 1, -1, 1, -1, 1};
+        static const short starY[8] = {-1, 1, 0, 0, -1, -1, 1, 1};
+        for (short d = 0; d < 8; d++) {
+            const pos tip = (pos){ e->origin.x + starX[d] * waveR, e->origin.y + starY[d] * waveR };
+            if (coordinatesAreInMap(tip.x, tip.y) && cosmeticMarkCell(tip, nowIdx)) {
+                hiliteCell(tip.x, tip.y, e->tint, strength, false);
+            }
+            if (waveR > 1) { // a dimmer trailing cell so each ray reads as a streak, not a lone dot
+                const pos trail = (pos){ e->origin.x + starX[d] * (waveR - 1), e->origin.y + starY[d] * (waveR - 1) };
+                if (coordinatesAreInMap(trail.x, trail.y) && cosmeticMarkCell(trail, nowIdx)) {
+                    hiliteCell(trail.x, trail.y, e->tint, strength / 2, false);
+                }
+            }
+        }
+    }
 
     // 2a. ripples first (color-hilite), so glyph kinds below can override on any shared cell
     for (i = 0; i < MAX_COSMETIC_EFFECTS; i++) {
@@ -3160,44 +3101,6 @@ void advanceCosmeticAnimations(void) {
                     if (cosmeticMarkCell(p, nowIdx)) {
                         hiliteCell(ix, iy, e->tint, strength, false);
                     }
-                }
-            }
-        }
-    }
-
-    // 2a''. breathing lights (color-hilite): a slow warm pulse over a small halo around each TM_LIGHT_BREATHES
-    // source. A triangle wave on the global clock, phase-offset by the source's coordinates so a row of torches
-    // breathes out of unison; the halo falls off with Chebyshev distance. Persistent (frameLife 0), so it never
-    // ages out here -- cosmeticRefreshLightBreathes manages its lifetime by visibility.
-    for (i = 0; i < MAX_COSMETIC_EFFECTS; i++) {
-        cosmeticEffect *e = &gCosmeticEffects[i];
-        if (!e->active || e->kind != CE_LIGHT_BREATHE) {
-            continue;
-        }
-        short ph = (gCosmeticBlinkTick + e->origin.x * 7 + e->origin.y * 13) % CE_LIGHT_BREATHE_PERIOD;
-        if (ph < 0) {
-            ph += CE_LIGHT_BREATHE_PERIOD;
-        }
-        const short half = CE_LIGHT_BREATHE_PERIOD / 2;
-        const short tri = (ph < half) ? ph : (CE_LIGHT_BREATHE_PERIOD - ph); // 0..half..0
-        const short peak = CE_LIGHT_BREATHE_STRENGTH * tri / half;           // 0..STRENGTH
-        if (peak <= 0) {
-            continue; // trough: leave the base look untouched
-        }
-        const short r = e->maxRadius;
-        for (short dy = -r; dy <= r; dy++) {
-            for (short dx = -r; dx <= r; dx++) {
-                const short dist = max(abs(dx), abs(dy)); // Chebyshev
-                if (dist > r) {
-                    continue;
-                }
-                const pos p = (pos){ e->origin.x + dx, e->origin.y + dy };
-                if (!coordinatesAreInMap(p.x, p.y) || !playerCanSeeOrSense(p.x, p.y)) {
-                    continue;
-                }
-                const short cellStrength = peak * (r - dist + 1) / (r + 1); // linear falloff from the source
-                if (cellStrength > 0 && cosmeticMarkCell(p, nowIdx)) {
-                    hiliteCell(p.x, p.y, e->tint, cellStrength, false);
                 }
             }
         }

@@ -1173,7 +1173,7 @@ static boolean purifyRunicIfReady(item *theItem) {
     if ((theItem->category & WEAPON) && theItem->enchant2 == W_CLUMSINESS) {
         theItem->enchant2 = W_QUIETUS;
     }
-    createFlare(player.loc.x, player.loc.y, PURIFY_FLARE_LIGHT); // iOS port (Brogue SE): green "curse lifted" flare
+    cosmeticSpawnItemTell(player.loc, ITEM_TELL_PURIFY); // iOS port (Brogue SE): green "curse lifted" star ripple
     return true;
 }
 
@@ -7029,11 +7029,11 @@ void autoIdentify(item *theItem) {
         revealed = true;
     }
 
-    // iOS port (Brogue SE): a passive identification (auto-ID by use, runic discovery) just landed -- flash a
-    // gold flare on the player so the scroll-by message isn't the only cue to open the pack. See createFlare
-    // / identifyFlareColor. Display-only (flares consume no game RNG); fast-replay-safe via animateFlares.
+    // iOS port (Brogue SE): a passive identification (auto-ID by use, runic discovery) just landed -- fire a
+    // gold "star ripple" on the player so the scroll-by message isn't the only cue to open the pack. Cosmetic
+    // layer (a radial star burst, distinct from noise ripples); display-only, no game RNG.
     if (revealed) {
-        createFlare(player.loc.x, player.loc.y, IDENTIFY_FLARE_LIGHT);
+        cosmeticSpawnItemTell(player.loc, ITEM_TELL_IDENTIFY);
     }
 }
 
@@ -10432,7 +10432,7 @@ boolean equipItem(item *theItem, boolean force, item *unequipHint) {
                     break;
             }
             messageWithColor(buf1, &badMessageColor, 0); // iOS port (Brogue SE): red log, matching the curse flare below
-            createFlare(player.loc.x, player.loc.y, CURSE_FLARE_LIGHT); // iOS port (Brogue SE): red "it's cursed" flare
+            cosmeticSpawnItemTell(player.loc, ITEM_TELL_CURSE); // iOS port (Brogue SE): red "it's cursed" star ripple
         }
 
         // iOS port (Brogue SE): cursed-runics rework -- Delirium's hallucination is unmistakable the
