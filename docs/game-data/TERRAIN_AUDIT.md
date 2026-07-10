@@ -67,6 +67,8 @@ Two catalogs and a flag system drive everything:
 | `T_IS_DF_TRAP` | 19 | spews its DF when triggered (pressure-plate traps) |
 | `T_CAUSES_EXPLOSIVE_DAMAGE` | 20 | explosion damage (gas explosion) |
 | `T_SACRED` | 21 | non-ally monsters avoid (sacred glyph) |
+| `T_CAUSES_FREEZE` | 22 | freezes anything caught on the tile (SE frost cloud) |
+| `T_SLOWS_MOVEMENT` | 23 | **SE**: sticky terrain (mud/bog) — a non-attack step ending here costs extra move-ticks (attacks unaffected). Charged in `playerTurnEnded` (player) and `applyMudMoveSlow` after `monstersTurn` (monsters). Levitators/fliers skip it; a mud-native (`MONST_RESTRICTED_TO_LIQUID`) is exempt unless `MONSTER_FLEEING`. Dial: `MUD_MOVE_SLOW_PCT`. |
 
 Composite masks (`Rogue.h:2074-2082`): `T_PATHING_BLOCKER`, `T_LAKE_PATHING_BLOCKER`,
 `T_OBSTRUCTS_EVERYTHING`, `T_HARMFUL_TERRAIN` (= poison | fire | damage | paralysis | confusion |
@@ -109,7 +111,7 @@ the `tileCatalog[]` row in `Globals.c`.
 |------|-----------|-----------|-------|
 | `DEEP_WATER` | 422 | `T_IS_DEEP_WATER`, `T_IS_FLAMMABLE`† | submerging, extinguishes fire; can sweep floating items |
 | `SHALLOW_WATER` | 423 | — | extinguishes fire, allows submerging |
-| `MUD` (bog) | 424 | — | `promoteChance 100` → `METHANE_GAS_PUFF`; submerging |
+| `MUD` (bog) | 424 | `T_SLOWS_MOVEMENT` (SE) | `promoteChance 100` → `METHANE_GAS_PUFF`; submerging; SE: sticky (+50% move-cost, not fighting) |
 | `LAVA` | 429 | `T_LAVA_INSTA_DEATH` | instant death unless levitating/fire-immune; submerging |
 | `LAVA_RETRACTABLE` / `LAVA_RETRACTING` | 430–431 | `T_LAVA_INSTA_DEATH` | machine-controlled (wired) / cooling |
 | `SACRIFICE_LAVA` | 558 | `T_LAVA_INSTA_DEATH` | sacrifice-machine pit |

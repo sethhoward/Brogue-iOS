@@ -1340,6 +1340,7 @@ enum armorEnchants {
 // iOS port (Brogue SE): cursed-runics rework -- Phase 2 armor-curse tuning.
 #define ANCHOR_DEFENSE_BONUS            30  // +defense (x10 units; +3 displayed) while worn -- always on
 #define ANCHOR_MOVE_SLOW_PCT           100  // extra % move-cost while cursed (100 = double); attacks untouched
+#define MUD_MOVE_SLOW_PCT               50  // iOS port (Brogue SE): extra % move-cost while slogging through T_SLOWS_MOVEMENT mud/bog (attacks untouched)
 #define SMOKY_STEALTH_BONUS            3   // purified Smoky's passive stealth (spot + noise); ~a +3 ring of stealth
 #define SMOKY_DITHER_THIN_VOLUME      10  // cleared-lane smoke volume while cursed: below SMOKE_THICK_VOLUME, so it dims but doesn't block sight (progressive per-enchant sight)
 
@@ -2517,6 +2518,7 @@ enum terrainFlagCatalog {
     T_CAUSES_EXPLOSIVE_DAMAGE       = Fl(20),       // is an explosion; deals higher of 15-20 or 50% damage instantly, but not again for five turns
     T_SACRED                        = Fl(21),       // monsters that aren't allies of the player will avoid stepping here
     T_CAUSES_FREEZE                 = Fl(22),       // iOS port (iBrogue): freezes anything caught on this tile (the frost cloud)
+    T_SLOWS_MOVEMENT                = Fl(23),       // iOS port (Brogue SE): sticky terrain (mud/bog) -- a non-attack step ending here costs extra move-ticks (attacks unaffected). Levitators/fliers skip it; see the player charge in playerTurnEnded and the monster charge at the monstersTurn call sites.
 
     T_OBSTRUCTS_SCENT               = (T_OBSTRUCTS_PASSABILITY | T_OBSTRUCTS_VISION | T_AUTO_DESCENT | T_LAVA_INSTA_DEATH | T_IS_DEEP_WATER | T_SPONTANEOUSLY_IGNITES),
     T_PATHING_BLOCKER               = (T_OBSTRUCTS_PASSABILITY | T_AUTO_DESCENT | T_IS_DF_TRAP | T_LAVA_INSTA_DEATH | T_IS_DEEP_WATER | T_IS_FIRE | T_SPONTANEOUSLY_IGNITES),

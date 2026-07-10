@@ -32,6 +32,39 @@ See `BrogueCE/Engine/IOS_MODIFICATIONS.md` (faithful CE) and
 
 ## Change log
 
+### 2026-07-10 — Sticky mud/bog: T_SLOWS_MOVEMENT slows steps (not fighting) (new content)
+
+**What.** Mud/bog terrain now drags at your legs: a non-attack step that *ends* on a bog tile costs extra
+move-ticks, for the player and monsters alike. Fighting is untouched (you can swing at full speed in the
+mire, just can't maneuver), and anything above the muck -- levitating or flying -- skips it. Modeled on the
+cursed Anchor runic's move-slow.
+
+**How (data-driven).**
+- `Rogue.h` -- new terrain flag `T_SLOWS_MOVEMENT = Fl(23)` (not in any pathing/harmful composite -- mud stays
+  passable, just slow) and constant `MUD_MOVE_SLOW_PCT = 50` (extra % of `movementSpeed`; the tuning dial,
+  half the Anchor curse's 100 since mud is environmental, not a curse).
+- `Globals.c` -- the flag set on `MUD` and `MACHINE_MUD_DORMANT` (the two "knee-deep in mud" bog tiles; the
+  swamp DF lays `MUD` in the liquid layer, so swamps are covered). `MUD_FLOOR` (the walkable goblin-warren
+  floor) deliberately excluded. Their flavor text gained "...and each heavy step is a struggle."
+- `Time.c` (player) -- in the `playerTurnEnded` non-attack move-cost block (beside the Anchor drag; gated on
+  `ticksUntilTurn == 0`, so attacks -- charged elsewhere -- are exempt): if `!STATUS_LEVITATING` and the cell
+  has `T_SLOWS_MOVEMENT`, add `movementSpeed * MUD_MOVE_SLOW_PCT / 100`.
+- `Time.c` (monsters) -- new static `applyMudMoveSlow(monst, preTurnLoc)` called right after `monstersTurn`
+  in the monster loop. A move changes `loc`, an attack does not, so a changed `loc` cleanly means "stepped"
+  (excludes attacks with no per-site edits). Skips levitators/fliers (`MONST_FLIES`). A mud-native
+  (`MONST_RESTRICTED_TO_LIQUID`, i.e. the bog monster) wades freely on its turf UNLESS `MONSTER_FLEEING` --
+  the mire lets it ambush at full speed but betrays it when it flees near death (it's also
+  `MONST_FLEES_NEAR_DEATH`), so you can wade in and finish it.
+
+**Design (CLAUDE.md #3).** Universal (two-way) slow makes mud tactical terrain, not a one-way "avoid" tile:
+you can lure fast land monsters into a bog, but only by positioning at one -- and bogs carry their own hazards
+(seizing bog monsters, `DF_METHANE_GAS_PUFF` explosive gas the slow now makes harder to flee). Counter-pressure,
+not a strict upgrade. No new runtime messages -- the existing on-entry tile flavor (`Time.c` ~L81) already fires
+and now spells out the drag.
+
+**Determinism / saves.** Pure tick arithmetic off `loc`/terrain/state -- no RNG, no new saved fields.
+Replay-safe. Marked `// iOS port (Brogue SE):`.
+
 ### 2026-07-10 — Poisoned creatures: sickly green body tint + pulsing ☠ status-blink (new content)
 
 **What.** Any poisoned creature — the player's `@` included — now takes a sickly toxic-green cast *and* wears
