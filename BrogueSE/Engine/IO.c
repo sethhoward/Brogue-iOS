@@ -2315,13 +2315,14 @@ static const color cosmeticPoisonColor   = {50, 90, 10, 20, 20,  0, 0, true}; //
 // iOS port (Brogue SE): the color-coded item-event "star ripple" (CE_STAR_RIPPLE) -- an 8-ray radial burst at
 // the player. Distinct in SHAPE from the box/wave noise ripples. Colors keyed by itemTellKind (0-100 range so
 // hiliteCell doesn't clamp them to white like the HDR flare-lights would).
-static const color cosmeticStarIdentifyColor = {95, 80, 25, 0, 0, 0, 0, false}; // gold: something identified
-static const color cosmeticStarCurseColor    = {95, 22, 28, 0, 0, 0, 0, false}; // red: a curse revealed
-static const color cosmeticStarPurifyColor   = {30, 95, 45, 0, 0, 0, 0, false}; // green: a curse purified
-static const color cosmeticStarRechargeColor  = {30, 82, 98, 0, 0, 0, 0, false}; // cyan: a staff/charm usable again
-#define CE_STAR_RIPPLE_STEP_FRAMES   2  // idle frames per ray-tip step outward
+// Vivid/saturated (dominant channel maxed) so they POP against the deliberately-subdued noise ripples.
+static const color cosmeticStarIdentifyColor = {100, 85, 15, 0, 0, 0, 0, false}; // gold: something identified
+static const color cosmeticStarCurseColor    = {100, 15, 20, 0, 0, 0, 0, false}; // red: a curse revealed
+static const color cosmeticStarPurifyColor   = {20, 100, 40, 0, 0, 0, 0, false}; // green: a curse purified
+static const color cosmeticStarRechargeColor  = {15, 90, 100, 0, 0, 0, 0, false}; // cyan: a staff/charm usable again
+#define CE_STAR_RIPPLE_STEP_FRAMES   5  // idle frames per ray-tip step outward (higher = slower / longer-lived)
 #define CE_STAR_RIPPLE_MAX_RADIUS    4  // rays reach this far, then the burst expires
-#define CE_STAR_RIPPLE_STRENGTH     55  // peak hilite at the ray tip (fades as it expands)
+#define CE_STAR_RIPPLE_STRENGTH     78  // peak hilite at the ray tip (fades as it expands); high so the color reads over a noise ripple
 
 typedef struct {
     boolean active;
