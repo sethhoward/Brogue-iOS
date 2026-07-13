@@ -1843,17 +1843,31 @@ static void placeAltarPairInRoom(short minMachineNumber, enum tileType westAltar
     }
 }
 
-// iOS port (Brogue SE): place the Altars of Divination in a cross -- a central statue with up to four one-use
+// iOS port (Brogue SE): is (x,y) an open interior carpet cell of one SPECIFIC machine? Unlike
+// altarPairCellIsOpen (which matches any machineNumber > a floor), this matches an EXACT machine
+// number. The divination build is a cascade -- the reward room PLUS a locked-door vestibule and an
+// outsourced key-guard sub-machine, several of which are also carpeted room-machines -- so a "> floor"
+// test would sweep the sibling key-guard room into the altar layout (that stranded the cross across two
+// rooms, the 2-3-altar bug). Matching the exact divination-room number keeps the cross inside it.
+static boolean divCellIsOpen(short x, short y, short machineNumber) {
+    return coordinatesAreInMap(x, y)
+        && pmap[x][y].machineNumber == machineNumber
+        && (pmap[x][y].flags & IS_IN_ROOM_MACHINE)
+        && pmap[x][y].layers[DUNGEON] == CARPET
+        && !(pmap[x][y].flags & (HAS_ITEM | HAS_MONSTER));
+}
+
+// iOS port (Brogue SE): place the Altars of Divination in a cross -- a central statue with four one-use
 // altars one tile out in each cardinal direction (a gap of open carpet sits between the statue and each altar,
 // so the guardian that bursts from the statue has a buffer). Modeled on placeAltarPairInRoom: the generic
 // builder scatters features and can't produce this ordered layout, so we lay it here. Deterministic (no RNG).
-// minMachineNumber is rogue.machineNumber captured before the build, so any cell with a greater machineNumber
-// belongs to the room we just built.
-static void placeAltarCrossInRoom(short minMachineNumber) {
+// divMachineNumber is the divination room's EXACT machine number (preDivinationMachineNumber + 1); see the
+// call site in addMachines for why that is the reward room and not one of its cascade siblings.
+static void placeAltarCrossInRoom(short divMachineNumber) {
     int cx = 0, cy = 0, count = 0;
     for (short i = 0; i < DCOLS; i++) {
         for (short j = 0; j < DROWS; j++) {
-            if (altarPairCellIsOpen(i, j, minMachineNumber)) {
+            if (divCellIsOpen(i, j, divMachineNumber)) {
                 cx += i;
                 cy += j;
                 count++;
@@ -1866,18 +1880,35 @@ static void placeAltarCrossInRoom(short minMachineNumber) {
     cx /= count;
     cy /= count;
 
-    // Center the statue on the open interior cell nearest the centroid.
+    static const short dirX[4] = {0, 0, -1, 1};
+    static const short dirY[4] = {-1, 1, 0, 0};
+
+    // Choose the statue cell: the open interior cell that admits the MOST cardinal altars (a direction
+    // counts if its spaced OR adjacent cell is open interior), tie-broken toward the centroid so the
+    // shrine still reads as centered. The old code centred on the raw centroid alone; in an irregular /
+    // elongated pocket that lands in a narrow neck and strands one or two directions, so the room came
+    // out with only 2-3 altars instead of 4. Picking the roomiest spot fixes that, and the guaranteed
+    // fill below covers any remainder. Deterministic (fixed scan order, no RNG).
     short centerX = -1, centerY = -1;
-    int bestDist = -1;
+    int bestScore = -1, bestDist = 0;
     for (short i = 0; i < DCOLS; i++) {
         for (short j = 0; j < DROWS; j++) {
-            if (altarPairCellIsOpen(i, j, minMachineNumber)) {
-                const int dist = abs(i - cx) + abs(j - cy);
-                if (bestDist < 0 || dist < bestDist) {
-                    bestDist = dist;
-                    centerX = i;
-                    centerY = j;
+            if (!divCellIsOpen(i, j, divMachineNumber)) {
+                continue;
+            }
+            int openDirs = 0;
+            for (int d = 0; d < 4; d++) {
+                if (divCellIsOpen(i + dirX[d] * 2, j + dirY[d] * 2, divMachineNumber)
+                    || divCellIsOpen(i + dirX[d], j + dirY[d], divMachineNumber)) {
+                    openDirs++;
                 }
+            }
+            const int dist = abs(i - cx) + abs(j - cy);
+            if (openDirs > bestScore || (openDirs == bestScore && dist < bestDist)) {
+                bestScore = openDirs;
+                bestDist = dist;
+                centerX = i;
+                centerY = j;
             }
         }
     }
@@ -1887,21 +1918,50 @@ static void placeAltarCrossInRoom(short minMachineNumber) {
     pmap[centerX][centerY].layers[DUNGEON] = DIVINATION_STATUE;
     refreshDungeonCell((pos){ centerX, centerY });
 
-    // One altar per cardinal direction: prefer one tile out (a readable gap from the statue); fall back to
-    // adjacent if the spaced cell isn't open interior. A direction is skipped only if neither cell qualifies
-    // (roomSize {10,30} makes at least the adjacent ring available, so all four normally place).
-    static const short dirX[4] = {0, 0, -1, 1};
-    static const short dirY[4] = {-1, 1, 0, 0};
+    // One altar per cardinal direction: prefer one tile out (a readable gap from the statue, so the
+    // guardian that bursts from the statue has a buffer); fall back to adjacent if the spaced cell isn't
+    // open interior.
+    int placed = 0;
     for (int d = 0; d < 4; d++) {
         const short farX = centerX + dirX[d] * 2, farY = centerY + dirY[d] * 2;
         const short nearX = centerX + dirX[d], nearY = centerY + dirY[d];
-        if (altarPairCellIsOpen(farX, farY, minMachineNumber)) {
+        if (divCellIsOpen(farX, farY, divMachineNumber)) {
             pmap[farX][farY].layers[DUNGEON] = DIVINATION_ALTAR;
             refreshDungeonCell((pos){ farX, farY });
-        } else if (altarPairCellIsOpen(nearX, nearY, minMachineNumber)) {
+            placed++;
+        } else if (divCellIsOpen(nearX, nearY, divMachineNumber)) {
             pmap[nearX][nearY].layers[DUNGEON] = DIVINATION_ALTAR;
             refreshDungeonCell((pos){ nearX, nearY });
+            placed++;
         }
+    }
+
+    // Guarantee four altars. When the cardinal cross stranded a direction (an irregular room), fill the
+    // shortfall from the open interior cells nearest the statue, so the reward is never stunted to 2-3
+    // altars. A just-placed altar/the statue is no longer CARPET, so divCellIsOpen excludes it and each
+    // pass finds the next-nearest free cell. Deterministic (nearest-first, fixed tie-break scan).
+    while (placed < 4) {
+        short pickX = -1, pickY = -1;
+        int pickDist = -1;
+        for (short i = 0; i < DCOLS; i++) {
+            for (short j = 0; j < DROWS; j++) {
+                if (!divCellIsOpen(i, j, divMachineNumber)) {
+                    continue;
+                }
+                const int dist = abs(i - centerX) + abs(j - centerY);
+                if (pickDist < 0 || dist < pickDist) {
+                    pickDist = dist;
+                    pickX = i;
+                    pickY = j;
+                }
+            }
+        }
+        if (pickX < 0) {
+            break; // no open interior cell left (a truly tiny room); place what we could
+        }
+        pmap[pickX][pickY].layers[DUNGEON] = DIVINATION_ALTAR;
+        refreshDungeonCell((pos){ pickX, pickY });
+        placed++;
     }
 }
 
@@ -1936,8 +1996,13 @@ static void addMachines() {
             const short preDivinationMachineNumber = rogue.machineNumber;
             if (buildAMachine(MT_DIVINATION_ALTARS, -1, -1, 0, NULL, NULL, NULL)) {
                 // The blueprint built only the carpeted room; lay the statue + altar cross here (the generic
-                // builder won't produce an ordered cross layout itself).
-                placeAltarCrossInRoom(preDivinationMachineNumber);
+                // builder won't produce an ordered cross layout itself). Pass the divination room's EXACT
+                // machine number: buildAMachine reserves it as `++rogue.machineNumber` for the primary room
+                // (Architect.c ~1232) BEFORE its feature loop spawns the locked-door vestibule and the
+                // outsourced key-guard sub-machines, so the primary room is always preDivinationMachineNumber+1
+                // and the cascade rooms take higher numbers. Isolating by the exact number keeps the altar
+                // cross out of those sibling rooms (see placeAltarCrossInRoom).
+                placeAltarCrossInRoom(preDivinationMachineNumber + 1);
                 rogue.divinationAltarBuilt = true;
                 break;
             }

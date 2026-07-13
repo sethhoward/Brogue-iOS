@@ -9464,10 +9464,22 @@ static boolean performDivination(short machineNumber) {
                 // Fire only if it helps: an already-known item is skipped (a no-op; it's lifted back freely),
                 // and -- crucially -- skipping it here means a known item left on one altar can't block an
                 // unknown item waiting on another.
+                //
+                // iOS port (Brogue SE): eligibility mirrors the scroll of identify (ITEM_CAN_BE_IDENTIFIED),
+                // NOT itemIdentityFullyKnown -- the altar identifies whatever a scroll of identify would. This
+                // matters for a runic weapon/armor whose base kind+enchant are known but whose RUNIC is still
+                // hidden: itemIdentityFullyKnown() reports it fully known (ITEM_IDENTIFIED is set) and the altar
+                // used to skip it, so the runic was never revealed. ITEM_CAN_BE_IDENTIFIED stays set until the
+                // runic itself is identified (see updateIdentifiableItem), so the altar now completes it via the
+                // identify() below, exactly like the scroll. Refresh the cached flag on this floor item first
+                // (it can be stale) -- the scroll does the same via updateIdentifiableItems() before prompting.
                 item *anItem = itemAtLoc((pos){ i, j });
-                if (anItem != NULL && !itemIdentityFullyKnown(anItem)) {
-                    theItem = anItem;
-                    altarLoc = (pos){ i, j };
+                if (anItem != NULL) {
+                    updateIdentifiableItem(anItem);
+                    if (anItem->flags & ITEM_CAN_BE_IDENTIFIED) {
+                        theItem = anItem;
+                        altarLoc = (pos){ i, j };
+                    }
                 }
             }
         }

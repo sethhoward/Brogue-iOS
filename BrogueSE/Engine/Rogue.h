@@ -2987,8 +2987,8 @@ typedef struct creature {
     short turnsSpentStationary;         // how many (subjective) turns it's been since the creature moved between tiles
     short flashStrength;                // monster will flash soon; this indicates the percent strength of flash
     color flashColor;                   // the color that the monster will flash
-    short status[NUMBER_OF_STATUS_EFFECTS];
-    short maxStatus[NUMBER_OF_STATUS_EFFECTS]; // used to set the max point on the status bars
+    int status[NUMBER_OF_STATUS_EFFECTS];
+    int maxStatus[NUMBER_OF_STATUS_EFFECTS]; // used to set the max point on the status bars
     unsigned long bookkeepingFlags;
     short spawnDepth;                   // keep track of the depth of the machine to which they relate (for activation monsters)
     short machineHome;                  // monsters that spawn in a machine keep track of the machine number here (for activation monsters)
@@ -4026,6 +4026,8 @@ extern "C" {
     void populateMonsters(void);
     void updateMonsterState(creature *monst);
     void decrementMonsterStatus(creature *monst);
+    boolean isSoothableAffliction(short statusIndex); // iOS port (Brogue SE): bloodwort soothing vapors -- the soft afflictions the healing cloud ticks 2x
+    boolean creatureInSoothingVapor(const creature *monst); // iOS port (Brogue SE): bloodwort soothing vapors -- eligibility (in cloud, not inanimate/submerged)
     boolean specifiedPathBetween(short x1, short y1, short x2, short y2,
                                  unsigned long blockingTerrain, unsigned long blockingFlags);
     boolean traversiblePathBetween(creature *monst, short x2, short y2);

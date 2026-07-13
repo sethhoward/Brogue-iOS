@@ -2483,6 +2483,40 @@ void updateMonsterState(creature *monst) {
     }
 }
 
+// iOS port (Brogue SE): bloodwort soothing vapors. The 9 "soft afflictions" the healing cloud drains
+// twice as fast (see docs/design/bloodwort-soothing-vapors.md). Deliberately EXCLUDES damage-ticks
+// (burning / poison -- the cloud's HP heal already out-heals poison), the hard "can't-act" lockouts
+// (paralysis / freeze, which always run their full duration), and structural / bookkeeping statuses
+// (stuck, lifespan, fiery-doused, aggravating, donning/searching/nutrition), plus every positive buff.
+// Single source of truth for both decrement sites (decrementMonsterStatus + decrementPlayerStatus);
+// reusable if a future SE cleanse effect wants "the afflictions".
+boolean isSoothableAffliction(short statusIndex) {
+    switch (statusIndex) {
+        case STATUS_WEAKENED:
+        case STATUS_HALLUCINATING:
+        case STATUS_SLOWED:
+        case STATUS_CONFUSED:
+        case STATUS_NAUSEOUS:
+        case STATUS_DISCORDANT:
+        case STATUS_MAGICAL_FEAR:
+        case STATUS_ENTRANCED:
+        case STATUS_DARKNESS:
+            return true;
+        default:
+            return false;
+    }
+}
+
+// iOS port (Brogue SE): bloodwort soothing vapors -- eligibility to be soothed, mirroring the healing
+// cloud's HP-heal gate (Time.c): standing in the cloud (T_CAUSES_HEALING), not an inanimate construct,
+// not submerged. "If the spores can't heal you, they can't soothe you."
+boolean creatureInSoothingVapor(const creature *monst) {
+    return monst
+        && !(monst->info.flags & MONST_INANIMATE)
+        && !(monst->bookkeepingFlags & MB_SUBMERGED)
+        && cellHasTerrainFlag(monst->loc, T_CAUSES_HEALING);
+}
+
 void decrementMonsterStatus(creature *monst) {
     short i, damage;
     char buf[COLS], buf2[COLS];
@@ -2506,7 +2540,16 @@ void decrementMonsterStatus(creature *monst) {
         }
     }
 
+    const boolean soothing = creatureInSoothingVapor(monst);
     for (i=0; i<NUMBER_OF_STATUS_EFFECTS; i++) {
+        // iOS port (Brogue SE): bloodwort soothing vapors -- soft afflictions tick twice as fast in the
+        // healing cloud. Pre-decrement here only when > 1, so the switch below still performs the final
+        // tick-to-zero (and its per-status cleanup, e.g. SLOWED restoring speed, DISCORDANT's guard);
+        // this doubles the effective rate without bypassing any cleanup. See
+        // docs/design/bloodwort-soothing-vapors.md.
+        if (soothing && monst->status[i] > 1 && isSoothableAffliction(i)) {
+            monst->status[i]--;
+        }
         switch (i) {
             case STATUS_LEVITATING:
                 if (monst->status[i] && !(monst->info.flags & MONST_FLIES)) {
@@ -4544,6 +4587,16 @@ void monstersTurn(creature *monst) {
     }
 
     if (monst->bookkeepingFlags & MB_IS_DYING) {
+        return;
+    }
+
+    // #855: a kraken or eel beached on dry land writhes helplessly -- it cannot seize, attack, or
+    // move. The info box already describes this state; enforce it here. Any seize it was holding is
+    // released in applyInstantTileEffectsToCreature above.
+    if ((monst->info.flags & MONST_RESTRICTED_TO_LIQUID)
+        && !cellHasTMFlag(monst->loc, TM_ALLOWS_SUBMERGING)) {
+
+        monst->ticksUntilTurn = monst->movementSpeed;
         return;
     }
 

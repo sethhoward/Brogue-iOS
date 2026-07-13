@@ -162,6 +162,16 @@ void applyInstantTileEffectsToCreature(creature *monst) {
         monst->bookkeepingFlags &= ~MB_SEIZING;
     }
 
+    // #855: a kraken or eel knocked onto dry land can no longer hold its prey. A liquid-restricted
+    // monster off submergible terrain writhes helplessly (enforced in monstersTurn), so it must
+    // also release any seize the instant it is beached; otherwise the seized creature stays pinned.
+    if ((monst->bookkeepingFlags & MB_SEIZING)
+        && (monst->info.flags & MONST_RESTRICTED_TO_LIQUID)
+        && !cellHasTMFlag((pos){ *x, *y }, TM_ALLOWS_SUBMERGING)) {
+
+        monst->bookkeepingFlags &= ~MB_SEIZING;
+    }
+
     // Creatures plunge into chasms and through trap doors.
     if (monsterShouldFall(monst)) {
         if (monst == &player) {
@@ -2343,6 +2353,30 @@ static void monstersApproachStairs() {
 }
 
 static void decrementPlayerStatus() {
+    // iOS port (Brogue SE): bloodwort soothing vapors -- while the player stands in the healing cloud,
+    // soft afflictions tick twice as fast. Pre-decrement here (only when > 1) so each status's own block
+    // below still performs the final tick-to-zero with its message/cleanup. Placed BEFORE the cursed-runic
+    // top-ups (Delirium hallucination / Acrophobia confusion): a runic-forced status sits at its steady
+    // forced value of 1 at the top of the turn -- not > 1 -- so the vapor is a correct no-op on it (curse-
+    // forced afflictions stay purify/remove-only, no flicker). The vapor only accelerates the portion of an
+    // affliction stacked ABOVE the forced floor. See docs/design/bloodwort-soothing-vapors.md.
+    static boolean announcedSoothingVapor = false; // cosmetic one-time-per-exposure latch (not game state)
+    if (creatureInSoothingVapor(&player)) {
+        boolean easedSomething = false;
+        for (short i = 0; i < NUMBER_OF_STATUS_EFFECTS; i++) {
+            if (isSoothableAffliction(i) && player.status[i] > 1) {
+                player.status[i]--;
+                easedSomething = true;
+            }
+        }
+        if (easedSomething && !announcedSoothingVapor) {
+            message("the soothing spores ease your afflictions.", 0);
+            announcedSoothingVapor = true;
+        }
+    } else {
+        announcedSoothingVapor = false;
+    }
+
     // Handle hunger.
     if (!player.status[STATUS_PARALYZED] && !player.status[STATUS_FROZEN]) { // iOS port (iBrogue): no metabolism while frozen, as with paralysis
         // No nutrition is expended while paralyzed.
