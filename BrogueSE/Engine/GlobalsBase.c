@@ -104,6 +104,10 @@ const color darkPurple =            {50,    0,      50,     0,      0,          
 const color brown =                 {60,    40,     0,      0,      0,          0,          0,      false};
 const color green =                 {0,     100,    0,      0,      0,          0,          0,      false};
 const color darkGreen =             {0,     50,     0,      0,      0,          0,          0,      false};
+// iOS port (Brogue SE): sickly toxic yellow-green for the poisoned-creature body tint (getCellAppearance).
+// Plain (no shimmer) so it pulls no RNG on the substantive display path, and leans yellow to stay distinct
+// from the minty, bluer protective-green of the shielded status tell.
+const color poisonTintColor =       {45,    90,     10,     0,      0,          0,          0,      false};
 const color orange =                {100,   50,     0,      0,      0,          0,          0,      false};
 const color darkOrange =            {50,    25,     0,      0,      0,          0,          0,      false};
 const color blue =                  {0,     0,      100,    0,      0,          0,          0,      false};

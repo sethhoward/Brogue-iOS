@@ -71,6 +71,13 @@ extern void ceClearMenuBox(void);
 // path reads it immediately after drawing, before anything else can draw a box.
 static short gLastTextBoxX, gLastTextBoxY, gLastTextBoxWidth, gLastTextBoxHeight;
 
+// iOS port (Brogue SE): when true, description / info text boxes (printTextBox) render with a fully
+// opaque background (opacity 100) instead of the default translucent INTERFACE_OPACITY panel. Set by
+// the host via se_setDescriptionBoxOpaque() — enabled on iPhone, where the box is shown magnified and
+// the dungeon bleeding through the enlarged panel hurts legibility. Default off, so iPad / macOS keep
+// the translucent look. External linkage so SEBridge.mm can drive it.
+boolean gDescriptionBoxOpaque = false;
+
 // Populates path[][] with a list of coordinates starting at origin and traversing down the map. Returns the number of steps in the path.
 short getPlayerPathOnMap(pos path[1000], short **map, pos origin) {
     pos at = origin;
@@ -1344,6 +1351,11 @@ void getCellAppearance(pos loc, enum displayGlyph *returnChar, color *returnFore
         if (pmapAt(loc)->flags & HAS_PLAYER) {
             cellChar = player.info.displayChar;
             cellForeColor = *(player.info.foreColor);
+            // iOS port (Brogue SE): the player's @ takes the same sickly green cast when poisoned (mirrors the
+            // monster body tint above). Deterministic state read, no RNG.
+            if (player.status[STATUS_POISONED] > 0) {
+                applyColorAverage(&cellForeColor, &poisonTintColor, 50);
+            }
             needDistinctness = true;
         } else if (((pmapAt(loc)->flags & HAS_ITEM) && (pmapAt(loc)->flags & ITEM_DETECTED)
                     && itemMagicPolarity(theItem)
@@ -1402,6 +1414,18 @@ void getCellAppearance(pos loc, enum displayGlyph *returnChar, color *returnFore
                         applyColorAverage(&cellBackColor, &lightBlue, 40);
                     } else if (monst->status[STATUS_SLOWED]) {
                         applyColorAverage(&cellForeColor, &lightBlue, 30);
+                    }
+                    // iOS port (Brogue SE): poisoned creatures wear a sickly green cast (persistent state tint,
+                    // like the frost/slow tints above -- a deterministic read of game state, no RNG). Composes
+                    // over the frost/slow tint if both apply. See the matching HAS_PLAYER branch for the player.
+                    // A pulsing '☠' status-blink tell now rides poisoned creatures too (statusBlinkGlyphFor ~L2701),
+                    // so poison has a steady body tint PLUS a pulsing glyph. TODO (tabled): to make this GREEN BODY
+                    // TINT itself pulse, don't animate here -- getCellAppearance is a pure, time-less function and a
+                    // still creature's cell isn't re-run each idle tick. That needs a dedicated cosmetic kind
+                    // (CE_POISON_PULSE) + a cosmeticRefresh* sibling that keeps the cell in the per-tick redraw set
+                    // and oscillates this blend weight on gCosmeticBlinkTick.
+                    if (monst->status[STATUS_POISONED] > 0) {
+                        applyColorAverage(&cellForeColor, &poisonTintColor, 50);
                     }
                 }
                 //DEBUG if (monst->bookkeepingFlags & MB_LEADER) applyColorAverage(&cellBackColor, &purple, 50);
@@ -2276,7 +2300,7 @@ static const char gCosmeticImpactRippleChannel = 0;
 
 // Effect kinds hosted by the layer. RIPPLE_* paint via hiliteCell (color overlay); ALERT/BLINK via a
 // glyph (plotCharWithColor). (File-local; promote to Rogue.h if a spawner ever needs a kind parameter.)
-enum cosmeticEffectKind { CE_ALERT_GLYPH, CE_RIPPLE_MONSTER, CE_RIPPLE_PLAYER, CE_RIPPLE_IMPACT, CE_RIPPLE_AGGRAVATE, CE_INVESTIGATE_BLINK, CE_ALERT_BLINK, CE_STATUS_BLINK, CE_SPEED_TRAIL };
+enum cosmeticEffectKind { CE_ALERT_GLYPH, CE_RIPPLE_MONSTER, CE_RIPPLE_PLAYER, CE_RIPPLE_IMPACT, CE_RIPPLE_AGGRAVATE, CE_INVESTIGATE_BLINK, CE_ALERT_BLINK, CE_STATUS_BLINK, CE_SPEED_TRAIL, CE_STAR_RIPPLE };
 
 // iOS port (Brogue SE): tints for the status-blink overlays (a glyph that rides a confused/burning/stunned
 // creature, the player included). Flame = fireForeColor's warm flicker; stun = dazed yellow "stars";
@@ -2287,6 +2311,18 @@ static const color cosmeticConfusedColor = {60, 25, 75, 35, 15, 45, 0, true}; //
 static const color cosmeticHasteColor    = {30, 90, 100, 20, 10, 0, 0, true}; // electric cyan -- the hasted "blink dash" contrail
 static const color cosmeticHealColor     = {100, 40, 60, 0, 20, 20, 0, true}; // bright rose-pink -- warm/wort family but far lighter + pinker than the dim darkRed {50,0,0} healing cloud, so the heart separates from the spores it sits in
 static const color cosmeticShieldColor   = {20, 85, 40, 15, 20, 15, 0, true}; // protective green (STATUS_SHIELDED)
+static const color cosmeticPoisonColor   = {50, 90, 10, 20, 20,  0, 0, true}; // sickly toxic yellow-green (STATUS_POISONED) -- leans yellow to stay distinct from the bluer protective-green shield crest
+// iOS port (Brogue SE): the color-coded item-event "star ripple" (CE_STAR_RIPPLE) -- an 8-ray radial burst at
+// the player. Distinct in SHAPE from the box/wave noise ripples. Colors keyed by itemTellKind (0-100 range so
+// hiliteCell doesn't clamp them to white like the HDR flare-lights would).
+// Vivid/saturated (dominant channel maxed) so they POP against the deliberately-subdued noise ripples.
+static const color cosmeticStarIdentifyColor = {100, 85, 15, 0, 0, 0, 0, false}; // gold: something identified
+static const color cosmeticStarCurseColor    = {100, 15, 20, 0, 0, 0, 0, false}; // red: a curse revealed
+static const color cosmeticStarPurifyColor   = {20, 100, 40, 0, 0, 0, 0, false}; // green: a curse purified
+static const color cosmeticStarRechargeColor  = {15, 90, 100, 0, 0, 0, 0, false}; // cyan: a staff/charm usable again
+#define CE_STAR_RIPPLE_STEP_FRAMES   5  // idle frames per ray-tip step outward (higher = slower / longer-lived)
+#define CE_STAR_RIPPLE_MAX_RADIUS    4  // rays reach this far, then the burst expires
+#define CE_STAR_RIPPLE_STRENGTH     78  // peak hilite at the ray tip (fades as it expands); high so the color reads over a noise ripple
 
 typedef struct {
     boolean active;
@@ -2517,6 +2553,35 @@ void cosmeticSpawnRipplePlayer(short radius) {
     gCosmeticEffects[i].frameLife = radius * CE_RIPPLE_EXPAND_FRAMES;
 }
 
+// iOS port (Brogue SE): spawn the color-coded item-event "star ripple" -- a transient 8-ray radial burst at
+// loc, in the kind's color. Shape (a star, not a ring/box) keeps it clearly distinct from the noise ripples.
+void cosmeticSpawnItemTell(pos loc, enum itemTellKind kind) {
+    if (rogue.playbackFastForward || !coordinatesAreInMap(loc.x, loc.y)) {
+        return;
+    }
+    const color *tint;
+    switch (kind) {
+        case ITEM_TELL_CURSE:    tint = &cosmeticStarCurseColor;    break;
+        case ITEM_TELL_PURIFY:   tint = &cosmeticStarPurifyColor;   break;
+        case ITEM_TELL_RECHARGE: tint = &cosmeticStarRechargeColor; break;
+        case ITEM_TELL_IDENTIFY:
+        default:                 tint = &cosmeticStarIdentifyColor; break;
+    }
+    short i = cosmeticFreeSlot();
+    if (i < 0) {
+        return; // pool full -- a missed tell is harmless
+    }
+    gCosmeticEffects[i].active = true;
+    gCosmeticEffects[i].kind = CE_STAR_RIPPLE;
+    gCosmeticEffects[i].origin = loc;
+    gCosmeticEffects[i].glyph = 0;
+    gCosmeticEffects[i].tint = tint;
+    gCosmeticEffects[i].maxRadius = CE_STAR_RIPPLE_MAX_RADIUS;
+    gCosmeticEffects[i].channel = NULL;
+    gCosmeticEffects[i].frameAge = 0;
+    gCosmeticEffects[i].frameLife = CE_STAR_RIPPLE_MAX_RADIUS * CE_STAR_RIPPLE_STEP_FRAMES; // transient; ages out
+}
+
 // iOS port (Brogue SE): retire any in-flight player sound-footprint ripple. The ripple is a single-turn
 // footprint, but recordPlayerNoiseRippleIfNeeded only ever spawns one -- so a ripple lives out its frame
 // life. The cosmetic animator ticks only in the idle loop, so a ripple spawned right before a burst of
@@ -2676,9 +2741,9 @@ void cosmeticRefreshInvestigateBlinks(void) {
 
 // iOS port (Brogue SE): pick the status-blink glyph + tint for a creature, by priority (one tell at a time):
 // on fire (NOT the MONST_FIERY trait -- only a real STATUS_BURNING, matching the light/extinguish systems) >
-// paralyzed/stunned > confused > shielded > healing. Returns false if the creature has no tell-worthy status.
-// (Buffs rank below threats/afflictions; among buffs, shielded -- "my damage is absorbed" -- outranks healing
-// -- "it's topping up".)
+// paralyzed/stunned > confused > poisoned > shielded > healing. Returns false if no tell-worthy status.
+// (Afflictions rank above buffs; poison sits below the urgent control effects (burning/paralyzed/confused)
+// but above the buffs. Among buffs, shielded -- "my damage is absorbed" -- outranks healing -- "topping up".)
 static boolean statusBlinkGlyphFor(const creature *m, enum displayGlyph *glyph, const color **tint) {
     if (m->status[STATUS_BURNING] > 0 && !(m->info.flags & MONST_FIERY)) {
         *glyph = G_FIRE;
@@ -2693,6 +2758,11 @@ static boolean statusBlinkGlyphFor(const creature *m, enum displayGlyph *glyph, 
     if (m->status[STATUS_CONFUSED] > 0) {
         *glyph = G_INVERTED_QUESTION; // inverted '¿' + purple tint -- distinct in BOTH shape and color from the white investigate '?'
         *tint = &cosmeticConfusedColor;
+        return true;
+    }
+    if (m->status[STATUS_POISONED] > 0) {
+        *glyph = G_POISON_SKULL; // '☠' + toxic green -- reinforces the poisoned body tint (getCellAppearance)
+        *tint = &cosmeticPoisonColor;
         return true;
     }
     if (m->status[STATUS_SHIELDED] > 0) {
@@ -2950,6 +3020,42 @@ void advanceCosmeticAnimations(void) {
     memset(gCosmeticPaintedNow, 0, sizeof(gCosmeticPaintedNow));
     nowIdx = 1 - gCosmeticCur;
     gCosmeticCellCount[nowIdx] = 0;
+
+    // 2a(pre). item-event STAR RIPPLE, painted BEFORE the noise ripples so it CLAIMS its cells first (the
+    // first painter of a cell each frame wins it via cosmeticMarkCell; later effects skip it). That gives the
+    // star priority: a noise ripple sweeping over it paints AROUND it instead of punching holes, so the star
+    // reads cleanly and runs to completion (frameLife). An 8-ray radial burst at the player -- rays shoot
+    // outward (tip + a dimmer trailing cell), fading as they expand, with a bright center flash on step 1. Its
+    // star shape (not a box/wave) already sets it apart from the noise ripples; the claim-first gives priority.
+    for (i = 0; i < MAX_COSMETIC_EFFECTS; i++) {
+        cosmeticEffect *e = &gCosmeticEffects[i];
+        if (!e->active || e->kind != CE_STAR_RIPPLE) {
+            continue;
+        }
+        const short waveR = e->frameAge / CE_STAR_RIPPLE_STEP_FRAMES + 1; // current ray-tip radius
+        if (waveR > e->maxRadius) {
+            continue; // fully expanded; the age loop will retire it
+        }
+        const short strength = CE_STAR_RIPPLE_STRENGTH * (e->maxRadius - waveR + 1) / e->maxRadius;
+        // bright center flash for the first step (the "pop")
+        if (e->frameAge < CE_STAR_RIPPLE_STEP_FRAMES && cosmeticMarkCell(e->origin, nowIdx)) {
+            hiliteCell(e->origin.x, e->origin.y, e->tint, CE_STAR_RIPPLE_STRENGTH, false);
+        }
+        static const short starX[8] = {0, 0, -1, 1, -1, 1, -1, 1};
+        static const short starY[8] = {-1, 1, 0, 0, -1, -1, 1, 1};
+        for (short d = 0; d < 8; d++) {
+            const pos tip = (pos){ e->origin.x + starX[d] * waveR, e->origin.y + starY[d] * waveR };
+            if (coordinatesAreInMap(tip.x, tip.y) && cosmeticMarkCell(tip, nowIdx)) {
+                hiliteCell(tip.x, tip.y, e->tint, strength, false);
+            }
+            if (waveR > 1) { // a dimmer trailing cell so each ray reads as a streak, not a lone dot
+                const pos trail = (pos){ e->origin.x + starX[d] * (waveR - 1), e->origin.y + starY[d] * (waveR - 1) };
+                if (coordinatesAreInMap(trail.x, trail.y) && cosmeticMarkCell(trail, nowIdx)) {
+                    hiliteCell(trail.x, trail.y, e->tint, strength / 2, false);
+                }
+            }
+        }
+    }
 
     // 2a. ripples first (color-hilite), so glyph kinds below can override on any shared cell
     for (i = 0; i < MAX_COSMETIC_EFFECTS; i++) {
@@ -6248,7 +6354,11 @@ short printTextBox(char *textBuf, short x, short y, short width,
     screenDisplayBuffer dbuf;
     clearDisplayBuffer(&dbuf);
     printStringWithWrapping(textBuf, x2, y2, width, foreColor, backColor, &dbuf);
-    rectangularShading(x2, y2, width, lineCount + padLines, backColor, INTERFACE_OPACITY, &dbuf);
+    // iOS port (Brogue SE): on iPhone the box is shown magnified; a translucent panel lets the
+    // enlarged dungeon bleed through and hurts legibility, so the host opts into a fully opaque
+    // background (see gDescriptionBoxOpaque). iPad / macOS keep the default translucent look.
+    const short boxOpacity = gDescriptionBoxOpaque ? 100 : INTERFACE_OPACITY;
+    rectangularShading(x2, y2, width, lineCount + padLines, backColor, boxOpacity, &dbuf);
     overlayDisplayBuffer(&dbuf);
 
     // iOS port (Brogue SE): remember this box's rect for the iPhone examine fit-zoom.
@@ -6259,8 +6369,16 @@ short printTextBox(char *textBuf, short x, short y, short width,
 
     if (buttonCount > 0) {
         // iOS port (Brogue SE): the iPhone menu-magnify rect is reported inside buttonInputLoop
-        // (the single choke point for all button menus), so nothing to report here.
-        return buttonInputLoop(buttons, buttonCount, x2, y2, width, by - y2 + 1 + padLines, NULL);
+        // (the single choke point for all button menus). The window rect passed here IS that rect,
+        // so it must describe the box the player actually sees. rectangularShading draws a one-cell
+        // shadow halo on every side, so the visible box spans (x2-1, y2-1)…(x2+width, y2+lineCount+padLines).
+        // Raise the top by one to include the top halo row (otherwise it's left behind as a dark 1x
+        // seam above the magnified panel) and size the height to text+buttons+halo (the old
+        // `by - y2 + 1 + padLines` double-counted the padding, over-running the bottom with empty
+        // rows). The horizontal halo is added by buttonInputLoop's own 1-cell trim. winY/winHeight
+        // only bound the click-to-cancel region (buttons are positioned absolutely), so the visible
+        // box now equals the cancel region.
+        return buttonInputLoop(buttons, buttonCount, x2, y2 - 1, width, lineCount + padLines + 2, NULL);
     } else {
         return -1;
     }

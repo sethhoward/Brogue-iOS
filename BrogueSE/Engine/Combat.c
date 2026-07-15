@@ -729,17 +729,57 @@ static boolean forceWeaponHit(creature *defender, item *theItem) {
 #define EXPLOSION_KNOCKBACK_DISTANCE 4
 #define EXPLOSION_KNOCKBACK_SLAM_BONUS 3
 
+// iOS port (Brogue SE): the cosmetic slide for a force-shoved creature. Instead of the victim popping
+// straight to its rest cell, its own glyph (frozen tint and all) skates cell-by-cell along the shove
+// path -- the same "launched creature" read as the force weapon's blink and a thrown item's arc. Purely
+// visual: it consumes no RNG and changes no game state (shoveCreatureAlong still does the real relocation
+// via setMonsterLocation once the slide finishes), so seeded runs and save-replay are untouched. Bails
+// out when the player can't see the slide or during fast-forward playback. Shared by the frost block-push
+// and (when enabled) the explosion knockback -- see the force-shove primitive below.
+static void animateForceShove(creature *victim, pos fromLoc, const pos *path, short pathLen) {
+    enum displayGlyph slideChar, cellChar;
+    color slideFore, slideBack, cellFore, cellBack;
+    const unsigned long creatureFlag = (victim == &player ? HAS_PLAYER : HAS_MONSTER);
+    boolean fastForward = false;
+
+    if (pathLen <= 0 || rogue.playbackFastForward) {
+        return;
+    }
+
+    // Snapshot the victim's rendered appearance at its starting cell (keeps any frozen tint) -- this is
+    // the glyph that slides. Then hide the victim at its origin so the moving glyph reads as the creature
+    // itself, not a duplicate; setMonsterLocation re-adds the flag at the destination once the slide ends.
+    getCellAppearance(fromLoc, &slideChar, &slideFore, &slideBack);
+    pmapAt(fromLoc)->flags &= ~creatureFlag;
+    refreshDungeonCell(fromLoc);
+
+    for (short i = 0; i < pathLen; i++) {
+        const pos step = path[i];
+        if (playerCanSee(step.x, step.y)) {
+            getCellAppearance(step, &cellChar, &cellFore, &cellBack); // for the cell's own background
+            plotCharWithColor(slideChar, mapToWindow(step), &slideFore, &cellBack);
+            if (!fastForward) {
+                fastForward = rogue.playbackFastForward || pauseAnimation(16, PAUSE_BEHAVIOR_DEFAULT);
+            }
+            refreshDungeonCell(step); // wipe this frame so only the single moving glyph is ever shown
+        }
+    }
+}
+
 // iOS port (Brogue SE): the shared "force shove" primitive behind BOTH the frost block-push and the
 // explosion knockback (the reusable force effect). Slides `victim` along the unit vector (dx,dy) up to
 // maxDist tiles, coming to rest ON the first hazard (lava/chasm/deep water -- it then meets its fate via
 // the destination's tile effects) or BEFORE a wall, another creature, or the map edge. Relocation goes
 // through setMonsterLocation, so it is correct for the player and monsters alike (creature flag, vision,
-// item pickup, and destination tile effects). If stopped by a creature, that creature is returned via
-// *slamTargetOut so the caller can apply impact damage. Returns the number of tiles actually travelled.
+// item pickup, and destination tile effects), preceded by a cosmetic slide animation along the same path.
+// If stopped by a creature, that creature is returned via *slamTargetOut so the caller can apply impact
+// damage. Returns the number of tiles actually travelled.
 static short shoveCreatureAlong(creature *victim, short dx, short dy, short maxDist, creature **slamTargetOut) {
     const pos oldLoc = victim->loc;
     pos cur = oldLoc;
     creature *slamTarget = NULL;
+    pos path[FROST_PUSH_MAX_DISTANCE]; // slide cells captured for animateForceShove; maxDist never exceeds this
+    short pathLen = 0;
 
     for (short step = 0; step < maxDist; step++) {
         const pos next = (pos){ cur.x + dx, cur.y + dy };
@@ -753,6 +793,9 @@ static short shoveCreatureAlong(creature *victim, short dx, short dy, short maxD
             break;
         }
         cur = next; // slide onto the next cell
+        if (pathLen < FROST_PUSH_MAX_DISTANCE) {
+            path[pathLen++] = cur; // record the traversed cell so the slide can be animated below
+        }
         if (cellHasTerrainFlag(cur, (T_LAVA_INSTA_DEATH | T_AUTO_DESCENT | T_IS_DEEP_WATER))) {
             break; // deposited onto the hazard; it meets its fate via the destination's tile effects
         }
@@ -760,6 +803,7 @@ static short shoveCreatureAlong(creature *victim, short dx, short dy, short maxD
 
     const short dist = distanceBetween(oldLoc, cur);
     if (dist > 0) {
+        animateForceShove(victim, oldLoc, path, pathLen); // cosmetic slide; the real relocation follows
         setMonsterLocation(victim, cur); // handles player/monster flags, vision, item pickup, tile effects
     }
     if (slamTargetOut) {
@@ -1292,6 +1336,7 @@ static void decrementWeaponAutoIDTimer() {
         itemName(rogue.weapon, buf2, true, true, NULL);
         sprintf(buf, "%s %s.", (rogue.weapon->quantity > 1 ? "they are" : "it is"), buf2);
         messageWithColor(buf, &itemMessageColor, 0);
+        cosmeticSpawnItemTell(player.loc, ITEM_TELL_IDENTIFY); // iOS port (Brogue SE): gold "now familiar" star ripple
     }
 }
 

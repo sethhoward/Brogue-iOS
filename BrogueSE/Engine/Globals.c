@@ -239,6 +239,14 @@ const color scrollEnchantmentColor ={250,   225,    300,    0,      0,          
 const color potionStrengthColor =   {1000,  0,      400,    600,    0,          0,          0,      true};
 const color empowermentFlashColor = {500,   1000,   600,    0,      500,        0,          0,      true};
 const color genericFlashColor =     {800,   800,    800,    0,      0,          0,          0,      false};
+// iOS port (Brogue SE): color-coded "check your inventory" flares centered on the player (createFlare) for
+// passive events that otherwise only scroll a message: gold = something identified (auto-ID / familiar timer
+// / runic), red = a curse revealed on equip, green = a cursed runic purified (weld released), cyan = a spent
+// staff/charm usable again. Distinct hues so the meaning reads before you open the pack.
+const color identifyFlareColor =    {750,   580,    150,    0,      0,          0,          0,      false};
+const color curseFlareColor =       {800,   90,     50,     0,      0,          0,          0,      false};
+const color purifyFlareColor =      {150,   780,    320,    0,      0,          0,          0,      false};
+const color rechargeFlareColor =    {130,   560,    800,    0,      0,          0,          0,      false};
 const color summoningFlashColor =   {0,     0,      0,      600,    0,          1200,       0,      true};
 const color fireFlashColor =        {750,   225,    0,      100,    50,         0,          0,      true};
 const color explosionFlareColor =   {10000, 6000,   1000,   0,      0,          0,          0,      false};
@@ -426,7 +434,7 @@ const floorTileType tileCatalog[NUMBER_TILETYPES] = {
  // tileType                    char        fore color              back color        prio ign% [fire,discover,promote]Type                         promoteChance   glowLight   flags mechflags                                                                     description             flavorText
  /*DEEP_WATER*/                 {G_LIQUID,  &deepWaterForeColor,    &deepWaterBackColor,40, 100,DF_STEAM_ACCUMULATION,0,0,                                      0,  NO_LIGHT,   (T_IS_FLAMMABLE | T_IS_DEEP_WATER), (TM_ALLOWS_SUBMERGING | TM_STAND_IN_TILE | TM_EXTINGUISHES_FIRE),"the murky waters", "the current tugs you in all directions."},
  /*SHALLOW_WATER*/              {0,     &shallowWaterForeColor, &shallowWaterBackColor, 55, 0,  DF_STEAM_ACCUMULATION,0,0,                                      0,  NO_LIGHT,   (0), (TM_STAND_IN_TILE | TM_EXTINGUISHES_FIRE | TM_ALLOWS_SUBMERGING),              "shallow water",        "the water is cold and reaches your knees."},
- /*MUD*/                        {G_BOG,     &mudForeColor,          &mudBackColor,      55, 0,  DF_PLAIN_FIRE,0,DF_METHANE_GAS_PUFF,                          100,  NO_LIGHT,   (0), (TM_STAND_IN_TILE | TM_ALLOWS_SUBMERGING),                                     "a bog",                "you are knee-deep in thick, foul-smelling mud."},
+ /*MUD*/                        {G_BOG,     &mudForeColor,          &mudBackColor,      55, 0,  DF_PLAIN_FIRE,0,DF_METHANE_GAS_PUFF,                          100,  NO_LIGHT,   (T_SLOWS_MOVEMENT), (TM_STAND_IN_TILE | TM_ALLOWS_SUBMERGING),                                     "a bog",                "you are knee-deep in thick, foul-smelling mud, and each heavy step is a struggle."}, // iOS port (Brogue SE): T_SLOWS_MOVEMENT -- sticky bog
  /*CHASM*/                      {G_CHASM,   &chasmForeColor,        &black,             40, 0,  DF_PLAIN_FIRE,0,0,                                              0,  NO_LIGHT,   (T_AUTO_DESCENT), (TM_STAND_IN_TILE),                                               "a chasm",              "you plunge downward into the chasm!"},
  /*CHASM_EDGE*/                 {G_FLOOR,   &white,                 &chasmEdgeBackColor,80, 0,  DF_PLAIN_FIRE,0,0,                                              0,  NO_LIGHT,   0, 0,                                                                               "the brink of a chasm", "chilly winds blow upward from the stygian depths."},
  /*MACHINE_COLLAPSE_EDGE_DORMANT*/{G_FLOOR, &floorForeColor,        &floorBackColor,    95, 0,  DF_PLAIN_FIRE,0,DF_SPREADABLE_COLLAPSE,                         0,  NO_LIGHT,   (0), (TM_VANISHES_UPON_PROMOTION | TM_IS_WIRED),                                    "the ground",           ""},
@@ -445,7 +453,7 @@ const floorTileType tileCatalog[NUMBER_TILETYPES] = {
  /*STONE_BRIDGE*/               {G_FLOOR,   &white,                 &chasmEdgeBackColor,20, 50, DF_BRIDGE_FIRE,0,0,                                             0,  NO_LIGHT,   0, 0,                                                                               "a stone bridge",       "the narrow stone bridge winds precariously across the chasm."},
  /*MACHINE_FLOOD_WATER_DORMANT*/{0,     &shallowWaterForeColor, &shallowWaterBackColor, 60, 0,  DF_STEAM_ACCUMULATION,0,DF_SPREADABLE_WATER,                    0,  NO_LIGHT,   (0), (TM_STAND_IN_TILE | TM_VANISHES_UPON_PROMOTION | TM_IS_WIRED | TM_EXTINGUISHES_FIRE | TM_ALLOWS_SUBMERGING), "shallow water", "the water is cold and reaches your knees."},
  /*MACHINE_FLOOD_WATER_SPREADING*/{0,   &shallowWaterForeColor, &shallowWaterBackColor, 60, 0,  DF_STEAM_ACCUMULATION,0,DF_WATER_SPREADS,                    2500,  NO_LIGHT,   (0), (TM_STAND_IN_TILE | TM_VANISHES_UPON_PROMOTION | TM_EXTINGUISHES_FIRE | TM_ALLOWS_SUBMERGING), "shallow water", "the water is cold and reaches your knees."},
- /*MACHINE_MUD_DORMANT*/        {G_FLOOR,   &mudForeColor,          &mudBackColor,      55, 0,  DF_PLAIN_FIRE,0,DF_MUD_ACTIVATE,                                0,  NO_LIGHT,   (0), (TM_STAND_IN_TILE | TM_VANISHES_UPON_PROMOTION | TM_IS_WIRED | TM_ALLOWS_SUBMERGING), "a bog",         "you are knee-deep in thick, foul-smelling mud."},
+ /*MACHINE_MUD_DORMANT*/        {G_FLOOR,   &mudForeColor,          &mudBackColor,      55, 0,  DF_PLAIN_FIRE,0,DF_MUD_ACTIVATE,                                0,  NO_LIGHT,   (T_SLOWS_MOVEMENT), (TM_STAND_IN_TILE | TM_VANISHES_UPON_PROMOTION | TM_IS_WIRED | TM_ALLOWS_SUBMERGING), "a bog",         "you are knee-deep in thick, foul-smelling mud, and each heavy step is a struggle."}, // iOS port (Brogue SE): T_SLOWS_MOVEMENT -- sticky bog
  /*ICE_DEEP*/                   {G_FLOOR,   &white,                 &lightBlue,         35, 100,DF_DEEP_WATER_THAW,0,DF_DEEP_WATER_MELTING,                  -100,  NO_LIGHT,   (T_IS_FLAMMABLE), (TM_VANISHES_UPON_PROMOTION),                                     "ice",                  "a sheet of ice extends into the water, ripples frozen into its glossy surface."},
  /*ICE_DEEP_MELT*/              {G_FLOOR,   &black,                 &lightBlue,         35, 100,DF_DEEP_WATER_THAW,0,DF_DEEP_WATER_THAW,                    10000,  NO_LIGHT,   (T_IS_FLAMMABLE), (TM_VANISHES_UPON_PROMOTION),                                     "melting ice",          "cracks extend across the surface of the ice as it melts before your eyes."},
  /*ICE_SHALLOW*/                {G_FLOOR,   &white,                 &lightBlue,         35, 100,DF_SHALLOW_WATER_THAW,0,DF_SHALLOW_WATER_MELTING,            -100,  NO_LIGHT,   (T_IS_FLAMMABLE), (TM_VANISHES_UPON_PROMOTION),                                     "ice",                  "a sheet of ice extends into the water, ripples frozen into its glossy surface."},
@@ -630,6 +638,14 @@ const floorTileType tileCatalog[NUMBER_TILETYPES] = {
  /*DIVINATION_ALTAR_ARMED*/  {G_ORB_ALTAR,&altarForeColor,      &goldAltarBackColor, 17, 0,  0,0,DF_DIVINATION_ALTAR_CLOSE,0,CANDLE_LIGHT,  (T_OBSTRUCTS_SURFACE_EFFECTS), (TM_PROMOTES_ON_ITEM_PICKUP | TM_VANISHES_UPON_PROMOTION | TM_LIST_IN_SIDEBAR | TM_VISUALLY_DISTINCT), "a divining altar",       "the revealed item rests here; lift it and the altar will seal shut."},
  /*DIVINATION_ALTAR_CLOSED*/ {G_ORB_ALTAR,&black,               &goldAltarBackColor, 17, 0,  0,0,0,                      0,  NO_LIGHT,       (T_OBSTRUCTS_SURFACE_EFFECTS), (TM_LIST_IN_SIDEBAR | TM_VISUALLY_DISTINCT),                                                       "a sealed altar",         "the altar has sealed shut, its stone cold and silent."},
  /*DIVINATION_STATUE*/       {G_STATUE,   &wallBackColor,       &statueBackColor,    17, 0,  0,0,0,                      0,  CANDLE_LIGHT,   (T_OBSTRUCTS_PASSABILITY | T_OBSTRUCTS_ITEMS | T_OBSTRUCTS_GAS | T_OBSTRUCTS_SURFACE_EFFECTS), (TM_LIST_IN_SIDEBAR | TM_VISUALLY_DISTINCT), "a looming statue",       "a weathered stone statue looms over the altars; something seems to stir within it."},
+ // iOS port (Brogue SE): "tracks & traces" spoor. Cosmetic SURFACE overlays (no T_* flags). A fresh print
+ // promotes to the shared FADING_TRACKS smudge (~5 turns) and then vanishes (~5 more); ~20%/turn = 2000.
+ /*WET_FOOTPRINTS*/           {G_FLOOR_ALT,&lightBlue,           0,                  80, 0,  0,0,DF_FADING_TRACKS,             2000,  NO_LIGHT,       (0), (TM_STAND_IN_TILE | TM_VANISHES_UPON_PROMOTION),                                               "wet footprints",       "wet footprints glisten on the floor, already beginning to dry."},
+ /*BLOODY_FOOTPRINTS*/       {G_FLOOR_ALT,&humanBloodColor,     0,                  80, 0,  0,0,DF_FADING_TRACKS,             2000,  NO_LIGHT,       (0), (TM_STAND_IN_TILE | TM_VANISHES_UPON_PROMOTION),                                               "bloody footprints",    "bloody footprints are tracked across the floor."},
+ /*MUDDY_FOOTPRINTS*/        {G_FLOOR_ALT,&brown,               0,                  80, 0,  0,0,DF_FADING_TRACKS,             2000,  NO_LIGHT,       (0), (TM_STAND_IN_TILE | TM_VANISHES_UPON_PROMOTION),                                               "muddy tracks",         "muddy tracks are smeared across the floor."},
+ /*FADING_TRACKS*/           {G_FLOOR_ALT,&gray,                0,                  80, 0,  0,0,0,                            2000,  NO_LIGHT,       (0), (TM_STAND_IN_TILE | TM_VANISHES_UPON_PROMOTION),                                               "faint tracks",         "a faint smudge of tracks, nearly gone."},
+ // iOS port (Brogue SE): grass matted flat by a large creature; regrows to grass over ~100 turns.
+ /*FLATTENED_GRASS*/         {G_GRASS,    &deadGrassColor,      0,                  60, 15, DF_PLAIN_FIRE,0,DF_FLATTENED_GRASS_REGROW, 100, NO_LIGHT,       (T_IS_FLAMMABLE), (TM_STAND_IN_TILE | TM_VANISHES_UPON_PROMOTION),                                 "flattened grass",      "the grass here has been crushed flat by something large."},
 };
 
 unsigned long terrainFlags(pos p) {
@@ -1028,9 +1044,31 @@ dungeonFeature dungeonFeatureCatalog[NUMBER_DUNGEON_FEATURES] = {
     // 75/5 sprawl) and chains no dead foliage -- just flammable grass that the trap's flame can ignite.
     {DEAD_GRASS,                SURFACE,    75,     25,     (DFF_BLOCKED_BY_OTHER_LAYERS)},
 
+    // iOS port (Brogue SE): companion glowing fungus for a confusion trap. Contained (60/22, vs open
+    // DF_LUMINESCENT_FUNGUS's 60/8 sprawl). Grass-type surface -- casts a pale glow but doesn't obstruct
+    // vision, so (like the grass/bones companions) it never hides the trap nor gets stripped off it.
+    {LUMINESCENT_FUNGUS,        SURFACE,    60,     22,     (DFF_BLOCKED_BY_OTHER_LAYERS)},
+
     // iOS port (Brogue SE): an armed divination altar seals shut (-> DIVINATION_ALTAR_CLOSED) when its
     // revealed item is lifted. Fired via TM_PROMOTES_ON_ITEM_PICKUP -> promoteTile -> this promoteType DF.
     {DIVINATION_ALTAR_CLOSED,   DUNGEON,    0,      0,      0},
+    // iOS port (Brogue SE): tracks & traces -- single-cell fading spoor (startProb 0 = origin only, no
+    // spread, no RNG). Fresh prints promote to FADING_TRACKS then vanish. See layCreatureSpoor (Monsters.c).
+    {WET_FOOTPRINTS,            SURFACE,    0,      0,      0},
+    {BLOODY_FOOTPRINTS,         SURFACE,    0,      0,      0},
+    {MUDDY_FOOTPRINTS,          SURFACE,    0,      0,      0},
+    {FADING_TRACKS,             SURFACE,    0,      0,      0},
+    // iOS port (Brogue SE): a large creature's flattened-grass swath, and its regrowth back to grass.
+    {FLATTENED_GRASS,           SURFACE,    0,      0,      0},
+    {GRASS,                     SURFACE,    0,      0,      (DFF_BLOCKED_BY_OTHER_LAYERS)},
+    // iOS port (Brogue SE): "signs of life" lair dressing (generation-only, cosmetic). See spawnHorde's
+    // spawnDF block (Monsters.c) and the hordeCatalog_Brogue rows (GlobalsBrogue.c). Contained core + apron.
+    {BONES,                     SURFACE,    90,     40,     (DFF_BLOCKED_BY_OTHER_LAYERS),  "", 0,  0,  0,      0,          DF_OGRE_DEN_RUBBLE},
+    {RUBBLE,                    SURFACE,    60,     25,     (DFF_BLOCKED_BY_OTHER_LAYERS)},
+    {BONES,                     SURFACE,    80,     40,     (DFF_BLOCKED_BY_OTHER_LAYERS)},
+    {ECTOPLASM,                 SURFACE,    85,     35,     (DFF_BLOCKED_BY_OTHER_LAYERS)},
+    {BONES,                     SURFACE,    90,     35,     (DFF_BLOCKED_BY_OTHER_LAYERS),  "", 0,  0,  0,      0,          DF_DRAGON_ROOST_ASH},
+    {ASH,                       SURFACE,    70,     25,     (DFF_BLOCKED_BY_OTHER_LAYERS)},
 };
 
 const dungeonProfile dungeonProfileCatalog[NUMBER_DUNGEON_PROFILES] = {
@@ -1091,6 +1129,11 @@ const lightSource lightCatalog[NUMBER_LIGHT_KINDS] = {
     {&quietusFlashColor,    {300, 300, 1},          0,      true},      // quietus activation flare
     {&slayingFlashColor,    {300, 300, 1},          0,      true},      // slaying activation flare
     {&lightningColor,       {800, 800, 1},          0,      false},     // electric crystal activates
+    // iOS port (Brogue SE): player-centered "check your inventory" flares (see the color defs above).
+    {&identifyFlareColor,   {350, 350, 1},          0,      true},      // item identified (auto-ID / familiar / runic)
+    {&curseFlareColor,      {350, 350, 1},          0,      true},      // a curse revealed on equip
+    {&purifyFlareColor,     {350, 350, 1},          0,      true},      // a cursed runic purified (weld released)
+    {&rechargeFlareColor,   {300, 300, 1},          0,      true},      // a spent staff/charm usable again
 
     // glowing terrain:
     {&torchLightColor,      {1000, 1000, 1},        50,     false},     // torch

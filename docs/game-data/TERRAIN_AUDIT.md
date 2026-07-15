@@ -67,6 +67,8 @@ Two catalogs and a flag system drive everything:
 | `T_IS_DF_TRAP` | 19 | spews its DF when triggered (pressure-plate traps) |
 | `T_CAUSES_EXPLOSIVE_DAMAGE` | 20 | explosion damage (gas explosion) |
 | `T_SACRED` | 21 | non-ally monsters avoid (sacred glyph) |
+| `T_CAUSES_FREEZE` | 22 | freezes anything caught on the tile (SE frost cloud) |
+| `T_SLOWS_MOVEMENT` | 23 | **SE**: sticky terrain (mud/bog) — a non-attack step ending here costs extra move-ticks (attacks unaffected). Charged in `playerTurnEnded` (player) and `applyMudMoveSlow` after `monstersTurn` (monsters). Levitators/fliers skip it; a mud-native (`MONST_RESTRICTED_TO_LIQUID`) is exempt unless `MONSTER_FLEEING`. Dial: `MUD_MOVE_SLOW_PCT`. |
 
 Composite masks (`Rogue.h:2074-2082`): `T_PATHING_BLOCKER`, `T_LAKE_PATHING_BLOCKER`,
 `T_OBSTRUCTS_EVERYTHING`, `T_HARMFUL_TERRAIN` (= poison | fire | damage | paralysis | confusion |
@@ -93,6 +95,7 @@ explosive). The instant per-turn application of these to creatures happens in
 | `TM_EXPLOSIVE_PROMOTE` | 21 | when surrounded by fire/explosion, promotes (methane → explosion) |
 | `TM_SWAP_ENCHANTS_ACTIVATION` | 25 | commutation altar |
 | `TM_INSIGHT_ACTIVATION` / `TM_TRANSFER_ENCHANT_ACTIVATION` | 26–27 | **iOS-port** insight / transfer altars |
+| `TM_DIVINATION_ACTIVATION` | 28 | **SE** divination altar |
 
 ---
 
@@ -109,7 +112,7 @@ the `tileCatalog[]` row in `Globals.c`.
 |------|-----------|-----------|-------|
 | `DEEP_WATER` | 422 | `T_IS_DEEP_WATER`, `T_IS_FLAMMABLE`† | submerging, extinguishes fire; can sweep floating items |
 | `SHALLOW_WATER` | 423 | — | extinguishes fire, allows submerging |
-| `MUD` (bog) | 424 | — | `promoteChance 100` → `METHANE_GAS_PUFF`; submerging |
+| `MUD` (bog) | 424 | `T_SLOWS_MOVEMENT` (SE) | `promoteChance 100` → `METHANE_GAS_PUFF`; submerging; SE: sticky (+50% move-cost, not fighting) |
 | `LAVA` | 429 | `T_LAVA_INSTA_DEATH` | instant death unless levitating/fire-immune; submerging |
 | `LAVA_RETRACTABLE` / `LAVA_RETRACTING` | 430–431 | `T_LAVA_INSTA_DEATH` | machine-controlled (wired) / cooling |
 | `SACRIFICE_LAVA` | 558 | `T_LAVA_INSTA_DEATH` | sacrifice-machine pit |
@@ -259,6 +262,29 @@ the trigger**, so the trap couldn't be sprung remotely. Two-part SE fix:
 
 Both are SE-only for now and flagged as a cherry-pick candidate for CE/Classic/upstream (see
 [`BrogueSE/Engine/IOS_MODIFICATIONS.md`](../../BrogueSE/Engine/IOS_MODIFICATIONS.md)).
+
+### 6.2 SE — "living dungeon": tracks & traces, large-creature signs, lair dressing
+
+Cosmetic environmental-storytelling tiles/DFs (no gameplay flags; the world *records passage*):
+
+- **Tracks & traces (spoor).** New SURFACE tiles `WET_FOOTPRINTS` / `BLOODY_FOOTPRINTS` /
+  `MUDDY_FOOTPRINTS` (appended at the `tileType` enum end) each carry `TM_VANISHES_UPON_PROMOTION` and a
+  `promoteChance ~2000` (~5 turns) → `promoteType` = the shared `FADING_TRACKS` smudge → vanishes (~5
+  more). The `EMBERS→ASH` fade pattern; the two stages give a **readable freshness gradient** (fresh
+  vs. drying description). A creature stepping off water/blood/mud onto bare floor lays one via
+  `layCreatureSpoor` (`Monsters.c`, at `setMonsterLocation`), driven by the reusable `spoorRules` table;
+  the print DFs use `startProbability 0` (origin-only, **no spread RNG**). No `T_*` flags — never blocks,
+  never read by AI (a one-way tell). "Wet" reuses the shared `isWetTile` predicate (also electrified water).
+- **Large-creature signs.** `FLATTENED_GRASS` (SURFACE, flammable, regrows to `GRASS` over ~100 turns via
+  `DF_FLATTENED_GRASS_REGROW`, like trampled foliage) is laid when an `isLarge` creature crosses open
+  `GRASS`/`DEAD_GRASS` — a "something big passed" swath small creatures don't leave.
+- **Lair dressing.** The `hordeType.spawnDF` hook (§6.1's jackal den) extended to cosmetic-residue lairs:
+  `DF_OGRE_DEN_BONES`(+rubble apron), `DF_SPIDER_HUSKS`, `DF_PHANTOM_ECTOPLASM`, `DF_DRAGON_ROOST_BONES`
+  (+ash apron) — contained core+apron, **generation-only** (`!levels[…].visited`), reusing `BONES`/
+  `RUBBLE`/`ECTOPLASM`/`ASH`. Deliberately no entangling/vision-blocking terrain, to stay flavor-only.
+
+See [`BrogueSE/Engine/IOS_MODIFICATIONS.md`](../../BrogueSE/Engine/IOS_MODIFICATIONS.md) (2026-07-10 entry)
+and [reusable-components.md](../guides/reusable-components.md) (the spoor component).
 
 ---
 

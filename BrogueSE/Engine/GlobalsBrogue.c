@@ -134,7 +134,7 @@ const autoGenerator autoGeneratorCatalog_Brogue[] = {
     {NET_TRAP,                  DUNGEON,0,                          0,                          FLOOR,      NOTHING,    2,      5,              20,     0,      0,          1},
     {0,                         0,      0,                          MT_PARALYSIS_TRAP_AREA,     FLOOR,      NOTHING,    2,      6,              20,     0,      0,          1},
     {ALARM_TRAP,                DUNGEON,0,                          0,                          FLOOR,      NOTHING,    4,      7,              20,     0,      0,          1},
-    {GAS_TRAP_CONFUSION,        DUNGEON,0,                          0,                          FLOOR,      NOTHING,    2,      10,             20,     0,      0,          1},
+    {GAS_TRAP_CONFUSION,        DUNGEON,0,                          0,                          FLOOR,      NOTHING,    2,      10,             20,     0,      0,          1,      DF_TRAP_LUMINESCENT_FUNGUS,40}, // iOS port (Brogue SE): confusion trap amid glowing fungus
     {FLAMETHROWER,              DUNGEON,0,                          0,                          FLOOR,      NOTHING,    4,      12,             20,     0,      0,          1,      DF_TRAP_DRY_GRASS,  40}, // iOS port (Brogue SE): fire trap ringed with dry grass
     {FLOOD_TRAP,                DUNGEON,0,                          0,                          FLOOR,      NOTHING,    10,     14,             20,     0,      0,          1},
 
@@ -144,7 +144,7 @@ const autoGenerator autoGeneratorCatalog_Brogue[] = {
     {0,                         0,      0,                          MT_PARALYSIS_TRAP_HIDDEN_AREA, FLOOR,   NOTHING,    7,      DEEPEST_LEVEL-1,20,     100,    0,          3},
     {ALARM_TRAP_HIDDEN,         DUNGEON,0,                          0,                          FLOOR,      NOTHING,    8,      DEEPEST_LEVEL-1,20,     100,    0,          2},
     {TRAP_DOOR_HIDDEN,          DUNGEON,0,                          0,                          FLOOR,      NOTHING,    9,      DEEPEST_LEVEL-1,20,     100,    0,          2},
-    {GAS_TRAP_CONFUSION_HIDDEN, DUNGEON,0,                          0,                          FLOOR,      NOTHING,    11,     DEEPEST_LEVEL-1,20,     100,    0,          3},
+    {GAS_TRAP_CONFUSION_HIDDEN, DUNGEON,0,                          0,                          FLOOR,      NOTHING,    11,     DEEPEST_LEVEL-1,20,     100,    0,          3,      DF_TRAP_LUMINESCENT_FUNGUS,40}, // iOS port (Brogue SE): confusion trap amid glowing fungus
     {FLAMETHROWER_HIDDEN,       DUNGEON,0,                          0,                          FLOOR,      NOTHING,    13,     DEEPEST_LEVEL-1,20,     100,    0,          3,      DF_TRAP_DRY_GRASS,  40}, // iOS port (Brogue SE): fire trap ringed with dry grass
     {FLOOD_TRAP_HIDDEN,         DUNGEON,0,                          0,                          FLOOR,      NOTHING,    15,     DEEPEST_LEVEL-1,20,     100,    0,          3},
     {0,                         0,      0,                          MT_SWAMP_AREA,              FLOOR,      NOTHING,    1,      DEEPEST_LEVEL-1,30,     0,      0,          2},
@@ -836,10 +836,10 @@ const hordeType hordeCatalog_Brogue[] = {
     {MK_GOBLIN_CONJURER,2,      {MK_GOBLIN_CONJURER, MK_GOBLIN_MYSTIC}, {{0,1,1}, {1,1,1}},             7,      15,     40},
     {MK_CENTIPEDE,      0,      {0},                                    {{0}},                          7,      14,     100},
     {MK_BOG_MONSTER,    0,      {0},                                    {{0}},                          7,      14,     80,     MUD,            0,              HORDE_NEVER_OOD},
-    {MK_OGRE,           0,      {0},                                    {{0}},                          7,      13,     100},
+    {MK_OGRE,           0,      {0},                                    {{0}},                          7,      13,     100,    .spawnDF = DF_OGRE_DEN_BONES}, // iOS port (Brogue SE): bone-strewn brute den
     {MK_EEL,            1,      {MK_EEL},                               {{2, 4, 1}},                    8,      22,     70,     DEEP_WATER},
     {MK_ACID_MOUND,     1,      {MK_ACID_MOUND},                        {{2, 4, 1}},                    9,      13,     30},
-    {MK_SPIDER,         0,      {0},                                    {{0}},                          9,      16,     100},
+    {MK_SPIDER,         0,      {0},                                    {{0}},                          9,      16,     100,    .spawnDF = DF_SPIDER_HUSKS}, // iOS port (Brogue SE): husks of drained prey around the lair
     {MK_DAR_BLADEMASTER,1,      {MK_DAR_BLADEMASTER},                   {{0, 1, 1}},                    10,     14,     100},
     {MK_WILL_O_THE_WISP,0,      {0},                                    {{0}},                          10,     17,     100},
     {MK_WRAITH,         0,      {0},                                    {{0}},                          10,     17,     100},
@@ -860,7 +860,7 @@ const hordeType hordeCatalog_Brogue[] = {
     {MK_DAR_BLADEMASTER,2,      {MK_DAR_BLADEMASTER, MK_DAR_PRIESTESS}, {{0, 1, 1}, {0, 1, 1}},         15,     17,     100},
     {MK_PINK_JELLY,     2,      {MK_PINK_JELLY, MK_DAR_PRIESTESS},      {{0, 1, 1}, {1, 2, 1}},         17,     23,     70},
     {MK_KRAKEN,         0,      {0},                                    {{0}},                          15,     30,     100,        DEEP_WATER},
-    {MK_PHANTOM,        0,      {0},                                    {{0}},                          16,     23,     100},
+    {MK_PHANTOM,        0,      {0},                                    {{0}},                          16,     23,     100,    .spawnDF = DF_PHANTOM_ECTOPLASM}, // iOS port (Brogue SE): glowing ectoplasm marks an invisible haunt
     {MK_WRAITH,         1,      {MK_WRAITH},                            {{1, 4, 1}},                    16,     23,     80},
     {MK_IMP,            0,      {0},                                    {{0}},                          17,     24,     100},
     {MK_DAR_BLADEMASTER,3,      {MK_DAR_BLADEMASTER, MK_DAR_PRIESTESS, MK_DAR_BATTLEMAGE},{{1,2,1},{1,1,1},{1,1,1}},18,25,100},
@@ -869,7 +869,7 @@ const hordeType hordeCatalog_Brogue[] = {
     {MK_GOLEM,          0,      {0},                                    {{0}},                          21,     30,     100},
     {MK_TENTACLE_HORROR,0,      {0},                                    {{0}},                          22,     DEEPEST_LEVEL-1,        100},
     {MK_PHYLACTERY,     0,      {0},                                    {{0}},                          22,     DEEPEST_LEVEL-1,        100},
-    {MK_DRAGON,         0,      {0},                                    {{0}},                          24,     DEEPEST_LEVEL-1,        70},
+    {MK_DRAGON,         0,      {0},                                    {{0}},                          24,     DEEPEST_LEVEL-1,        70,     .spawnDF = DF_DRAGON_ROOST_BONES}, // iOS port (Brogue SE): charred bones of a dragon's roost
     {MK_DRAGON,         1,      {MK_DRAGON},                            {{1,1,1}},                      27,     DEEPEST_LEVEL-1,        30},
     {MK_GOLEM,          3,      {MK_GOLEM, MK_DAR_PRIESTESS, MK_DAR_BATTLEMAGE}, {{1, 2, 1}, {0,1,1},{0,1,1}},27,DEEPEST_LEVEL-1,   80},
     {MK_GOLEM,          1,      {MK_GOLEM},                             {{5, 10, 2}},                   30,     DEEPEST_LEVEL-1,    20},

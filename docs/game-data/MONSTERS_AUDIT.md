@@ -285,8 +285,21 @@ Source: `GlobalsBrogue.c:796` (`hordeCatalog_Brogue`). `brogueGameConst.numberHo
 | `spawnsIn` | terrain the horde must spawn into (e.g. `DEEP_WATER`, `WALL`, `MUD`, `STATUE_DORMANT`, `MONSTER_CAGE_CLOSED`) |
 | `machine` | accompanying machine to build (e.g. `MT_CAMP_AREA`) |
 | `flags` | `HORDE_*` (see §8) |
+| `spawnDF` (SE) | a `DF_*` "lair" laid at the leader's cell **at level-gen only** (`!levels[…].visited`), so a horde that wanders in mid-game doesn't conjure one. `0` = none. |
 
 `pickHordeType` (`Monsters.c:663`) sums `frequency` over eligible hordes (matching depth and flag filters) and picks weighted-randomly. `spawnHorde` (`Monsters.c:944`) places the leader, then iterates members, building any associated `machine`.
+
+**SE lair dressing (`spawnDF`).** A "living dungeon" tell: the room reads as inhabited before its
+occupant is seen. Cosmetic-residue lairs (no gameplay hazard): jackal → dense foliage (`DF_JACKAL_DEN_FOLIAGE`),
+ogre → bones+rubble (`DF_OGRE_DEN_BONES`), spider → prey husks (`DF_SPIDER_HUSKS`), phantom → glowing
+ectoplasm (`DF_PHANTOM_ECTOPLASM`), dragon → charred bones (`DF_DRAGON_ROOST_BONES`). See
+[TERRAIN_AUDIT.md §6.2](TERRAIN_AUDIT.md) and [reusable-components.md](../guides/reusable-components.md).
+
+**SE large-creature signs (`isLarge`).** The `creatureType.isLarge` flag (ogre, troll, naga, ogre shaman,
+kraken, bog monster, dragon, golem, tentacle horror, wraith, zombie, lich, phantom, revenant, centaur,
+naga, pink/acid jelly, salamander, underworm) — historically only sizing the psychic emanation — is now
+*also* read by `layCreatureSpoor` (`Monsters.c`): a large creature crossing open grass mats it flat into a
+`FLATTENED_GRASS` swath (regrows like trampled foliage) that a small creature never leaves.
 
 ### 7.2 Naturally-spawning hordes (no machine/summon flags)
 

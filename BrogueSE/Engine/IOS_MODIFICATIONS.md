@@ -32,6 +32,298 @@ See `BrogueCE/Engine/IOS_MODIFICATIONS.md` (faithful CE) and
 
 ## Change log
 
+### 2026-07-10 — Color-coded "check your inventory" flares for passive item events (new content)
+
+**What.** Several momentous item events currently just scroll a message by, with no visual cue to open the
+pack. Each now also fires a **color-coded "star ripple"** on the player — a radial 8-ray burst on the cosmetic
+layer, shaped so it can't be confused with the box/wave **noise ripples**:
+- **Gold** — something identified: auto-ID by use, a worn/used item becoming familiar, or a weapon/armor
+  **runic** revealing itself.
+- **Red** — a **curse** revealed the instant you equip a cursed item.
+- **Green** — a cursed double-edged **runic purified** (its weld releases).
+- **Cyan** — a fully-spent **staff or charm becomes usable again**.
+
+**How.** A new `CE_STAR_RIPPLE` cosmetic effect + `cosmeticSpawnItemTell(loc, kind)` (`IO.c`): a transient
+8-ray burst (tip + trailing cell per ray, bright center flash, fading as it expands) in a kind-keyed 0-100
+color (`cosmeticStar*Color`). Chosen over the first cut (`createFlare` radiant burst) because that *expanded
+outward like a noise ripple* and read as one; the star's shape reads as distinct. *(The `*_FLARE_LIGHT`
+lights/colors from that first cut are now unused — pending removal.)*
+
+**Priority + completion.** The overlay has no explicit priority flag — cell precedence is the render order
+plus a first-claim rule (`cosmeticMarkCell`: the first effect to paint a cell each frame wins it). The star is
+painted **before** the noise ripples, so it claims its cells and a ripple sweeping over it paints *around* it
+(no holes) rather than overwriting it. Completion is inherent: transient effects carry a `frameLife` and
+nothing cancels the star early, so it always runs its full burst. Fired at `player.loc` from the passive
+event chokes:
+- `autoIdentify()` (`Items.c`) — one gold flare covers runic discovery **and** auto-ID-by-use across its 10+
+  call sites; gated on an actual reveal (`revealed` flag), so a no-op call doesn't flash.
+- The worn-timer "now familiar" identify (`Time.c` ~L2181) and the weapon-kills familiar
+  (`decrementWeaponAutoIDTimer`, `Combat.c`) — gold.
+- The equip-time curse block in `equipItem` (`Items.c`) — red.
+- `purifyRunicIfReady()` on the transition (`Items.c`) — green.
+- `rechargeItemsIncrementally()` (`Time.c`): staff **0→usable** transition (captured before/after, so it does
+  **not** flash on every incremental charge — no combat strobe) and the charm "has recharged" moment — cyan.
+
+**Scope note — passive only.** Deliberately hooked the *automatic* reveals (timers, runic, curse-on-equip),
+**not** `identify()` generically — that also fires on scroll-of-identify / divination altars, where you
+*initiated* the ID and are already looking at inventory. No flare there.
+
+**Log colors matched to flare hues (learned association).** Each event's message text now shares its flare's
+hue, so the color becomes the tell: gold identify messages already used `itemMessageColor` (unchanged); the
+equip-curse message moved gold→**red** (`badMessageColor`); the purify message moved blue-ish
+`goodMessageColor`→**green** (`advancementMessageColor`); and recharge messages use **cyan** (`teal`) — the
+charm "has recharged" line recolored, and a matching teal staff line added on the 0→usable transition (staffs
+printed nothing before). Flare colors themselves are HDR light values, too bright for text, so the log reuses
+readable message-palette colors of the same hue rather than the flare color objects.
+
+**Determinism / saves.** The star ripple rides the cosmetic layer (`RNG_COSMETIC`, hard-suppressed under
+playback fast-forward); the events driving it are already deterministic. No game-state or save impact.
+Marked `// iOS port (Brogue SE):`.
+
+### 2026-07-10 — Living dungeon: tracks & traces, large-creature signs, lair dressing (new content)
+
+**What.** Three cosmetic "the world records passage" features, all composed from existing machinery:
+
+1. **Tracks & traces.** A creature (or the player) that steps off water, blood or mud onto bare dry
+   floor leaves a short trail of fading footprints — wet (bluish), bloody, or muddy — that promote to
+   a shared faint smudge and then vanish (the `EMBERS→ASH` fade). A readable clue that something
+   passed and which way, plus atmosphere. Data-driven via a `spoorRules` table + `layCreatureSpoor()`.
+2. **Large-creature signs.** A creature flagged `isLarge` mats open `GRASS`/`DEAD_GRASS` flat into a
+   `FLATTENED_GRASS` swath that regrows like trampled foliage — a "something big came through here"
+   tell (small creatures leave grass untouched; dense foliage already trampled for everyone).
+3. **Lair dressing.** Extended the jackal-den `hordeType.spawnDF` hook to ogres (bones+rubble den),
+   spiders (prey husks), phantoms (glowing ectoplasm haunt) and dragons (charred-bone roost), so a
+   room reads as inhabited before its occupant is seen.
+
+**Why.** Make the dungeon feel alive without touching balance. Scope was deliberately pinned to
+"readable clue + flavor": the print tiles carry **no `T_*` gameplay flags and no monster reads them**
+(a one-way tell — you can read tracks, but nothing tracks you), and the new lairs use **cosmetic
+residue only** (no entangling webs / vision-blocking foliage beyond the pre-existing jackal den).
+
+**Where.**
+- New `tileType`s `WET_FOOTPRINTS`/`BLOODY_FOOTPRINTS`/`MUDDY_FOOTPRINTS`/`FADING_TRACKS`/
+  `FLATTENED_GRASS` (appended at enum end, no index shift) + `DF_*` counterparts and six
+  `DF_*_DEN/ROOST/HUSKS/ECTOPLASM` lair DFs (`Rogue.h`); matching `tileCatalog` and
+  `dungeonFeatureCatalog` rows (`Globals.c`).
+- Creature runtime fields `spoorType`/`spoorCharge` (`Rogue.h`), set deterministically from movement.
+- `layCreatureSpoor()` + `spoorRules`/`isBloodTile`/`isMudTile`/`isTrackableFloor` and the single call
+  in `setMonsterLocation()` — the one seam every creature *and* the player route through (`Monsters.c`).
+- `isConductiveWater()` renamed to the shared, non-static `isWetTile()` (`Items.c`, prototype in
+  `Rogue.h`) so electrified water and the spoor system share one water definition and never drift.
+- `.spawnDF` rows on the ogre/spider/phantom/dragon hordes (`GlobalsBrogue.c`).
+
+**Gating / determinism.** Footprint placement is a deterministic function of deterministic movement
+and consumes **no** RNG (DFs use `startProbability 0` = origin-only, no spread rolls); the fade rides
+the existing substantive promote loop, so everything replays from the seed exactly like the jackal
+den. New creature fields are save-safe (saves are input replays). Lairs spawn generation-only (gated
+on `!levels[...].visited`), so a horde wandering into explored dungeon never conjures one. SE is
+Game-Center-silent, so perturbing the substantive stream via the fade carries no leaderboard risk.
+
+### 2026-07-10 — Sticky mud/bog: T_SLOWS_MOVEMENT slows steps (not fighting) (new content)
+
+**What.** Mud/bog terrain now drags at your legs: a non-attack step that *ends* on a bog tile costs extra
+move-ticks, for the player and monsters alike. Fighting is untouched (you can swing at full speed in the
+mire, just can't maneuver), and anything above the muck -- levitating or flying -- skips it. Modeled on the
+cursed Anchor runic's move-slow.
+
+**How (data-driven).**
+- `Rogue.h` -- new terrain flag `T_SLOWS_MOVEMENT = Fl(23)` (not in any pathing/harmful composite -- mud stays
+  passable, just slow) and constant `MUD_MOVE_SLOW_PCT = 50` (extra % of `movementSpeed`; the tuning dial,
+  half the Anchor curse's 100 since mud is environmental, not a curse).
+- `Globals.c` -- the flag set on `MUD` and `MACHINE_MUD_DORMANT` (the two "knee-deep in mud" bog tiles; the
+  swamp DF lays `MUD` in the liquid layer, so swamps are covered). `MUD_FLOOR` (the walkable goblin-warren
+  floor) deliberately excluded. Their flavor text gained "...and each heavy step is a struggle."
+- `Time.c` (player) -- in the `playerTurnEnded` non-attack move-cost block (beside the Anchor drag; gated on
+  `ticksUntilTurn == 0`, so attacks -- charged elsewhere -- are exempt): if `!STATUS_LEVITATING` and the cell
+  has `T_SLOWS_MOVEMENT`, add `movementSpeed * MUD_MOVE_SLOW_PCT / 100`.
+- `Time.c` (monsters) -- new static `applyMudMoveSlow(monst, preTurnLoc)` called right after `monstersTurn`
+  in the monster loop. A move changes `loc`, an attack does not, so a changed `loc` cleanly means "stepped"
+  (excludes attacks with no per-site edits). Skips levitators/fliers (`MONST_FLIES`). A mud-native
+  (`MONST_RESTRICTED_TO_LIQUID`, i.e. the bog monster) wades freely on its turf UNLESS `MONSTER_FLEEING` --
+  the mire lets it ambush at full speed but betrays it when it flees near death (it's also
+  `MONST_FLEES_NEAR_DEATH`), so you can wade in and finish it.
+
+**Design (CLAUDE.md #3).** Universal (two-way) slow makes mud tactical terrain, not a one-way "avoid" tile:
+you can lure fast land monsters into a bog, but only by positioning at one -- and bogs carry their own hazards
+(seizing bog monsters, `DF_METHANE_GAS_PUFF` explosive gas the slow now makes harder to flee). Counter-pressure,
+not a strict upgrade. No new runtime messages -- the existing on-entry tile flavor (`Time.c` ~L81) already fires
+and now spells out the drag.
+
+**Determinism / saves.** Pure tick arithmetic off `loc`/terrain/state -- no RNG, no new saved fields.
+Replay-safe. Marked `// iOS port (Brogue SE):`.
+
+### 2026-07-10 — Poisoned creatures: sickly green body tint + pulsing ☠ status-blink (new content)
+
+**What.** Any poisoned creature — the player's `@` included — now takes a sickly toxic-green cast *and* wears
+a pulsing `☠` skull overlay, so the poison DoT is legible at a glance on the map, not only in the
+sidebar/health readout. Two complementary tells: the tint recolors the creature's own glyph (always on); the
+skull rides above it, blinking in the global unison phase like the other status tells.
+
+**How — the body tint.** Two `applyColorAverage(..., &poisonTintColor, 50)` calls in `getCellAppearance`
+(`IO.c`), gated on `status[STATUS_POISONED] > 0`: one in the `HAS_MONSTER` branch (right after the existing
+frost/slow body tints, so it composes over them) and one in the `HAS_PLAYER` branch (which previously took no
+status tint at all). New plain color `poisonTintColor` in `GlobalsBase.c`/`.h` — a yellow-leaning green kept
+distinct from the bluer, minty protective-green of the shielded tell. Exact pattern as the staff-of-frost
+`STATUS_FROZEN`/`STATUS_SLOWED` tints: a persistent, deterministic **read** of game state on the display path
+— no RNG, no game-state write, no save impact. `poisonTintColor` carries no shimmer fields precisely so it
+pulls nothing from the substantive RNG when baked in this path.
+
+**How — the ☠ status-blink.** Reuses the existing `CE_STATUS_BLINK` overlay system (the 2026-06-25 entry): a
+`STATUS_POISONED` case added to `statusBlinkGlyphFor` at priority `burning > paralyzed > confused > `**`poison`**` >
+shielded > healing` (an affliction, so above the buffs, but below the urgent control effects). New glyph
+`G_POISON_SKULL` (enum tail, cosmetic-only → save-safe) → `U_SKULL_CROSSBONES` (`0x2620`) in `SEBridge.mm`'s
+glyph→unicode mapper → routed through ArialUnicodeMS in `RogueScene.swift` (`\u{2620}` added beside ★/♥/◈,
+since Monaco lacks it). Tint = new `cosmeticPoisonColor` (toxic yellow-green, family-consistent with the other
+cosmetic tints). No new effect kind — it's config on the proven blink infra.
+
+**Pulse still tabled.** The *skull* pulses (it's a blink), but the green *body tint* itself stays steady. To
+make the tint pulse would need a dedicated `CE_POISON_PULSE` kind that keeps the cell in the per-tick redraw
+set and oscillates the blend on `gCosmeticBlinkTick` (`getCellAppearance` is time-less and isn't re-run for a
+still creature each idle tick). Deferred; noted at the tint seam in `IO.c`.
+
+**Frost NOT given a glyph (deliberate).** Considered a ❄ frost blink alongside this; skipped because frozen
+already has a strong icy body tint in `getCellAppearance` (and was excluded from the blink system for exactly
+that reason on 2026-06-25). Easy to add later (❄ = `U+2744`, same 4 touchpoints) if wanted.
+
+**Determinism / saves.** Body tint is a deterministic display-path state read; the skull rides the cosmetic
+layer (`RNG_COSMETIC`, hard-suppressed under playback fast-forward). Both display-only, replay-safe. New glyph
+enum value is appended at the tail and cosmetic-only, so it's never recorded. Marked `// iOS port (Brogue SE):`.
+
+### 2026-07-09 — Divination room reliably places 4 altars (was 2–3 in ~20% of seeds)
+
+**What.** An altar-of-divination room sometimes generated with only **2 or 3 altars** and a lot of empty
+carpet, behind a locked door — it read as "an empty room you needed a key for." Repro: seed 4/9/10 gave 2
+altars, seed 6/11/19 gave 3 (seed 43004854, the report's seed, happened to roll a clean 4). Now every seed
+places the statue + **4 altars** inside the divination room.
+
+**Cause.** The divination `buildAMachine` is a *cascade*: the reward room **plus** a locked-door vestibule
+(frequency-100 vestibule) **plus** an outsourced key-guard sub-machine — and that key-guard room is itself a
+carpeted commutation room. `placeAltarCrossInRoom` matched interior cells by `machineNumber >
+preDivinationMachineNumber`, i.e. *any* machine built during the cascade. When the key-guard room was
+carpeted, its cells qualified too, so the centroid was averaged across **two separate rooms**; the statue
+landed off-centre and the strict N/S/E/W cross stranded the directions that pointed at walls/the gap → 2–3
+altars. (This is also why it always coincided with a locked door: the locked-door vestibule is the very
+feature whose outsourced key-guard room polluted the cell set.)
+
+**Fix (`Architect.c`).**
+- New `divCellIsOpen(x,y,machineNumber)` matches the divination room's **exact** machine number instead of a
+  `>` floor. The room is `preDivinationMachineNumber + 1` — `buildAMachine` reserves the primary room's number
+  (`++rogue.machineNumber`, ~line 1232) *before* its feature loop spawns the vestibule/key-guard siblings, so
+  they take strictly higher numbers. The call site now passes that exact number.
+- `placeAltarCrossInRoom` centres the statue on the interior cell admitting the **most** cardinal altars
+  (tie-broken toward the centroid), then, if the cross still stranded a direction in an irregular room, **fills
+  the shortfall from the nearest open interior cells** — guaranteeing four altars.
+
+Deterministic (fixed scan order, no RNG), so seeded runs stay deterministic and the sibling key-guard rooms are
+left untouched. Verified with a headless dungeon generator (SE engine + fightsim stubs) over seeds 1–200: 4
+altars on every divination floor. The locked-door gating is unchanged (intended). See MACHINES_AUDIT §7f.
+
+### 2026-07-09 — Altar of divination reveals runics, exactly like a scroll of identify
+
+**What.** Placing a runic weapon/armor whose base kind+enchant were already known — but whose **runic was
+still hidden** — on an altar of divination did nothing: the altar skipped it and never revealed the runic.
+A scroll of identify handles the same item fine. Now the altar completes the runic ID too.
+
+**Cause.** `performDivination` (`Items.c`) gated eligibility on `!itemIdentityFullyKnown(anItem)`, and
+`itemIdentityFullyKnown` returns true as soon as `ITEM_IDENTIFIED` is set — but for a runic weapon/armor,
+`ITEM_IDENTIFIED` (base kind+enchant) does **not** imply the runic is known (that's `ITEM_RUNIC_IDENTIFIED`).
+The scroll of identify instead gates on `ITEM_CAN_BE_IDENTIFIED`, which `updateIdentifiableItem` keeps set on
+runic gear until the runic itself is identified.
+
+**Fix.** The altar's gate now mirrors the scroll: refresh the candidate floor item via
+`updateIdentifiableItem(anItem)` (the flag can be stale — the scroll calls `updateIdentifiableItems()` before
+prompting for the same reason), then require `ITEM_CAN_BE_IDENTIFIED`. The reveal itself was already a full
+`identify()` (which sets `ITEM_RUNIC_IDENTIFIED` on runic items), so no change there. The "fire only if it
+helps / don't block another altar" contract is preserved — a truly-known item has the flag cleared and is
+still skipped. Marked `// iOS port (Brogue SE):`. See IDENTIFICATION_AUDIT.md §5e′.
+
+### 2026-07-09 — Force-shoved creatures slide (animated) instead of teleporting
+
+**What.** A frozen creature shoved by the staff of frost (and, when enabled, any creature flung by the
+explosion knockback) now **skates cell-by-cell along the shove path** to its rest cell rather than
+popping there instantly — the same "launched creature" read that the force *weapon* gets from its
+`zap(BOLT_BLINKING)` blink. The victim's own rendered glyph (frozen tint included) slides, mirroring the
+per-cell glyph animation used by thrown items / bolts (`getCellAppearance` → `plotCharWithColor` →
+`pauseAnimation(16)` → `refreshDungeonCell`).
+
+**Where.** Added `animateForceShove` and wired it into `shoveCreatureAlong` (`Combat.c`) — the shared
+force-shove primitive — so both `pushFrozenCreature` and `knockCreatureFromExplosion` inherit it with no
+per-caller code. The loop records the traversed cells into a small `path[]` (bounded by
+`FROST_PUSH_MAX_DISTANCE`), then plays them back just before the existing `setMonsterLocation` relocation.
+
+**Why it's safe.** Purely cosmetic: it consumes **no RNG** and changes **no game state** — the rest cell,
+slam target, momentum/strength damage, and hazard-deposit are all still decided by `shoveCreatureAlong`'s
+unchanged geometry, and `setMonsterLocation` still does the one real relocation. So seeded runs and
+input-replay saves are untouched. Bails out immediately when the player can't see the slide or during
+fast-forward playback. To avoid a ghost/duplicate, the victim's flag is cleared from its origin cell for
+the duration of the slide and re-added at the destination by `setMonsterLocation`. Marked
+`// iOS port (Brogue SE):`.
+
+### 2026-07-08 — Bloodwort soothing vapors: soft afflictions tick 2× in the healing cloud
+
+**What.** Brings BrogueCE issue #514 to SE in its non-overpowered form: the bloodwort healing cloud
+(`HEALING_CLOUD` / `T_CAUSES_HEALING`) doesn't *cure* ailments — it drains **soft afflictions twice as
+fast** while a creature stands in it. Symmetric (player + monsters), same eligibility as the cloud's HP
+heal (skip `MONST_INANIMATE` + `MB_SUBMERGED`). Never cures: the cloud is `TM_GAS_DISSIPATES_QUICKLY`, so
+exposure is only a few turns. Full spec + rationale in `docs/design/bloodwort-soothing-vapors.md`.
+
+- **Accelerated set (9):** `WEAKENED`, `HALLUCINATING`, `SLOWED`, `CONFUSED`, `NAUSEOUS`, `DISCORDANT`,
+  `MAGICAL_FEAR`, `ENTRANCED`, `DARKNESS`. Excludes damage-ticks (`BURNING`/`POISONED` — the HP heal
+  already out-heals poison), hard lockouts (`PARALYZED`/`FROZEN` run full duration), and
+  structural/bookkeeping statuses. All positive buffs untouched.
+- **`Monsters.c`:** two new shared helpers — `isSoothableAffliction(statusIndex)` (single source of truth
+  for the set) and `creatureInSoothingVapor(monst)` (mirrors the heal gate). In `decrementMonsterStatus`,
+  a pre-decrement at the top of the status loop, applied **only when `status > 1`**, so the switch below
+  still performs the final tick-to-zero and its per-status cleanup (SLOWED speed restore, DISCORDANT
+  guard, etc.) — doubling the rate without bypassing any cleanup.
+- **`Time.c` (`decrementPlayerStatus`):** the player's statuses decrement here, not in
+  `decrementMonsterStatus`, so the same `> 1` pre-decrement is added at the **top** of the function —
+  crucially *before* the cursed-runic top-ups (Delirium hallucination @ ~2375, Acrophobia confusion
+  @ ~2397). A runic-forced status sits at its steady forced value of 1 at turn-top (not `> 1`), so the
+  vapor is a correct no-op on it (no flicker, no "…fade" spam); those stay purify/remove-only. The vapor
+  only accelerates the portion of an affliction stacked *above* the forced floor. One-time subtle
+  player line "the soothing spores ease your afflictions." latched per exposure (cosmetic static; not
+  game state).
+- **`Rogue.h`:** prototypes for the two helpers.
+- **Determinism:** RNG-free (flag + integer decrement) → save-replay-safe. Behavior change, so
+  pre-existing SE recordings that pass through a bloodwort cloud won't replay identically (normal for an
+  SE gameplay change).
+- **Tuning:** the `2×` is the single `> 1` pre-decrement; bump toward per-effect factors later if
+  playtesting wants it.
+
+### 2026-07-08 — Opaque description boxes on iPhone (SE only)
+
+**What.** SE-only, iPhone-only: description / info text boxes (`printTextBox`) render with a fully
+opaque background (opacity 100) instead of the default translucent `INTERFACE_OPACITY` (95). On
+iPhone the box is shown *magnified* (menu-magnify / examine fit-zoom), so the enlarged translucent
+panel lets the dungeon bleed through and hurts legibility. iPad / macOS keep the translucent look.
+
+- **`IO.c`:** new external-linkage flag `boolean gDescriptionBoxOpaque` (default `false`);
+  `printTextBox` shades with `gDescriptionBoxOpaque ? 100 : INTERFACE_OPACITY`.
+- **`SEBridge.mm` + `BrogueSEHost.h`:** new exported entry point `se_setDescriptionBoxOpaque(int)`
+  drives the flag (sibling of `se_setKeyboardLabelsEnabled`). SE-only — no `BrogueCEHost` protocol
+  change, so nothing crosses into CE / Classic.
+- **Host (`BrogueViewController+EngineSession.swift`):** calls
+  `se_setDescriptionBoxOpaque(isPhoneIdiom ? 1 : 0)` at SE engine start.
+
+Experiment / tuning: it's a static per-process flag gated on device idiom. To make it zoom-gated
+instead (opaque only while actually magnified), promote it to a host *query* like
+`ceShouldSuppressExamineBox` and read it per `printTextBox`.
+
+### 2026-07-08 — Menu-magnify: report the visible (haloed) box rect, not the cancel region
+
+**What.** In `IO.c printTextBox`, the window rect passed to `buttonInputLoop` (which the iPhone
+menu-magnify borrows and scales, via `ceSetMenuBox`) started at `y2` and used
+`by - y2 + 1 + padLines` for the height. `rectangularShading` draws a one-cell shadow halo on every
+side, so the box the player actually sees spans `(x2-1, y2-1)`…`(x2+width, y2+lineCount+padLines)`.
+The old rect therefore **dropped the top halo row** (left behind as a dark 1× seam above the
+magnified panel) and, because `by - y2 + 1 + padLines` double-counts the padding, **over-ran the
+bottom** with empty rows. Fixed by passing `winY = y2 - 1` and `winHeight = lineCount + padLines + 2`
+so the borrowed/reported rect equals the visible box. `winY`/`winHeight` only bound the
+click-to-cancel region (buttons are positioned absolutely), so the cancel region now matches the
+visible box too — no interaction regression. Horizontal halo is still added by `buttonInputLoop`'s
+own 1-cell trim. Marked `// iOS port (iBrogue):` (platform fix shared with CE + Classic).
+
 ### 2026-07-07 — Item-detail box: reserve room for action buttons so long descriptions keep "call"
 
 **What.** `printTextBox`'s auto-widen only widened until the **text** fit above the flavor/button
@@ -961,6 +1253,28 @@ leaves them alone and they don't hide the trap (the trap's lower `drawPriority` 
 **Determinism / saves.** Chance roll + offset pick + spread all run on substantive RNG during generation, so
 they replay from the seed. New struct/DF fields are static catalog data — save/replay-safe. Shifts generation
 for existing seeds (expected for new content; SE is Game Center–silent). Marked `// iOS port (Brogue SE):`.
+
+### 2026-07-10 — Trap-anchored thematic terrain, cont.: glowing fungus at confusion traps (new content)
+
+**What.** Extends the `companionDF` mechanic above to the confusion trap (`GAS_TRAP_CONFUSION` /
+`_HIDDEN`): a ~40% chance to sit amid a patch of glowing luminescent fungus, whose eerie pale glow lures
+you toward the psychotropic-gas plate. Pure config on the existing seam — no new mechanism.
+
+**How.**
+- `GlobalsBrogue.c` — the two confusion-trap rows set `companionDF = DF_TRAP_LUMINESCENT_FUNGUS`,
+  `companionChance = 40` (revealed + hidden, matching fire/caustic).
+- `Globals.c` / `Rogue.h` — one new DF, `DF_TRAP_LUMINESCENT_FUNGUS` (`LUMINESCENT_FUNGUS`, contained
+  `60/22` vs open-field `DF_LUMINESCENT_FUNGUS`'s `60/8` sprawl).
+
+**#832 interaction / why fungus, not a fungal forest.** `LUMINESCENT_FUNGUS` is a grass-type surface — it
+casts `FUNGUS_LIGHT` but is **not** `T_OBSTRUCTS_VISION`, so like the grass/bones companions it never hides
+the trap nor gets stripped by the fillSpawnMap trap guard. The taller "luminescent fungal forest"
+(`FUNGUS_FOREST`) was rejected as the companion precisely because it *does* obstruct vision (would
+reintroduce the #832 hide-the-trap problem). The glow is flavor only — it illuminates ambient floor, not
+the still-secret trap glyph, so the soft-tell level matches the unlit grass/bones cases.
+
+**Determinism / saves.** Same as the parent entry — substantive-RNG generation, static catalog data,
+replay-safe. Marked `// iOS port (Brogue SE):`.
 
 ### 2026-06-23 — Noise system: a pack's rallying cry (ripple + message when a creature rouses its companions)
 

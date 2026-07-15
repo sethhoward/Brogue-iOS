@@ -42,6 +42,12 @@ void se_setKeyboardLabelsEnabled(int enabled);
 // Gates SE's "Press <?> for help" welcome hint. Called on GCKeyboard connect/disconnect.
 void se_setHardwareKeyboardConnected(int connected);
 
+// iOS port (Brogue SE): opt description/info text boxes (printTextBox) into a fully opaque
+// background instead of the default translucent panel. The host enables it on iPhone, where the
+// box is shown magnified and the dungeon bleeding through the enlarged panel hurts legibility.
+// Static for the process; the host sets it once at engine start.
+void se_setDescriptionBoxOpaque(int opaque);
+
 // iOS port (Brogue SE): background suspend/resume. se_requestBackgroundSave() is called when the
 // app backgrounds; the engine thread snapshots exact state and marks it for cold-launch resume.
 // se_clearResumeMarker() drops that marker when the app survived the background (the in-memory

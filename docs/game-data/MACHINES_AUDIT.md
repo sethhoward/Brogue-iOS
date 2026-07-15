@@ -339,12 +339,24 @@ These have `freq 0` for the reward raffle — they're pulled in to host the key 
 | **Altars of divination** | 7–AL | 10–30 | 0 | force-built once per run, carry-forward D7→D22 (§8) | :653 |
 
 **Altars of Divination (Brogue SE)** — replaces the insight altars. `placeAltarCrossInRoom` (Architect.c) lays
-a central **statue** (a solid idol) with up to four one-use **divination altars** one tile out in each cardinal
+a central **statue** (a solid idol) with **four** one-use **divination altars** one tile out in each cardinal
 direction. Place an unID'd item on an active altar → full `identify()` → the altar **arms** (holds the item)
 and **seals shut on pickup** (`TM_PROMOTES_ON_ITEM_PICKUP` → `DF_DIVINATION_ALTAR_CLOSE`). Each identify (room-
 scoped `rogue.divinationAltarUses`) rolls an escalating **0/25/50/75%** awaken (`performDivination`, Items.c);
 on an awaken a tiered guardian (Ogre→Troll→Underworm by trigger-use) bursts from the statue "off balance" and
 the unused altars shatter. See IDENTIFICATION_AUDIT §5e and `docs/design/altars-of-divination.md`.
+
+> **Room isolation + four-altar guarantee (2026-07-09 fix).** The divination `buildAMachine` is a *cascade*:
+> the reward room **plus** a locked-door vestibule **plus** an outsourced key-guard sub-machine (a carpeted
+> commutation room). `placeAltarCrossInRoom` originally matched interior cells by `machineNumber >
+> preDivinationMachineNumber`, which swept the sibling key-guard room into the layout when it was also carpeted
+> — the centroid then spanned two separate rooms and the cardinal cross stranded 1–2 directions, so the room
+> came out with **only 2–3 altars** (~20% of seeds; e.g. seed 4/9/10 = 2, seed 6/11/19 = 3) and read as a
+> half-empty room behind a locked door. The fix isolates the divination room by its **exact** machine number
+> (`preDivinationMachineNumber + 1` — the primary room reserved at Architect.c ~1232, before the cascade
+> siblings take higher numbers), centres the statue on the cell that admits the most cardinal altars, and
+> **fills any stranded direction from the nearest open interior cell** so the reward is always four altars.
+> Verified with a headless generator over seeds 1–200: 4 altars every time, key-guard rooms untouched.
 
 ---
 

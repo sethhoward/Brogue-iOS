@@ -2483,6 +2483,40 @@ void updateMonsterState(creature *monst) {
     }
 }
 
+// iOS port (Brogue SE): bloodwort soothing vapors. The 9 "soft afflictions" the healing cloud drains
+// twice as fast (see docs/design/bloodwort-soothing-vapors.md). Deliberately EXCLUDES damage-ticks
+// (burning / poison -- the cloud's HP heal already out-heals poison), the hard "can't-act" lockouts
+// (paralysis / freeze, which always run their full duration), and structural / bookkeeping statuses
+// (stuck, lifespan, fiery-doused, aggravating, donning/searching/nutrition), plus every positive buff.
+// Single source of truth for both decrement sites (decrementMonsterStatus + decrementPlayerStatus);
+// reusable if a future SE cleanse effect wants "the afflictions".
+boolean isSoothableAffliction(short statusIndex) {
+    switch (statusIndex) {
+        case STATUS_WEAKENED:
+        case STATUS_HALLUCINATING:
+        case STATUS_SLOWED:
+        case STATUS_CONFUSED:
+        case STATUS_NAUSEOUS:
+        case STATUS_DISCORDANT:
+        case STATUS_MAGICAL_FEAR:
+        case STATUS_ENTRANCED:
+        case STATUS_DARKNESS:
+            return true;
+        default:
+            return false;
+    }
+}
+
+// iOS port (Brogue SE): bloodwort soothing vapors -- eligibility to be soothed, mirroring the healing
+// cloud's HP-heal gate (Time.c): standing in the cloud (T_CAUSES_HEALING), not an inanimate construct,
+// not submerged. "If the spores can't heal you, they can't soothe you."
+boolean creatureInSoothingVapor(const creature *monst) {
+    return monst
+        && !(monst->info.flags & MONST_INANIMATE)
+        && !(monst->bookkeepingFlags & MB_SUBMERGED)
+        && cellHasTerrainFlag(monst->loc, T_CAUSES_HEALING);
+}
+
 void decrementMonsterStatus(creature *monst) {
     short i, damage;
     char buf[COLS], buf2[COLS];
@@ -2506,7 +2540,16 @@ void decrementMonsterStatus(creature *monst) {
         }
     }
 
+    const boolean soothing = creatureInSoothingVapor(monst);
     for (i=0; i<NUMBER_OF_STATUS_EFFECTS; i++) {
+        // iOS port (Brogue SE): bloodwort soothing vapors -- soft afflictions tick twice as fast in the
+        // healing cloud. Pre-decrement here only when > 1, so the switch below still performs the final
+        // tick-to-zero (and its per-status cleanup, e.g. SLOWED restoring speed, DISCORDANT's guard);
+        // this doubles the effective rate without bypassing any cleanup. See
+        // docs/design/bloodwort-soothing-vapors.md.
+        if (soothing && monst->status[i] > 1 && isSoothableAffliction(i)) {
+            monst->status[i]--;
+        }
         switch (i) {
             case STATUS_LEVITATING:
                 if (monst->status[i] && !(monst->info.flags & MONST_FLIES)) {
@@ -4547,6 +4590,16 @@ void monstersTurn(creature *monst) {
         return;
     }
 
+    // #855: a kraken or eel beached on dry land writhes helplessly -- it cannot seize, attack, or
+    // move. The info box already describes this state; enforce it here. Any seize it was holding is
+    // released in applyInstantTileEffectsToCreature above.
+    if ((monst->info.flags & MONST_RESTRICTED_TO_LIQUID)
+        && !cellHasTMFlag(monst->loc, TM_ALLOWS_SUBMERGING)) {
+
+        monst->ticksUntilTurn = monst->movementSpeed;
+        return;
+    }
+
     monst->ticksUntilTurn = monst->movementSpeed / 3; // will be later overwritten by movement or attack
 
     // iOS port (iBrogue): any creature with a flee component runs its reusable dormant->flee AI in place
@@ -4968,6 +5021,81 @@ boolean knownToPlayerAsPassableOrSecretDoor(pos loc) {
             || ((TMFlags & TM_IS_SECRET) && !(discoveredTerrainFlagsAtLoc(loc) & T_OBSTRUCTS_PASSABILITY)));
 }
 
+// iOS port (Brogue SE): "tracks & traces." When a creature (or the player) steps off water, blood or mud
+// onto bare dry floor it leaves a short, self-erasing trail of footprints -- a readable clue that
+// something passed, and which way, plus pure atmosphere. Data-driven (spoorRules): standing on a source
+// tile (re)charges the creature's spoor; each subsequent dry step lays one fading print and spends a
+// charge. Cosmetic only -- the print tiles carry no gameplay flags and no monster reads them (a
+// deliberately one-way tell). Placement is a deterministic function of movement and consumes no RNG
+// (startProb 0 in the DFs); the fade rides the existing substantive promote loop, so it replays from the
+// seed like the jackal den. Driven from the single all-creature seam, setMonsterLocation (just below).
+static boolean isBloodTile(pos loc) {
+    const enum tileType s = pmapAt(loc)->layers[SURFACE];
+    return (s == RED_BLOOD || s == GREEN_BLOOD || s == PURPLE_BLOOD || s == WORM_BLOOD);
+}
+
+static boolean isMudTile(pos loc) {
+    return (pmapAt(loc)->layers[LIQUID] == MUD);
+}
+
+static const struct {
+    boolean (*matches)(pos loc);
+    enum dungeonFeatureTypes footprintDF;
+    short charge;
+} spoorRules[] = {
+    { isWetTile,   DF_WET_FOOTPRINTS,    4 },  // isWetTile is shared with electrified water (Items.c)
+    { isBloodTile, DF_BLOODY_FOOTPRINTS, 3 },
+    { isMudTile,   DF_MUDDY_FOOTPRINTS,  3 },
+};
+
+// A bare, dry, standable floor cell -- the only place a footprint may be laid, so tracks never clobber
+// grass/blood/webs (the surface layer must be empty) and never sit on water, lava or chasms.
+static boolean isTrackableFloor(pos loc) {
+    return (pmapAt(loc)->layers[SURFACE] == NOTHING
+            && !cellHasTMFlag(loc, TM_ALLOWS_SUBMERGING)
+            && !cellHasTerrainFlag(loc, (T_OBSTRUCTS_SURFACE_EFFECTS | T_LAVA_INSTA_DEATH | T_AUTO_DESCENT)));
+}
+
+static void layCreatureSpoor(creature *monst, pos loc) {
+    short i;
+    const short ruleCount = sizeof(spoorRules) / sizeof(spoorRules[0]);
+
+    // Only a grounded creature touches the ground: levitating/flying leaves no tracks and mats no grass
+    // (mirrors creatureContactsWater's grounded test for electrified water). A bird over a pool stays dry.
+    if (monst->status[STATUS_LEVITATING] || (monst->info.flags & MONST_FLIES)) {
+        return;
+    }
+
+    // Standing on a marking tile (re)charges the creature's spoor; don't print on the source itself.
+    for (i = 0; i < ruleCount; i++) {
+        if (spoorRules[i].matches(loc)) {
+            monst->spoorType = spoorRules[i].footprintDF;
+            monst->spoorCharge = spoorRules[i].charge;
+            break;
+        }
+    }
+    if (i == ruleCount && monst->spoorCharge > 0 && monst->spoorType) {
+        // Not on a source: spend a charge, laying a print if this cell is bare dry floor.
+        if (isTrackableFloor(loc)) {
+            spawnDungeonFeature(loc.x, loc.y, &dungeonFeatureCatalog[monst->spoorType], true, false);
+        }
+        monst->spoorCharge--;
+        if (monst->spoorCharge <= 0) {
+            monst->spoorType = 0;
+        }
+    }
+
+    // iOS port (Brogue SE): a large creature (isLarge) mats open grass flat into a visible, slowly
+    // regrowing swath -- a "something big came through here" tell. Dense foliage already tramples for
+    // everyone (TM_PROMOTES_ON_STEP); this extends that idea to open grass, but only for heavy monsters.
+    if (monst->info.isLarge) {
+        const enum tileType s = pmapAt(loc)->layers[SURFACE];
+        if (s == GRASS || s == DEAD_GRASS) {
+            spawnDungeonFeature(loc.x, loc.y, &dungeonFeatureCatalog[DF_FLATTENED_GRASS], true, false);
+        }
+    }
+}
+
 void setMonsterLocation(creature *monst, pos newLoc) {
     unsigned long creatureFlag = (monst == &player ? HAS_PLAYER : HAS_MONSTER);
     pmapAt(monst->loc)->flags &= ~creatureFlag;
@@ -4985,6 +5113,9 @@ void setMonsterLocation(creature *monst, pos newLoc) {
         discover(newLoc.x, newLoc.y); // if you see a monster use a secret door, you discover it
     }
     refreshDungeonCell(newLoc);
+    // iOS port (Brogue SE): tracks & traces + large-creature grass flattening. Before instant tile
+    // effects, which may kill the creature (lava/traps) and free it -- the spoor only reads loc + tiles.
+    layCreatureSpoor(monst, newLoc);
     applyInstantTileEffectsToCreature(monst);
     if (monst == &player) {
         updateVision(true);

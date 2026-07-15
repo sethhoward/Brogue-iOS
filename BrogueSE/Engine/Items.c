@@ -1173,6 +1173,7 @@ static boolean purifyRunicIfReady(item *theItem) {
     if ((theItem->category & WEAPON) && theItem->enchant2 == W_CLUMSINESS) {
         theItem->enchant2 = W_QUIETUS;
     }
+    cosmeticSpawnItemTell(player.loc, ITEM_TELL_PURIFY); // iOS port (Brogue SE): green "curse lifted" star ripple
     return true;
 }
 
@@ -5418,11 +5419,12 @@ static void detonateBolt(bolt *theBolt, creature *caster, short x, short y, bool
 #define WATER_SHOCK_MAX_RINGS       128 // safety cap on precomputed falloff table
 #define WATER_SHOCK_STUN_DURATION   3   // turns of paralysis inflicted on anything the shock damages
 
-// iOS port (iBrogue): a tile conducts the shock iff it is water (deep or shallow). Both deep
-// and shallow water carry TM_ALLOWS_SUBMERGING and TM_EXTINGUISHES_FIRE; bog, lava, cooling
-// lava and the sacrificial pit share TM_ALLOWS_SUBMERGING but not TM_EXTINGUISHES_FIRE, so the
-// pair of flags excludes them while matching deep/shallow/sloshing/luminescent water.
-static boolean isConductiveWater(pos loc) {
+// iOS port (Brogue SE): a "wet" tile = water (deep or shallow). Both deep and shallow water carry
+// TM_ALLOWS_SUBMERGING and TM_EXTINGUISHES_FIRE; bog, lava, cooling lava and the sacrificial pit share
+// TM_ALLOWS_SUBMERGING but not TM_EXTINGUISHES_FIRE, so the pair of flags excludes them while matching
+// deep/shallow/sloshing/luminescent water. Shared by electrified water (which conducts through it) and
+// the tracks & traces spoor system (wet feet leave footprints) -- one definition so the two never drift.
+boolean isWetTile(pos loc) {
     return cellHasTMFlag(loc, TM_ALLOWS_SUBMERGING) && cellHasTMFlag(loc, TM_EXTINGUISHES_FIRE);
 }
 
@@ -5433,7 +5435,7 @@ static boolean creatureContactsWater(creature *monst) {
     return monst
         && !(monst->status[STATUS_LEVITATING])
         && !(monst->info.flags & MONST_FLIES)
-        && isConductiveWater(monst->loc);
+        && isWetTile(monst->loc);
 }
 
 // iOS port (iBrogue): spread an electric bolt's charge through the connected body of water and
@@ -5468,7 +5470,7 @@ static void electrifyWater(bolt *theBolt, creature *caster, const pos *sources, 
     fillGrid(dist, -1);
 
     for (i = 0; i < numSources; i++) {
-        if (isConductiveWater(sources[i]) && dist[sources[i].x][sources[i].y] < 0) {
+        if (isWetTile(sources[i]) && dist[sources[i].x][sources[i].y] < 0) {
             dist[sources[i].x][sources[i].y] = 0;
             queue[qTail++] = sources[i];
         }
@@ -5484,7 +5486,7 @@ static void electrifyWater(bolt *theBolt, creature *caster, const pos *sources, 
             for (ny = cur.y - 1; ny <= cur.y + 1; ny++) {
                 if (coordinatesAreInMap(nx, ny)
                     && dist[nx][ny] < 0
-                    && isConductiveWater((pos){ nx, ny })) {
+                    && isWetTile((pos){ nx, ny })) {
 
                     dist[nx][ny] = d + 1;
                     if (d + 1 > maxRing) {
@@ -6998,6 +7000,7 @@ void identifyItemKind(item *theItem) {
 void autoIdentify(item *theItem) {
     short quantityBackup;
     char buf[COLS * 3], oldName[COLS * 3], newName[COLS * 3];
+    boolean revealed = false; // iOS port (Brogue SE): fire one gold "check your inventory" flare if anything is revealed here
 
     if (tableForItemCategory(theItem->category)
         && !tableForItemCategory(theItem->category)[theItem->kind].identified) {
@@ -7011,6 +7014,7 @@ void autoIdentify(item *theItem) {
                 ((theItem->category & (POTION | SCROLL)) ? "have been" : "be"),
                 newName);
         messageWithColor(buf, &itemMessageColor, 0);
+        revealed = true;
     }
 
     if ((theItem->category & (WEAPON | ARMOR))
@@ -7022,6 +7026,14 @@ void autoIdentify(item *theItem) {
         itemName(theItem, newName, true, true, NULL);
         sprintf(buf, "(Your %s must be %s.)", oldName, newName);
         messageWithColor(buf, &itemMessageColor, 0);
+        revealed = true;
+    }
+
+    // iOS port (Brogue SE): a passive identification (auto-ID by use, runic discovery) just landed -- fire a
+    // gold "star ripple" on the player so the scroll-by message isn't the only cue to open the pack. Cosmetic
+    // layer (a radial star burst, distinct from noise ripples); display-only, no game RNG.
+    if (revealed) {
+        cosmeticSpawnItemTell(player.loc, ITEM_TELL_IDENTIFY);
     }
 }
 
@@ -8682,7 +8694,7 @@ boolean readScroll(item *theItem) {
                     } else {
                         sprintf(buf2, "the curse is purged from your %s -- only its gift remains.", buf);
                     }
-                    messageWithColor(buf2, &goodMessageColor, 0);
+                    messageWithColor(buf2, &advancementMessageColor, 0); // iOS port (Brogue SE): green log, matching the purify flare
                 }
             } else if (uncurse(theItem)) {
                 sprintf(buf2, "a malevolent force leaves your %s.", buf);
@@ -9464,10 +9476,22 @@ static boolean performDivination(short machineNumber) {
                 // Fire only if it helps: an already-known item is skipped (a no-op; it's lifted back freely),
                 // and -- crucially -- skipping it here means a known item left on one altar can't block an
                 // unknown item waiting on another.
+                //
+                // iOS port (Brogue SE): eligibility mirrors the scroll of identify (ITEM_CAN_BE_IDENTIFIED),
+                // NOT itemIdentityFullyKnown -- the altar identifies whatever a scroll of identify would. This
+                // matters for a runic weapon/armor whose base kind+enchant are known but whose RUNIC is still
+                // hidden: itemIdentityFullyKnown() reports it fully known (ITEM_IDENTIFIED is set) and the altar
+                // used to skip it, so the runic was never revealed. ITEM_CAN_BE_IDENTIFIED stays set until the
+                // runic itself is identified (see updateIdentifiableItem), so the altar now completes it via the
+                // identify() below, exactly like the scroll. Refresh the cached flag on this floor item first
+                // (it can be stale) -- the scroll does the same via updateIdentifiableItems() before prompting.
                 item *anItem = itemAtLoc((pos){ i, j });
-                if (anItem != NULL && !itemIdentityFullyKnown(anItem)) {
-                    theItem = anItem;
-                    altarLoc = (pos){ i, j };
+                if (anItem != NULL) {
+                    updateIdentifiableItem(anItem);
+                    if (anItem->flags & ITEM_CAN_BE_IDENTIFIED) {
+                        theItem = anItem;
+                        altarLoc = (pos){ i, j };
+                    }
                 }
             }
         }
@@ -10407,7 +10431,8 @@ boolean equipItem(item *theItem, boolean force, item *unequipHint) {
                     sprintf(buf1, "your %s seizes you with a malevolent force.", buf2);
                     break;
             }
-            messageWithColor(buf1, &itemMessageColor, 0);
+            messageWithColor(buf1, &badMessageColor, 0); // iOS port (Brogue SE): red log, matching the curse flare below
+            cosmeticSpawnItemTell(player.loc, ITEM_TELL_CURSE); // iOS port (Brogue SE): red "it's cursed" star ripple
         }
 
         // iOS port (Brogue SE): cursed-runics rework -- Delirium's hallucination is unmistakable the
