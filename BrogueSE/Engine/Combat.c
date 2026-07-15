@@ -1336,6 +1336,7 @@ static void decrementWeaponAutoIDTimer() {
         itemName(rogue.weapon, buf2, true, true, NULL);
         sprintf(buf, "%s %s.", (rogue.weapon->quantity > 1 ? "they are" : "it is"), buf2);
         messageWithColor(buf, &itemMessageColor, 0);
+        cosmeticSpawnItemTell(player.loc, ITEM_TELL_IDENTIFY); // iOS port (Brogue SE): gold "now familiar" star ripple
     }
 }
 

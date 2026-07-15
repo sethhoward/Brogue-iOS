@@ -2179,6 +2179,7 @@ static void processIncrementalAutoID() {
                     identify(theItem);
                 }
                 updateIdentifiableItems();
+                cosmeticSpawnItemTell(player.loc, ITEM_TELL_IDENTIFY); // iOS port (Brogue SE): gold "now familiar" star ripple
 
                 itemName(theItem, theItemName, true, true, NULL);
                 sprintf(buf, "%s %s.", (theItem->quantity > 1 ? "they are" : "it is"), theItemName);
@@ -2210,6 +2211,7 @@ void rechargeItemsIncrementally(short multiplier) {
 
     for (theItem = packItems->nextItem; theItem != NULL; theItem = theItem->nextItem) {
         if (theItem->category & STAFF) {
+            const short staffChargesBefore = theItem->charges; // iOS port (Brogue SE): detect the 0->usable transition
             if (theItem->charges < theItem->enchant1 && rechargeIncrement > 0
                 || theItem->charges > 0 && rechargeIncrement < 0) {
 
@@ -2230,12 +2232,22 @@ void rechargeItemsIncrementally(short multiplier) {
                 }
                 theItem->enchant2 -= staffRechargeDuration;
             }
+            // iOS port (Brogue SE): a fully-spent staff just became usable again -- cyan flare + matching cyan
+            // log line (0->1 only, not every incremental charge, so it doesn't strobe during combat). The teal
+            // message mirrors the charm "has recharged" line below, so both recharge tells share one color.
+            if (staffChargesBefore == 0 && theItem->charges > 0) {
+                itemName(theItem, theItemName, false, false, NULL);
+                sprintf(buf, "your %s has recharged.", theItemName);
+                messageWithColor(buf, &teal, 0);
+                cosmeticSpawnItemTell(player.loc, ITEM_TELL_RECHARGE);
+            }
         } else if ((theItem->category & CHARM) && (theItem->charges > 0)) {
             theItem->charges = clamp(theItem->charges - multiplier, 0, charmRechargeDelay(theItem->kind, theItem->enchant1));
             if (theItem->charges == 0) {
                 itemName(theItem, theItemName, false, false, NULL);
                 sprintf(buf, "your %s has recharged.", theItemName);
-                message(buf, 0);
+                messageWithColor(buf, &teal, 0); // iOS port (Brogue SE): cyan log, matching the recharge star ripple
+                cosmeticSpawnItemTell(player.loc, ITEM_TELL_RECHARGE); // iOS port (Brogue SE): cyan "usable again" star ripple
             }
         }
     }
@@ -2764,6 +2776,26 @@ static void emitSmokyArmorCloud(void) {
     }
 }
 
+// iOS port (Brogue SE): sticky mud/bog charge for a monster that just took its turn. A move changes the
+// monster's loc; an attack does not -- so a changed loc from preTurnLoc means a real step, and only then do
+// we add the extra move-cost (the monster analogue of the player's non-attack mud slow in playerTurnEnded,
+// so fighting in the mire stays full-speed). Levitators/fliers float over it. A mud-native creature (the bog
+// monster, MONST_RESTRICTED_TO_LIQUID) wades freely on its own turf UNLESS it is fleeing near death, in which
+// case the mire betrays it too. Deterministic (loc + terrain + state) -> replay-safe.
+static void applyMudMoveSlow(creature *monst, pos preTurnLoc) {
+    if (posEq(monst->loc, preTurnLoc)                      // didn't move (attacked / waited / blocked)
+        || monst->status[STATUS_LEVITATING]
+        || (monst->info.flags & MONST_FLIES)
+        || !cellHasTerrainFlag(monst->loc, T_SLOWS_MOVEMENT)) {
+        return;
+    }
+    if ((monst->info.flags & MONST_RESTRICTED_TO_LIQUID)
+        && monst->creatureState != MONSTER_FLEEING) {
+        return; // native to the mire; only dragged down once it turns tail
+    }
+    monst->ticksUntilTurn += monst->movementSpeed * MUD_MOVE_SLOW_PCT / 100;
+}
+
 void playerTurnEnded() {
     short soonestTurn, damage, turnsRequiredToShore, turnsToShore;
     char buf[COLS], buf2[COLS];
@@ -2899,6 +2931,14 @@ void playerTurnEnded() {
                 if (!(rogue.armor->flags & ITEM_RUNIC_IDENTIFIED)) {
                     autoIdentify(rogue.armor);
                 }
+            }
+            // iOS port (Brogue SE): sticky mud/bog drags at your legs -- extra move-cost for any non-attack
+            // turn that ends with you standing on T_SLOWS_MOVEMENT terrain. This is the same non-attack block
+            // as Anchor (attacks add ticks elsewhere), so you can still fight at full speed in the mire, just
+            // not maneuver. Levitating floats over it. Deterministic (terrain + state) -> replay-safe.
+            if (!player.status[STATUS_LEVITATING]
+                && cellHasTerrainFlag(player.loc, T_SLOWS_MOVEMENT)) {
+                player.ticksUntilTurn += player.movementSpeed * MUD_MOVE_SLOW_PCT / 100;
             }
         } else if (player.ticksUntilTurn < 0) { // if he gets a free turn
             player.ticksUntilTurn = 0;
@@ -3049,7 +3089,9 @@ void playerTurnEnded() {
                         // Do not pass go; do not collect 200 gold.
                         monst->ticksUntilTurn = monst->movementSpeed;
                     } else {
+                        const pos preTurnLoc = monst->loc; // iOS port (Brogue SE): for the mud/bog move-slow
                         monstersTurn(monst);
+                        applyMudMoveSlow(monst, preTurnLoc); // iOS port (Brogue SE): sticky mud/bog
                     }
 
                     for (creatureIterator it2 = iterateCreatures(monsters); hasNextCreature(it2);) {

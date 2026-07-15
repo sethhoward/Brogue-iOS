@@ -730,7 +730,8 @@ enum displayGlyph {
     G_STUN_STAR, // iOS port (Brogue SE): a true star glyph for the paralyzed/stunned status-blink overlay (was an ASCII '*', which collided with the gold-pile glyph). Cosmetic-only and appended at the enum tail, so it is never recorded and stays save-safe.
     G_INVERTED_QUESTION, // iOS port (Brogue SE): an inverted '¿' for the confused status-blink overlay, so its shape (not just its purple tint) differs from the white noise-system investigate '?'. Cosmetic-only, appended at the enum tail -> save-safe.
     G_HEART, // iOS port (Brogue SE): a '♥' for the healing status-blink overlay (creature being healed, or standing in bloodwort spores). Cosmetic-only, appended at the enum tail -> save-safe. Like G_STUN_STAR, not in Monaco -> rendered via ArialUnicodeMS.
-    G_SHIELD_CREST // iOS port (Brogue SE): a '◈' crest for the protected (STATUS_SHIELDED) status-blink overlay. Cosmetic-only, appended at the enum tail -> save-safe. Not in Monaco -> rendered via ArialUnicodeMS.
+    G_SHIELD_CREST, // iOS port (Brogue SE): a '◈' crest for the protected (STATUS_SHIELDED) status-blink overlay. Cosmetic-only, appended at the enum tail -> save-safe. Not in Monaco -> rendered via ArialUnicodeMS.
+    G_POISON_SKULL // iOS port (Brogue SE): a '☠' skull for the poisoned status-blink overlay (rides the green body tint in getCellAppearance). Cosmetic-only, appended at the enum tail -> save-safe. Not in Monaco -> rendered via ArialUnicodeMS.
 };
 
 enum graphicsModes {
@@ -1097,6 +1098,20 @@ enum tileType {
     DIVINATION_ALTAR_CLOSED,   // sealed/inert (a used altar's graceful close, or an unused one shattered on awaken)
     DIVINATION_STATUE,         // the central statue; its guardian bursts out beside it on an awaken
 
+    // iOS port (Brogue SE): "tracks & traces." Fading spoor a creature leaves when it steps off water,
+    // blood or mud onto bare floor. Pure cosmetic SURFACE overlays (no T_* gameplay flags): a readable,
+    // self-erasing clue that something passed, and which way. Each fresh print promotes to a shared
+    // faint smudge and then vanishes (the EMBERS->ASH fade). Appended at enum end so no existing tile
+    // index shifts. See layCreatureSpoor (Monsters.c).
+    WET_FOOTPRINTS,
+    BLOODY_FOOTPRINTS,
+    MUDDY_FOOTPRINTS,
+    FADING_TRACKS,
+
+    // iOS port (Brogue SE): a swath of open grass matted flat by a large creature's passage (isLarge);
+    // regrows to grass like trampled foliage. A "something big came through here" tell.
+    FLATTENED_GRASS,
+
     NUMBER_TILETYPES,
 };
 
@@ -1135,6 +1150,10 @@ enum lightType {
     QUIETUS_FLARE_LIGHT,
     SLAYING_FLARE_LIGHT,
     CHARGE_FLASH_LIGHT,
+    IDENTIFY_FLARE_LIGHT,   // iOS port (Brogue SE): player "check inventory" flares (see lightCatalog + createFlare sites)
+    CURSE_FLARE_LIGHT,      // iOS port (Brogue SE)
+    PURIFY_FLARE_LIGHT,     // iOS port (Brogue SE)
+    RECHARGE_FLARE_LIGHT,   // iOS port (Brogue SE)
 
     TORCH_LIGHT,
     LAVA_LIGHT,
@@ -1339,6 +1358,7 @@ enum armorEnchants {
 // iOS port (Brogue SE): cursed-runics rework -- Phase 2 armor-curse tuning.
 #define ANCHOR_DEFENSE_BONUS            30  // +defense (x10 units; +3 displayed) while worn -- always on
 #define ANCHOR_MOVE_SLOW_PCT           100  // extra % move-cost while cursed (100 = double); attacks untouched
+#define MUD_MOVE_SLOW_PCT               50  // iOS port (Brogue SE): extra % move-cost while slogging through T_SLOWS_MOVEMENT mud/bog (attacks untouched)
 #define SMOKY_STEALTH_BONUS            3   // purified Smoky's passive stealth (spot + noise); ~a +3 ring of stealth
 #define SMOKY_DITHER_THIN_VOLUME      10  // cleared-lane smoke volume while cursed: below SMOKE_THICK_VOLUME, so it dims but doesn't block sight (progressive per-enchant sight)
 
@@ -1764,6 +1784,7 @@ boolean cellHasThickSmoke(pos loc); // iOS port (Brogue SE): thick smoke blocks 
 boolean cellHasTMFlag(pos loc, unsigned long flagMask);
 
 boolean cellHasTerrainType(pos loc, enum tileType terrain);
+boolean isWetTile(pos loc); // iOS port (Brogue SE): deep/shallow water; shared by electrified-water and the tracks/traces spoor system
 
 static inline boolean coordinatesAreInMap(short x, short y) {
     return (x >= 0 && x < DCOLS && y >= 0 && y < DROWS);
@@ -2335,9 +2356,36 @@ enum dungeonFeatureTypes {
     // companion DF -- tighter than open-field DF_DEAD_GRASS and, unlike it, chains no dead foliage.
     DF_TRAP_DRY_GRASS,
 
+    // iOS port (Brogue SE): a contained patch of glowing luminescent fungus laid near a confusion trap
+    // as a companion DF -- tighter than open-field DF_LUMINESCENT_FUNGUS. Grass-type (no vision block),
+    // so it stays a soft tell that never hides the trap; the eerie glow just lures you toward the plate.
+    DF_TRAP_LUMINESCENT_FUNGUS,
+
     // iOS port (Brogue SE): an armed divination altar seals shut when its revealed item is lifted
     // (promoteType fired by TM_PROMOTES_ON_ITEM_PICKUP -> lays DIVINATION_ALTAR_CLOSED).
     DF_DIVINATION_ALTAR_CLOSE,
+
+    // iOS port (Brogue SE): "tracks & traces" spoor -- each lays a single fading footprint tile at the
+    // creature's cell (no spread). The fresh print's tile promotes to FADING_TRACKS, which then vanishes.
+    // See layCreatureSpoor (Monsters.c).
+    DF_WET_FOOTPRINTS,
+    DF_BLOODY_FOOTPRINTS,
+    DF_MUDDY_FOOTPRINTS,
+    DF_FADING_TRACKS,
+
+    // iOS port (Brogue SE): a large creature's flattened-grass swath, and its slow regrowth back to grass.
+    DF_FLATTENED_GRASS,
+    DF_FLATTENED_GRASS_REGROW,
+
+    // iOS port (Brogue SE): "signs of life" -- lairs dressed at level generation via hordeType.spawnDF
+    // (the jackal-den pattern, generation-only). Cosmetic residue only (bones/rubble/ectoplasm/ash), so a
+    // room reads as inhabited before its occupant is seen, without adding a gameplay hazard. Core + apron.
+    DF_OGRE_DEN_BONES,
+    DF_OGRE_DEN_RUBBLE,
+    DF_SPIDER_HUSKS,
+    DF_PHANTOM_ECTOPLASM,
+    DF_DRAGON_ROOST_BONES,
+    DF_DRAGON_ROOST_ASH,
 
     NUMBER_DUNGEON_FEATURES,
 };
@@ -2511,6 +2559,7 @@ enum terrainFlagCatalog {
     T_CAUSES_EXPLOSIVE_DAMAGE       = Fl(20),       // is an explosion; deals higher of 15-20 or 50% damage instantly, but not again for five turns
     T_SACRED                        = Fl(21),       // monsters that aren't allies of the player will avoid stepping here
     T_CAUSES_FREEZE                 = Fl(22),       // iOS port (iBrogue): freezes anything caught on this tile (the frost cloud)
+    T_SLOWS_MOVEMENT                = Fl(23),       // iOS port (Brogue SE): sticky terrain (mud/bog) -- a non-attack step ending here costs extra move-ticks (attacks unaffected). Levitators/fliers skip it; see the player charge in playerTurnEnded and the monster charge at the monstersTurn call sites.
 
     T_OBSTRUCTS_SCENT               = (T_OBSTRUCTS_PASSABILITY | T_OBSTRUCTS_VISION | T_AUTO_DESCENT | T_LAVA_INSTA_DEATH | T_IS_DEEP_WATER | T_SPONTANEOUSLY_IGNITES),
     T_PATHING_BLOCKER               = (T_OBSTRUCTS_PASSABILITY | T_AUTO_DESCENT | T_IS_DF_TRAP | T_LAVA_INSTA_DEATH | T_IS_DEEP_WATER | T_IS_FIRE | T_SPONTANEOUSLY_IGNITES),
@@ -2997,6 +3046,8 @@ typedef struct creature {
     short totalPowerCount;              // how many times has the monster been empowered? Used to recover abilities when negated.
     fleerState fleer;                   // iOS port (iBrogue): reusable flee-component runtime state (gold goblin etc.)
     lootState looter;                   // iOS port (iBrogue): reusable loot-component runtime state (gold goblin etc.)
+    enum dungeonFeatureTypes spoorType; // iOS port (Brogue SE): tracks & traces -- which footprint DF this creature currently leaves (0 = none)
+    short spoorCharge;                  // iOS port (Brogue SE): tracks & traces -- steps of trail remaining after leaving water/blood/mud
 
     struct creature *leader;                 // only if monster is a follower
     struct creature *carriedMonster; // when vampires turn into bats, one of the bats restores the vampire when it dies
@@ -3849,6 +3900,11 @@ extern "C" {
     void beginCoalescedImpactRipples(void); // iOS port (Brogue SE): suppress per-cell impact ripples during a multi-cell machine activation
     void endCoalescedImpactRipples(pos origin); // iOS port (Brogue SE): emit ONE coalesced, flare-delayed impact ripple if any were suppressed
     void cosmeticSpawnRippleAggravate(pos source, short radius); // iOS port (Brogue SE): cosmetic layer -- level-wide aggravate ripple (alarm trap / aggravate scroll)
+    // iOS port (Brogue SE): the color-coded "check your inventory" tell for a passive item event -- a radial
+    // STAR burst (8 rays) at the player, distinct in shape from the noise ripples so it can't be mistaken for
+    // one. Replaces the earlier createFlare radiant burst. Cosmetic-only; the color is chosen by kind in IO.c.
+    enum itemTellKind { ITEM_TELL_IDENTIFY, ITEM_TELL_CURSE, ITEM_TELL_PURIFY, ITEM_TELL_RECHARGE };
+    void cosmeticSpawnItemTell(pos loc, enum itemTellKind kind);
     void cosmeticRefreshInvestigateBlinks(void); // iOS port (Brogue SE): cosmetic layer -- per-turn '?' blink rebuild
     void cosmeticRefreshStatusBlinks(void); // iOS port (Brogue SE): cosmetic layer -- per-turn confused/burning/stun/healing blink rebuild
     void cosmeticMarkHealed(const creature *monst); // iOS port (Brogue SE): cosmetic layer -- flag a creature as just-healed so the '♥' tell blinks for a couple turns

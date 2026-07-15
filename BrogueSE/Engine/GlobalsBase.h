@@ -114,6 +114,7 @@ extern const color darkPurple;
 extern const color brown;
 extern const color green;
 extern const color darkGreen;
+extern const color poisonTintColor; // iOS port (Brogue SE): poisoned-creature body tint
 extern const color orange;
 extern const color darkOrange;
 extern const color darkBlue;
