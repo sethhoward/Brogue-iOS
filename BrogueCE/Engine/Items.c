@@ -6346,9 +6346,9 @@ void throwCommand(item *theItem, boolean autoThrow) {
     //
     // Ask location to throw
     //
-    sprintf(buf, "Throw %s %s where? (<hjklyubn>, mouse, or <tab>)",
+    sprintf(buf, "Throw %s %s where? (<%s>, mouse, or <tab>)", // iOS port (iBrogue): scheme-aware move-key hint
             (theItem->quantity > 1 ? "a" : "your"),
-            theName);
+            theName, keyboardSchemeMoveKeysHint());
     temporaryMessage(buf, REFRESH_SIDEBAR);
     maxDistance = (12 + 2 * max(rogue.strength - player.weaknessAmount - 12, 2));
 
@@ -6568,7 +6568,9 @@ static boolean useStaffOrWand(item *theItem) {
         messageWithColor(buf, &itemMessageColor, 0);
         return false;
     }
-    temporaryMessage("Direction? (<hjklyubn>, mouse, or <tab>; <return> to confirm)", REFRESH_SIDEBAR);
+    // iOS port (iBrogue): the movement-key hint tracks the active scheme.
+    sprintf(buf, "Direction? (<%s>, mouse, or <tab>; <return> to confirm)", keyboardSchemeMoveKeysHint());
+    temporaryMessage(buf, REFRESH_SIDEBAR);
     itemName(theItem, buf2, false, false, NULL);
     sprintf(buf, "Zapping your %s:", buf2);
     printString(buf, mapToWindowX(0), 1, &itemMessageColor, &black, NULL);
