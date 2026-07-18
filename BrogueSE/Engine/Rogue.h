@@ -3933,6 +3933,11 @@ extern "C" {
     // active keyboard scheme (see enum keyboardScheme). Identity for CLASSIC. May adjust the modifier
     // flags (e.g. to flag a run). Applied in nextBrogueEvent before recording, so recordings stay canonical.
     signed long applyKeyboardScheme(signed long keystroke, boolean *controlKey, boolean *shiftKey);
+    // iOS port (Brogue SE): the INVERSE of applyKeyboardScheme -- the active scheme's display tokens for
+    // on-screen keyboard indicators, so a label can't drift from the real remap. Only consulted when
+    // KEYBOARD_LABELS is on. See IO.c / docs/design/keyboard-schemes.md.
+    const char *keyboardSchemeMoveKeysHint(void); // "hjklyubn" (Classic) / "uio/jkl/m,." (Modern)
+    char keyboardSchemeInventoryLetter(void);     // 'i' (Classic) / 'e' (Modern)
     boolean placeStairs(pos *upStairsLoc);
     void initializeLevel(pos upStairsLoc);
     void startLevel (short oldLevelNumber, short stairDirection);
