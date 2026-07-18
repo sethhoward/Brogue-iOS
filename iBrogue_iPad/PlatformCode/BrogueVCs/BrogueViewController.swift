@@ -801,6 +801,13 @@ final class BrogueViewController: UIViewController {
         setupVersionChooser()
         setupOptionsButton()
         setupInfoButton()
+        // iOS port (iBrogue): establish hardware-keyboard state (and thus KEYBOARD_LABELS) BEFORE the
+        // engine thread starts. The engine builds the title menu immediately on start, and setButtonText
+        // bakes the hotkey highlight in from KEYBOARD_LABELS at build time — the title menu is built once
+        // and won't re-read the flag if it flips later — so the flag must be correct before startEngine(),
+        // or the title screen shows no shortcuts. On Catalyst the keyboard is always present, so labels
+        // must be on from the first frame. (A global set before Thread.start() is visible to that thread.)
+        setupHardwareKeyboardObserver()
         startEngine()
 
         magView.viewToMagnify = skViewPort
@@ -829,7 +836,6 @@ final class BrogueViewController: UIViewController {
 
         GameCenter.shared.authenticate(from: self)
 
-        setupHardwareKeyboardObserver()
         setupAppLifecycleObserver()
         setupActionButtons()
         setupCenterShortcutButton()
