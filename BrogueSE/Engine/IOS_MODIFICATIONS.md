@@ -32,6 +32,61 @@ See `BrogueCE/Engine/IOS_MODIFICATIONS.md` (faithful CE) and
 
 ## Change log
 
+### 2026-07-18 — Scheme-aware in-play keyboard indicators (bug fix, engine side)
+
+**What.** The on-screen hotkey indicators shown during active play were hardcoded to the **Classic**
+key layout, so under **Modern** (the iOS/macOS default — see `ceLoadPersistedKeyboardScheme`, SEBridge.mm)
+they named the wrong keys: the bottom-bar **Inventory** button highlighted `I` though Modern opens
+inventory with `e` (`i` is UP), and the examine / throw / zap-direction prompts read `<hjklyubn>` though
+Modern moves on the `uio/jkl/m,.` grid. This is the reason the labels were switched off in the
+2026-06-15 "Keyboard labels disabled" change; making them scheme-aware is the prerequisite to turning
+them back on (the host-side re-enable is a separate, later change).
+
+**How.** Added the **inverse of `applyKeyboardScheme`** — two tiny accessors in `IO.c`, declared in
+`Rogue.h`, kept right beside `applyKeyboardScheme` so a label can never drift from the real remap:
+- `keyboardSchemeMoveKeysHint()` → `"hjklyubn"` (Classic) / `"uio/jkl/m,."` (Modern).
+- `keyboardSchemeInventoryLetter()` → `'i'` (Classic) / `'e'` (Modern).
+
+Consumers:
+- **Inventory bottom-bar button** (`initializeMenuButtons`, `IO.c`): both `I` and `e` occur in
+  "Inventory", so the in-word highlight is kept and simply moved to the live key (`I` vs the `e` in
+  "invEntory"). The button's `hotkey[]` is unchanged — a tap still synthesizes `INVENTORY_KEY`, and an
+  in-play `e` is remapped to it upstream, so the button fires in both schemes; only the label moved.
+- **Movement-key prompts**: examine (`mainInputLoop`, `IO.c`), throw (`throwCommand`, Items.c), and
+  zap direction (`useStaffOrWand`, Items.c) now build the hint from `keyboardSchemeMoveKeysHint()`.
+- **Live toggle**: `mainInputLoop` tracks the scheme its bottom bar was built for and rebuilds the bar
+  at the top of the loop if the player flips Classic↔Modern from the `?` screen mid-play, so the label
+  updates at once instead of after the next turn.
+
+Menus/dialogs (title menu, item-action buttons, confirms) read input with `textInput == true`, which
+**bypasses** `applyKeyboardScheme`, so their letter hotkeys work and are labeled correctly in both
+schemes already — they are deliberately left untouched. The `?` help screen was already scheme-aware.
+
+**Determinism / saves.** Display-only; reads `rogueKeyboardScheme` (a persisted input preference, never
+game state). No RNG, no save impact. Marked `// iOS port (Brogue SE):`.
+
+### 2026-07-18 — Suppress the gold ID "star ripple" on active drink/read/throw (bug fix)
+
+**What.** The gold identify star (see 2026-07-10 below) is a *passive* "open your pack" cue. It was leaking
+into **active** consumable use: drinking or reading an unidentified potion/scroll, or throwing a potion, all
+identify the kind through `autoIdentify()` and so fired the star — redundant, since the player just chose to
+use the item and the `(It must have been X.)` line already says what it was. This completes the original
+**"passive only"** intent (see the Scope note in the 2026-07-10 entry), which the shared `autoIdentify()`
+choke had quietly undermined for consumables.
+
+**How (`Items.c`, `Rogue.h`).** Split the identify-and-tell logic: `autoIdentify()` and a new
+`autoIdentifyFromUse()` both delegate to a shared `static autoIdentifyInternal(item *, boolean announceReveal)`
+— the boolean gates the `cosmeticSpawnItemTell(ITEM_TELL_IDENTIFY)` call at the tail. `autoIdentify()` keeps
+firing the star (incidental reveals: combat auto-ID in `Combat.c`, a reflected zap, equipping a runic,
+empty-bottle capture-fill); `autoIdentifyFromUse()` skips it. Active-use callers switched to the new entry
+point: `drinkPotion()`, `readScroll()`, and the six thrown-potion tell paths in `throwItem()`.
+`shatterPotionAtLoc()` is shared between a deliberate hand-throw (suppress) and an **incidental** bolt/dart
+detonation of a *floor* potion (keep the star), so it gained a `boolean deliberateUse` param, threaded from
+its three callers (`throwItem` → true; `updateBolt` and `detonateFloorPotionAt` → false).
+
+**Determinism / saves.** Cosmetic-layer only (same `RNG_COSMETIC` star as before); identification itself is
+unchanged. No game-state or save impact. Marked `// iOS port (Brogue SE):`.
+
 ### 2026-07-10 — Color-coded "check your inventory" flares for passive item events (new content)
 
 **What.** Several momentous item events currently just scroll a message by, with no visual cue to open the
@@ -66,7 +121,9 @@ event chokes:
 
 **Scope note — passive only.** Deliberately hooked the *automatic* reveals (timers, runic, curse-on-equip),
 **not** `identify()` generically — that also fires on scroll-of-identify / divination altars, where you
-*initiated* the ID and are already looking at inventory. No flare there.
+*initiated* the ID and are already looking at inventory. No flare there. *(Superseded refinement: the shared
+`autoIdentify()` choke still leaked the star into active drink/read/throw — the player-initiated case this
+note meant to exclude. Fixed 2026-07-18 via `autoIdentifyFromUse()`; see that entry above.)*
 
 **Log colors matched to flare hues (learned association).** Each event's message text now shares its flare's
 hue, so the color becomes the tell: gold identify messages already used `itemMessageColor` (unchanged); the
@@ -2205,6 +2262,12 @@ metering uses `regenerationHeal` + starvation auto-eat message (Time.c). SE-only
 
 ### 2026-06-15 — Keyboard labels disabled; hardware-keyboard presence drives UI instead
 
+> **Superseded 2026-07-18** (see the scheme-aware-labels entry above): labels were disabled because they
+> showed the *Classic* layout and mismatched the Modern default. They are now scheme-aware, so the host
+> re-enables them on keyboard presence. The "labels stay off / host no longer enables `KEYBOARD_LABELS`"
+> statements below are historical; the hardware-keyboard-presence UI (d-pad/ESC hide, help hint) still
+> applies.
+
 **What.** The in-game hotkey labels are turned off (they reflect the Classic key layout and would
 mismatch the new Modern default — see the "Default to Modern keyboard layout" change). A hardware
 keyboard now instead: hides the on-screen d-pad and ESC button (platform/Swift side — redundant with
@@ -2330,6 +2393,80 @@ off) verify this empirically since a version-locked save can't replay across bui
 - `D_LEGACY_EXPLOSION_TIMING` — reverts to the pre-fix ordering (decrement back in
   `decrementPlayerStatus`, after `updateEnvironment`) for a single-binary A/B: off → gap 5 (fixed),
   on → gap 4 (the reported bug). The two decrement sites are now gated on this flag rather than hard-coded.
+
+#### 2026-07-18 — Follow-up: the reposition-only fix still lost a turn on melee explosions (#816 / PR #861)
+
+**What.** `HangryHippo` on tmewett/BrogueCE PR #861 (the upstream form of this same fix) reported that
+after the ordering + grant change you still get only **four** clear turns when an **explosive bloat**
+detonates on you *in melee*, not the intended five. It reproduces in SE too.
+
+**Cause — the reposition can't win.** The grant site (`applyInstantTileEffectsToCreature`) is called from
+*several* points in a turn, and they straddle the single decrement:
+- **Gas ignition** grants *inside* `updateEnvironment` — **after** the player decrement. Survives its turn
+  → 5 clear turns. (The path the 06-19 harness tested, which is why it read 5.)
+- **A bloat dying in melee** spawns `DF_BLOAT_EXPLOSION` → `GAS_EXPLOSION` via `spawnDungeonFeature(…,
+  refreshCell=true)` (`Combat.c` `MA_DF_ON_DEATH`), and `refreshCell=true` fires
+  `applyInstantTileEffectsToCreature(&player)` **immediately, during the player's action** — *before*
+  `playerTurnEnded` runs, and thus before the decrement. That grant is knocked down on the same turn →
+  only 4 clear turns.
+
+No single decrement *position* fixes both: the melee grant lands before the turn counter has even
+incremented, the gas grant lands mid-loop. This is the general form of the original #816 off-by-one.
+
+**Fix — a PLAYER-ONLY position-independent marker.** New `boolean creature.explosionImmunityFresh`, set at
+the shared grant site the instant immunity is granted, and checked **only by the player's decrement** in
+`playerTurnEnded` so it **skips exactly the one same-turn decrement** when the grant landed before it
+(melee); when the grant lands after it (gas) the flag is a no-op. Cleared once per turn at the **end of
+`playerTurnEnded`'s inner turn-advance loop**. The clear must sit there, not at the decrement: clearing at
+the decrement would re-protect a gas grant (which lands after it) on the following turn, whereas a melee
+grant (before it) must be protected once. `D_LEGACY_EXPLOSION_TIMING` gates the skip off to reproduce the
+bug (gap 5).
+
+**Why NOT monsters (the correction — see the 2026-07-18 gap-7 finding below).** The marker is deliberately
+**not** applied to `decrementMonsterStatus`. A monster grants immunity (its `applyInstant`, start of the
+env tick) and decrements it (`decrementMonsterStatus`, same env tick) in **grant-then-decrement** order,
+so `grant=6` **already** yields the intended gap of 6 — the grant turn's decrement is absorbed by the hit
+that same turn. Adding the player's skip there **over-corrects to gap 7** (six clear turns). This is the
+opposite of the player, whose anomalous melee grant lands in `playerMoves`, a phase *before* its decrement,
+with follow-up hits arriving later via `updateEnvironment` (decrement-then-check) — so only the player
+needs the skip. The flag is still *set* (and cleared) for monsters at the shared sites; it is simply never
+*read* for them. (A monster hit by a bloat detonating on it mid-turn — the rare monster analog of the
+player's melee case — still loses one immune turn; accepted: not the reported bug, negligible, and a flag
+can't tell that case apart from the common grant-then-decrement one.)
+
+**Where.** `explosionImmunityFresh` field (`Rogue.h` `creature` struct); set in
+`applyInstantTileEffectsToCreature` (`Time.c`); player skip in `playerTurnEnded`'s decrement + the
+end-of-inner-loop clear over player and all monsters (`Time.c`). `decrementMonsterStatus` is unchanged
+(`Monsters.c`) — an explicit comment there records why. Marked `#816`.
+
+**Testing.** The **fight simulator cannot test any of this** — `tools/fightsim/sim.c` runs its own tick
+loop over `attack()`/`zap()`/`killCreature` and never calls `updateEnvironment` or `decrementMonsterStatus`
+(it re-implements a subset of status ticking itself), which is exactly the ordering under test; it would
+exercise a re-implementation, not the engine.
+- `D_TEST_EXPLOSION_MONSTER` (`Rogue.h`): pins one monster, keeps it at full HP, lays a single
+  `GAS_EXPLOSION` tile on it each env tick before the monster `applyInstant` loop; each fresh hit logs
+  `"[#816] <name> explosive hit on turn N"`. **Correct value is gap 6 with NO monster guard** — this
+  harness is what caught the over-correction (read a clean gap 7 while the guard was wrongly present, gap 6
+  after removing it). An earlier tightening note: the first version used `DF_BLOAT_EXPLOSION` (a radius),
+  which hit several off-screen monsters at once (all logged as "something") and produced noisy 4/5/6 gaps;
+  the single-tile pinned version reads cleanly.
+- **No in-loop "melee" harness.** An earlier `D_TEST_EXPLOSION_MELEE` was removed: spawning the explosion
+  inside the env tick makes the grant *and* the recurring hit-check the same grant-then-decrement event, so
+  it reads gap 7 like a monster — it does **not** reproduce real melee combat (grant in `playerMoves`,
+  follow-up via `updateEnvironment`). **The player melee/combat fix must therefore be verified by actually
+  fighting an explosive bloat in wizard mode** and counting turns to the next explosion.
+
+**Status / verification.** The gas path reads gap 6 (`D_TEST_EXPLOSION`, pre-existing). The monster path
+reads gap 6 after removing the over-correcting guard (`D_TEST_EXPLOSION_MONSTER`). The **player melee fix
+is not yet empirically confirmed** — the earlier "five turns" run was the gas harness (already correct
+before this change); it needs a live explosive-bloat fight. All debug toggles ship at 0.
+
+**Determinism.** The marker is set/cleared only from the deterministic turn loop off deterministic
+explosion events (no RNG), and is transient — cleared every turn, so it never crosses a save/replay
+boundary in a way that matters. Save-safe (new field, set deterministically). **Known minor edge:** under
+haste/slow, where one player turn spans several environment ticks, a grant may skip more than one decrement
+(slightly *longer* immunity); immunity is measured in environment ticks, not player turns, and this is no
+worse than the pre-existing model. Not yet backported to the CE test tree.
 
 ### 2026-06-15 — Fix: a submerged player saw submerged monsters across separate water bodies (#831)
 

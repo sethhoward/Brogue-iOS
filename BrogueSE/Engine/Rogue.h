@@ -432,6 +432,17 @@
 // Lets a single binary compare the fix (gap of 5, default) against the bug (gap of 4). Flip to 0 to ship.
 #define D_LEGACY_EXPLOSION_TIMING       0
 
+// iOS port (Brogue SE): #816 creature-path harness. D_TEST_EXPLOSION above measures the PLAYER; this one
+// pins ONE monster, keeps it at full HP, and lays a single GAS_EXPLOSION tile on it each env tick, so the
+// monster applyInstant loop grants immunity and decrementMonsterStatus ticks it -- in the real monster
+// order. Each fresh monster hit logs its turn; the gap between logged turns is its immunity duration, which
+// must be 6 (five clear turns). NOTE the correct value is 6 with NO explosionImmunityFresh guard on the
+// monster decrement: a monster grants (applyInstant) then decrements in the SAME env tick, so grant=6
+// already yields gap 6 -- adding the player's skip over-corrects to gap 7 (this harness is exactly what
+// caught that). The fight simulator (BrogueSE/tools/fightsim) CANNOT test any of this -- it runs its own
+// tick loop and never calls updateEnvironment / decrementMonsterStatus, the ordering under test. Ship at 0.
+#define D_TEST_EXPLOSION_MONSTER        0
+
 // If enabled, runs a benchmark for the performance of repeatedly updating the screen at the start of the game.
 // #define SCREEN_UPDATE_BENCHMARK
 
@@ -3048,6 +3059,7 @@ typedef struct creature {
     lootState looter;                   // iOS port (iBrogue): reusable loot-component runtime state (gold goblin etc.)
     enum dungeonFeatureTypes spoorType; // iOS port (Brogue SE): tracks & traces -- which footprint DF this creature currently leaves (0 = none)
     short spoorCharge;                  // iOS port (Brogue SE): tracks & traces -- steps of trail remaining after leaving water/blood/mud
+    boolean explosionImmunityFresh;     // iOS port (Brogue SE): #816 -- true only for the turn an explosion granted STATUS_EXPLOSION_IMMUNITY. Suppresses that one same-turn decrement so a grant from ANY point in the turn (a bloat detonating in melee, applied *before* the decrement, vs. gas igniting in updateEnvironment, applied *after*) yields the full five clear turns. Cleared once per turn at the end of playerTurnEnded's inner loop. This marker is why a single fixed decrement site can never be correct -- see IOS_MODIFICATIONS.md #816.
 
     struct creature *leader;                 // only if monster is a follower
     struct creature *carriedMonster; // when vampires turn into bats, one of the bats restores the vampire when it dies
@@ -4199,6 +4211,7 @@ extern "C" {
                        boolean targetCanLeaveMap);
     void identifyItemKind(item *theItem);
     void autoIdentify(item *theItem);
+    void autoIdentifyFromUse(item *theItem); // iOS port (Brogue SE): active drink/read/throw -- identify without the gold ID star
     short wisdomAutoIDChargeStep(void); // iOS port (iBrogue): ring of wisdom speeds armor/ring auto-ID-by-use
     boolean fillEmptyBottle(item *bottle, short newPotionKind, const char *flavorText); // iOS port (iBrogue): empty-bottle capture
     void showEmptyBottleCaptureHint(void); // iOS port (iBrogue): empty-bottle v2 contextual capture hint

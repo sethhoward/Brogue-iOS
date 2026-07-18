@@ -353,11 +353,25 @@ void applyInstantTileEffectsToCreature(creature *monst) {
         // (The #816 decrement-ordering fix in playerTurnEnded is separate: it stopped the player from
         // losing one *additional* turn relative to monsters. Both are needed for a true five turns.)
         monst->status[STATUS_EXPLOSION_IMMUNITY] = 6;
-        // iOS port (Brogue SE): #816 test harness. We only reach this branch when the player was NOT
+        // iOS port (Brogue SE): #816 -- mark this as the grant turn. The single per-turn decrement checks
+        // this and skips itself once, so the grant survives its own turn no matter WHERE in the turn it
+        // landed (a bloat detonating in melee grants before the decrement; gas igniting in updateEnvironment
+        // grants after it). Without this, the melee path loses one turn -- the "still only four turns"
+        // follow-up on PR #816/#861. Cleared once per turn in playerTurnEnded. Shared: player and monsters.
+        monst->explosionImmunityFresh = true;
+        // iOS port (Brogue SE): #816 test harness. We only reach this branch when the creature was NOT
         // immune, i.e. on a fresh explosive hit. Log the turn so the gap between hits reveals the
-        // immunity duration, and zero the damage so the test can run indefinitely. Debug only (D_TEST_EXPLOSION).
+        // immunity duration, and zero the damage so the test can run indefinitely. Debug only.
         if (D_TEST_EXPLOSION && monst == &player) {
             sprintf(buf, "[#816] explosive hit on turn %lu", rogue.playerTurnNumber);
+            messageWithColor(buf, &teal, 0);
+            damage = 0;
+        }
+        // iOS port (Brogue SE): #816 creature-path harness -- log a MONSTER's fresh explosive hits and zero
+        // the damage so its immunity cycle can be measured (the gap between logged turns = its clear turns).
+        if (D_TEST_EXPLOSION_MONSTER && monst != &player) {
+            monsterName(buf2, monst, false);
+            sprintf(buf, "[#816] %s explosive hit on turn %lu", buf2, rogue.playerTurnNumber);
             messageWithColor(buf, &teal, 0);
             damage = 0;
         }
@@ -3008,6 +3022,34 @@ void playerTurnEnded() {
                 processIncrementalAutoID();   // become more familiar with worn armor and rings
                 rogue.monsterSpawnFuse--; // monsters spawn in the level every so often
 
+                // iOS port (Brogue SE): #816 creature-path harness. Pin ONE monster as the subject and,
+                // each env tick, keep it at full HP and lay a SINGLE GAS_EXPLOSION tile on its cell *now* --
+                // so the applyInstant loop just below grants it immunity and decrementMonsterStatus (further
+                // below) ticks it in the real monster order the fight simulator can't reproduce. Single tile
+                // (a direct SURFACE write, not a DF) so the blast never spreads to neighbours: only the
+                // subject is ever hit, so every logged line is the same creature and the gap between them is
+                // a clean immunity duration (6 = five clear turns). The pin survives the monster moving and
+                // is re-acquired (by identity, no deref of a stale pointer) if the subject ever dies or the
+                // level changes. Debug only (D_TEST_EXPLOSION_MONSTER).
+                if (D_TEST_EXPLOSION_MONSTER) {
+                    static creature *explosionTestSubject = NULL;
+                    boolean subjectAlive = false;
+                    for (creatureIterator it = iterateCreatures(monsters); hasNextCreature(it);) {
+                        if (nextCreature(&it) == explosionTestSubject) { subjectAlive = true; break; }
+                    }
+                    if (!subjectAlive) { // (re)acquire the first monster on the level
+                        explosionTestSubject = NULL;
+                        for (creatureIterator it = iterateCreatures(monsters); hasNextCreature(it);) {
+                            explosionTestSubject = nextCreature(&it);
+                            break;
+                        }
+                    }
+                    if (explosionTestSubject) {
+                        explosionTestSubject->currentHP = explosionTestSubject->info.maxHP;
+                        pmap[explosionTestSubject->loc.x][explosionTestSubject->loc.y].layers[SURFACE] = GAS_EXPLOSION;
+                    }
+                }
+
                 for (creatureIterator it = iterateCreatures(monsters); hasNextCreature(it);) {
                     creature *monst = nextCreature(&it);
                     applyInstantTileEffectsToCreature(monst);
@@ -3039,6 +3081,13 @@ void playerTurnEnded() {
                     spawnDungeonFeature(player.loc.x, player.loc.y, &dungeonFeatureCatalog[DF_PLAIN_FIRE], false, false);
                 }
 
+                // iOS port (Brogue SE): #816 -- there is deliberately NO in-loop "melee" harness here. Any
+                // harness that spawns the explosion inside this block grants before the decrement AND uses
+                // that same spawn as the recurring hit-check (grant-then-decrement) -- which reads gap 7, not
+                // the gap-6 of REAL melee combat (whose grant lands in playerMoves and whose follow-up hits
+                // come through updateEnvironment, decrement-then-check). So the melee/combat fix must be
+                // verified by actually fighting an explosive bloat in wizard mode, not by an in-loop harness.
+
                 // iOS port (Brogue SE): #816 — decrement explosion immunity *before*
                 // updateEnvironment (not in decrementPlayerStatus below, which runs after).
                 // Explosions are spawned inside updateEnvironment (flammable gas igniting ->
@@ -3050,7 +3099,8 @@ void playerTurnEnded() {
                 // clear turns. Monster status already decrements before updateEnvironment
                 // (decrementMonsterStatus, above), so this aligns the player with monsters.
                 // D_LEGACY_EXPLOSION_TIMING restores the old post-updateEnvironment decrement for A/B testing.
-                if (!D_LEGACY_EXPLOSION_TIMING && player.status[STATUS_EXPLOSION_IMMUNITY]) {
+                if (!D_LEGACY_EXPLOSION_TIMING && player.status[STATUS_EXPLOSION_IMMUNITY]
+                    && !player.explosionImmunityFresh) { // iOS port (Brogue SE): #816 -- never spend the grant turn's own decrement (see explosionImmunityFresh)
                     player.status[STATUS_EXPLOSION_IMMUNITY]--;
                 }
                 updateEnvironment(); // Update fire and gas, items floating around in water, monsters falling into chasms, etc.
@@ -3110,6 +3160,18 @@ void playerTurnEnded() {
                 return;
             }
         }
+
+        // iOS port (Brogue SE): #816 -- the grant turn is over; clear the "freshly granted" markers so the
+        // NEXT turn's decrement counts again. This runs once per player turn (after the inner turn-advance
+        // loop above), NOT at the decrement itself: clearing at the decrement would wrongly re-protect a
+        // grant that lands AFTER it (gas ignition in updateEnvironment) on the following turn, while a grant
+        // BEFORE it (a bloat detonating in melee) must be protected exactly once. Player + all monsters,
+        // since the grant site (applyInstantTileEffectsToCreature) is shared. See explosionImmunityFresh.
+        player.explosionImmunityFresh = false;
+        for (creatureIterator it = iterateCreatures(monsters); hasNextCreature(it);) {
+            nextCreature(&it)->explosionImmunityFresh = false;
+        }
+
         // DEBUG displayLevel();
         //checkForDungeonErrors();
 
