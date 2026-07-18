@@ -28,6 +28,28 @@ covers the separate Classic engine that ships in the app target).
 
 ## Change log
 
+### 2026-07-18 — Scheme-aware in-play keyboard indicators + labels re-enabled (bug fix)
+
+**What.** In-play hotkey indicators were hardcoded to the Classic layout, so under **Modern** (the
+iOS/macOS default) they named the wrong keys: the bottom-bar **Inventory** button highlighted `I` though
+Modern opens inventory with `e`, and the examine / throw / zap-direction prompts read `<hjklyubn>` though
+Modern moves on `uio/jkl/m,.`. This is why labels were switched off in the 2026-06-15 change; making them
+scheme-aware is the prerequisite to turning them back on (host side).
+
+**How.** Added the **inverse of `applyKeyboardScheme`** in `IO.c` (declared in `Rogue.h`), kept beside it
+so a label can't drift from the real remap: `keyboardSchemeMoveKeysHint()` → `hjklyubn`/`uio/jkl/m,.` and
+`keyboardSchemeInventoryLetter()` → `i`/`e`. Consumers: the Inventory bottom-bar button (in-word highlight
+moved to the live key — both `I` and `e` occur in "Inventory"; `hotkey[]` unchanged, since a tap sends
+`INVENTORY_KEY` and an in-play `e` remaps to it upstream), and the examine / throw / zap-direction prompts.
+`mainInputLoop` tracks the scheme its bottom bar was built for and rebuilds it if the player toggles
+Classic↔Modern from the `?` screen mid-play. Menus read with `textInput == true` (bypassing the remap), so
+their letter hotkeys were already correct in both schemes and are untouched; the `?` help screen was
+already scheme-aware.
+
+**Determinism / saves.** Display-only; reads `rogueKeyboardScheme` (a persisted input preference, never
+game state). No RNG, no save impact. Marked `// iOS port (iBrogue):`. (The host re-enables labels on
+keyboard presence in `BrogueViewController.swift`; see the amended 2026-06-15 entry below.)
+
 ### 2026-07-08 — Menu-magnify: report the visible (haloed) box rect, not the cancel region
 
 **What.** In `IO.c printTextBox`, the window rect passed to `buttonInputLoop` (which the iPhone
@@ -178,6 +200,12 @@ enabled for the CE/SE screen in `BrogueViewController.presentFileManagementScree
 platform/Swift — no engine C change. Debug aid (currently always on for CE/SE).
 
 ### 2026-06-15 — Keyboard labels disabled; hardware-keyboard presence drives UI instead
+
+> **Superseded 2026-07-18** (see the scheme-aware-labels entry above): labels were disabled because they
+> showed the *Classic* layout and mismatched the Modern default. They are now scheme-aware, so the host
+> re-enables them on keyboard presence. The "labels stay off / host no longer enables `KEYBOARD_LABELS`"
+> statements below are historical; the hardware-keyboard-presence UI (d-pad/ESC hide, help hint) still
+> applies.
 
 **What.** The in-game hotkey labels are turned off (they reflect the Classic key layout and would
 mismatch the new Modern default — see the "Default to Modern keyboard layout" change). A hardware

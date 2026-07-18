@@ -100,6 +100,13 @@ extern "C" __attribute__((visibility("default"))) void classic_setHardwareKeyboa
     HARDWARE_KEYBOARD_CONNECTED = (boolean)(connected != 0);
 }
 
+// iOS port (iBrogue): drive Classic's runtime KEYBOARD_LABELS flag (the in-game hotkey hints). Called on
+// GCKeyboard connect/disconnect so labels show only with a keyboard. Sets the engine global directly, for
+// the same linkage reason as classic_setPhoneLayout / classic_setHardwareKeyboardConnected above.
+extern "C" __attribute__((visibility("default"))) void classic_setKeyboardLabelsEnabled(int enabled) {
+    KEYBOARD_LABELS = (boolean)(enabled != 0);
+}
+
 // ---------------------------------------------------------------------------
 // Rendering
 // ---------------------------------------------------------------------------

@@ -100,6 +100,10 @@ void classic_setPhoneLayout(int isPhone);
 // hotkey hints. Called on GCKeyboard connect/disconnect.
 void classic_setHardwareKeyboardConnected(int connected);
 
+// iOS port (iBrogue): enables Classic's in-game hotkey labels (KEYBOARD_LABELS) when a keyboard is
+// present. The labels are scheme-aware. Called on GCKeyboard connect/disconnect.
+void classic_setKeyboardLabelsEnabled(int enabled);
+
 #ifdef __cplusplus
 }
 #endif

@@ -3104,6 +3104,11 @@ extern "C" {
     // iOS port (iBrogue): translate a raw physical keystroke to the canonical engine keystroke for the
     // active keyboard scheme. Identity for CLASSIC. Applied in the platform bridge before recording.
     signed long applyKeyboardScheme(signed long keystroke, boolean *controlKey, boolean *shiftKey);
+    // iOS port (iBrogue): the INVERSE of applyKeyboardScheme -- the active scheme's display tokens for
+    // on-screen keyboard indicators, so a label can't drift from the real remap. Only consulted when
+    // KEYBOARD_LABELS is on. See IO.c / docs/design/keyboard-schemes.md.
+    const char *keyboardSchemeMoveKeysHint(void); // "hjklyubn" (Classic) / "uio/jkl/m,." (Modern)
+    char keyboardSchemeInventoryLetter(void);     // 'i' (Classic) / 'e' (Modern)
     // iOS port (iBrogue): platform-bridge persistence hooks (implemented in CEBridge.mm). Seed persists
     // the last run's seed across launches; keyboard-scheme persists the Classic/Modern choice; the
     // text-input hook pre-fills + shows the on-screen keyboard for seed/save entry.

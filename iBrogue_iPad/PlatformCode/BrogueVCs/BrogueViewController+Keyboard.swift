@@ -183,13 +183,13 @@ extension BrogueViewController {
         updateHardwareKeyboardState(GCKeyboard.coalesced != nil)
     }
 
-    // A hardware keyboard now changes two things (the on-screen hotkey labels themselves stay OFF in
-    // every engine — they reflect the Classic layout and would mismatch the Modern default, so we
-    // deliberately never re-enable KEYBOARD_LABELS): (1) the on-screen d-pad is redundant, so hide it;
-    // (2) the engines surface a "Press <?> for help" hint in the message log — the only help affordance
-    // left with the labels (and their help button) disabled. We report presence to every engine via
-    // its own image's hook (Classic's setHardwareKeyboardConnected(); CE/SE's
-    // ce_/se_setHardwareKeyboardConnected()) so the setting is correct whichever engine is active.
+    // A hardware keyboard drives several things: (1) the on-screen d-pad and ESC button are redundant,
+    // so hide them; (2) in-game hotkey LABELS turn on. The labels are now scheme-aware in all three engines
+    // (they follow the active Classic/Modern layout — see keyboardScheme* in each engine), so they no
+    // longer mismatch the Modern default the way the old Classic-hardcoded labels did (which is why they
+    // were disabled). With labels on, each engine's "?" help/keyboard-layout screen is reachable again too.
+    // Both the presence flag and the label flag are reported to every engine via its own image's hook, so
+    // the setting is correct whichever engine is active.
     private func updateHardwareKeyboardState(_ connected: Bool) {
         // iOS port (iBrogue): a Mac always has a keyboard, and GameController's GCKeyboard discovery can
         // lag app launch — long enough that the engine's one-time welcome() can print before the flag
@@ -205,6 +205,11 @@ extension BrogueViewController {
         classic_setHardwareKeyboardConnected(isConnected ? 1 : 0)
         ce_setHardwareKeyboardConnected(isConnected ? 1 : 0)
         se_setHardwareKeyboardConnected(isConnected ? 1 : 0)
+        // iOS port (iBrogue): re-enable in-game hotkey labels when a keyboard is present, now that the
+        // indicators are scheme-aware in every engine.
+        classic_setKeyboardLabelsEnabled(isConnected ? 1 : 0)
+        ce_setKeyboardLabelsEnabled(isConnected ? 1 : 0)
+        se_setKeyboardLabelsEnabled(isConnected ? 1 : 0)
         DispatchQueue.main.async { [weak self] in
             self?.refreshDirectionPadVisibility()
             self?.refreshEscButtonVisibility()

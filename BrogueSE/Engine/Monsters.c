@@ -2693,6 +2693,13 @@ void decrementMonsterStatus(creature *monst) {
                 }
                 break;
             default:
+                // iOS port (Brogue SE): #816 -- NOTE: no explosionImmunityFresh guard here, deliberately.
+                // A monster grants immunity in applyInstantTileEffectsToCreature (start of the env tick) and
+                // decrements it here, in that order -- so grant=6 already yields the intended gap of 6 (five
+                // clear turns); the grant turn's decrement is absorbed by the hit that same turn. Adding the
+                // player's skip here over-corrects to gap 7 (six clear turns) -- confirmed empirically with
+                // D_TEST_EXPLOSION_MONSTER. The player's skip exists only because the player's anomalous
+                // grant (a bloat detonating in melee) lands in playerMoves, one phase before its decrement.
                 if (monst->status[i]) {
                     monst->status[i]--;
                 }
