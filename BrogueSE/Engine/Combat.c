@@ -1393,6 +1393,28 @@ static short weaponMeleeLoudness(const item *weapon, boolean connected) {
     return loudness;
 }
 
+// iOS port (Brogue SE): the off-screen "you hear combat in the distance" tell (unseen hit/miss; kill
+// tells stay separate and always fire -- a death is real information). Once per turn as always
+// (heardCombatThisTurn), plus ONCE PER REST SESSION: perpetual off-screen fights (captors beating a
+// regenerative captive to keep it weak, Monsters.c) otherwise re-kill every 'Z' rest on the level,
+// since every message() sets rogue.disturbed. First tell of a session still interrupts (real
+// information); repeats during the same session are suppressed until the player takes a non-rest
+// action (rogue.heardDistantCombatThisRest, cleared in the playerTurnEnded session sweep alongside
+// MB_HEARD_THIS_REST). No RNG; replay-deterministic.
+static void distantCombatTell(void) {
+    if (rogue.heardCombatThisTurn) {
+        return;
+    }
+    rogue.heardCombatThisTurn = true;
+    if (rogue.automationActive && rogue.justRested) { // inside a 'Z' rest turn
+        if (rogue.heardDistantCombatThisRest) {
+            return; // this session already got its one ambient-combat interrupt
+        }
+        rogue.heardDistantCombatThisRest = true;
+    }
+    combatMessage("you hear combat in the distance", 0);
+}
+
 // returns whether the attack hit
 boolean attack(creature *attacker, creature *defender, boolean lungeAttack) {
     short damage, specialDamage, poisonDamage;
@@ -1482,7 +1504,8 @@ boolean attack(creature *attacker, creature *defender, boolean lungeAttack) {
         // landing the blow (the ally is the listener's "side"; the enemy is what we're locating). Cosmetic
         // and RNG-silent; same-cell merge keeps repeated swings from stacking. See docs/design/noise-system.md.
         creature *noiseSource = (attacker == &player || attacker->creatureState == MONSTER_ALLY) ? defender : attacker;
-        cosmeticSpawnRippleMonster(noiseSource->loc);
+        cosmeticSpawnRippleMonster(noiseSource->loc, false); // suppressed during automation, as ever (the
+                                                             // rest-interrupt bypass is the footstep channel's)
     }
 
     // iOS port (Brogue SE): cursed-runics rework -- Clumsiness (unpurified) fumble: a chance to trip on
@@ -1633,10 +1656,7 @@ boolean attack(creature *attacker, creature *defender, boolean lungeAttack) {
             // belongs). See docs/design/noise-system.md.
             if (!rogue.blockCombatText) {
                 if (sightUnseen) {
-                    if (!rogue.heardCombatThisTurn) {
-                        rogue.heardCombatThisTurn = true;
-                        combatMessage("you hear combat in the distance", 0);
-                    }
+                    distantCombatTell();
                 } else if (canSeeMonster(attacker) || canSeeMonster(defender)) {
                     attackVerb(verb, attacker, max(damage - (attacker->info.damage.lowerBound * monsterDamageAdjustmentAmount(attacker) / FP_FACTOR), 0) * 100
                                / max(1, (attacker->info.damage.upperBound - attacker->info.damage.lowerBound) * monsterDamageAdjustmentAmount(attacker) / FP_FACTOR));
@@ -1700,10 +1720,7 @@ boolean attack(creature *attacker, creature *defender, boolean lungeAttack) {
     } else { // if the attack missed
         if (!rogue.blockCombatText) {
             if (sightUnseen) {
-                if (!rogue.heardCombatThisTurn) {
-                    rogue.heardCombatThisTurn = true;
-                    combatMessage("you hear combat in the distance", 0);
-                }
+                distantCombatTell();
             } else {
                 sprintf(buf, "%s missed %s", attackerName, defenderName);
                 combatMessage(buf, 0);

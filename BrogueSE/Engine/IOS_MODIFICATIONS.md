@@ -32,6 +32,44 @@ See `BrogueCE/Engine/IOS_MODIFICATIONS.md` (faithful CE) and
 
 ## Change log
 
+### 2026-07-22 — Noise: hearing interrupts long rest + once-per-rest combat tells (gameplay)
+
+**What.** Listening finally *does* something during 'Z' rest — the two halves of one fix:
+1. **Hearing interrupts rest.** During a long-rest turn, a hostile monster's heard-footstep roll is
+   promoted to the **substantive** RNG stream, and a success wakes the player: tier-flavored message
+   ("thunderous footfalls" / "heavy footsteps" / "something stirring" / "a faint rustle", worshipers
+   "a frenzied clamor"), the grey ripple (bypassing the automation suppression that used to eat it), and
+   a haptic. **One interrupt per monster per rest session** (`MB_HEARD_THIS_REST`, new `Fl(30)`): re-'Z'
+   past a ping is an informed gamble; a worshiper's endless clamor stops nagging after its first wake.
+   Allies/captives never interrupt. Before this, 'Z' rest drained every ripple and the cosmetic roll
+   couldn't stop the rest — the whole listen-at-the-door mechanic was invisible exactly when it mattered.
+2. **Distant-combat tells stop re-killing rest.** Vanilla captors perpetually beat a regenerative captive
+   to keep it weak (`Monsters.c` captive-torment block), and since SE's survive-hit fix made every unseen
+   landed blow audible, "you hear combat in the distance" fired level-wide every turn — and every
+   `message()` sets `rogue.disturbed`, so 'Z' died within a turn or two anywhere on such a level. The tell
+   is now also **once per rest session** (`rogue.heardDistantCombatThisRest`): the first tell still
+   interrupts (real information), repeats are suppressed until the player takes a non-rest action.
+   Kill tells ("you hear something die…") still always fire. Factored both call sites into
+   `distantCombatTell()`.
+
+**How.** `Monsters.c` — `monsterEmitMovementNoise`: `restListening` predicate (`rogue.automationActive
+&& rogue.justRested`, hostile, not already flagged) picks substantive vs cosmetic for the same
+`detectChance`; on success, flag + message + direct `cePlayDetectionHaptic(0)` (the wrapper suppresses
+during automation — exactly when this fires; fast playback stays silent) + forced ripple. `IO.c` —
+`cosmeticSpawnRippleMonster(pos, boolean bypassAutomation)`: bypass renders mid-automation; playback
+fast-forward always suppresses. `Time.c` — `playerTurnEnded`: any non-rest turn sweeps
+`MB_HEARD_THIS_REST` off the level's creatures and clears the combat-tell latch (the "rest session"
+boundary; stale flags on other levels self-heal on arrival). `Combat.c` — `distantCombatTell()`.
+`Rogue.h` — flag, `rogue` field, decl, comment updates (the REST bonus "latent" note, the door-listen
+"never exceed" claim, the "PROMOTE TO SUBSTANTIVE" note — all now describe the landed behavior).
+
+**Determinism / saves.** The rest-turn roll is substantive, so **recording compat breaks**:
+`BROGUE_MINOR` bumped 2 → 3 ("SE 2.3.0") so old saves/recordings are rejected rather than desyncing.
+The branch condition is replay-deterministic (player state), so new recordings replay exactly. Normal-play
+rolls stay `RNG_COSMETIC` — tuning `NOISE_*` constants still never desyncs non-rest play or seeds. The
+session bookkeeping (flag + latch) evolves deterministically; no direct save-format impact (saves are
+input replays). Design rationale: docs/design/noise-system.md ("hearing interrupts rest").
+
 ### 2026-07-22 — Suppress the gold ID star on empty-bottle capture (bug fix)
 
 **What.** Applying an empty bottle to capture a gas/liquid (e.g. caustic gas) fired the gold ID "star

@@ -3307,6 +3307,21 @@ void playerTurnEnded() {
         levels[rogue.depthLevel].restTurnsOnLevel++; // iOS port (iBrogue): debug-only per-level rest tally
     }
 
+#if NOISE_SYSTEM_ENABLED
+    // iOS port (Brogue SE): hearing-interrupts-rest -- any NON-rest action ends the "rest session":
+    // clear the one-interrupt-per-monster heard-set and the distant-combat tell latch so the next 'Z'
+    // starts fresh. Rest turns keep them, so immediately re-resting past a ping stays an informed gamble
+    // (the pinged monster and the ambient combat tell won't nag again until you act). Sweeps only the
+    // current level's creatures; a stale flag on another level self-heals on the first (necessarily
+    // non-rest) turn after arriving there. See monsterEmitMovementNoise / MB_HEARD_THIS_REST.
+    if (!rogue.justRested) {
+        for (creatureIterator it = iterateCreatures(monsters); hasNextCreature(it);) {
+            nextCreature(&it)->bookkeepingFlags &= ~MB_HEARD_THIS_REST;
+        }
+        rogue.heardDistantCombatThisRest = false;
+    }
+#endif
+
     rogue.justRested = false;
     rogue.justSearched = false;
 #if NOISE_SYSTEM_ENABLED
