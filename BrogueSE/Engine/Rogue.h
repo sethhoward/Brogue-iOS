@@ -92,7 +92,7 @@
 // suspends it). Aim short to test the trailing catch-up, far to test the cinematic pan. Granted
 // deterministically in initializeRogue, so it is recording-safe. CURRENTLY ON -- flip to 0 to ship
 // (see docs/notes/pre-ship-debug-checklist.md).
-#define D_BLINK_STAFF_START             1//(WIZARD_MODE && 0)
+#define D_BLINK_STAFF_START             0//(WIZARD_MODE && 0)
 
 // iOS port (iBrogue): start with a +3 ring of light for playtesting (ally emboldenment aura + invisible
 // reveal). Granted deterministically in initializeRogue, so it is recording-safe. Equip it to see the
@@ -107,7 +107,7 @@
 // camera's cinematic pan on a same-level teleport -- the high enchant gives a short recharge, so it can be
 // spammed. Granted deterministically in initializeRogue, so it is recording-safe. CURRENTLY ON -- flip to
 // 0 to ship (see docs/notes/pre-ship-debug-checklist.md).
-#define D_TELEPORT_CHARM_START          1//(WIZARD_MODE && 0)
+#define D_TELEPORT_CHARM_START          0//(WIZARD_MODE && 0)
 
 // iOS port (iBrogue): start with a +50 leather armor for playtesting -- effectively invulnerable, to test
 // without dying. Granted deterministically in initializeRogue, so it is recording-safe. Equip it to wear
@@ -117,7 +117,7 @@
 // iOS port (Brogue SE): start with a few empty bottles for playtesting the v2 capture system, so you can
 // test capturing gases/liquids/hazards without first finding one. Granted deterministically in
 // initializeRogue, so it is recording-safe. Flip to 0 to ship.
-#define D_EMPTY_BOTTLE_START            1//(WIZARD_MODE && 0)
+#define D_EMPTY_BOTTLE_START            0//(WIZARD_MODE && 0)
 
 // iOS port (Brogue SE): start with 3 potions of telepathy for playtesting the noise system -- telepathy
 // reveals off-screen monsters so you can correlate the noise box-ripples with the creatures making them.

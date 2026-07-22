@@ -594,32 +594,22 @@ final class BrogueViewController: UIViewController {
     // them the camera *snapped* the player to center every step, so at 2.5× each tile
     // was a ~20pt teleport — poppy when moving slowly, chunky when travelling. Now the
     // camera EASES: a continuous trailing lerp during normal movement (player rides
-    // slightly ahead of center, glides back to dead-center on stop), a one-shot
-    // cinematic pan for a discrete same-level jump (teleport / long blink / returning
-    // from a two-finger scout-pan), and an instant snap on a true level change (the old
-    // origin means nothing on the new map — see setPlayerWindowX's `depth`). iPhone only.
+    // slightly ahead of center, glides back to dead-center on stop). A same-level jump
+    // (a blink) just eases over via that same trail; a true level change instantly snaps
+    // (the old origin means nothing on the new map — see setPlayerWindowX's `depth`).
+    // iPhone only.
 
     /// Master switch. When false, auto-follow reverts to the pre-smoothing behavior
     /// (instant re-center each step, applied in lockstep on the engine thread) — flip
     /// it off to A/B the new feel against the old one.
     static let followSmoothingEnabled = true
-    /// Trailing-lerp time constant (seconds) for normal movement. Each frame the applied
-    /// origin closes the gap to the player-centered target exponentially with this time
-    /// constant, so it's frame-rate independent. **Smaller** = tighter follow, less drift
-    /// (player stays nearer center, but a single step is snappier); **larger** = smoother,
-    /// but the player rides further ahead during fast travel. Governs BOTH the single-step
-    /// ease and the fast-travel trail.
+    /// Trailing-lerp time constant (seconds). Each frame the applied origin closes the gap
+    /// to the player-centered target exponentially with this time constant, so it's
+    /// frame-rate independent. **Smaller** = tighter follow, less drift (player stays nearer
+    /// center, but a single step is snappier); **larger** = smoother, but the player rides
+    /// further ahead during fast travel. Governs the single-step ease, the fast-travel trail,
+    /// AND how a blink eases over.
     static let followTimeConstant: CFTimeInterval = 0.10
-    /// Camera-travel distance (in dungeon tiles) above which a same-level jump stops being
-    /// absorbed by the trail and instead gets the one-shot cinematic pan. A short blink
-    /// below this just eases over via the normal trail. **Must stay above the steady
-    /// fast-travel trail** (≈ 40·followTimeConstant tiles at ~40 steps/sec, so ≈4 tiles at
-    /// the default) or sustained travel would keep (wrongly) tripping the pan.
-    static let followPanTriggerTiles: CGFloat = 6
-    /// Duration (seconds) of the one-shot cinematic pan. **Fixed regardless of distance**
-    /// and smoothstep-eased (accelerate then decelerate), so a long teleport swoops faster
-    /// on screen but never whips. Larger = more overtly cinematic / slower.
-    static let followPanDuration: CFTimeInterval = 0.35
 
     /// Center columns of the 5 engine bottom buttons (Explore/Rest/Search/Menu/
     /// Inventory), mirroring initializeMenuButtons in BrogueCode/IO.c (starts
@@ -726,12 +716,6 @@ final class BrogueViewController: UIViewController {
     var followTargetOrigin: CGPoint = .zero
     /// Timestamp of the previous follow tick, for frame-rate-independent exponential smoothing.
     var followLastTickTime: CFTimeInterval = 0
-    /// While true the follow link is running the fixed-duration cinematic PAN (teleport /
-    /// long blink / return-from-scout) rather than the exponential trail; the two fields hold
-    /// that pan's start point and start time.
-    var followPanActive = false
-    var followPanStartOrigin: CGPoint = .zero
-    var followPanStartTime: CFTimeInterval = 0
     /// Dungeon depth reported alongside the last player-window cell. A change means a true
     /// level transition — the follow snaps rather than pans (the old origin is meaningless on
     /// the new map). -1 = none yet (first report after a reset establishes the baseline).

@@ -32,6 +32,22 @@ See `BrogueCE/Engine/IOS_MODIFICATIONS.md` (faithful CE) and
 
 ## Change log
 
+### 2026-07-22 — Suppress the gold ID star on empty-bottle capture (bug fix)
+
+**What.** Applying an empty bottle to capture a gas/liquid (e.g. caustic gas) fired the gold ID "star
+ripple" — redundant, since the capture is a deliberate, player-initiated act and the capture flavor line
+already names the potion. Reclassified empty-bottle capture from an *incidental reveal* (keeps the star)
+to an *active use* (suppresses it), matching drink/read/throw.
+
+**How (`Items.c`).** `fillEmptyBottle()` — the shared capture routine behind all three capture paths
+(apply-underfoot in `drinkPotion`, bolt capture in `updateBolt`, the Time.c stand-in) — now calls
+`autoIdentifyFromUse()` instead of `autoIdentify()`, so the identify-and-fold still happens without the
+`cosmeticSpawnItemTell(ITEM_TELL_IDENTIFY)` star. This supersedes the 2026-07-18 note below, which had
+listed empty-bottle capture-fill among the star-firing incidental reveals.
+
+**Determinism / saves.** Cosmetic-layer only (`RNG_COSMETIC`); identification itself is unchanged. No
+game-state or save impact. Marked `// iOS port (Brogue SE):` context via the existing capture comments.
+
 ### 2026-07-22 — Player-window report carries the dungeon depth (iPhone camera-follow smoothing)
 
 **What.** `ceSetPlayerWindowLocation` gained a third argument, `short depth`, and the host protocol
@@ -122,9 +138,11 @@ choke had quietly undermined for consumables.
 **How (`Items.c`, `Rogue.h`).** Split the identify-and-tell logic: `autoIdentify()` and a new
 `autoIdentifyFromUse()` both delegate to a shared `static autoIdentifyInternal(item *, boolean announceReveal)`
 — the boolean gates the `cosmeticSpawnItemTell(ITEM_TELL_IDENTIFY)` call at the tail. `autoIdentify()` keeps
-firing the star (incidental reveals: combat auto-ID in `Combat.c`, a reflected zap, equipping a runic,
-empty-bottle capture-fill); `autoIdentifyFromUse()` skips it. Active-use callers switched to the new entry
-point: `drinkPotion()`, `readScroll()`, and the six thrown-potion tell paths in `throwItem()`.
+firing the star (incidental reveals: combat auto-ID in `Combat.c`, a reflected zap, equipping a runic);
+`autoIdentifyFromUse()` skips it. Active-use callers switched to the new entry point: `drinkPotion()`,
+`readScroll()`, and the six thrown-potion tell paths in `throwItem()`. *(Empty-bottle capture-fill was
+originally left on `autoIdentify()` here but was later reclassified as active use — see the 2026-07-22
+entry above.)*
 `shatterPotionAtLoc()` is shared between a deliberate hand-throw (suppress) and an **incidental** bolt/dart
 detonation of a *floor* potion (keep the star), so it gained a `boolean deliberateUse` param, threaded from
 its three callers (`throwItem` → true; `updateBolt` and `detonateFloorPotionAt` → false).

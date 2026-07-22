@@ -7310,7 +7310,9 @@ boolean fillEmptyBottle(item *bottle, short newPotionKind, const char *flavorTex
     if (flavorText) {
         messageWithColor(flavorText, &itemMessageColor, 0);
     }
-    autoIdentify(bottle); // identify the new kind + fold matching pack potions into the known count
+    // Active-use identify (no gold ID star): capturing is a deliberate, player-initiated act, so the
+    // star would be redundant -- same reasoning as drinking/reading/throwing (see autoIdentifyFromUse).
+    autoIdentifyFromUse(bottle); // identify the new kind + fold matching pack potions into the known count
     return true;
 }
 

@@ -432,10 +432,10 @@ extension BrogueViewController: UIGestureRecognizerDelegate {
     ///
     /// With smoothing ON (default) the follow is continuous and lives entirely on the main
     /// thread (where its CADisplayLink must run): a trailing exponential lerp for normal
-    /// movement, a one-shot cinematic pan for a big same-level jump, and an instant snap when
-    /// the dungeon `depth` changed (a true level transition — the old origin points at nothing
-    /// on the new map). Engine-thread lockstep is deliberately given up: a *continuous* ease
-    /// reads as intentional, unlike the one-frame lag that made an instant apply stutter.
+    /// movement and blinks alike, and an instant snap when the dungeon `depth` changed (a true
+    /// level transition — the old origin points at nothing on the new map). Engine-thread
+    /// lockstep is deliberately given up: a *continuous* ease reads as intentional, unlike the
+    /// one-frame lag that made an instant apply stutter.
     private func applyAutoFollow(playerCell: CGPoint, depth: Int) {
         guard zoomScale > 1.0 else { return }
         let target = clampedOrigin(autoFollowOrigin(playerCell: playerCell), scale: zoomScale)
@@ -477,60 +477,29 @@ extension BrogueViewController: UIGestureRecognizerDelegate {
         }
     }
 
-    /// Feeds a new player-centered target to the smoothed follow (main thread). Starts a
-    /// one-shot cinematic pan when the camera must travel more than `followPanTriggerTiles`
-    /// on the same level (a teleport, a long blink, or snapping back after a two-finger
-    /// scout-pan); otherwise the running trail lerp just chases the moved target.
+    /// Feeds a new player-centered target to the smoothed follow (main thread); the running
+    /// trail lerp then chases it. Used for every same-level move — a normal step, fast travel,
+    /// or a blink all just ease over via the trail.
     private func updateFollow(to target: CGPoint) {
         followTargetOrigin = target
-        if !followPanActive {
-            let dx = target.x - appliedOrigin.x
-            let dy = target.y - appliedOrigin.y
-            let ptsPerTile = max(skViewPort.effectiveWidthPoints / CGFloat(COLS) * zoomScale, 0.0001)
-            let distTiles = hypot(dx, dy) / ptsPerTile
-            if distTiles > BrogueViewController.followPanTriggerTiles {
-                followPanActive = true
-                followPanStartOrigin = appliedOrigin
-                followPanStartTime = CACurrentMediaTime()
-            }
-        }
         ensureFollowLinkRunning()
     }
 
-    /// Instantly centers on the player (a true level transition): cancels any trail / pan and
+    /// Instantly centers on the player (a true level transition): cancels the trail and
     /// applies the target with no animation. Main thread only.
     private func snapFollow(to target: CGPoint) {
         followTargetOrigin = target
         setAppliedZoom(scale: zoomScale, origin: target) // cancels the follow + anim links, applies instantly
     }
 
-    /// Per-frame smoothed-follow tick (main thread). Runs one of two modes: a fixed-duration
-    /// smoothstep cinematic PAN toward the target, or the continuous exponential TRAIL that
-    /// chases the (possibly still-moving) target. Sleeps itself once it converges and the
-    /// player is idle.
+    /// Per-frame smoothed-follow tick (main thread): a continuous exponential TRAIL that chases
+    /// the (possibly still-moving) target. Sleeps itself once it converges and the player is idle.
     @objc private func stepFollow(_ link: CADisplayLink) {
         // Be defensive: if we somehow left full-zoom map play, stop (suspend/gesture/reset
         // each tear the link down through their own paths too).
         guard zoomScale > 1.0, appliedScale >= zoomScale - 0.001 else { cancelFollow(); return }
         let now = CACurrentMediaTime()
         let target = followTargetOrigin
-
-        if followPanActive {
-            let raw = (now - followPanStartTime) / BrogueViewController.followPanDuration
-            let t = CGFloat(min(max(raw, 0), 1))
-            let e = t * t * (3 - 2 * t) // smoothstep
-            let ox = followPanStartOrigin.x + (target.x - followPanStartOrigin.x) * e
-            let oy = followPanStartOrigin.y + (target.y - followPanStartOrigin.y) * e
-            applyAppliedTransform(scale: zoomScale, origin: CGPoint(x: ox, y: oy))
-            if t >= 1.0 {
-                followPanActive = false
-                applyAppliedTransform(scale: zoomScale, origin: target)
-                cancelFollow() // pan done and centered → nothing left to chase
-            }
-            followLastTickTime = now
-            return
-        }
-
         // Exponential trail toward the (possibly moving) target — frame-rate independent.
         let dt = max(0, now - followLastTickTime)
         followLastTickTime = now
@@ -563,7 +532,6 @@ extension BrogueViewController: UIGestureRecognizerDelegate {
     func cancelFollow() {
         followLink?.invalidate()
         followLink = nil
-        followPanActive = false
     }
 
     /// Engine bridge callback (both engines), reporting the player's window cell
