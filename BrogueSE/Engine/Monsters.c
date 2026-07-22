@@ -2693,6 +2693,13 @@ void decrementMonsterStatus(creature *monst) {
                 }
                 break;
             default:
+                // iOS port (Brogue SE): #816 -- NOTE: no explosionImmunityFresh guard here, deliberately.
+                // A monster grants immunity in applyInstantTileEffectsToCreature (start of the env tick) and
+                // decrements it here, in that order -- so grant=6 already yields the intended gap of 6 (five
+                // clear turns); the grant turn's decrement is absorbed by the hit that same turn. Adding the
+                // player's skip here over-corrects to gap 7 (six clear turns) -- confirmed empirically with
+                // D_TEST_EXPLOSION_MONSTER. The player's skip exists only because the player's anomalous
+                // grant (a bloat detonating in melee) lands in playerMoves, one phase before its decrement.
                 if (monst->status[i]) {
                     monst->status[i]--;
                 }
@@ -5028,7 +5035,10 @@ boolean knownToPlayerAsPassableOrSecretDoor(pos loc) {
 // charge. Cosmetic only -- the print tiles carry no gameplay flags and no monster reads them (a
 // deliberately one-way tell). Placement is a deterministic function of movement and consumes no RNG
 // (startProb 0 in the DFs); the fade rides the existing substantive promote loop, so it replays from the
-// seed like the jackal den. Driven from the single all-creature seam, setMonsterLocation (just below).
+// seed like the jackal den. Monsters (and forced relocations like knockback) reach this through
+// setMonsterLocation (just below); the player's ordinary walk does NOT route through that seam, so
+// playerMoves() calls layCreatureSpoor(&player, ...) directly -- without both hooks the player leaves
+// no tracks at all. layCreatureSpoor is therefore non-static (prototype in Rogue.h).
 static boolean isBloodTile(pos loc) {
     const enum tileType s = pmapAt(loc)->layers[SURFACE];
     return (s == RED_BLOOD || s == GREEN_BLOOD || s == PURPLE_BLOOD || s == WORM_BLOOD);
@@ -5056,7 +5066,7 @@ static boolean isTrackableFloor(pos loc) {
             && !cellHasTerrainFlag(loc, (T_OBSTRUCTS_SURFACE_EFFECTS | T_LAVA_INSTA_DEATH | T_AUTO_DESCENT)));
 }
 
-static void layCreatureSpoor(creature *monst, pos loc) {
+void layCreatureSpoor(creature *monst, pos loc) {
     short i;
     const short ruleCount = sizeof(spoorRules) / sizeof(spoorRules[0]);
 
@@ -5265,12 +5275,17 @@ void playerEmitNoise(short spike) { (void)spike; rogue.playerNoise = NOISE_PLAYE
 // map (soundDistanceAt: near-field boost, then falloff, silent if unreachable -- so walls/doors and
 // range all bake in -- this is PROPAGATION); terrainNoiseModifier is the EMISSION term (how loud the
 // step itself is on this tile -- crunchy grass +, soft carpet -); doorListenBonus rewards standing at a
-// closed door. Additive (not a multiplicative
-// loudness scalar) so awareness can compensate for a quiet monster. The roll uses RNG_COSMETIC: it's
-// informational only and must NOT perturb the substantive stream, so noise tuning never desyncs
-// saves/replays and seeds are unaffected. >>> PROMOTE TO SUBSTANTIVE (swap assureCosmeticRNG/restoreRNG
-// for a plain rand_percent) ONLY when "hearing" starts driving gameplay -- e.g. interrupting travel/rest
-// or feeding monster awareness. See docs/design/noise-system.md.
+// closed door. Additive (not a multiplicative loudness scalar) so awareness can compensate for a quiet
+// monster.
+//
+// RNG SPLIT (hearing-interrupts-rest, 2026-07-22): during a LONG-REST turn ('Z': rogue.automationActive
+// && rogue.justRested) a hostile monster's roll is SUBSTANTIVE -- a success INTERRUPTS the rest (tier-
+// flavored message + ripple + haptic), so the outcome drives gameplay and must replay identically. One
+// interrupt per monster per rest session (MB_HEARD_THIS_REST; cleared on any non-rest action in
+// playerTurnEnded): re-resting past a ping is an informed gamble, and a worshiper's endless clamor stops
+// nagging after its first wake. Allies/captives never interrupt. Everywhere else the roll stays
+// RNG_COSMETIC (informational ripple only), so noise tuning never desyncs normal-play saves/replays or
+// seeds -- only rest-context behavior is version-locked. See docs/design/noise-system.md.
 static void monsterEmitMovementNoise(creature *monst, short originX, short originY) {
 #if NOISE_SYSTEM_ENABLED
     if (monst == &player) {
@@ -5321,14 +5336,46 @@ static void monsterEmitMovementNoise(creature *monst, short originX, short origi
         detectChance = clamp(ambientChance + noiseModifier, 0, NOISE_PERCEPTION_CEILING);
         // Global A/B playtest scalar (NOISE_PERCEPTION_SCALE: 100 = baseline, <100 quieter, >100 louder).
         detectChance = clamp((detectChance * NOISE_PERCEPTION_SCALE) / 100, 0, NOISE_PERCEPTION_CEILING);
-        assureCosmeticRNG; // informational roll -> cosmetic stream; never desyncs saves/replays
-        heard = rand_percent(detectChance);
-        restoreRNG;
+
+        // Hearing-interrupts-rest: on a long-rest turn, a hostile that hasn't already broken this rest
+        // session rolls on the SUBSTANTIVE stream, because a success ends the rest (see header comment).
+        const boolean restListening = rogue.automationActive && rogue.justRested   // inside a 'Z' rest turn
+                                    && monst->creatureState != MONSTER_ALLY        // hostiles only
+                                    && !(monst->bookkeepingFlags & MB_CAPTIVE)
+                                    && !(monst->bookkeepingFlags & MB_HEARD_THIS_REST);
+        if (restListening) {
+            heard = rand_percent(detectChance); // substantive: the outcome can interrupt the rest
+        } else {
+            assureCosmeticRNG; // informational roll -> cosmetic stream; never desyncs saves/replays
+            heard = rand_percent(detectChance);
+            restoreRNG;
+        }
         if (!heard) {
             return; // not perceived this time
         }
+        if (restListening) {
+            // Wake the player: tier-flavored message (message() sets rogue.disturbed, which exits the
+            // autoRest loop), the ripple (bypassing automation suppression -- the rest is ending this
+            // turn, so it must render), and a haptic. The haptic hook is called directly because the
+            // noiseDetectionHaptic wrapper suppresses during automation -- which is exactly when this
+            // fires; fast playback (save loading) stays silent.
+            char buf[COLS];
+            const char *tell = monsterIsWorshiper(monst)      ? "a frenzied clamor"
+                             : (noiseModifier >= NOISE_BOOMING) ? "thunderous footfalls"
+                             : (noiseModifier >= NOISE_LOUD)    ? "heavy footsteps"
+                             : (noiseModifier <= NOISE_QUIET)   ? "a faint rustle"
+                                                                : "something stirring";
+            monst->bookkeepingFlags |= MB_HEARD_THIS_REST; // one interrupt per monster per rest session
+            sprintf(buf, "you hear %s and stop resting.", tell);
+            messageWithColor(buf, &badMessageColor, 0);
+            if (!rogue.playbackFastForward && !rogue.autoPlayingLevel) {
+                cePlayDetectionHaptic(0); // one short, sharp tap
+            }
+            cosmeticSpawnRippleMonster(monst->loc, true);
+            return;
+        }
     }
-    cosmeticSpawnRippleMonster(monst->loc); // monst->loc is already the destination
+    cosmeticSpawnRippleMonster(monst->loc, false); // monst->loc is already the destination
 #endif
 }
 

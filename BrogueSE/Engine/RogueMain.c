@@ -475,6 +475,18 @@ void initializeRogue(uint64_t seed) {
         theItem = addItemToPack(theItem);
     }
 
+    if (D_BLINK_STAFF_START) {
+        // iOS port (iBrogue): playtest grant for the staff of blinking -- exercises the iPhone zoom camera's
+        // same-level follow WHILE ZOOMED (aiming keeps the zoom). High enchant = long max range, so you can
+        // aim short (trailing catch-up) or far (cinematic pan). Added deterministically here (not a recorded
+        // input), so it reconstructs identically on replay. The staff table is shared across variants.
+        theItem = generateItem(STAFF, STAFF_BLINKING);
+        theItem->enchant1 = theItem->charges = 10;
+        theItem->flags |= (ITEM_IDENTIFIED | ITEM_MAX_CHARGES_KNOWN);
+        identify(theItem);
+        theItem = addItemToPack(theItem);
+    }
+
     if (D_LIGHT_RING_START) {
         // iOS port (iBrogue): playtest grant for the reworked ring of light. Added deterministically here
         // (not as a recorded input), so it reconstructs identically on replay. Equip it to activate the
@@ -490,6 +502,19 @@ void initializeRogue(uint64_t seed) {
         // iOS port (iBrogue): playtest grant for a strong charm of health. Added deterministically here
         // (not as a recorded input), so it reconstructs identically on replay.
         theItem = generateItem(CHARM, CHARM_HEALTH);
+        theItem->enchant1 = 10;
+        theItem->charges = 0; // ready to use immediately
+        theItem->flags |= ITEM_IDENTIFIED;
+        identify(theItem);
+        theItem = addItemToPack(theItem);
+    }
+
+    if (D_TELEPORT_CHARM_START) {
+        // iOS port (iBrogue): playtest grant for a strong charm of teleportation -- exercises the iPhone
+        // zoom camera's cinematic pan on a same-level teleport. High enchant = short recharge, so it can be
+        // re-used freely. Added deterministically here (not a recorded input), so it reconstructs
+        // identically on replay.
+        theItem = generateItem(CHARM, CHARM_TELEPORTATION);
         theItem->enchant1 = 10;
         theItem->charges = 0; // ready to use immediately
         theItem->flags |= ITEM_IDENTIFIED;
@@ -539,67 +564,67 @@ void initializeRogue(uint64_t seed) {
     }
 
     if (D_DELIRIUM_WEAPON_START) {
-        // iOS port (Brogue SE): cursed-runics rework playtest grant -- an unidentified, cursed (-1)
+        // iOS port (Brogue SE): cursed-runics rework playtest grant -- an unidentified, cursed (+0)
         // Delirium sword. Equip to test the weld + on-equip reveal + hallucination + confusion venom;
-        // enchant to +6 to purify (hallucination lifts, proc switches to weakness); remove-curse then
+        // enchant to +7 to purify (hallucination lifts, proc switches to weakness); remove-curse then
         // unequip to shatter. Deterministic here (not a recorded input), so it reconstructs on replay.
         theItem = generateItem(WEAPON, SWORD);
-        theItem->enchant1 = -1;
+        theItem->enchant1 = 0;
         theItem->enchant2 = W_DELIRIUM;
         theItem->flags |= (ITEM_RUNIC | ITEM_CURSED);
         theItem = addItemToPack(theItem);
     }
 
     if (D_RECKLESSNESS_WEAPON_START) {
-        // iOS port (Brogue SE): cursed-runics rework playtest grant -- an unidentified, cursed (-1)
+        // iOS port (Brogue SE): cursed-runics rework playtest grant -- an unidentified, cursed (+0)
         // Recklessness sword (+damage dealt always; +damage taken while cursed; purify drops the
         // vulnerability). Deterministic/replay-safe.
         theItem = generateItem(WEAPON, SWORD);
-        theItem->enchant1 = -1;
+        theItem->enchant1 = 0;
         theItem->enchant2 = W_RECKLESSNESS;
         theItem->flags |= (ITEM_RUNIC | ITEM_CURSED);
         theItem = addItemToPack(theItem);
     }
 
     if (D_CLUMSINESS_WEAPON_START) {
-        // iOS port (Brogue SE): cursed-runics rework playtest grant -- an unidentified, cursed (-1)
+        // iOS port (Brogue SE): cursed-runics rework playtest grant -- an unidentified, cursed (+0)
         // Clumsiness sword (decap + fumble while cursed; purify transforms it into a runic of quietus).
         // Deterministic/replay-safe.
         theItem = generateItem(WEAPON, SWORD);
-        theItem->enchant1 = -1;
+        theItem->enchant1 = 0;
         theItem->enchant2 = W_CLUMSINESS;
         theItem->flags |= (ITEM_RUNIC | ITEM_CURSED);
         theItem = addItemToPack(theItem);
     }
 
     if (D_ACROPHOBIA_ARMOR_START) {
-        // iOS port (Brogue SE): cursed-runics rework playtest grant -- an unidentified, cursed (-1)
+        // iOS port (Brogue SE): cursed-runics rework playtest grant -- an unidentified, cursed (+0)
         // Acrophobia armor (fall-immune + dive-at-will always; vertigo/confusion at a chasm's edge while
         // cursed; purify to conquer the fear). Deterministic/replay-safe.
         theItem = generateItem(ARMOR, LEATHER_ARMOR);
-        theItem->enchant1 = -1;
+        theItem->enchant1 = 0;
         theItem->enchant2 = A_ACROPHOBIA;
         theItem->flags |= (ITEM_RUNIC | ITEM_CURSED);
         theItem = addItemToPack(theItem);
     }
 
     if (D_ANCHOR_ARMOR_START) {
-        // iOS port (Brogue SE): cursed-runics rework playtest grant -- an unidentified, cursed (-1)
+        // iOS port (Brogue SE): cursed-runics rework playtest grant -- an unidentified, cursed (+0)
         // Anchor armor (+defense always; ponderous move-slow while cursed; purify lifts the drag).
         // Deterministic/replay-safe.
         theItem = generateItem(ARMOR, LEATHER_ARMOR);
-        theItem->enchant1 = -1;
+        theItem->enchant1 = 0;
         theItem->enchant2 = A_ANCHOR;
         theItem->flags |= (ITEM_RUNIC | ITEM_CURSED);
         theItem = addItemToPack(theItem);
     }
 
     if (D_SMOKY_ARMOR_START) {
-        // iOS port (Brogue SE): cursed-runics rework playtest grant -- an unidentified, cursed (-1) Smoky
+        // iOS port (Brogue SE): cursed-runics rework playtest grant -- an unidentified, cursed (+0) Smoky
         // armor (wreathed in concealing-but-blinding smoke while cursed; purify -> a subtle stealth aura).
         // Deterministic/replay-safe.
         theItem = generateItem(ARMOR, LEATHER_ARMOR);
-        theItem->enchant1 = -1;
+        theItem->enchant1 = 0;
         theItem->enchant2 = A_SMOKY;
         theItem->flags |= (ITEM_RUNIC | ITEM_CURSED);
         theItem = addItemToPack(theItem);
@@ -607,8 +632,8 @@ void initializeRogue(uint64_t seed) {
 
     if (D_CURSE_TEST_SCROLLS_START) {
         // iOS port (Brogue SE): cursed-runics rework playtest grant -- scrolls to drive the whole curse
-        // loop: identify (reveal the runic), enchanting (reach +6 to purify), and remove-curse (eject ->
-        // shatter). Deterministic/replay-safe.
+        // loop: identify (reveal the runic), enchanting (reach the purify threshold: weapon +7 / armor
+        // +4), and remove-curse (eject -> shatter). Deterministic/replay-safe.
         theItem = generateItem(SCROLL, SCROLL_ENCHANTING);
         theItem->quantity = 5;
         identify(theItem);

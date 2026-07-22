@@ -253,11 +253,12 @@ item *makeItemInto(item *theItem, unsigned long itemCategory, short itemKind) {
                 theItem->enchant1 += rand_range(1, 3);
                 if (rand_percent(50)) {
                     // iOS port (Brogue SE): cursed-runics rework. Negative items split two ways: a
-                    // double-edged *runic* curse (welds on, starts at exactly -1, purify to lift it)
-                    // or a plain "inferior" item (random -1..-3, no runic, freely removable -- no
+                    // double-edged *runic* curse (welds on, starts at exactly +0, purify to +7 to
+                    // lift it -- polarity reads malevolent via ITEM_CURSED, not the enchant sign) or
+                    // a plain "inferior" item (random -1..-3, no runic, freely removable -- no
                     // ITEM_CURSED). Runic share of negatives raised from 33% to 55%.
                     if (rand_percent(55)) {
-                        theItem->enchant1 = -1;
+                        theItem->enchant1 = 0;
                         theItem->enchant2 = rand_range(NUMBER_GOOD_WEAPON_ENCHANT_KINDS, NUMBER_WEAPON_RUNIC_KINDS - 1);
                         theItem->flags |= (ITEM_CURSED | ITEM_RUNIC);
                     } else {
@@ -305,10 +306,11 @@ item *makeItemInto(item *theItem, unsigned long itemCategory, short itemKind) {
                 theItem->enchant1 += rand_range(1, 3);
                 if (rand_percent(50)) {
                     // iOS port (Brogue SE): cursed-runics rework (see the weapon case above). A
-                    // double-edged runic curse (welds, starts at exactly -1) vs an inferior plain
-                    // negative (random -1..-3, no runic, freely removable); runic share 33% -> 55%.
+                    // double-edged runic curse (welds, starts at exactly +0, purify to +4) vs an
+                    // inferior plain negative (random -1..-3, no runic, freely removable); runic
+                    // share 33% -> 55%.
                     if (rand_percent(55)) {
-                        theItem->enchant1 = -1;
+                        theItem->enchant1 = 0;
                         theItem->enchant2 = rand_range(NUMBER_GOOD_ARMOR_ENCHANT_KINDS, NUMBER_ARMOR_ENCHANT_KINDS - 1);
                         theItem->flags |= (ITEM_CURSED | ITEM_RUNIC);
                     } else {
@@ -4828,7 +4830,7 @@ enum boltType boltForItem(item *theItem) {
 // If the effect causes the level's lighting or vision to change, *lightingChanged
 // will be set to true. (LightingChanged can be null.)
 // iOS port (iBrogue): a fire/lightning bolt crossing a dropped bad potion detonates it (helper defined near throwItem)
-static boolean shatterPotionAtLoc(item *theItem, short x, short y, boolean fiery);
+static boolean shatterPotionAtLoc(item *theItem, short x, short y, boolean fiery, boolean deliberateUse);
 static void detectMagicOnItem(item *theItem); // iOS port (iBrogue): fire-detonation polarity reveal (defined below near quaffDetectMagic)
 
 // iOS port (iBrogue): staff-of-frost freeze semantics, applied to one creature. Anything fiery or
@@ -5258,7 +5260,7 @@ static boolean updateBolt(bolt *theBolt, creature *caster, short x, short y,
                     *autoID = true; // the visible capture identifies the firing staff/wand
                 }
                 terminateBolt = true; // the bottle drinks the bolt, just as a detonation absorbs it
-            } else if (shatterPotionAtLoc(floorPotion, x, y, (theBolt->flags & BF_FIERY) != 0)) {
+            } else if (shatterPotionAtLoc(floorPotion, x, y, (theBolt->flags & BF_FIERY) != 0, false)) { // incidental bolt detonation -> keep the ID star
                 removeItemFromChain(floorPotion, floorItems);
                 deleteItem(floorPotion);
                 pmap[x][y].flags &= ~(HAS_ITEM | ITEM_DETECTED);
@@ -6997,7 +6999,12 @@ void identifyItemKind(item *theItem) {
     }
 }
 
-void autoIdentify(item *theItem) {
+// iOS port (Brogue SE): shared identify-and-tell core. `announceReveal` gates the passive gold "star
+// ripple": INCIDENTAL reveals (auto-ID by combat, a reflected zap, equipping a runic) fire it so the
+// pack becomes the player's focus, while ACTIVE application of a consumable (drink/read/throw) suppresses
+// it -- the player initiated the use and the "(It must have been X.)" line already tells them, so a
+// look-at-your-pack cue would just be visual noise. Public entry points below pick the right mode.
+static void autoIdentifyInternal(item *theItem, boolean announceReveal) {
     short quantityBackup;
     char buf[COLS * 3], oldName[COLS * 3], newName[COLS * 3];
     boolean revealed = false; // iOS port (Brogue SE): fire one gold "check your inventory" flare if anything is revealed here
@@ -7029,12 +7036,25 @@ void autoIdentify(item *theItem) {
         revealed = true;
     }
 
-    // iOS port (Brogue SE): a passive identification (auto-ID by use, runic discovery) just landed -- fire a
-    // gold "star ripple" on the player so the scroll-by message isn't the only cue to open the pack. Cosmetic
-    // layer (a radial star burst, distinct from noise ripples); display-only, no game RNG.
-    if (revealed) {
+    // iOS port (Brogue SE): an INCIDENTAL identification (auto-ID by use, runic discovery) just landed --
+    // fire a gold "star ripple" on the player so the scroll-by message isn't the only cue to open the pack.
+    // Cosmetic layer (a radial star burst, distinct from noise ripples); display-only, no game RNG.
+    // Suppressed for active application (announceReveal == false): drinking/reading/throwing is a deliberate
+    // act the player already understands, so the star would be redundant.
+    if (revealed && announceReveal) {
         cosmeticSpawnItemTell(player.loc, ITEM_TELL_IDENTIFY);
     }
+}
+
+// Incidental reveal (combat auto-ID, reflected zap, equipping a runic): fires the gold ID star.
+void autoIdentify(item *theItem) {
+    autoIdentifyInternal(theItem, true);
+}
+
+// iOS port (Brogue SE): active application of a consumable (drink/read/throw). Identifies the kind and
+// prints the "(It must have been X.)" line, but WITHOUT the gold ID star -- the player initiated the use.
+void autoIdentifyFromUse(item *theItem) {
+    autoIdentifyInternal(theItem, false);
 }
 
 // returns whether the item disappeared
@@ -7142,7 +7162,7 @@ static void spawnFrostCloud(short x, short y) {
 // Every other signature is self-evident (a non-flammable cloud, distinctive terrain like honey's mire or
 // wort's healing cloud, a hole, a flood, or fire itself) and fully identifies as before. The "erased by
 // fire" test is data-driven -- the GAS layer's own flammability -- so any future potion auto-classifies.
-static boolean shatterPotionAtLoc(item *theItem, short x, short y, boolean fiery) {
+static boolean shatterPotionAtLoc(item *theItem, short x, short y, boolean fiery, boolean deliberateUse) {
     const char *shatterMsg = NULL;
     switch (theItem->kind) {
         case POTION_POISON:
@@ -7261,7 +7281,13 @@ static boolean shatterPotionAtLoc(item *theItem, short x, short y, boolean fiery
         if (shatterMsg) {
             message(shatterMsg, 0);
         }
-        autoIdentify(theItem);
+        // iOS port (Brogue SE): a deliberate hand-throw suppresses the gold ID star (the player chose to
+        // throw it); an incidental bolt/dart detonation of a floor potion keeps it (an unexpected reveal).
+        if (deliberateUse) {
+            autoIdentifyFromUse(theItem);
+        } else {
+            autoIdentify(theItem);
+        }
     }
     refreshDungeonCell((pos){ x, y });
     return true;
@@ -7284,7 +7310,9 @@ boolean fillEmptyBottle(item *bottle, short newPotionKind, const char *flavorTex
     if (flavorText) {
         messageWithColor(flavorText, &itemMessageColor, 0);
     }
-    autoIdentify(bottle); // identify the new kind + fold matching pack potions into the known count
+    // Active-use identify (no gold ID star): capturing is a deliberate, player-initiated act, so the
+    // star would be redundant -- same reasoning as drinking/reading/throwing (see autoIdentifyFromUse).
+    autoIdentifyFromUse(bottle); // identify the new kind + fold matching pack potions into the known count
     return true;
 }
 
@@ -7429,7 +7457,7 @@ static void throwDetectMagicOnFloor(void);
 // signature) and the empty bottle are left untouched (a dart isn't a bolt, so it can't capture).
 static boolean detonateFloorPotionAt(short x, short y, boolean fiery) {
     item *floorPotion = itemAtLoc((pos){ x, y });
-    if (floorPotion && (floorPotion->category & POTION) && shatterPotionAtLoc(floorPotion, x, y, fiery)) {
+    if (floorPotion && (floorPotion->category & POTION) && shatterPotionAtLoc(floorPotion, x, y, fiery, false)) { // incidental dart detonation -> keep the ID star
         removeItemFromChain(floorPotion, floorItems);
         deleteItem(floorPotion);
         pmap[x][y].flags &= ~(HAS_ITEM | ITEM_DETECTED);
@@ -7679,7 +7707,7 @@ static void throwItem(item *theItem, creature *thrower, pos targetLoc, short max
         // (creature or bare ground), then auto-IDs and is consumed.
         if (theItem->kind == POTION_DETECT_MAGIC2) {
             throwDetectMagicOnFloor();
-            autoIdentify(theItem);
+            autoIdentifyFromUse(theItem); // iOS port (Brogue SE): deliberate throw -- no gold ID star
             refreshDungeonCell((pos){ x, y });
             deleteItem(theItem);
             return;
@@ -7693,7 +7721,7 @@ static void throwItem(item *theItem, creature *thrower, pos targetLoc, short max
             }
             spawnDungeonFeature(x, y, &dungeonFeatureCatalog[DF_LIFE_POTION_CLOUD], true, false);
             message("the flask shatters and a cloud of healing spores bursts out!", 0);
-            autoIdentify(theItem);
+            autoIdentifyFromUse(theItem); // iOS port (Brogue SE): deliberate throw -- no gold ID star
             refreshDungeonCell((pos){ x, y });
             deleteItem(theItem);
             return;
@@ -7705,7 +7733,7 @@ static void throwItem(item *theItem, creature *thrower, pos targetLoc, short max
             monsterName(buf3, struck, true);
             sprintf(buf, "the flask shatters and douses %s in searing venom!", buf3);
             message(buf, 0);
-            autoIdentify(theItem);
+            autoIdentifyFromUse(theItem); // iOS port (Brogue SE): deliberate throw -- no gold ID star
             refreshDungeonCell((pos){ x, y });
             deleteItem(theItem);
             return;
@@ -7719,7 +7747,7 @@ static void throwItem(item *theItem, creature *thrower, pos targetLoc, short max
             monsterName(buf3, struck, true);
             sprintf(buf, "the flask shatters and acid sears %s!", buf3);
             message(buf, 0);
-            autoIdentify(theItem);
+            autoIdentifyFromUse(theItem); // iOS port (Brogue SE): deliberate throw -- no gold ID star
             refreshDungeonCell((pos){ x, y });
             deleteItem(theItem);
             return;
@@ -7748,7 +7776,7 @@ static void throwItem(item *theItem, creature *thrower, pos targetLoc, short max
                     ? "the flask shatters and water hisses over %s, quenching its flames for good!"
                     : "the flask shatters and water douses the flames on %s!", buf3);
             message(buf, 0);
-            autoIdentify(theItem);
+            autoIdentifyFromUse(theItem); // iOS port (Brogue SE): deliberate throw -- no gold ID star
             refreshDungeonCell((pos){ x, y });
             deleteItem(theItem);
             return;
@@ -7763,7 +7791,7 @@ static void throwItem(item *theItem, creature *thrower, pos targetLoc, short max
             && potionTable[theItem->kind].magicPolarity == MAGIC_POLARITY_BENEVOLENT
             && applyPotionEffectToCreature(struck, theItem->kind, potionMag)) {
 
-            autoIdentify(theItem);
+            autoIdentifyFromUse(theItem); // iOS port (Brogue SE): deliberate throw -- no gold ID star
             refreshDungeonCell((pos){ x, y });
             deleteItem(theItem);
             return;
@@ -7772,7 +7800,7 @@ static void throwItem(item *theItem, creature *thrower, pos targetLoc, short max
         // bolt-detonation hook in updateBolt). Returns true (signature spawned + flask auto-identified)
         // for the cloud/explosion kinds and hallucination's fungal forest; otherwise falls through to the
         // harmless-splash branch.
-        if (shatterPotionAtLoc(theItem, x, y, false)) { // hand-thrown: deliberate use -> full ID (not fiery)
+        if (shatterPotionAtLoc(theItem, x, y, false, true)) { // hand-thrown: deliberate use -> full ID, no star (not fiery)
             // bad/cloud potion: its shatter signature was spawned and the flask auto-identified
         } else {
             if (cellHasTerrainFlag((pos){ x, y }, T_OBSTRUCTS_PASSABILITY)) {
@@ -7883,9 +7911,9 @@ void throwCommand(item *theItem, boolean autoThrow) {
     //
     // Ask location to throw
     //
-    sprintf(buf, "Throw %s %s where? (<hjklyubn>, mouse, or <tab>)",
+    sprintf(buf, "Throw %s %s where? (<%s>, mouse, or <tab>)", // iOS port (Brogue SE): scheme-aware move-key hint
             (theItem->quantity > 1 ? "a" : "your"),
-            theName);
+            theName, keyboardSchemeMoveKeysHint());
     temporaryMessage(buf, REFRESH_SIDEBAR);
     maxDistance = (12 + 2 * max(rogue.strength - player.weaknessAmount - 12, 2));
 
@@ -8105,7 +8133,9 @@ static boolean useStaffOrWand(item *theItem) {
         messageWithColor(buf, &itemMessageColor, 0);
         return false;
     }
-    temporaryMessage("Direction? (<hjklyubn>, mouse, or <tab>; <return> to confirm)", REFRESH_SIDEBAR);
+    // iOS port (Brogue SE): the movement-key hint tracks the active scheme.
+    sprintf(buf, "Direction? (<%s>, mouse, or <tab>; <return> to confirm)", keyboardSchemeMoveKeysHint());
+    temporaryMessage(buf, REFRESH_SIDEBAR);
     itemName(theItem, buf2, false, false, NULL);
     sprintf(buf, "Zapping your %s:", buf2);
     printString(buf, mapToWindowX(0), 1, &itemMessageColor, &black, NULL);
@@ -8821,7 +8851,7 @@ boolean readScroll(item *theItem) {
         && (theItem->kind != SCROLL_ENCHANTING)
         && (theItem->kind != SCROLL_IDENTIFY)) {
 
-        autoIdentify(theItem);
+        autoIdentifyFromUse(theItem); // iOS port (Brogue SE): deliberate read -- no gold ID star
     }
 
     return true;
@@ -9946,7 +9976,7 @@ boolean drinkPotion(item *theItem) {
     }
 
     if (!potionKind.identified) {
-        autoIdentify(theItem);
+        autoIdentifyFromUse(theItem); // iOS port (Brogue SE): deliberate drink -- no gold ID star
     }
 
     recordApplyItemCommand(theItem);

@@ -33,7 +33,7 @@
 // iOS port (iBrogue): reports the player's window cell to the host after each
 // screen refresh so the iPhone pinch-zoom can auto-follow. Defined in the
 // Obj-C++ bridge (CEBridge.mm).
-extern void ceSetPlayerWindowLocation(short windowX, short windowY);
+extern void ceSetPlayerWindowLocation(short windowX, short windowY, short depth);
 
 // iOS port (iBrogue): reports whether a travel destination is currently pending (rogue.cursorLoc
 // is a real cell), so the host's reactive center d-pad button can show "continue journey" vs
@@ -546,7 +546,15 @@ static void initializeMenuButtons(buttonState *state, brogueButton buttons[5]) {
         buttonCount++;
     }
 
-    sprintf(buttons[4].text,    "   %sI%snventory   ", goldTextEscape, whiteTextEscape);
+    // iOS port (iBrogue): inventory hotkey is scheme-dependent (Classic 'i' / Modern 'e', since Modern
+    // remaps 'i' to UP). Both letters live in "Inventory", so keep the in-word highlight and move it to the
+    // live key. The hotkeys stay canonical: a tap synthesizes INVENTORY_KEY and in-play 'e' remaps to it
+    // upstream, so the button fires in both schemes regardless of the label.
+    if (keyboardSchemeInventoryLetter() == 'e') {
+        sprintf(buttons[4].text, "   Inv%se%sntory   ", goldTextEscape, whiteTextEscape); // Modern: highlight the 'e'
+    } else {
+        sprintf(buttons[4].text, "   %sI%snventory   ", goldTextEscape, whiteTextEscape); // Classic: highlight the 'I'
+    }
     buttons[4].hotkey[0] = INVENTORY_KEY;
     buttons[4].hotkey[1] = 'I';
 
@@ -599,6 +607,10 @@ void mainInputLoop() {
 
     // Initialize buttons.
     initializeMenuButtons(&state, buttons);
+    // iOS port (iBrogue): the bottom bar's labels depend on the active keyboard scheme (Inventory 'i'/'e').
+    // The bar is built once here, so track the scheme it was built for and rebuild at the top of the loop
+    // if the player toggles Classic<->Modern from the ? screen mid-play.
+    enum keyboardScheme sidebarScheme = rogueKeyboardScheme;
 
     playingBack = rogue.playbackMode;
     rogue.playbackMode = false;
@@ -611,6 +623,13 @@ void mainInputLoop() {
     uiMode = CBrogueGameEventInNormalPlay; // tablet ui mode
     while (!rogue.gameHasEnded && (!playingBack || !canceled)) { // repeats until the game ends
 
+        // iOS port (iBrogue): scheme toggled mid-play (via the ? screen)? Rebuild the bottom bar so its
+        // scheme-dependent labels (Inventory 'i'/'e') match the live scheme.
+        if (rogueKeyboardScheme != sidebarScheme) {
+            initializeMenuButtons(&state, buttons);
+            sidebarScheme = rogueKeyboardScheme;
+        }
+
         oldRNG = rogue.RNG;
         rogue.RNG = RNG_COSMETIC;
 
@@ -621,7 +640,10 @@ void mainInputLoop() {
         const pos originLoc = player.loc;
 
         if (playingBack && rogue.cursorMode) {
-            temporaryMessage("Examine what? (<hjklyubn>, mouse, or <tab>)", 0);
+            // iOS port (iBrogue): the movement-key hint tracks the active scheme.
+            char examinePrompt[COLS];
+            sprintf(examinePrompt, "Examine what? (<%s>, mouse, or <tab>)", keyboardSchemeMoveKeysHint());
+            temporaryMessage(examinePrompt, 0);
         }
 
         if (!playingBack
@@ -962,7 +984,7 @@ void commitDraws() {
     }
     // iOS port (iBrogue): feed the player's window cell to the host for the
     // iPhone pinch-zoom auto-follow (deduped host-side).
-    ceSetPlayerWindowLocation(mapToWindowX(player.loc.x), mapToWindowY(player.loc.y));
+    ceSetPlayerWindowLocation(mapToWindowX(player.loc.x), mapToWindowY(player.loc.y), rogue.depthLevel);
     // iOS port (iBrogue): report whether a journey is pending so the host's reactive center d-pad
     // button can swap between "continue journey" and "rest". Deduped host-side.
     ceSetTravelPending(isPosInMap(rogue.cursorLoc));
@@ -2535,6 +2557,18 @@ signed long applyKeyboardScheme(signed long keystroke, boolean *controlKey, bool
         default:
             return keystroke;
     }
+}
+
+// iOS port (iBrogue): the INVERSE of applyKeyboardScheme -- the display tokens an on-screen keyboard
+// indicator should show under the active scheme. Kept beside applyKeyboardScheme so the two never drift.
+// Consulted only when KEYBOARD_LABELS is on. See docs/design/keyboard-schemes.md.
+const char *keyboardSchemeMoveKeysHint(void) {
+    return (rogueKeyboardScheme == KEYBOARD_SCHEME_MODERN) ? "uio/jkl/m,." : "hjklyubn";
+}
+
+char keyboardSchemeInventoryLetter(void) {
+    // Modern puts UP on 'i', so inventory moves to 'e'; Classic keeps it on 'i'.
+    return (rogueKeyboardScheme == KEYBOARD_SCHEME_MODERN) ? 'e' : 'i';
 }
 
 void nextBrogueEvent(rogueEvent *returnEvent, boolean textInput, boolean colorsDance, boolean realInputEvenInPlayback) {

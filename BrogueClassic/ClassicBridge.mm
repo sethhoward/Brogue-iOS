@@ -100,6 +100,13 @@ extern "C" __attribute__((visibility("default"))) void classic_setHardwareKeyboa
     HARDWARE_KEYBOARD_CONNECTED = (boolean)(connected != 0);
 }
 
+// iOS port (iBrogue): drive Classic's runtime KEYBOARD_LABELS flag (the in-game hotkey hints). Called on
+// GCKeyboard connect/disconnect so labels show only with a keyboard. Sets the engine global directly, for
+// the same linkage reason as classic_setPhoneLayout / classic_setHardwareKeyboardConnected above.
+extern "C" __attribute__((visibility("default"))) void classic_setKeyboardLabelsEnabled(int enabled) {
+    KEYBOARD_LABELS = (boolean)(enabled != 0);
+}
+
 // ---------------------------------------------------------------------------
 // Rendering
 // ---------------------------------------------------------------------------
@@ -125,12 +132,16 @@ extern "C" void iosPlayerTookDamage(int severity) {
 // iOS port (iBrogue): commitDraws() reports the player's WINDOW cell here every refresh so the
 // iPhone pinch-zoom can auto-follow. Deduped against the last reported cell so the (frequent)
 // commitDraws calls don't spam the host.
-extern "C" void iosSetPlayerWindowLocation(short windowX, short windowY) {
-    static short lastX = -1, lastY = -1;
-    if (windowX == lastX && windowY == lastY) return;
+extern "C" void iosSetPlayerWindowLocation(short windowX, short windowY, short depth) {
+    static short lastX = -1, lastY = -1, lastDepth = -1;
+    // Forward on any change, INCLUDING depth — so the host still learns of a level
+    // transition even in the (rare) case the player lands on the same window cell,
+    // which is exactly when it must snap the camera rather than pan across a new map.
+    if (windowX == lastX && windowY == lastY && depth == lastDepth) return;
     lastX = windowX;
     lastY = windowY;
-    if (gHost) [gHost setPlayerWindowX:windowX y:windowY];
+    lastDepth = depth;
+    if (gHost) [gHost setPlayerWindowX:windowX y:windowY depth:depth];
 }
 
 // iOS port (iBrogue): refreshScreen() reports here whether a travel destination is pending

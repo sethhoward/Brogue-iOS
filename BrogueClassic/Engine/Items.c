@@ -5762,9 +5762,9 @@ void throwCommand(item *theItem, boolean autoThrow) {
     }
     
     if(KEYBOARD_LABELS) {
-        sprintf(buf, "Throw %s %s where? (<hjklyubn>, mouse, or <tab>)",
+        sprintf(buf, "Throw %s %s where? (<%s>, mouse, or <tab>)", // iOS port (iBrogue): scheme-aware move-key hint
                 (theItem->quantity > 1 ? "a" : "your"),
-                theName);
+                theName, keyboardSchemeMoveKeysHint());
     } else {
         sprintf(buf, "Throw %s %s where?",
                 (theItem->quantity > 1 ? "a" : "your"),
@@ -5964,7 +5964,9 @@ boolean useStaffOrWand(item *theItem, boolean *commandsRecorded) {
         messageWithColor(buf, &itemMessageColor, false);
         return false;
     }
-    temporaryMessage("Direction? (<hjklyubn>, mouse, or <tab>; <return> to confirm)", false);
+    // iOS port (iBrogue): the movement-key hint tracks the active scheme.
+    sprintf(buf, "Direction? (<%s>, mouse, or <tab>; <return> to confirm)", keyboardSchemeMoveKeysHint());
+    temporaryMessage(buf, false);
     itemName(theItem, buf2, false, false, NULL);
     sprintf(buf, "Zapping your %s:", buf2);
     printString(buf, mapToWindowX(0), 1, &itemMessageColor, &black, NULL);

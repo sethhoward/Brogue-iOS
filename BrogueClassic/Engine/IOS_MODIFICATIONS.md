@@ -23,6 +23,43 @@ future maintainers (human or AI) don't mistake an intentional port change for a 
 
 ## Change log
 
+### 2026-07-22 — Player-window report carries the dungeon depth (iPhone camera-follow smoothing)
+
+**What.** `iosSetPlayerWindowLocation` gained a third argument, `short depth`, and the shared host
+protocol method is now `-setPlayerWindowX:y:depth:`. `commitDraws` passes `rogue.depthLevel` alongside
+the player's window cell.
+
+**Why.** The iPhone pinch-zoom camera follow is being smoothed (host-side): it eases the camera to
+the player instead of snapping each step. To do that correctly it must tell a **same-level teleport**
+(ease/pan the camera across the shared map) apart from a **true level transition** (snap — the old
+camera origin is meaningless on the brand-new map). Both look like a large jump in the player's window
+cell, so cell distance alone can't distinguish them; the depth can.
+
+**Where.** `IO.c` (`commitDraws` call site + the `extern` decl), `ClassicBridge.mm`
+(`iosSetPlayerWindowLocation` now dedupes on depth too and forwards it). Pure platform/host plumbing —
+no gameplay or determinism impact. Mirrored in the CE and SE ports (same feature, all three engines
+share the host follow).
+
+### 2026-07-18 — Scheme-aware in-play keyboard indicators + labels re-enabled (bug fix)
+
+**What.** As in CE/SE: in-play indicators were hardcoded to Classic and wrong under **Modern** — the
+bottom-bar **Inventory** button highlighted `I` (Modern uses `e`), and the examine / throw / zap-direction
+prompts read `<hjklyubn>` (Modern moves on `uio/jkl/m,.`). This is why labels were disabled in the
+2026-06-15 change.
+
+**How.** Added `keyboardSchemeMoveKeysHint()` / `keyboardSchemeInventoryLetter()` in `IO.c` (declared in
+`Rogue.h`) — the inverse of `applyKeyboardScheme`. Consumers: the Inventory bottom-bar button, the
+examine and zap-direction prompts, and the `KEYBOARD_LABELS`-gated branch of the throw prompt (Classic
+gates that prompt on labels; CE/SE do not). `mainInputLoop` rebuilds the bottom bar on a mid-play scheme
+toggle. Classic's engine `setKeyboardLabelsEnabled` was **not** exposed to the host, so added a
+`classic_setKeyboardLabelsEnabled` bridge export (`ClassicBridge.mm` / `BrogueClassicHost.h`), mirroring
+`classic_setHardwareKeyboardConnected` (sets the `KEYBOARD_LABELS` global directly, for the same linkage
+reason). The host calls it on keyboard presence. Menus bypass the remap (`textInput == true`) and were
+already correct; the `?` help screen was already scheme-aware.
+
+**Determinism / saves.** Display-only; reads `rogueKeyboardScheme`. No RNG, no save impact. Marked
+`// iOS port (iBrogue):`.
+
 ### 2026-07-08 — Menu-magnify: report the visible (haloed) box rect, not the cancel region
 
 **What.** In `IO.c printTextBox`, the window rect passed to `buttonInputLoop` (which the iPhone
@@ -134,6 +171,12 @@ Display-only and consumes no RNG, so saves/recordings are unaffected. Mirrors CE
 already does for CE). Classic engine only.
 
 ### 2026-06-15 — Keyboard labels disabled; hardware-keyboard presence drives UI instead
+
+> **Superseded 2026-07-18** (see the scheme-aware-labels entry above): labels were disabled because they
+> showed the *Classic* layout and mismatched the Modern default. They are now scheme-aware, so the host
+> re-enables them on keyboard presence. The "labels stay off / host no longer enables `KEYBOARD_LABELS`"
+> statements below are historical; the hardware-keyboard-presence UI (d-pad/ESC hide, help hint) still
+> applies.
 
 **What.** The in-game hotkey labels are turned off (they reflect the Classic key layout and would
 mismatch the new Modern default — see the "Default to Modern keyboard layout" change). A hardware

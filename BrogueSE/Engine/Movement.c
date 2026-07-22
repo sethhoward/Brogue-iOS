@@ -1237,6 +1237,10 @@ boolean playerMoves(short direction) {
             pmap[x][y].flags &= ~HAS_PLAYER;
             pmapAt(player.loc)->flags |= HAS_PLAYER;
             pmapAt(player.loc)->flags &= ~IS_IN_PATH;
+            // iOS port (Brogue SE): tracks & traces -- lay the player's footprints here. Unlike monsters,
+            // the player's ordinary walk commits its move directly (above) instead of through
+            // setMonsterLocation, so this is the player's only spoor seam. RNG-free -> replay-safe.
+            layCreatureSpoor(&player, player.loc);
             if (defender && defender->creatureState == MONSTER_ALLY) { // Swap places with ally.
                 pmapAt(defender->loc)->flags &= ~HAS_MONSTER;
                 defender->loc.x = x;
