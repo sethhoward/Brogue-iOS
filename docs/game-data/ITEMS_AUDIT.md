@@ -460,7 +460,7 @@ is commented out in the table.
 | 5 | telepathy | 3 | 700 | Telepathy, base 25 × `1.25^e` turns |
 | 6 | levitation | 1 | 700 | Levitation, base 10 × `1.25^e` turns |
 | 7 | shattering | 1 | 700 | Shatters nearby walls; radius `charmShattering(e) = 4 + e` |
-| 8 | guardian | 5 | 700 | Summons a guardian; lifespan `charmGuardianLifespan(e) = 4 + 2*e`, base duration 18 |
+| 8 | guardian | 5 | 700 | **SE rework** — summons `charmGuardianCount(e) = clamp(1 + (e-1)/2, 1, 3)` **immobile** ward guardians; lifespan `charmGuardianLifespan(e) = 14 + 2*e`. Wards hold their post (so enemies no longer flee them, per `monsterFleesFrom`), block the tile, reflect bolts, and stab within 2 cells via `BOLT_PIKE` (a `BE_ATTACK` reach weapon dealing the guardian's own damage) |
 | 9 | teleportation | 4 | 700 | Teleports the player to a random location |
 | 10 | recharging | 5 | 700 | Recharges staffs/charms |
 | 11 | negation | 5 | 700 | Negation burst; radius `charmNegationRadius(e) = 1 + 3*e` |
@@ -482,7 +482,7 @@ arrays in `GlobalsBase.c:123`), `rechargeDelayDuration`, `rechargeDelayBase`
 | TELEPATHY | 25 | POW_125 | 800 | 0.65 | — | — |
 | LEVITATION | 10 | POW_125 | 800 | 0.65 | — | — |
 | SHATTERING | 0 | POW_0 | 2500 | 0.60 | 4 | — |
-| GUARDIAN | 18 | POW_0 | 700 | 0.70 | 4 | 2 |
+| GUARDIAN | 18 | POW_0 | 700 | 0.70 | 14 | 2 | (SE: magConst 4→14; count via `charmGuardianCount`, not this table) |
 | TELEPORTATION | 0 | POW_0 | 920 | 0.60 | — | — |
 | RECHARGING | 0 | POW_0 | 10000 | 0.55 | — | — |
 | NEGATION | 0 | POW_0 | 2500 | 0.60 | 1 | 3 |

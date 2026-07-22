@@ -3380,6 +3380,11 @@ static boolean specificallyValidBoltTarget(creature *caster, creature *target, e
             }
             break;
         case BE_ATTACK:
+            if (theBoltType == BOLT_PIKE
+                && distanceBetween(caster->loc, target->loc) > 2) {
+                // iOS port (Brogue SE): the guardian's pike is a reach weapon that only strikes within two cells.
+                return false;
+            }
             if (cellHasTerrainFlag(target->loc, T_OBSTRUCTS_PASSABILITY)
                 && !(target->info.flags & MONST_ATTACKABLE_THRU_WALLS)) {
                 // Don't shoot an arrow at an embedded creature.

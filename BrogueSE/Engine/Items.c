@@ -3088,9 +3088,11 @@ void itemDetails(char *buf, item *theItem) {
                             charmRechargeDelay(theItem->kind, theItem->enchant1 + enchantMagnitude()));
                     break;
                 case CHARM_GUARDIAN:
-                    sprintf(buf2, "\n\nWhen used, a guardian will materialize for %i turns, and the charm will recharge in %i turns. (If the charm is enchanted, the guardian will last for %i turns and the charm will recharge in %i turns.)",
+                    sprintf(buf2, "\n\nWhen used, %i guardian(s) will materialize for %i turns, and the charm will recharge in %i turns. (If the charm is enchanted, %i guardian(s) will last for %i turns and the charm will recharge in %i turns.)",
+                            charmGuardianCount(enchant),
                             charmGuardianLifespan(enchant),
                             charmRechargeDelay(theItem->kind, theItem->enchant1),
+                            charmGuardianCount(enchant + enchantMagnitude() * FP_FACTOR),
                             charmGuardianLifespan(enchant + enchantMagnitude() * FP_FACTOR),
                             charmRechargeDelay(theItem->kind, theItem->enchant1 + enchantMagnitude()));
                     break;
@@ -8214,22 +8216,65 @@ static boolean useStaffOrWand(item *theItem) {
     return true;
 }
 
+// iOS port (Brogue SE): count the cells next to the player that a creature could stand in, ignoring one
+// candidate cell. Used so the guardian charm's *immobile* wards can never seal the player in place.
+static short playerFreeAdjacentCells(pos excluding) {
+    short count = 0;
+    for (enum directions dir = 0; dir < DIRECTION_COUNT; dir++) {
+        const pos loc = posNeighborInDirection(player.loc, dir);
+        if (!isPosInMap(loc)
+            || (loc.x == excluding.x && loc.y == excluding.y)
+            || cellHasTerrainFlag(loc, T_OBSTRUCTS_PASSABILITY)
+            || (pmapAt(loc)->flags & (HAS_MONSTER | HAS_PLAYER))) {
+            continue;
+        }
+        count++;
+    }
+    return count;
+}
+
+// iOS port (Brogue SE): the guardian charm now summons 1–3 immobile "ward" guardians (count scales with enchant)
+// that hold their post, block the tile, reflect bolts, and stab approaching foes with a 2-cell pike.
 static void summonGuardian(item *theItem) {
-    short x = player.loc.x, y = player.loc.y;
+    const fixpt enchant = netEnchant(theItem);
+    const short count = charmGuardianCount(enchant);
+    const short lifespan = charmGuardianLifespan(enchant);
+    short numSummoned = 0;
     creature *monst;
 
-    monst = generateMonster(MK_CHARM_GUARDIAN, false, false);
-    monst->loc = getQualifyingPathLocNear((pos){ x, y }, true,
-                             T_DIVIDES_LEVEL & avoidedFlagsForMonster(&(monst->info)) & ~T_SPONTANEOUSLY_IGNITES, HAS_PLAYER,
-                             avoidedFlagsForMonster(&(monst->info)) & ~T_SPONTANEOUSLY_IGNITES, (HAS_PLAYER | HAS_MONSTER | HAS_STAIRS), false);
-    monst->bookkeepingFlags |= (MB_FOLLOWER | MB_BOUND_TO_LEADER | MB_DOES_NOT_TRACK_LEADER);
-    monst->bookkeepingFlags &= ~MB_JUST_SUMMONED;
-    monst->leader = &player;
-    monst->creatureState = MONSTER_ALLY;
-    monst->ticksUntilTurn = monst->info.attackSpeed + 1; // So they don't move before the player's next turn.
-    monst->status[STATUS_LIFESPAN_REMAINING] = monst->maxStatus[STATUS_LIFESPAN_REMAINING] = charmGuardianLifespan(netEnchant(theItem));
-    pmapAt(monst->loc)->flags |= HAS_MONSTER;
-    fadeInMonster(monst);
+    for (short i = 0; i < count; i++) {
+        monst = generateMonster(MK_CHARM_GUARDIAN, false, false);
+        monst->loc = getQualifyingPathLocNear(player.loc, true,
+                                 T_DIVIDES_LEVEL & avoidedFlagsForMonster(&(monst->info)) & ~T_SPONTANEOUSLY_IGNITES, HAS_PLAYER,
+                                 avoidedFlagsForMonster(&(monst->info)) & ~T_SPONTANEOUSLY_IGNITES, (HAS_PLAYER | HAS_MONSTER | HAS_STAIRS), false);
+        // Abort this guardian if there's no valid cell for it, or if planting an immobile ward adjacent to the
+        // player would leave the player with no free cell to step into (don't box the player in with their own charm).
+        if (!isPosInMap(monst->loc)
+            || cellHasTerrainFlag(monst->loc, T_OBSTRUCTS_PASSABILITY)
+            || (pmapAt(monst->loc)->flags & (HAS_MONSTER | HAS_PLAYER))
+            || (distanceBetween(player.loc, monst->loc) <= 1 && playerFreeAdjacentCells(monst->loc) == 0)) {
+            killCreature(monst, true);
+            break;
+        }
+        monst->bookkeepingFlags |= (MB_FOLLOWER | MB_BOUND_TO_LEADER | MB_DOES_NOT_TRACK_LEADER);
+        monst->bookkeepingFlags &= ~MB_JUST_SUMMONED;
+        monst->leader = &player;
+        monst->creatureState = MONSTER_ALLY;
+        monst->ticksUntilTurn = monst->info.attackSpeed + 1; // So they don't move before the player's next turn.
+        monst->status[STATUS_LIFESPAN_REMAINING] = monst->maxStatus[STATUS_LIFESPAN_REMAINING] = lifespan;
+        pmapAt(monst->loc)->flags |= HAS_MONSTER;
+        fadeInMonster(monst);
+        numSummoned++;
+    }
+
+    if (numSummoned == 0) {
+        messageWithColor("your charm flashes, but there is no room for a guardian to take form.", &itemMessageColor, 0);
+    } else {
+        messageWithColor(numSummoned == 1
+                         ? "your charm flashes, and a spectral guardian coalesces to stand watch!"
+                         : "your charm flashes, and spectral guardians coalesce to stand watch around you!",
+                         &itemMessageColor, 0);
+    }
 }
 
 /// @brief Decrements item quantity or removes an item from inventory if it's the last one
@@ -8344,8 +8389,7 @@ static boolean useCharm(item *theItem) {
             emitEnvironmentalNoise(player.loc, NOISE_BOOMING, NULL); // iOS port (Brogue SE): a wall-breach is deafening
             break;
         case CHARM_GUARDIAN:
-            messageWithColor("your charm flashes and the form of a mythical guardian coalesces!", &itemMessageColor, 0);
-            summonGuardian(theItem);
+            summonGuardian(theItem); // iOS port (Brogue SE): summons 1–3 immobile ward guardians; messaging handled inside
             break;
         case CHARM_TELEPORTATION:
             teleport(&player, INVALID_POS, true);

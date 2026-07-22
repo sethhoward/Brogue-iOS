@@ -1424,7 +1424,8 @@ enum boltType {
     BOLT_POISON_DART,
     BOLT_ANCIENT_SPIRIT_VINES,
     BOLT_WHIP,
-    BOLT_FREEZE // iOS port (iBrogue): staff of frost
+    BOLT_FREEZE, // iOS port (iBrogue): staff of frost
+    BOLT_PIKE // iOS port (Brogue SE): guardian charm's short-range (2-cell) reach attack
 };
 
 enum ringKind {
@@ -4403,6 +4404,7 @@ extern "C" {
     int charmProtection(fixpt enchant);
     short charmShattering(fixpt enchant);
     short charmGuardianLifespan(fixpt enchant);
+    short charmGuardianCount(fixpt enchant); // iOS port (Brogue SE): guardian charm summons a scaling number of wards
     short charmNegationRadius(fixpt enchant);
     short weaponParalysisDuration(fixpt enchant);
     short weaponConfusionDuration(fixpt enchant);

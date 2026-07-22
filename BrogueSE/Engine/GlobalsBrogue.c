@@ -90,6 +90,9 @@ const bolt boltCatalog_Brogue[] = {
     // iOS port (iBrogue): staff of frost — single-target freeze (stops at the first creature so a frozen one
     // can be shoved into the rest); pathDF freezes deep water/foliage along the bolt's path
     {"frost",                   "casts a bolt of frost",        "can freeze $HISHER enemies",               0,      NULL,           &lightBlue,         BE_FREEZE,      5,              DF_DEEP_WATER_FREEZE, 0,    MONST_INANIMATE,            (BF_TARGET_ENEMIES | BF_NOT_LEARNABLE)},
+    // iOS port (Brogue SE): guardian charm's spectral pike — a physical (BE_ATTACK) reach weapon that deals the guardian's
+    // own damage. Its 2-cell range is enforced in specificallyValidBoltTarget(); everything else mirrors the whip.
+    {"pike",                    "thrusts a spectral pike",      "wields a spectral pike",                   G_WEAPON,&spectralBladeColor_Brogue, NULL,             BE_ATTACK,      1,              0,          0,          MONST_IMMUNE_TO_WEAPONS,    (BF_TARGET_ENEMIES | BF_NEVER_REFLECTS | BF_NOT_LEARNABLE | BF_DISPLAY_CHAR_ALONG_LENGTH)},
 };
 
     //name              feat description                                        initial value
@@ -803,7 +806,7 @@ const charmEffectTableEntry charmEffectTable_Brogue[] = {
     { .kind = CHARM_TELEPATHY, .effectDurationBase = 25, .effectDurationIncrement = POW_125_CHARM_INCREMENT, .rechargeDelayDuration = 800, .rechargeDelayBase = FP_FACTOR * 65 / 100, .rechargeDelayMinTurns = 1 },
     { .kind = CHARM_LEVITATION, .effectDurationBase = 10, .effectDurationIncrement = POW_125_CHARM_INCREMENT, .rechargeDelayDuration = 800, .rechargeDelayBase = FP_FACTOR * 65 / 100, .rechargeDelayMinTurns = 1 },
     { .kind = CHARM_SHATTERING, .effectDurationBase = 0, .effectDurationIncrement = POW_0_CHARM_INCREMENT, .rechargeDelayDuration = 2500, .rechargeDelayBase = FP_FACTOR * 60 / 100, .rechargeDelayMinTurns = 1, .effectMagnitudeConstant = 4 },
-    { .kind = CHARM_GUARDIAN, .effectDurationBase = 18, .effectDurationIncrement = POW_0_CHARM_INCREMENT, .rechargeDelayDuration = 700, .rechargeDelayBase = FP_FACTOR * 70 / 100, .rechargeDelayMinTurns = 1, .effectMagnitudeConstant = 4, .effectMagnitudeMultiplier = 2 },
+    { .kind = CHARM_GUARDIAN, .effectDurationBase = 18, .effectDurationIncrement = POW_0_CHARM_INCREMENT, .rechargeDelayDuration = 700, .rechargeDelayBase = FP_FACTOR * 70 / 100, .rechargeDelayMinTurns = 1, .effectMagnitudeConstant = 14, .effectMagnitudeMultiplier = 2 }, // iOS port (Brogue SE): guardian lifespan 14 + 2*enchant (was 4 + 2*enchant) so a ward lasts a real fight
     { .kind = CHARM_TELEPORTATION, .effectDurationBase = 0, .effectDurationIncrement = POW_0_CHARM_INCREMENT, .rechargeDelayDuration = 920, .rechargeDelayBase = FP_FACTOR * 60 / 100, .rechargeDelayMinTurns = 1 },
     { .kind = CHARM_RECHARGING, .effectDurationBase = 0, .effectDurationIncrement = POW_0_CHARM_INCREMENT, .rechargeDelayDuration = 10000, .rechargeDelayBase = FP_FACTOR * 55 / 100, .rechargeDelayMinTurns = 1 },
     { .kind = CHARM_NEGATION, .effectDurationBase = 0, .effectDurationIncrement = POW_0_CHARM_INCREMENT, .rechargeDelayDuration = 2500, .rechargeDelayBase = FP_FACTOR * 60 / 100, .rechargeDelayMinTurns = 1, .effectMagnitudeConstant = 1, .effectMagnitudeMultiplier = 3 }
