@@ -2520,9 +2520,13 @@ void cosmeticSpawnAlertGlyph(pos loc, enum displayGlyph glyph) {
 
 // iOS port (Brogue SE): a monster's "you heard something" ripple -- a grey box expanding from `loc`.
 // ACCUMULATE with same-cell merge: several can coexist, but two from the same cell don't stack.
-void cosmeticSpawnRippleMonster(pos loc) {
+// bypassAutomation: the hearing-interrupts-rest ripple fires DURING 'Z' automation (the interrupt ends
+// the rest this same turn, so the ripple must survive the usual automation suppression to be seen);
+// playback fast-forward stays suppressed either way.
+void cosmeticSpawnRippleMonster(pos loc, boolean bypassAutomation) {
     if (!coordinatesAreInMap(loc.x, loc.y)
-        || rogue.automationActive || rogue.autoPlayingLevel || rogue.playbackFastForward) {
+        || rogue.playbackFastForward
+        || (!bypassAutomation && (rogue.automationActive || rogue.autoPlayingLevel))) {
         return;
     }
     for (short j = 0; j < MAX_COSMETIC_EFFECTS; j++) {
