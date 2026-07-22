@@ -124,7 +124,10 @@ NS_ASSUME_NONNULL_BEGIN
 
 // Reports the player's WINDOW cell (already mapToWindow-converted) after each
 // screen refresh, so the host's iPhone pinch-zoom can keep the player centered.
-- (void)setPlayerWindowX:(short)x y:(short)y;
+// `depth` is the current dungeon level: the host's smoothed camera follow uses a
+// change in depth to distinguish a true level transition (snap the camera — the old
+// origin is meaningless on the new map) from a same-level teleport (which it eases).
+- (void)setPlayerWindowX:(short)x y:(short)y depth:(short)depth;
 
 // Reports whether a travel destination is currently pending (the engine still remembers where
 // you were headed after an interruption), so the host can swap the reactive center d-pad button

@@ -32,6 +32,51 @@ See `BrogueCE/Engine/IOS_MODIFICATIONS.md` (faithful CE) and
 
 ## Change log
 
+### 2026-07-22 — Player-window report carries the dungeon depth (iPhone camera-follow smoothing)
+
+**What.** `ceSetPlayerWindowLocation` gained a third argument, `short depth`, and the host protocol
+method is now `-setPlayerWindowX:y:depth:`. `commitDraws` passes `rogue.depthLevel` alongside the
+player's window cell.
+
+**Why.** The iPhone pinch-zoom camera follow is being smoothed (host-side): it eases the camera to
+the player instead of snapping each step. To do that correctly it must tell a **same-level teleport**
+(ease/pan the camera across the shared map) apart from a **true level transition** (snap — the old
+camera origin is meaningless on the brand-new map). Both look like a large jump in the player's window
+cell, so cell distance alone can't distinguish them; the depth can. Passing depth *with* the cell (vs.
+reusing the separate `ceSetGameContext` depth signal) keeps it race-free and correct during playback —
+the decision is made in the same synchronous call that drives the follow.
+
+**Where.** `IO.c` (`commitDraws` call site + the `extern` decl), `SEBridge.mm` (`ceSetPlayerWindowLocation`
+now dedupes on depth too and forwards it). Pure platform/host plumbing — no gameplay or determinism
+impact; not recorded, not replayed. Mirrored verbatim in the CE port (same feature, both frameworks
+share the follow).
+
+### 2026-07-21 — Cursed-runics tuning: start at +0, weapon purify +7 (gameplay)
+
+**What.** Cursed double-edged runics now generate at **exactly +0** (was −1), in both the weapon and
+armor `makeItemInto` branches (`Items.c`). To hold the purify *distances* steady, the weapon purify
+threshold rose **+6 → +7** (`WEAPON_RUNIC_PURIFY_ENCHANT` in `Rogue.h`); armor stays **+4**
+(`ARMOR_RUNIC_PURIFY_ENCHANT`). Net scroll cost: weapon +0→+7 = **7 scrolls** (unchanged); armor
++0→+4 = **4 scrolls** (down from 5).
+
+**Why.** De-emphasizes the boring −1 stat tax entirely — the item is purely "about the tradeoff" from
+turn one — and makes armor purification a touch more reachable (4 scrolls). Polarity is unaffected:
+`itemMagicPolarity` reads a cursed runic as **malevolent via the `ITEM_CURSED` flag**, not the enchant
+sign, so a +0 cursed runic still checks as malevolent (the `enchant1 < 0` clause was always redundant
+for flagged runics). *Inferior* plain-negatives (no `ITEM_CURSED`) are untouched — they keep the random
+−1…−3 roll and still read malevolent via `enchant1 < 0`.
+
+**Where.** `Rogue.h` (both purify constants + comment), `Items.c` (weapon + armor generation), `Time.c`
+(Smoky-armor progressive-sight curve — see Notes), `RogueMain.c` (the six `D_*_START` playtest grants).
+
+**Notes.** The Smoky-armor sight relief (`Time.c`, `emitSmokyArmorCloud`) was indexed off the old −1..+3
+cursed span; rebased to the new **0..+3** span (`clearByTier[4] = {0, 3, 5, 6}`, indexed by `enchant1`,
+clamped 0..3) so the +0 start is still maximally blinding (clearCount 0) and +3 still bites (2 of 8
+blind). Effect *scaling* is unaffected by the floor shift: every enchant-scaled curse floors at
+`max(0, e)` (`PowerTables.c` Delirium proc, Recklessness dealt), so −1 and +0 already produced identical
+values. Save-format unaffected beyond the existing SE break. **Playtest grants** (`RogueMain.c`,
+`D_*_START`) still spawn their runic sword — now at +0 like generated ones.
+
 ### 2026-07-18 — Scheme-aware in-play keyboard indicators (bug fix, engine side)
 
 **What.** The on-screen hotkey indicators shown during active play were hardcoded to the **Classic**
@@ -163,8 +208,10 @@ residue only** (no entangling webs / vision-blocking foliage beyond the pre-exis
   `DF_*_DEN/ROOST/HUSKS/ECTOPLASM` lair DFs (`Rogue.h`); matching `tileCatalog` and
   `dungeonFeatureCatalog` rows (`Globals.c`).
 - Creature runtime fields `spoorType`/`spoorCharge` (`Rogue.h`), set deterministically from movement.
-- `layCreatureSpoor()` + `spoorRules`/`isBloodTile`/`isMudTile`/`isTrackableFloor` and the single call
-  in `setMonsterLocation()` — the one seam every creature *and* the player route through (`Monsters.c`).
+- `layCreatureSpoor()` (non-static; prototype in `Rogue.h`) + `spoorRules`/`isBloodTile`/`isMudTile`/
+  `isTrackableFloor` (`Monsters.c`), called from `setMonsterLocation()` for monsters/forced relocations
+  **and** directly from `playerMoves()` for the player (see the 2026-07-21 fix below — the player's
+  ordinary walk does not route through `setMonsterLocation`).
 - `isConductiveWater()` renamed to the shared, non-static `isWetTile()` (`Items.c`, prototype in
   `Rogue.h`) so electrified water and the spoor system share one water definition and never drift.
 - `.spawnDF` rows on the ogre/spider/phantom/dragon hordes (`GlobalsBrogue.c`).
@@ -175,6 +222,24 @@ the existing substantive promote loop, so everything replays from the seed exact
 den. New creature fields are save-safe (saves are input replays). Lairs spawn generation-only (gated
 on `!levels[...].visited`), so a horde wandering into explored dungeon never conjures one. SE is
 Game-Center-silent, so perturbing the substantive stream via the fade carries no leaderboard risk.
+
+### 2026-07-21 — Fix: the player never left footprints (tracks & traces)
+
+**What.** The tracks & traces feature (above) hooked spoor only in `setMonsterLocation()`, on the
+assumption that it was "the one seam every creature and the player route through." It isn't: the
+player's ordinary walk in `playerMoves()` commits its move by writing `player.loc` and the
+`HAS_PLAYER` flags directly, and never calls `setMonsterLocation` (that function is the *monster*
+move seam plus forced relocations like knockback). So `layCreatureSpoor()` never ran for the
+player — the player left no wet/bloody/muddy tracks at all; only monsters did.
+
+**Where.** `layCreatureSpoor()` de-`static`ed with a prototype in `Rogue.h`; `playerMoves()`
+(`Movement.c`) now calls `layCreatureSpoor(&player, player.loc)` immediately after committing the
+move, mirroring the destination-arrival timing in `setMonsterLocation()`. Direct call rather than
+routing the player through `setMonsterLocation` (which would double-handle the submerged-flag clear,
+secret-door discovery and cell refresh that `playerMoves` already does).
+
+**Determinism.** Unchanged — spoor placement still consumes no RNG (`startProbability 0`), so this is
+replay-safe and adds nothing to the substantive stream.
 
 ### 2026-07-10 — Sticky mud/bog: T_SLOWS_MOVEMENT slows steps (not fighting) (new content)
 

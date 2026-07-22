@@ -952,7 +952,7 @@ static void enchantCurve(int trials) {
 // -- compare the +6..+10 cells to baseline. Each cell = win%/meanHPlost.
 static void curseCurve(int trials) {
     const int depth = 12;                              // mid-game: find a curse, grind it toward purity
-    const int ench[] = {-1, 0, 2, 4, 5, 6, 8, 10};    // '|' boundary at the +6 purify threshold
+    const int ench[] = {0, 2, 4, 5, 6, 7, 8, 10};    // cursed runics start at +0; '|' boundary at the +7 purify threshold
     const int NE = (int)(sizeof ench / sizeof ench[0]);
     fs_buildBudgetTable(depth, 8);
     DepthBudget bud = fs_budgetAt(depth);

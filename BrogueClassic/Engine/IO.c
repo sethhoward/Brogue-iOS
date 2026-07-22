@@ -30,7 +30,7 @@
 // iOS port (iBrogue): reports the player's window cell to the host after each
 // screen refresh so the iPhone pinch-zoom can auto-follow. Defined in the
 // Obj-C bridge (RogueDriver.mm).
-extern void iosSetPlayerWindowLocation(short windowX, short windowY);
+extern void iosSetPlayerWindowLocation(short windowX, short windowY, short depth);
 
 // iOS port (iBrogue): reports whether a travel destination is currently pending (rogue.cursorLoc
 // is a real cell), so the host's reactive center d-pad button can show "continue journey" vs
@@ -1870,7 +1870,7 @@ void commitDraws() {
     }
     // iOS port (iBrogue): feed the player's window cell to the host for the
     // iPhone pinch-zoom auto-follow (deduped host-side).
-    iosSetPlayerWindowLocation(mapToWindowX(player.xLoc), mapToWindowY(player.yLoc));
+    iosSetPlayerWindowLocation(mapToWindowX(player.xLoc), mapToWindowY(player.yLoc), rogue.depthLevel);
     // iOS port (iBrogue): report whether a journey is pending so the host's reactive center d-pad
     // button can swap between "continue journey" and "rest". Deduped host-side.
     iosSetTravelPending(coordinatesAreInMap(rogue.cursorLoc[0], rogue.cursorLoc[1]));

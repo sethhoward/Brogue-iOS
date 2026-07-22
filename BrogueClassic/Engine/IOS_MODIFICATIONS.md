@@ -23,6 +23,23 @@ future maintainers (human or AI) don't mistake an intentional port change for a 
 
 ## Change log
 
+### 2026-07-22 — Player-window report carries the dungeon depth (iPhone camera-follow smoothing)
+
+**What.** `iosSetPlayerWindowLocation` gained a third argument, `short depth`, and the shared host
+protocol method is now `-setPlayerWindowX:y:depth:`. `commitDraws` passes `rogue.depthLevel` alongside
+the player's window cell.
+
+**Why.** The iPhone pinch-zoom camera follow is being smoothed (host-side): it eases the camera to
+the player instead of snapping each step. To do that correctly it must tell a **same-level teleport**
+(ease/pan the camera across the shared map) apart from a **true level transition** (snap — the old
+camera origin is meaningless on the brand-new map). Both look like a large jump in the player's window
+cell, so cell distance alone can't distinguish them; the depth can.
+
+**Where.** `IO.c` (`commitDraws` call site + the `extern` decl), `ClassicBridge.mm`
+(`iosSetPlayerWindowLocation` now dedupes on depth too and forwards it). Pure platform/host plumbing —
+no gameplay or determinism impact. Mirrored in the CE and SE ports (same feature, all three engines
+share the host follow).
+
 ### 2026-07-18 — Scheme-aware in-play keyboard indicators + labels re-enabled (bug fix)
 
 **What.** As in CE/SE: in-play indicators were hardcoded to Classic and wrong under **Modern** — the

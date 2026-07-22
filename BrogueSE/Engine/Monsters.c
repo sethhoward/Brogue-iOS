@@ -5035,7 +5035,10 @@ boolean knownToPlayerAsPassableOrSecretDoor(pos loc) {
 // charge. Cosmetic only -- the print tiles carry no gameplay flags and no monster reads them (a
 // deliberately one-way tell). Placement is a deterministic function of movement and consumes no RNG
 // (startProb 0 in the DFs); the fade rides the existing substantive promote loop, so it replays from the
-// seed like the jackal den. Driven from the single all-creature seam, setMonsterLocation (just below).
+// seed like the jackal den. Monsters (and forced relocations like knockback) reach this through
+// setMonsterLocation (just below); the player's ordinary walk does NOT route through that seam, so
+// playerMoves() calls layCreatureSpoor(&player, ...) directly -- without both hooks the player leaves
+// no tracks at all. layCreatureSpoor is therefore non-static (prototype in Rogue.h).
 static boolean isBloodTile(pos loc) {
     const enum tileType s = pmapAt(loc)->layers[SURFACE];
     return (s == RED_BLOOD || s == GREEN_BLOOD || s == PURPLE_BLOOD || s == WORM_BLOOD);
@@ -5063,7 +5066,7 @@ static boolean isTrackableFloor(pos loc) {
             && !cellHasTerrainFlag(loc, (T_OBSTRUCTS_SURFACE_EFFECTS | T_LAVA_INSTA_DEATH | T_AUTO_DESCENT)));
 }
 
-static void layCreatureSpoor(creature *monst, pos loc) {
+void layCreatureSpoor(creature *monst, pos loc) {
     short i;
     const short ruleCount = sizeof(spoorRules) / sizeof(spoorRules[0]);
 

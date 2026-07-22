@@ -127,8 +127,8 @@ final class CEHost: NSObject, BrogueClassicHost {
         viewController?.shouldSuppressExamineBox() ?? false
     }
 
-    func setPlayerWindowX(_ x: Int16, y: Int16) {
-        viewController?.setPlayerWindowX(Int(x), y: Int(y))
+    func setPlayerWindowX(_ x: Int16, y: Int16, depth: Int16) {
+        viewController?.setPlayerWindowX(Int(x), y: Int(y), depth: Int(depth))
     }
 
     func setTravelPending(_ pending: Bool) {

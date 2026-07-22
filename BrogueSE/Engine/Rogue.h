@@ -87,6 +87,13 @@
 // frozen foliage/push). Granted deterministically in initializeRogue, so it is recording-safe. Flip to 0 to ship.
 #define D_FROST_STAFF_START             0//(WIZARD_MODE && 0)
 
+// iOS port (iBrogue): start with a high-enchant staff of blinking for playtesting the iPhone zoom camera's
+// same-level-jump follow WHILE ZOOMED (targeting keeps the zoom, unlike the item-menu teleport which
+// suspends it). Aim short to test the trailing catch-up, far to test the cinematic pan. Granted
+// deterministically in initializeRogue, so it is recording-safe. CURRENTLY ON -- flip to 0 to ship
+// (see docs/notes/pre-ship-debug-checklist.md).
+#define D_BLINK_STAFF_START             1//(WIZARD_MODE && 0)
+
 // iOS port (iBrogue): start with a +3 ring of light for playtesting (ally emboldenment aura + invisible
 // reveal). Granted deterministically in initializeRogue, so it is recording-safe. Equip it to see the
 // effect. Flip to 0 to ship.
@@ -96,6 +103,12 @@
 // short cooldown. Granted deterministically in initializeRogue, so it is recording-safe. Flip to 0 to ship.
 #define D_HEAL_CHARM_START              0//(WIZARD_MODE && 0)
 
+// iOS port (iBrogue): start with a strong (+10) charm of teleportation for playtesting the iPhone zoom
+// camera's cinematic pan on a same-level teleport -- the high enchant gives a short recharge, so it can be
+// spammed. Granted deterministically in initializeRogue, so it is recording-safe. CURRENTLY ON -- flip to
+// 0 to ship (see docs/notes/pre-ship-debug-checklist.md).
+#define D_TELEPORT_CHARM_START          1//(WIZARD_MODE && 0)
+
 // iOS port (iBrogue): start with a +50 leather armor for playtesting -- effectively invulnerable, to test
 // without dying. Granted deterministically in initializeRogue, so it is recording-safe. Equip it to wear
 // it. Flip to 0 to ship.
@@ -104,7 +117,7 @@
 // iOS port (Brogue SE): start with a few empty bottles for playtesting the v2 capture system, so you can
 // test capturing gases/liquids/hazards without first finding one. Granted deterministically in
 // initializeRogue, so it is recording-safe. Flip to 0 to ship.
-#define D_EMPTY_BOTTLE_START            0//(WIZARD_MODE && 0)
+#define D_EMPTY_BOTTLE_START            1//(WIZARD_MODE && 0)
 
 // iOS port (Brogue SE): start with 3 potions of telepathy for playtesting the noise system -- telepathy
 // reveals off-screen monsters so you can correlate the noise box-ripples with the creatures making them.
@@ -1351,8 +1364,10 @@ enum armorEnchants {
 
 // iOS port (Brogue SE): cursed-runics rework. A double-edged runic welds on until enchanted to its
 // purify threshold, at which point the weld lifts, the downside (gated on enchant level in the
-// effect code) falls away, and W_CLUMSINESS tempers into W_QUIETUS. Weapons cost more than armor.
-#define WEAPON_RUNIC_PURIFY_ENCHANT     6
+// effect code) falls away, and W_CLUMSINESS tempers into W_QUIETUS. Cursed runics generate at
+// exactly +0, so the purify threshold equals the scroll cost: weapon +7 = 7 scrolls, armor +4 = 4
+// scrolls (weapons cost more than armor).
+#define WEAPON_RUNIC_PURIFY_ENCHANT     7
 #define ARMOR_RUNIC_PURIFY_ENCHANT      4
 
 // iOS port (Brogue SE): cursed-runics rework -- Phase 1 weapon-curse tuning (Fight-Simulator knobs).
@@ -4132,6 +4147,7 @@ extern "C" {
     boolean isPassableOrSecretDoor(pos loc);
     boolean knownToPlayerAsPassableOrSecretDoor(pos loc);
     void setMonsterLocation(creature *monst, pos newLoc);
+    void layCreatureSpoor(creature *monst, pos loc); // iOS port (Brogue SE): tracks & traces -- called from setMonsterLocation (monsters) and playerMoves (the player, which bypasses setMonsterLocation)
     boolean moveMonster(creature *monst, short dx, short dy);
     unsigned long burnedTerrainFlagsAtLoc(pos loc);
     unsigned long discoveredTerrainFlagsAtLoc(pos loc);
