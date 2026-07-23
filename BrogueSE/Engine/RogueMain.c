@@ -475,6 +475,28 @@ void initializeRogue(uint64_t seed) {
         theItem = addItemToPack(theItem);
     }
 
+    if (D_FIRE_STAFF_START) {
+        // iOS port (Brogue SE): playtest grant for the staff of firebolt -- exercises the ember->ash terrain
+        // trail the flame bolt lays on bare ground (DF_EMBER_TRAIL). Added deterministically here (not a
+        // recorded input), so it reconstructs identically on replay. The staff table is shared across variants.
+        theItem = generateItem(STAFF, STAFF_FIRE);
+        theItem->enchant1 = theItem->charges = 10;
+        theItem->flags |= (ITEM_IDENTIFIED | ITEM_MAX_CHARGES_KNOWN);
+        identify(theItem);
+        theItem = addItemToPack(theItem);
+    }
+
+    if (D_POISON_STAFF_START) {
+        // iOS port (Brogue SE): playtest grant for the staff of poison -- exercises the acid-puddle terrain
+        // trail the poison ray lays on bare ground (DF_ACID_TRAIL). Added deterministically here (not a
+        // recorded input), so it reconstructs identically on replay. The staff table is shared across variants.
+        theItem = generateItem(STAFF, STAFF_POISON);
+        theItem->enchant1 = theItem->charges = 10;
+        theItem->flags |= (ITEM_IDENTIFIED | ITEM_MAX_CHARGES_KNOWN);
+        identify(theItem);
+        theItem = addItemToPack(theItem);
+    }
+
     if (D_BLINK_STAFF_START) {
         // iOS port (iBrogue): playtest grant for the staff of blinking -- exercises the iPhone zoom camera's
         // same-level follow WHILE ZOOMED (aiming keeps the zoom). High enchant = long max range, so you can

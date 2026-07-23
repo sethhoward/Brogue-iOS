@@ -87,6 +87,13 @@
 // frozen foliage/push). Granted deterministically in initializeRogue, so it is recording-safe. Flip to 0 to ship.
 #define D_FROST_STAFF_START             0//(WIZARD_MODE && 0)
 
+// iOS port (Brogue SE): start with a high-enchant staff of firebolt / staff of poison for playtesting the
+// "staff terrain trails" feature -- the ember->ash streak the firebolt leaves and the acid-puddle trail the
+// poison ray leaves on bare ground it crosses. Granted deterministically in initializeRogue, so it is
+// recording-safe. CURRENTLY ON -- flip to 0 to ship.
+#define D_FIRE_STAFF_START              0//(WIZARD_MODE && 0)
+#define D_POISON_STAFF_START            0//(WIZARD_MODE && 0)
+
 // iOS port (iBrogue): start with a high-enchant staff of blinking for playtesting the iPhone zoom camera's
 // same-level-jump follow WHILE ZOOMED (targeting keeps the zoom, unlike the item-menu teleport which
 // suspends it). Aim short to test the trailing catch-up, far to test the cinematic pan. Granted
@@ -1152,6 +1159,12 @@ enum tileType {
     // iOS port (Brogue SE): a swath of open grass matted flat by a large creature's passage (isLarge);
     // regrows to grass like trampled foliage. A "something big came through here" tell.
     FLATTENED_GRASS,
+
+    // iOS port (Brogue SE): staff of frost -- a rime of frost the frost bolt lays on bare ground it crosses
+    // (the cosmetic ground counterpart to the ice it forms on water/foliage). Purely cosmetic SURFACE overlay
+    // (no T_* gameplay flags); thaws back to bare floor via FROSTED_GROUND_MELT. See DF_GROUND_FROST.
+    FROSTED_GROUND,
+    FROSTED_GROUND_MELT,
 
     NUMBER_TILETYPES,
 };
@@ -2429,6 +2442,21 @@ enum dungeonFeatureTypes {
     DF_PHANTOM_ECTOPLASM,
     DF_DRAGON_ROOST_BONES,
     DF_DRAGON_ROOST_ASH,
+
+    // iOS port (Brogue SE): "staff terrain trails" -- cosmetic residue a staff's bolt leaves along its path
+    // (pathDF), gated to bare ground so it skips liquids, chasm, and terrain the bolt already transforms.
+    // Fire: sputtering embers that fade to ash via the stock EMBERS->ASH chain (permanent ash, like all fire).
+    // Poison: the existing ACID_SPLATTER puddle (permanent, shared with acid potions/mounds).
+    // Frost: a rime of FROSTED_GROUND that thaws back to floor; chained onto the frost-bolt freeze cascade.
+    // Each has a FLOOR link plus a FLOOR_FLOODABLE link (mirrors the water cascade's algae variants) so the
+    // trail stays continuous over both bare-floor tile types. Single-cell (startProb 0), no spread.
+    DF_EMBER_TRAIL,
+    DF_EMBER_TRAIL_FLOODABLE,
+    DF_ACID_TRAIL,
+    DF_ACID_TRAIL_FLOODABLE,
+    DF_GROUND_FROST,
+    DF_GROUND_FROST_FLOODABLE,
+    DF_GROUND_FROST_MELT,
 
     NUMBER_DUNGEON_FEATURES,
 };
