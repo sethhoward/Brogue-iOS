@@ -114,9 +114,10 @@ const color blue =                  {0,     0,      100,    0,      0,          
 const color darkBlue =              {0,     0,      50,     0,      0,          0,          0,      false};
 const color darkTurquoise =         {0,     40,     65,     0,      0,          0,          0,      false};
 const color lightBlue =             {40,    40,     100,    0,      0,          0,          0,      false};
-// iOS port (Brogue SE): pale silvery-blue rime for FROSTED_GROUND (the frost bolt's cosmetic ground trail).
-// Lighter and less saturated than lightBlue so it reads as a delicate frost on the floor, not solid ice.
-const color frostColor =            {62,    72,     92,     0,      0,          0,          0,      false};
+// iOS port (Brogue SE): icy-blue ground tint for FROSTED_GROUND (the frost bolt's cosmetic ground trail).
+// Used as the tile's BACKGROUND so the bolt visibly discolors the floor (a rime), not just its glyph. Muted
+// and darker than lightBlue (the solid-ice color) so frosted ground reads as frost, distinct from lake ice.
+const color frostColor =            {28,    38,     58,     0,      0,          0,          0,      false};
 const color pink =                  {100,   60,     66,     0,      0,          0,          0,      false};
 const color darkPink =              {50,    30,     33,     0,      0,          0,          0,      false};
 const color red  =                  {100,   0,      0,      0,      0,          0,          0,      false};

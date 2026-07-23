@@ -85,7 +85,7 @@
 
 // iOS port (iBrogue): start with a high-enchant staff of frost for playtesting (freeze/slow/ice bridges/
 // frozen foliage/push). Granted deterministically in initializeRogue, so it is recording-safe. Flip to 0 to ship.
-#define D_FROST_STAFF_START             0//(WIZARD_MODE && 0)
+#define D_FROST_STAFF_START             1//(WIZARD_MODE && 0)
 
 // iOS port (Brogue SE): start with a high-enchant staff of firebolt / staff of poison for playtesting the
 // "staff terrain trails" feature -- the ember->ash streak the firebolt leaves and the acid-puddle trail the
