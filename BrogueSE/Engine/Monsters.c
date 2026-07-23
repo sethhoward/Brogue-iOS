@@ -5278,14 +5278,19 @@ void playerEmitNoise(short spike) { (void)spike; rogue.playerNoise = NOISE_PLAYE
 // closed door. Additive (not a multiplicative loudness scalar) so awareness can compensate for a quiet
 // monster.
 //
-// RNG SPLIT (hearing-interrupts-rest, 2026-07-22): during a LONG-REST turn ('Z': rogue.automationActive
-// && rogue.justRested) a hostile monster's roll is SUBSTANTIVE -- a success INTERRUPTS the rest (tier-
-// flavored message + ripple + haptic), so the outcome drives gameplay and must replay identically. One
-// interrupt per monster per rest session (MB_HEARD_THIS_REST; cleared on any non-rest action in
-// playerTurnEnded): re-resting past a ping is an informed gamble, and a worshiper's endless clamor stops
-// nagging after its first wake. Allies/captives never interrupt. Everywhere else the roll stays
-// RNG_COSMETIC (informational ripple only), so noise tuning never desyncs normal-play saves/replays or
-// seeds -- only rest-context behavior is version-locked. See docs/design/noise-system.md.
+// RNG SPLIT (hearing-interrupts-rest, 2026-07-22; replay fix 2026-07-23): during ANY rest turn
+// (rogue.justRested -- a single 'z' or one turn of a 'Z' autoRest) a hostile monster's roll is
+// SUBSTANTIVE -- a success INTERRUPTS the rest (tier-flavored message + ripple + haptic), so the
+// outcome drives gameplay and must replay identically. The gate MUST NOT read rogue.automationActive:
+// autoRest records each turn as a plain REST_KEY (indistinguishable from 'z' in the recording), and
+// playback replays those through executeKeystroke where automationActive is never set -- so a gate on
+// it draws substantive RNG live but not on replay, desyncing every save that rested near an unseen
+// hostile (the 0.12.1 out-of-sync bug). Only state that playback reconstructs identically (justRested,
+// creatureState, bookkeepingFlags) may pick the stream. One interrupt per monster per rest session
+// (MB_HEARD_THIS_REST; cleared on any non-rest action in playerTurnEnded): re-resting past a ping is an
+// informed gamble, and a worshiper's endless clamor stops nagging after its first wake. Allies/captives
+// never interrupt. Everywhere else the roll stays RNG_COSMETIC (informational ripple only), so noise
+// tuning never desyncs normal-play saves/replays or seeds. See docs/design/noise-system.md.
 static void monsterEmitMovementNoise(creature *monst, short originX, short originY) {
 #if NOISE_SYSTEM_ENABLED
     if (monst == &player) {
@@ -5337,9 +5342,10 @@ static void monsterEmitMovementNoise(creature *monst, short originX, short origi
         // Global A/B playtest scalar (NOISE_PERCEPTION_SCALE: 100 = baseline, <100 quieter, >100 louder).
         detectChance = clamp((detectChance * NOISE_PERCEPTION_SCALE) / 100, 0, NOISE_PERCEPTION_CEILING);
 
-        // Hearing-interrupts-rest: on a long-rest turn, a hostile that hasn't already broken this rest
+        // Hearing-interrupts-rest: on a rest turn, a hostile that hasn't already broken this rest
         // session rolls on the SUBSTANTIVE stream, because a success ends the rest (see header comment).
-        const boolean restListening = rogue.automationActive && rogue.justRested   // inside a 'Z' rest turn
+        // NOT gated on rogue.automationActive: playback never reconstructs it (see header comment).
+        const boolean restListening = rogue.justRested                             // inside a rest turn ('z' or 'Z')
                                     && monst->creatureState != MONSTER_ALLY        // hostiles only
                                     && !(monst->bookkeepingFlags & MB_CAPTIVE)
                                     && !(monst->bookkeepingFlags & MB_HEARD_THIS_REST);

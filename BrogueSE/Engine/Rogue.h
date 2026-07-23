@@ -178,9 +178,12 @@
 //
 // NOISE_PERCEPTION_SCALE is the single A/B tuning lever: 100 = baseline, <100 toward lucky-roll, >100
 // toward generous -- slide the whole ringless feel without re-deriving every constant.
-// RNG SPLIT (hearing-interrupts-rest, 2026-07-22): during a LONG-REST turn ('Z' automation) the roll is
-// SUBSTANTIVE -- a successful hear interrupts the rest (one interrupt per monster per session, hostiles
-// only; see MB_HEARD_THIS_REST), so the outcome drives gameplay and must replay identically. Everywhere
+// RNG SPLIT (hearing-interrupts-rest, 2026-07-22; replay fix 2026-07-23): during ANY rest turn
+// (rogue.justRested: single 'z' or a 'Z' autoRest turn) the roll is SUBSTANTIVE -- a successful hear
+// interrupts the rest (one interrupt per monster per session, hostiles only; see MB_HEARD_THIS_REST),
+// so the outcome drives gameplay and must replay identically. The gate deliberately does NOT read
+// rogue.automationActive: playback replays autoRest as plain REST_KEY turns with it unset, so an
+// automation gate draws substantive RNG live but not on replay -- the 0.12.1 out-of-sync bug. Everywhere
 // else the roll stays RNG_COSMETIC (informational ripple only), so tuning these constants still never
 // desyncs normal-play recordings or seeds -- only rest-context behavior is version-locked (recording
 // version gates compat). See monsterEmitMovementNoise, docs/design/noise-system.md, PERCEPTION_AUDIT.md.
@@ -291,10 +294,10 @@
 #define NOISE_DOOR_LISTEN_RANGE         4   // audible-radius tiles added while at a door (hear through it)
 #define NOISE_REST_PERCEPTION_BONUS     6   // detection bonus while resting (listening intently). Applies
                                             // whenever rogue.justRested: live on a short 'z' (ripple animates
-                                            // with the boost) AND on long rest 'Z', where a successful hear now
-                                            // INTERRUPTS the rest (message + ripple + haptic; substantive roll,
-                                            // one interrupt per monster per session -- see MB_HEARD_THIS_REST
-                                            // and monsterEmitMovementNoise). Landed 2026-07-22.
+                                            // with the boost) AND on any rest turn ('z' or 'Z'), where a successful
+                                            // hear now INTERRUPTS the rest (message + ripple + haptic; substantive
+                                            // roll, one interrupt per monster per session -- see MB_HEARD_THIS_REST
+                                            // and monsterEmitMovementNoise). Landed 2026-07-22; replay fix 07-23.
 // Terrain EMISSION: how much the terrain a creature steps into adds to / dampens the noise of that step
 // (distinct from the sound map's propagation damping above). Signed, smaller than the monster tiers since
 // it only modulates on top. Read at the destination cell (terrainNoiseModifier). Direction-agnostic.
