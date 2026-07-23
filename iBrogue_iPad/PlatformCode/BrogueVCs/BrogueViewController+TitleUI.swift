@@ -463,7 +463,25 @@ extension BrogueViewController {
     private static func seInfoBlocks() -> [InfoBlock] {
         return [
             .link("Support", "https://github.com/sethhoward/Brogue-iPad"),
-            .note("Brogue SE — an experimental fork of BrogueCE with original items, monsters, and mechanics. Release 0.12.0, \"C is for Curses\", turns cursed gear from a dead end into a decision — a cursed runic now pairs a real, always-on power with its bite — and adds a shrine that will identify your pack, if you dare wake what guards it. Here's what's new:"),
+            .note("Brogue SE — an experimental fork of BrogueCE with original items, monsters, and mechanics. Release 0.12.1, \"Sharper Ears\", teaches the dungeon to break your rest the moment you hear something coming, sharpens last release's curses, and smooths the iPhone camera. Here's what's new:"),
+            .heading("🔊 Sharper Ears"),
+            .bullets([
+                "Rest with one ear open — Resting (\"Z\") now snaps you awake the moment you hear a hostile creature's footsteps closing in, with a message, a ripple, and a pulse that scale to how loud and how near it is. You get one such wake per creature, so pressing on past a warning is an informed gamble.",
+                "No more resting yourself to death by earshot — Fighting you can hear off in the distance no longer jolts you awake turn after turn: the first sound interrupts, then it quiets until you move again.",
+                "Thicker walls, muffled sound — Noise now carries a little more distinctly through closed doors, so listening at one tells you more about what's on the other side.",
+            ]),
+            .heading("🔮 Curses, Sharpened"),
+            .bullets([
+                "No more penalty tax — A cursed runic now starts at a clean +0 instead of a negative, so from the very first swing it's purely about the trade-off, never a dead stat loss you're digging out of.",
+                "Cheaper to purify armor — Cleansing a cursed runic off your armor now takes one fewer enchant scroll, making the \"keep it and purify\" path a little more reachable.",
+            ]),
+            .heading("🎮 Quality of Life"),
+            .bullets([
+                "Smoother camera on iPhone — With pinch-zoom, the view now glides to follow you instead of snapping a step at a time; true trips between floors still cut cleanly.",
+                "Quieter bottle captures — Filling the empty bottle no longer flashes the identify star — it's a deliberate act, and the capture message already names what you scooped up.",
+            ]),
+            .heading("📦 Previous Release — 0.12.0 \"C is for Curses\""),
+            .note("Turned cursed gear from a dead end into a decision — a cursed runic now pairs a real, always-on power with its bite — and added a shrine that will identify your pack, if you dare wake what guards it:"),
             .heading("🔮 Cursed Runics, Reworked"),
             .bullets([
                 "A curse is a bargain, not a trap — A cursed runic now grants a genuine, always-on power alongside its drawback, welded to you until you deal with it. Every downside has a counter you can lean into, so keeping a cursed item can be the smart play.",
