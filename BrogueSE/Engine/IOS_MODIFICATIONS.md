@@ -32,6 +32,26 @@ See `BrogueCE/Engine/IOS_MODIFICATIONS.md` (faithful CE) and
 
 ## Change log
 
+### 2026-07-23 — Title-screen version string centered (iPhone display)
+
+**What.** `drawMenuFlames` (`MainMenu.c`) now renders `gameConst->versionString` **centered** on the
+bottom row of the title menu instead of right-aligned. Added a `versionStringStart = (COLS -
+versionStringLength) / 2` origin (clamped `>= 0`) and changed the last-row predicate from
+`i >= COLS - versionStringLength` to `i >= versionStringStart && i < versionStringStart +
+versionStringLength`, indexing the string by `i - versionStringStart`.
+
+**Why.** On iPhone the title view crops the right edge of the grid, so the right-aligned version
+string was cut off and hard to read in the bottom corner. Centering keeps it fully on-screen. The
+bottom-left game-mode string ("Wizard Mode" / "Easy Mode") is unaffected — it stays far-left and
+does not overlap the centered version string at normal `COLS`.
+
+**Where.** `MainMenu.c` (`drawMenuFlames`). Pure display; no gameplay, RNG, or save/recording impact.
+Marked `// iOS port (Brogue SE):`. **Note:** `BROGUE_VERSION_STRING`'s trailing-space pad
+(`GlobalsBrogue.c`) was there to push the string off the right edge under the old right-alignment;
+with centering it now only shifts the text a half-cell left of true center — harmless, left in place.
+The same right-aligned rendering exists in the CE and Classic `MainMenu.c`; centering was applied to
+SE only (this release) and can be mirrored there if the same iPhone cutoff is wanted.
+
 ### 2026-07-22 — Noise: hearing interrupts long rest + once-per-rest combat tells (gameplay)
 
 **What.** Listening finally *does* something during 'Z' rest — the two halves of one fix:
