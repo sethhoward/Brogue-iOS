@@ -316,6 +316,13 @@ static void playbackPanic() {
         confirmMessages();
         message("Playback is out of sync.", 0);
 
+        // iOS port (Brogue SE): 1x modal -- mark a non-play uiMode while the apology box and its
+        // more-sign are up so the iPhone host suspends the dungeon pinch-zoom (feats-screen
+        // pattern); otherwise the box draws into the zoomed dungeon cells and tears against the
+        // 1x sidebar/chrome. Restored below so the paused-playback UI keeps its zoom state.
+        const CBrogueGameEvent oosOldUiMode = uiMode;
+        uiMode = CBrogueGameEventInMenu;
+
         const SavedDisplayBuffer rbuf = saveDisplayBuffer();
         printTextBox(OOS_APOLOGY, 0, 0, 0, &white, &black, NULL, 0);
 
@@ -324,6 +331,7 @@ static void playbackPanic() {
         rogue.playbackMode = true;
 
         restoreDisplayBuffer(&rbuf);
+        uiMode = oosOldUiMode;
 
         if (nonInteractivePlayback) {
             rogue.gameHasEnded = true;
