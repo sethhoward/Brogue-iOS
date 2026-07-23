@@ -42,7 +42,7 @@
 // release changes how a seed+inputs evolve. 0.12.0 "C is for Curses" is "SE 2.2.0": MINOR 1->2 (cursed-runics
 // + the Altars of Divination change level generation), rejecting 0.11.0 "B is for Balance" ("SE 2.1.0") saves.
 #define BROGUE_MAJOR 2
-#define BROGUE_MINOR 2
+#define BROGUE_MINOR 3
 #define BROGUE_PATCH 0
 
 // Expanding a macro as a string constant requires two levels of macros
@@ -85,7 +85,21 @@
 
 // iOS port (iBrogue): start with a high-enchant staff of frost for playtesting (freeze/slow/ice bridges/
 // frozen foliage/push). Granted deterministically in initializeRogue, so it is recording-safe. Flip to 0 to ship.
-#define D_FROST_STAFF_START             0//(WIZARD_MODE && 0)
+#define D_FROST_STAFF_START             1//(WIZARD_MODE && 0)
+
+// iOS port (Brogue SE): start with a high-enchant staff of firebolt / staff of poison for playtesting the
+// "staff terrain trails" feature -- the ember->ash streak the firebolt leaves and the acid-puddle trail the
+// poison ray leaves on bare ground it crosses. Granted deterministically in initializeRogue, so it is
+// recording-safe. CURRENTLY ON -- flip to 0 to ship.
+#define D_FIRE_STAFF_START              0//(WIZARD_MODE && 0)
+#define D_POISON_STAFF_START            0//(WIZARD_MODE && 0)
+
+// iOS port (iBrogue): start with a high-enchant staff of blinking for playtesting the iPhone zoom camera's
+// same-level-jump follow WHILE ZOOMED (targeting keeps the zoom, unlike the item-menu teleport which
+// suspends it). Aim short to test the trailing catch-up, far to test the cinematic pan. Granted
+// deterministically in initializeRogue, so it is recording-safe. CURRENTLY ON -- flip to 0 to ship
+// (see docs/notes/pre-ship-debug-checklist.md).
+#define D_BLINK_STAFF_START             0//(WIZARD_MODE && 0)
 
 // iOS port (iBrogue): start with a +3 ring of light for playtesting (ally emboldenment aura + invisible
 // reveal). Granted deterministically in initializeRogue, so it is recording-safe. Equip it to see the
@@ -95,6 +109,12 @@
 // iOS port (iBrogue): start with a strong (+10) charm of health for playtesting -- a near-full heal on a
 // short cooldown. Granted deterministically in initializeRogue, so it is recording-safe. Flip to 0 to ship.
 #define D_HEAL_CHARM_START              0//(WIZARD_MODE && 0)
+
+// iOS port (iBrogue): start with a strong (+10) charm of teleportation for playtesting the iPhone zoom
+// camera's cinematic pan on a same-level teleport -- the high enchant gives a short recharge, so it can be
+// spammed. Granted deterministically in initializeRogue, so it is recording-safe. CURRENTLY ON -- flip to
+// 0 to ship (see docs/notes/pre-ship-debug-checklist.md).
+#define D_TELEPORT_CHARM_START          0//(WIZARD_MODE && 0)
 
 // iOS port (iBrogue): start with a +50 leather armor for playtesting -- effectively invulnerable, to test
 // without dying. Granted deterministically in initializeRogue, so it is recording-safe. Equip it to wear
@@ -165,10 +185,15 @@
 //
 // NOISE_PERCEPTION_SCALE is the single A/B tuning lever: 100 = baseline, <100 toward lucky-roll, >100
 // toward generous -- slide the whole ringless feel without re-deriving every constant.
-// The roll uses RNG_COSMETIC (it's informational only -- it changes nothing in the simulation), so it
-// never perturbs the substantive stream: noise tuning never desyncs saves/replays, and seeds are
-// unaffected. PROMOTE TO SUBSTANTIVE only if/when "hearing" starts driving gameplay (e.g. interrupts
-// travel/rest, or feeds monster awareness). See docs/design/noise-system.md and PERCEPTION_AUDIT.md.
+// RNG SPLIT (hearing-interrupts-rest, 2026-07-22; replay fix 2026-07-23): during ANY rest turn
+// (rogue.justRested: single 'z' or a 'Z' autoRest turn) the roll is SUBSTANTIVE -- a successful hear
+// interrupts the rest (one interrupt per monster per session, hostiles only; see MB_HEARD_THIS_REST),
+// so the outcome drives gameplay and must replay identically. The gate deliberately does NOT read
+// rogue.automationActive: playback replays autoRest as plain REST_KEY turns with it unset, so an
+// automation gate draws substantive RNG live but not on replay -- the 0.12.1 out-of-sync bug. Everywhere
+// else the roll stays RNG_COSMETIC (informational ripple only), so tuning these constants still never
+// desyncs normal-play recordings or seeds -- only rest-context behavior is version-locked (recording
+// version gates compat). See monsterEmitMovementNoise, docs/design/noise-system.md, PERCEPTION_AUDIT.md.
 #define NOISE_SYSTEM_ENABLED            1   // single kill switch / pre-ship knob (flip to 0 to disable)
 // iOS port (Brogue SE): explosion knockback kill switch. Gated OFF for the 0.11.0 "B is for Balance"
 // release -- the feature (knockCreatureFromExplosion) ships disabled; flip to 1 to re-enable in a future
@@ -249,25 +274,37 @@
 //     else                                 -> -NOISE_FALLOFF_PER_TILE * (d - NOISE_NEARFIELD_RADIUS)
 //     unreachable (sealed off)             -> no noise at all
 // Plus NOISE_DOOR_LISTEN_BONUS (probability) AND NOISE_DOOR_LISTEN_RANGE (ear-on-door extends the
-// audible radius through it) while the player stands next to a closed door. Together they restore --
-// but never exceed -- open-air hearing for a monster behind that door (the muffle is negated, not beaten).
-// All read-only/deterministic -> roll stays cosmetic.
-#define NOISE_NEARFIELD_RADIUS          2 //1 - original value // ### <=this cost-distance = "right on top of you, unseen" (corner/
-                                            // foliage/dark/blind): flat boost. Kept at 1 so an open-stone
-                                            // approach's last tile doesn't auto-ping (stone stays stealthy).
+// audible radius through it) while the player stands next to a closed door. Exact restoration of open-air
+// hearing is NOT the invariant (the +8 listen bonus under-compensates the muffle inside the near-field
+// band and over-compensates it by ~2 in the falloff regime); the design point is simply that an ear at
+// the door hears meaningfully more through it than an ear elsewhere, without the door going acoustically
+// transparent. All read-only/deterministic.
+#define NOISE_NEARFIELD_RADIUS          2   // PLAYER-hears-monster (cosmetic ripple) ONLY: how readily YOU get the
+                                            // "heard something" ping for an UNSEEN monster moving this many cost-
+                                            // tiles away (corner/foliage/dark/blind). The monster-hears-player
+                                            // (sneak) side is a SEPARATE knob -- NOISE_HEAR_NEARFIELD_RADIUS -- so
+                                            // this value never affects sneaking up on an enemy. Within this
+                                            // distance a step gets a flat +NOISE_NEARFIELD_BONUS; beyond it,
+                                            // -NOISE_FALLOFF_PER_TILE per tile. That bonus is ADDITIVE to detect%,
+                                            // NOT an auto-ping: baseline (ringless, NOISE_NORMAL monster, open
+                                            // stone, no door/rest) a near-field step lands at ~30%/step, the first
+                                            // tile past it ~6%. Raised 1->2 so a monster 2 tiles out on open stone
+                                            // pings as readily as an adjacent one (was ~6% at d=2); open stone is
+                                            // no longer "silent until adjacent."
 #define NOISE_NEARFIELD_BONUS           20  // the near-field detection boost (additive %, applies to BOTH ringless
                                             // and ring-of-awareness listeners, so a bump lifts close-range hearing
                                             // equally for both -- raised 10->20 to turn up what's heard right on top of you)
 #define NOISE_FALLOFF_PER_TILE          2   // detection lost per effective tile beyond the near field (gentle
                                             // -> flat, directional pings inside the ear; the gate sets range)
-#define NOISE_DOOR_COST                 3   // extra sound-map cost to pass a closed door / foliage / smoke
+#define NOISE_DOOR_COST                 2   // extra sound-map cost to pass a closed door / foliage / smoke
 #define NOISE_DOOR_LISTEN_BONUS         8   // detection bonus while standing next to a closed door (0 = off)
 #define NOISE_DOOR_LISTEN_RANGE         4   // audible-radius tiles added while at a door (hear through it)
-#define NOISE_REST_PERCEPTION_BONUS     6   // detection bonus while resting (listening intently). LIVE on a
-                                            // short rest 'z' (a single manual turn -> ripples animate with the
-                                            // boost). On long rest 'Z' (autoRest) ripples are drained, so the
-                                            // boost is latent there until "hearing interrupts rest" lands
-                                            // (substantive, deferred). Applies whenever rogue.justRested.
+#define NOISE_REST_PERCEPTION_BONUS     6   // detection bonus while resting (listening intently). Applies
+                                            // whenever rogue.justRested: live on a short 'z' (ripple animates
+                                            // with the boost) AND on any rest turn ('z' or 'Z'), where a successful
+                                            // hear now INTERRUPTS the rest (message + ripple + haptic; substantive
+                                            // roll, one interrupt per monster per session -- see MB_HEARD_THIS_REST
+                                            // and monsterEmitMovementNoise). Landed 2026-07-22; replay fix 07-23.
 // Terrain EMISSION: how much the terrain a creature steps into adds to / dampens the noise of that step
 // (distinct from the sound map's propagation damping above). Signed, smaller than the monster tiers since
 // it only modulates on top. Read at the destination cell (terrainNoiseModifier). Direction-agnostic.
@@ -1123,6 +1160,12 @@ enum tileType {
     // regrows to grass like trampled foliage. A "something big came through here" tell.
     FLATTENED_GRASS,
 
+    // iOS port (Brogue SE): staff of frost -- a rime of frost the frost bolt lays on bare ground it crosses
+    // (the cosmetic ground counterpart to the ice it forms on water/foliage). Purely cosmetic SURFACE overlay
+    // (no T_* gameplay flags); thaws back to bare floor via FROSTED_GROUND_MELT. See DF_GROUND_FROST.
+    FROSTED_GROUND,
+    FROSTED_GROUND_MELT,
+
     NUMBER_TILETYPES,
 };
 
@@ -1351,8 +1394,10 @@ enum armorEnchants {
 
 // iOS port (Brogue SE): cursed-runics rework. A double-edged runic welds on until enchanted to its
 // purify threshold, at which point the weld lifts, the downside (gated on enchant level in the
-// effect code) falls away, and W_CLUMSINESS tempers into W_QUIETUS. Weapons cost more than armor.
-#define WEAPON_RUNIC_PURIFY_ENCHANT     6
+// effect code) falls away, and W_CLUMSINESS tempers into W_QUIETUS. Cursed runics generate at
+// exactly +0, so the purify threshold equals the scroll cost: weapon +7 = 7 scrolls, armor +4 = 4
+// scrolls (weapons cost more than armor).
+#define WEAPON_RUNIC_PURIFY_ENCHANT     7
 #define ARMOR_RUNIC_PURIFY_ENCHANT      4
 
 // iOS port (Brogue SE): cursed-runics rework -- Phase 1 weapon-curse tuning (Fight-Simulator knobs).
@@ -2398,6 +2443,21 @@ enum dungeonFeatureTypes {
     DF_DRAGON_ROOST_BONES,
     DF_DRAGON_ROOST_ASH,
 
+    // iOS port (Brogue SE): "staff terrain trails" -- cosmetic residue a staff's bolt leaves along its path
+    // (pathDF), gated to bare ground so it skips liquids, chasm, and terrain the bolt already transforms.
+    // Fire: sputtering embers that fade to ash via the stock EMBERS->ASH chain (permanent ash, like all fire).
+    // Poison: the existing ACID_SPLATTER puddle (permanent, shared with acid potions/mounds).
+    // Frost: a rime of FROSTED_GROUND that thaws back to floor; chained onto the frost-bolt freeze cascade.
+    // Each has a FLOOR link plus a FLOOR_FLOODABLE link (mirrors the water cascade's algae variants) so the
+    // trail stays continuous over both bare-floor tile types. Single-cell (startProb 0), no spread.
+    DF_EMBER_TRAIL,
+    DF_EMBER_TRAIL_FLOODABLE,
+    DF_ACID_TRAIL,
+    DF_ACID_TRAIL_FLOODABLE,
+    DF_GROUND_FROST,
+    DF_GROUND_FROST_FLOODABLE,
+    DF_GROUND_FROST_MELT,
+
     NUMBER_DUNGEON_FEATURES,
 };
 
@@ -2806,10 +2866,15 @@ enum monsterBookkeepingFlags {
     MB_RETURNING_HOME           = Fl(28),   // iOS port (Brogue SE): noise system -- a sleeper roused by noise that
                                             // investigated and found nothing is trudging back to its bed
                                             // (monst->slumberLoc) to doze off again; see PERCEPTION_AUDIT.md
-    MB_HEARD_DURING_AUTOMATION  = Fl(29)    // iOS port (Brogue SE): noise system -- this monster's '!'/'?' wake tell
+    MB_HEARD_DURING_AUTOMATION  = Fl(29),   // iOS port (Brogue SE): noise system -- this monster's '!'/'?' wake tell
                                             // was suppressed because it fired mid-travel/auto-explore (the cosmetic
                                             // animator is dormant during automation); re-emitted once at the
                                             // automation-end seam by flushAutomationHeardTells(). See PERCEPTION_AUDIT.md
+    MB_HEARD_THIS_REST          = Fl(30)    // iOS port (Brogue SE): noise system -- this monster already broke the
+                                            // player's current rest session with a heard-noise interrupt; it gets ONE
+                                            // interrupt per session (re-resting past its ping is an informed gamble;
+                                            // a worshiper's endless clamor stops nagging). Cleared for every monster
+                                            // when the player takes any non-rest action (playerTurnEnded sweep).
 };
 
 // Defines all creatures, which include monsters and the player:
@@ -3212,6 +3277,10 @@ typedef struct playerCharacter {
     boolean updatedMapToShoreThisTurn;      // so it's updated no more than once per turn
     boolean inWater;                    // helps with the blue water filter effect
     boolean heardCombatThisTurn;        // so you get only one "you hear combat in the distance" per turn
+    boolean heardDistantCombatThisRest; // iOS port (Brogue SE): the distant-combat tell already broke the current
+                                        // rest session; repeats are suppressed until the player takes a non-rest
+                                        // action (same session boundary as MB_HEARD_THIS_REST). Ambient repeats
+                                        // never nag; the first tell of a session still interrupts (real information).
     boolean creaturesWillFlashThisTurn; // there are creatures out there that need to flash before the turn ends
     boolean staleLoopMap;               // recalculate the loop map at the end of the turn
     boolean alreadyFell;                // so the player can fall only one depth per turn
@@ -3906,7 +3975,9 @@ extern "C" {
     void cosmeticSpawnAlertGlyph(pos loc, enum displayGlyph glyph); // iOS port (Brogue SE): cosmetic layer -- one-shot '?'/'!' flicker at a cell
     void cosmeticSpawnAlertBlink(creature *monst); // iOS port (Brogue SE): cosmetic layer -- creature-keyed '!' that rides the monster for N turns
     void cosmeticTickAlertBlinks(void);         // iOS port (Brogue SE): cosmetic layer -- per-turn '!' follow + countdown/expire
-    void cosmeticSpawnRippleMonster(pos loc);   // iOS port (Brogue SE): cosmetic layer -- monster "heard something" ripple
+    void cosmeticSpawnRippleMonster(pos loc, boolean bypassAutomation); // iOS port (Brogue SE): cosmetic layer -- monster "heard
+                                                // something" ripple. bypassAutomation: spawn even mid-'Z'-rest (the
+                                                // rest-interrupt ripple must render; playback fast-forward still suppresses)
     void cosmeticSpawnRipplePlayer(short radius);// iOS port (Brogue SE): cosmetic layer -- player's sound-footprint ripple
     void cosmeticSpawnRippleImpact(pos source, short radius); // iOS port (Brogue SE): cosmetic layer -- environmental-sound impact ripple (brighter + longer-lived so it reads through a tile flare)
     void beginCoalescedImpactRipples(void); // iOS port (Brogue SE): suppress per-cell impact ripples during a multi-cell machine activation
@@ -4132,6 +4203,7 @@ extern "C" {
     boolean isPassableOrSecretDoor(pos loc);
     boolean knownToPlayerAsPassableOrSecretDoor(pos loc);
     void setMonsterLocation(creature *monst, pos newLoc);
+    void layCreatureSpoor(creature *monst, pos loc); // iOS port (Brogue SE): tracks & traces -- called from setMonsterLocation (monsters) and playerMoves (the player, which bypasses setMonsterLocation)
     boolean moveMonster(creature *monst, short dx, short dy);
     unsigned long burnedTerrainFlagsAtLoc(pos loc);
     unsigned long discoveredTerrainFlagsAtLoc(pos loc);

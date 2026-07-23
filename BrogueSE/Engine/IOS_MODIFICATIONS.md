@@ -32,6 +32,125 @@ See `BrogueCE/Engine/IOS_MODIFICATIONS.md` (faithful CE) and
 
 ## Change log
 
+### 2026-07-23 — Title-screen version string centered (iPhone display)
+
+**What.** `drawMenuFlames` (`MainMenu.c`) now renders `gameConst->versionString` **centered** on the
+bottom row of the title menu instead of right-aligned. Added a `versionStringStart = (COLS -
+versionStringLength) / 2` origin (clamped `>= 0`) and changed the last-row predicate from
+`i >= COLS - versionStringLength` to `i >= versionStringStart && i < versionStringStart +
+versionStringLength`, indexing the string by `i - versionStringStart`.
+
+**Why.** On iPhone the title view crops the right edge of the grid, so the right-aligned version
+string was cut off and hard to read in the bottom corner. Centering keeps it fully on-screen. The
+bottom-left game-mode string ("Wizard Mode" / "Easy Mode") is unaffected — it stays far-left and
+does not overlap the centered version string at normal `COLS`.
+
+**Where.** `MainMenu.c` (`drawMenuFlames`). Pure display; no gameplay, RNG, or save/recording impact.
+Marked `// iOS port (Brogue SE):`. **Note:** `BROGUE_VERSION_STRING`'s trailing-space pad
+(`GlobalsBrogue.c`) was there to push the string off the right edge under the old right-alignment;
+with centering it now only shifts the text a half-cell left of true center — harmless, left in place.
+The same right-aligned rendering exists in the CE and Classic `MainMenu.c`; centering was applied to
+SE only (this release) and can be mirrored there if the same iPhone cutoff is wanted.
+
+### 2026-07-22 — Noise: hearing interrupts long rest + once-per-rest combat tells (gameplay)
+
+**What.** Listening finally *does* something during 'Z' rest — the two halves of one fix:
+1. **Hearing interrupts rest.** During a long-rest turn, a hostile monster's heard-footstep roll is
+   promoted to the **substantive** RNG stream, and a success wakes the player: tier-flavored message
+   ("thunderous footfalls" / "heavy footsteps" / "something stirring" / "a faint rustle", worshipers
+   "a frenzied clamor"), the grey ripple (bypassing the automation suppression that used to eat it), and
+   a haptic. **One interrupt per monster per rest session** (`MB_HEARD_THIS_REST`, new `Fl(30)`): re-'Z'
+   past a ping is an informed gamble; a worshiper's endless clamor stops nagging after its first wake.
+   Allies/captives never interrupt. Before this, 'Z' rest drained every ripple and the cosmetic roll
+   couldn't stop the rest — the whole listen-at-the-door mechanic was invisible exactly when it mattered.
+2. **Distant-combat tells stop re-killing rest.** Vanilla captors perpetually beat a regenerative captive
+   to keep it weak (`Monsters.c` captive-torment block), and since SE's survive-hit fix made every unseen
+   landed blow audible, "you hear combat in the distance" fired level-wide every turn — and every
+   `message()` sets `rogue.disturbed`, so 'Z' died within a turn or two anywhere on such a level. The tell
+   is now also **once per rest session** (`rogue.heardDistantCombatThisRest`): the first tell still
+   interrupts (real information), repeats are suppressed until the player takes a non-rest action.
+   Kill tells ("you hear something die…") still always fire. Factored both call sites into
+   `distantCombatTell()`.
+
+**How.** `Monsters.c` — `monsterEmitMovementNoise`: `restListening` predicate (`rogue.automationActive
+&& rogue.justRested`, hostile, not already flagged) picks substantive vs cosmetic for the same
+`detectChance`; on success, flag + message + direct `cePlayDetectionHaptic(0)` (the wrapper suppresses
+during automation — exactly when this fires; fast playback stays silent) + forced ripple. `IO.c` —
+`cosmeticSpawnRippleMonster(pos, boolean bypassAutomation)`: bypass renders mid-automation; playback
+fast-forward always suppresses. `Time.c` — `playerTurnEnded`: any non-rest turn sweeps
+`MB_HEARD_THIS_REST` off the level's creatures and clears the combat-tell latch (the "rest session"
+boundary; stale flags on other levels self-heal on arrival). `Combat.c` — `distantCombatTell()`.
+`Rogue.h` — flag, `rogue` field, decl, comment updates (the REST bonus "latent" note, the door-listen
+"never exceed" claim, the "PROMOTE TO SUBSTANTIVE" note — all now describe the landed behavior).
+
+**Determinism / saves.** The rest-turn roll is substantive, so **recording compat breaks**:
+`BROGUE_MINOR` bumped 2 → 3 ("SE 2.3.0") so old saves/recordings are rejected rather than desyncing.
+The branch condition is replay-deterministic (player state), so new recordings replay exactly. Normal-play
+rolls stay `RNG_COSMETIC` — tuning `NOISE_*` constants still never desyncs non-rest play or seeds. The
+session bookkeeping (flag + latch) evolves deterministically; no direct save-format impact (saves are
+input replays). Design rationale: docs/design/noise-system.md ("hearing interrupts rest").
+
+### 2026-07-22 — Suppress the gold ID star on empty-bottle capture (bug fix)
+
+**What.** Applying an empty bottle to capture a gas/liquid (e.g. caustic gas) fired the gold ID "star
+ripple" — redundant, since the capture is a deliberate, player-initiated act and the capture flavor line
+already names the potion. Reclassified empty-bottle capture from an *incidental reveal* (keeps the star)
+to an *active use* (suppresses it), matching drink/read/throw.
+
+**How (`Items.c`).** `fillEmptyBottle()` — the shared capture routine behind all three capture paths
+(apply-underfoot in `drinkPotion`, bolt capture in `updateBolt`, the Time.c stand-in) — now calls
+`autoIdentifyFromUse()` instead of `autoIdentify()`, so the identify-and-fold still happens without the
+`cosmeticSpawnItemTell(ITEM_TELL_IDENTIFY)` star. This supersedes the 2026-07-18 note below, which had
+listed empty-bottle capture-fill among the star-firing incidental reveals.
+
+**Determinism / saves.** Cosmetic-layer only (`RNG_COSMETIC`); identification itself is unchanged. No
+game-state or save impact. Marked `// iOS port (Brogue SE):` context via the existing capture comments.
+
+### 2026-07-22 — Player-window report carries the dungeon depth (iPhone camera-follow smoothing)
+
+**What.** `ceSetPlayerWindowLocation` gained a third argument, `short depth`, and the host protocol
+method is now `-setPlayerWindowX:y:depth:`. `commitDraws` passes `rogue.depthLevel` alongside the
+player's window cell.
+
+**Why.** The iPhone pinch-zoom camera follow is being smoothed (host-side): it eases the camera to
+the player instead of snapping each step. To do that correctly it must tell a **same-level teleport**
+(ease/pan the camera across the shared map) apart from a **true level transition** (snap — the old
+camera origin is meaningless on the brand-new map). Both look like a large jump in the player's window
+cell, so cell distance alone can't distinguish them; the depth can. Passing depth *with* the cell (vs.
+reusing the separate `ceSetGameContext` depth signal) keeps it race-free and correct during playback —
+the decision is made in the same synchronous call that drives the follow.
+
+**Where.** `IO.c` (`commitDraws` call site + the `extern` decl), `SEBridge.mm` (`ceSetPlayerWindowLocation`
+now dedupes on depth too and forwards it). Pure platform/host plumbing — no gameplay or determinism
+impact; not recorded, not replayed. Mirrored verbatim in the CE port (same feature, both frameworks
+share the follow).
+
+### 2026-07-21 — Cursed-runics tuning: start at +0, weapon purify +7 (gameplay)
+
+**What.** Cursed double-edged runics now generate at **exactly +0** (was −1), in both the weapon and
+armor `makeItemInto` branches (`Items.c`). To hold the purify *distances* steady, the weapon purify
+threshold rose **+6 → +7** (`WEAPON_RUNIC_PURIFY_ENCHANT` in `Rogue.h`); armor stays **+4**
+(`ARMOR_RUNIC_PURIFY_ENCHANT`). Net scroll cost: weapon +0→+7 = **7 scrolls** (unchanged); armor
++0→+4 = **4 scrolls** (down from 5).
+
+**Why.** De-emphasizes the boring −1 stat tax entirely — the item is purely "about the tradeoff" from
+turn one — and makes armor purification a touch more reachable (4 scrolls). Polarity is unaffected:
+`itemMagicPolarity` reads a cursed runic as **malevolent via the `ITEM_CURSED` flag**, not the enchant
+sign, so a +0 cursed runic still checks as malevolent (the `enchant1 < 0` clause was always redundant
+for flagged runics). *Inferior* plain-negatives (no `ITEM_CURSED`) are untouched — they keep the random
+−1…−3 roll and still read malevolent via `enchant1 < 0`.
+
+**Where.** `Rogue.h` (both purify constants + comment), `Items.c` (weapon + armor generation), `Time.c`
+(Smoky-armor progressive-sight curve — see Notes), `RogueMain.c` (the six `D_*_START` playtest grants).
+
+**Notes.** The Smoky-armor sight relief (`Time.c`, `emitSmokyArmorCloud`) was indexed off the old −1..+3
+cursed span; rebased to the new **0..+3** span (`clearByTier[4] = {0, 3, 5, 6}`, indexed by `enchant1`,
+clamped 0..3) so the +0 start is still maximally blinding (clearCount 0) and +3 still bites (2 of 8
+blind). Effect *scaling* is unaffected by the floor shift: every enchant-scaled curse floors at
+`max(0, e)` (`PowerTables.c` Delirium proc, Recklessness dealt), so −1 and +0 already produced identical
+values. Save-format unaffected beyond the existing SE break. **Playtest grants** (`RogueMain.c`,
+`D_*_START`) still spawn their runic sword — now at +0 like generated ones.
+
 ### 2026-07-18 — Scheme-aware in-play keyboard indicators (bug fix, engine side)
 
 **What.** The on-screen hotkey indicators shown during active play were hardcoded to the **Classic**
@@ -77,9 +196,11 @@ choke had quietly undermined for consumables.
 **How (`Items.c`, `Rogue.h`).** Split the identify-and-tell logic: `autoIdentify()` and a new
 `autoIdentifyFromUse()` both delegate to a shared `static autoIdentifyInternal(item *, boolean announceReveal)`
 — the boolean gates the `cosmeticSpawnItemTell(ITEM_TELL_IDENTIFY)` call at the tail. `autoIdentify()` keeps
-firing the star (incidental reveals: combat auto-ID in `Combat.c`, a reflected zap, equipping a runic,
-empty-bottle capture-fill); `autoIdentifyFromUse()` skips it. Active-use callers switched to the new entry
-point: `drinkPotion()`, `readScroll()`, and the six thrown-potion tell paths in `throwItem()`.
+firing the star (incidental reveals: combat auto-ID in `Combat.c`, a reflected zap, equipping a runic);
+`autoIdentifyFromUse()` skips it. Active-use callers switched to the new entry point: `drinkPotion()`,
+`readScroll()`, and the six thrown-potion tell paths in `throwItem()`. *(Empty-bottle capture-fill was
+originally left on `autoIdentify()` here but was later reclassified as active use — see the 2026-07-22
+entry above.)*
 `shatterPotionAtLoc()` is shared between a deliberate hand-throw (suppress) and an **incidental** bolt/dart
 detonation of a *floor* potion (keep the star), so it gained a `boolean deliberateUse` param, threaded from
 its three callers (`throwItem` → true; `updateBolt` and `detonateFloorPotionAt` → false).
@@ -163,8 +284,10 @@ residue only** (no entangling webs / vision-blocking foliage beyond the pre-exis
   `DF_*_DEN/ROOST/HUSKS/ECTOPLASM` lair DFs (`Rogue.h`); matching `tileCatalog` and
   `dungeonFeatureCatalog` rows (`Globals.c`).
 - Creature runtime fields `spoorType`/`spoorCharge` (`Rogue.h`), set deterministically from movement.
-- `layCreatureSpoor()` + `spoorRules`/`isBloodTile`/`isMudTile`/`isTrackableFloor` and the single call
-  in `setMonsterLocation()` — the one seam every creature *and* the player route through (`Monsters.c`).
+- `layCreatureSpoor()` (non-static; prototype in `Rogue.h`) + `spoorRules`/`isBloodTile`/`isMudTile`/
+  `isTrackableFloor` (`Monsters.c`), called from `setMonsterLocation()` for monsters/forced relocations
+  **and** directly from `playerMoves()` for the player (see the 2026-07-21 fix below — the player's
+  ordinary walk does not route through `setMonsterLocation`).
 - `isConductiveWater()` renamed to the shared, non-static `isWetTile()` (`Items.c`, prototype in
   `Rogue.h`) so electrified water and the spoor system share one water definition and never drift.
 - `.spawnDF` rows on the ogre/spider/phantom/dragon hordes (`GlobalsBrogue.c`).
@@ -175,6 +298,24 @@ the existing substantive promote loop, so everything replays from the seed exact
 den. New creature fields are save-safe (saves are input replays). Lairs spawn generation-only (gated
 on `!levels[...].visited`), so a horde wandering into explored dungeon never conjures one. SE is
 Game-Center-silent, so perturbing the substantive stream via the fade carries no leaderboard risk.
+
+### 2026-07-21 — Fix: the player never left footprints (tracks & traces)
+
+**What.** The tracks & traces feature (above) hooked spoor only in `setMonsterLocation()`, on the
+assumption that it was "the one seam every creature and the player route through." It isn't: the
+player's ordinary walk in `playerMoves()` commits its move by writing `player.loc` and the
+`HAS_PLAYER` flags directly, and never calls `setMonsterLocation` (that function is the *monster*
+move seam plus forced relocations like knockback). So `layCreatureSpoor()` never ran for the
+player — the player left no wet/bloody/muddy tracks at all; only monsters did.
+
+**Where.** `layCreatureSpoor()` de-`static`ed with a prototype in `Rogue.h`; `playerMoves()`
+(`Movement.c`) now calls `layCreatureSpoor(&player, player.loc)` immediately after committing the
+move, mirroring the destination-arrival timing in `setMonsterLocation()`. Direct call rather than
+routing the player through `setMonsterLocation` (which would double-handle the submerged-flag clear,
+secret-door discovery and cell refresh that `playerMoves` already does).
+
+**Determinism.** Unchanged — spoor placement still consumes no RNG (`startProbability 0`), so this is
+replay-safe and adds nothing to the substantive stream.
 
 ### 2026-07-10 — Sticky mud/bog: T_SLOWS_MOVEMENT slows steps (not fighting) (new content)
 

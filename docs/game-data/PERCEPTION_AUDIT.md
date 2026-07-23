@@ -245,7 +245,7 @@ made. Interruptible by a LOUD hear / spot / damage / a louder-closer new noise (
 at the arbitration sites); chaining decoys to keep a monster pinned costs one item per dwell. Substantive
 (`rand_range`), deterministic, save-safe. See `docs/design/environmental-sounds.md` §3.5.1.
 
-### 3.3 Player hears the monster (COSMETIC — the feedback)
+### 3.3 Player hears the monster (COSMETIC in normal play; SUBSTANTIVE during long rest — §3.3.3)
 
 The forward direction: an off-screen monster's move you can't see but can "hear" as a ripple.
 `monsterEmitMovementNoise()` ([Monsters.c:4660](../../BrogueSE/Engine/Monsters.c)) fires after a
@@ -257,8 +257,8 @@ louder world" — the Ring of Awareness mostly buys range, §3.3.2):
 ```
 // (1) RANGE GATE — is the step audible at all this turn?
 awarenessEnchant = min(rogue.awarenessBonus / 20, NOISE_AWARENESS_MAX_ENCHANT(6))   // capped at +6
-audibleRadius = NOISE_AUDIBLE_RADIUS_BASE(6)
-              + awarenessEnchant * NOISE_AWARENESS_RANGE_PER_ENCHANT(5) * NOISE_RING_RANGE_SCALE(100)/100
+audibleRadius = NOISE_AUDIBLE_RADIUS_BASE(8)
+              + awarenessEnchant * NOISE_AWARENESS_RANGE_PER_ENCHANT(5) * NOISE_RING_RANGE_SCALE(110)/100
               + (playerAdjacentToClosedDoor ? NOISE_DOOR_LISTEN_RANGE(4) : 0)        // ring = bigger ears
 if (soundDist > audibleRadius || sealed off) -> no roll, inaudible
 
@@ -268,34 +268,37 @@ ambient = NOISE_BASE_PERCEPTION(8) + awarenessEnchant*NOISE_AWARENESS_PER_ENCHAN
         + terrainNoiseModifier     // emission, §3.4
         + (playerAdjacentToClosedDoor ? NOISE_DOOR_LISTEN_BONUS(8) : 0)
         + (justRested ? NOISE_REST_PERCEPTION_BONUS(6) : 0)
-ambient = max(ambient, NOISE_AUDIBLE_FLOOR(5))    // faint but PRESENT anywhere in earshot...
+ambient = max(ambient, NOISE_AUDIBLE_FLOOR(1))    // faint but PRESENT anywhere in earshot...
 detectChance = clamp(ambient + noiseModifier, 0, NOISE_PERCEPTION_CEILING(85))  // ...tier added AFTER
-detectChance = detectChance * NOISE_PERCEPTION_SCALE(100) / 100   // global A/B playtest knob
+detectChance = detectChance * NOISE_PERCEPTION_SCALE(110) / 100   // global A/B playtest knob
 ```
 
 The **floor is the linchpin of the range design**: without it the per-tile falloff zeroes the chance
 well before `audibleRadius`, so a ring's extended radius would be dead range (a +6 ring would *gate* in
-monsters out to 36 tiles but its falloff would silence them past ~13). Flooring the ambient to 5% — and
+monsters far out but its falloff would silence them long before the edge). Flooring the ambient — and
 adding the monster's signed tier *after* — means anything of normal-or-louder body-noise stays faintly
 audible across your whole earshot (real reach), while a Silent (−30) / Quiet (−15) creature is still
 pulled below it and remains effectively sight-only even inside the radius.
 
-`awarenessEnchant = rogue.awarenessBonus / 20` (net Ring of Awareness enchant). The roll uses
-**`RNG_COSMETIC`** (`assureCosmeticRNG`/`restoreRNG`) — it's informational, must never perturb the
-substantive stream, so noise tuning never desyncs saves/replays. On a hit → `cosmeticSpawnRippleMonster`
+`awarenessEnchant = rogue.awarenessBonus / 20` (net Ring of Awareness enchant). **The roll's RNG stream
+depends on context** (the 2026-07-22 split): in normal play it uses **`RNG_COSMETIC`**
+(`assureCosmeticRNG`/`restoreRNG`) — informational only, so noise tuning never desyncs saves/replays.
+During a **long-rest turn** it is **substantive** (plain `rand_percent`), because a success now
+*interrupts the rest* (§3.3.3) and must replay identically. On a hit → `cosmeticSpawnRippleMonster`
 draws the **"heard something"** box-ripple at the monster's cell (the player feedback).
 
-The **range gate is what bounds accumulation**: a short ringless ear (radius 6) means only the last
-handful of steps of an approach roll at all, so a normal monster crossing open stone while you rest is
-heard ~⅓ of the time — not every step. Standing at a door adds both a probability bonus *and* a range
-extension through it, which **restores but never exceeds** open-air hearing for a monster on the far
-side (the muffle is negated, not beaten). `NOISE_PERCEPTION_SCALE` is the single A/B tuning lever
+The **range gate is what bounds accumulation**: a short ringless ear (radius 8) means only the last
+stretch of an approach rolls at all, so a normal monster crossing open stone while you rest is heard a
+minority of the time — not every step. Standing at a door adds both a probability bonus *and* a range
+extension through it. (Exact restoration of open-air hearing is *not* the invariant — the +8 listen
+bonus under-compensates the muffle in the near-field band and over-compensates it slightly in the
+falloff regime; the design point is that an ear at the door hears meaningfully more through it, without
+the door going acoustically transparent.) `NOISE_PERCEPTION_SCALE` is the single A/B tuning lever
 (100 = baseline; lower → lucky-roll; higher → generous) — slide the whole ringless feel without
 re-deriving every constant.
 
-> The cosmetic→substantive promotion path is noted in code: swap `assureCosmeticRNG`/`restoreRNG` for a
-> plain `rand_percent` only if "hearing" ever starts *driving* gameplay (interrupting travel/rest). Until
-> then it's pure feedback.
+> The cosmetic→substantive promotion contemplated here **landed 2026-07-22, scoped to rest turns only**
+> (§3.3.3). Travel/auto-explore hearing remains cosmetic-only feedback.
 
 #### 3.3.1 The numbers that matter: **E** and **P(≥1)** over an approach
 
@@ -312,6 +315,10 @@ spends inside your ear. This is why a low single-roll still "feels reliable" whe
 five 20% taps is `1 − 0.8⁵ ≈ 67%`.
 
 #### 3.3.2 Scenario tables (ringless unless noted; resting; ~9-turn approach)
+
+> **Tuning drift:** these tables were computed at an earlier tuning state (radius base 6, floor 5,
+> scales 100, near-field 1/+10). Current constants (radius 8, floor 1, scales 110, near-field 2/+20)
+> shift the numbers modestly — directionally everything below still holds. Pending regeneration.
 
 Open-room listening — **stone is stealthy, grass betrays, loud monsters are unmistakable**:
 
@@ -351,6 +358,41 @@ The ring's per-step chance stays modest at every distance (never near the 85% ce
 *how far away* you start hearing things — bigger ears — and, via the audible floor, how reliably that
 extended range actually pays off (a +6 ring hears a normal monster the moment it enters half the map,
 in faint but accumulating pings). See §2 ITEMS_AUDIT (Ring of Awareness) for the cross-link back here.
+
+#### 3.3.3 Hearing interrupts long rest (2026-07-22)
+
+Before this landed, 'Z' rest was **deaf by construction**: the hear roll succeeded but the ripple was
+suppressed (`rogue.automationActive` guard in `cosmeticSpawnRippleMonster`) and a cosmetic roll cannot
+change game state — so the marquee scenario, *resting at a door listening for what's coming*, produced
+literally nothing. Now, during a long-rest turn (`rogue.automationActive && rogue.justRested`), a
+**hostile** monster's roll moves to the **substantive stream**, and a success wakes the player:
+
+- **Tier-flavored message** — "you hear *thunderous footfalls / heavy footsteps / something stirring /
+  a faint rustle* and stop resting." (worshipers: "a frenzied clamor"). The `message()` call sets
+  `rogue.disturbed`, which exits the `autoRest` loop.
+- **The ripple renders** (the automation suppression is bypassed for this one spawn) and a haptic fires.
+- **One interrupt per monster per rest session** (`MB_HEARD_THIS_REST`): a monster that broke your rest
+  won't do so again until you take a **non-rest action** (the `playerTurnEnded` sweep clears the set).
+  Re-resting past a ping is an *informed gamble* — the first ping is information; a *different* monster
+  still gets its own wake. A worshiper's endless Loud pacing wakes you once, then becomes ambient.
+- **Allies and captives never interrupt** (they keep their normal-play cosmetic ripple).
+- **Quiet (−15) / Silent (−30) creatures remain the hard counter** — they roll ≈0% even at a door, so
+  rest is *not* universally safe; spectral and stealthy things still walk right up to you.
+
+**The companion fix — distant-combat tells.** Vanilla captors perpetually beat a regenerative captive
+to keep it weak (the captive-torment block in `monstersTurn`), and every unseen landed blow fires
+"you hear combat in the distance" **level-wide** (no earshot gate — vanilla-faithful). Since every
+`message()` disturbs, 'Z' died within a turn or two anywhere on such a level — this was masking the
+entire door-listening experience. The tell is now also **once per rest session**
+(`rogue.heardDistantCombatThisRest`, cleared by the same sweep): the first tell of a session still
+interrupts (real information — something is fighting), repeats are suppressed until you act. Kill
+tells ("you hear something die in combat") always fire. See `distantCombatTell()` (`Combat.c`).
+
+**Determinism.** The rest-turn roll is substantive → **recording-compat break** (recording version
+bumped to "SE 2.3.0"; old saves are rejected, not desynced). The context branch (resting) is itself
+replay-deterministic. Normal-play rolls stay cosmetic, so tuning the §3.3 constants still never
+desyncs non-rest play or seeds — only rest-context changes are version-locked. Scope decisions
+(rest-only, hostiles-only, once-per-session, worshiper stance) in docs/design/noise-system.md.
 
 ### 3.4 Terrain emission (both noise directions) — `terrainNoiseModifier()`
 [Monsters.c:4598](../../BrogueSE/Engine/Monsters.c). A signed **emission** term — how loud the *step
@@ -575,9 +617,14 @@ that player-facing flavor + the off-screen `?` cover it; flip to 1 for dev traci
   only contract is internal (`same seed + build + inputs → same result`), which `rand_percent` upholds.
   All new state (`playerNoise`, `investigateLoc`, `MB_INVESTIGATING`) is set deterministically, so saves
   (input replays) stay correct.
-- **Player-hears-monster (§3.3) + all animation:** **`RNG_COSMETIC`** — never touches the substantive
-  stream. A ripple that played live but not on replay (or vice-versa) is *correct*; tuning these never
-  desyncs a save.
+- **Player-hears-monster (§3.3) + all animation:** **`RNG_COSMETIC`** in normal play — never touches
+  the substantive stream. A ripple that played live but not on replay (or vice-versa) is *correct*;
+  tuning these never desyncs a save. **Exception (2026-07-22): long-rest turns roll substantive** —
+  a success interrupts the rest (§3.3.3), so the outcome is gameplay and must replay identically.
+  The branch condition (`automationActive && justRested`, hostile, not yet flagged) is pure
+  deterministic game state; the session bookkeeping (`MB_HEARD_THIS_REST`,
+  `heardDistantCombatThisRest`) evolves deterministically. Recording version gates compat
+  ("SE 2.3.0").
 
 ---
 
@@ -598,24 +645,24 @@ that player-facing flavor + the off-screen `?` cover it; flip to 1 for dev traci
 | `NOISE_PLAYER_ARMOR_SCALE / STEALTH_RING_SCALE` | 2 / 3 | armor / ring contribution to loudness |
 | `INVESTIGATE_SPOT_ADJACENT_CHANCE / FALLOFF / FLOOR` | 95 / 15 / 25 | investigate→hunt proximity curve (§3.2.5) |
 | `NOISE_INVESTIGATE_DWELL_MIN / MAX` | 4 / 8 | turns a monster loiters on a claimed thrown decoy, dropping to the 25% ambient roll (§3.2.7) |
-| **Player hears monster (cosmetic) — two-stage, §3.3** | | |
-| `NOISE_PERCEPTION_SCALE` | 100 | **A/B master 1** — global ×% on final detect% (loudness/step; <100 lucky-roll, >100 generous) |
-| `NOISE_RING_RANGE_SCALE` | 100 | **A/B master 2** — global ×% on the ring's range contribution (how far the bigger ears reach) |
+| **Player hears monster (cosmetic; substantive on rest turns, §3.3.3) — two-stage, §3.3** | | |
+| `NOISE_PERCEPTION_SCALE` | 110 | **A/B master 1** — global ×% on final detect% (loudness/step; <100 lucky-roll, >100 generous) |
+| `NOISE_RING_RANGE_SCALE` | 110 | **A/B master 2** — global ×% on the ring's range contribution (how far the bigger ears reach) |
 | `NOISE_AWARENESS_MAX_ENCHANT` | 6 | net ring enchant capped here (range + per-step bump) — detection stops growing past +6 |
-| `NOISE_AUDIBLE_RADIUS_BASE` | 6 | ringless audible radius (range gate) — bounds accumulation |
+| `NOISE_AUDIBLE_RADIUS_BASE` | 8 | ringless audible radius (range gate) — bounds accumulation |
 | `NOISE_AWARENESS_RANGE_PER_ENCHANT` | 5 | audible-radius tiles per net ring enchant (**ring = bigger ears**) |
-| `NOISE_AUDIBLE_FLOOR` | 5 | min per-step % anywhere in earshot (makes extended range real; added before tier) |
+| `NOISE_AUDIBLE_FLOOR` | 1 | min per-step % anywhere in earshot (makes extended range real; added before tier) |
 | `NOISE_DOOR_LISTEN_RANGE` | 4 | audible-radius tiles added while at a door (hear through it) |
 | `NOISE_BASE_PERCEPTION` | 8 | per-step hearing floor, ringless |
 | `NOISE_AWARENESS_PER_ENCHANT` | 2 | per-step % per net ring enchant (small — ring buys range, not %) |
 | `NOISE_PERCEPTION_CEILING` | 85 | per-step hearing cap |
-| `NOISE_NEARFIELD_RADIUS` / `_BONUS` | 1 / 10 | point-blank (adjacent-but-unseen) perception boost |
+| `NOISE_NEARFIELD_RADIUS` / `_BONUS` | 2 / 20 | point-blank (unseen, ≤2 sound-tiles) perception boost |
 | `NOISE_FALLOFF_PER_TILE` | 2 | per-step perception lost per tile (gentle → flat, directional pings) |
 | `NOISE_DOOR_LISTEN_BONUS` | 8 | per-step bonus while standing at a closed door |
-| `NOISE_REST_PERCEPTION_BONUS` | 6 | per-step bonus while resting (listening intently) |
+| `NOISE_REST_PERCEPTION_BONUS` | 6 | per-step bonus while resting; on 'Z' a hit now **interrupts** (§3.3.3) |
 | `NOISE_RIPPLE_RADIUS / MAX_STRENGTH` | 3 / 60 | "heard something" ripple size/brightness |
 | **Shared / terrain** | | |
-| `NOISE_DOOR_COST` | 4 | extra sound-map cost through a door/foliage/smoke |
+| `NOISE_DOOR_COST` | 3 | extra sound-map cost through a door/foliage/smoke |
 | `NOISE_TERRAIN_CRUNCH / SPLASH / RUSTLE / SOFT` | 8 / 6 / 4 / −6 | terrain emission (§3.4) |
 | `NOISE_*` body tiers (QUIET…BOOMING) | −15…+30 | per-monster movement loudness |
 | **Environmental emitters (non-item `emitEnvironmentalNoise`)** | | |

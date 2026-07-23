@@ -646,6 +646,10 @@ const floorTileType tileCatalog[NUMBER_TILETYPES] = {
  /*FADING_TRACKS*/           {G_FLOOR_ALT,&gray,                0,                  80, 0,  0,0,0,                            2000,  NO_LIGHT,       (0), (TM_STAND_IN_TILE | TM_VANISHES_UPON_PROMOTION),                                               "faint tracks",         "a faint smudge of tracks, nearly gone."},
  // iOS port (Brogue SE): grass matted flat by a large creature; regrows to grass over ~100 turns.
  /*FLATTENED_GRASS*/         {G_GRASS,    &deadGrassColor,      0,                  60, 15, DF_PLAIN_FIRE,0,DF_FLATTENED_GRASS_REGROW, 100, NO_LIGHT,       (T_IS_FLAMMABLE), (TM_STAND_IN_TILE | TM_VANISHES_UPON_PROMOTION),                                 "flattened grass",      "the grass here has been crushed flat by something large."},
+ // iOS port (Brogue SE): staff of frost -- cosmetic rime the frost bolt lays on bare ground (SURFACE overlay,
+ // no gameplay flags). Thaws to FROSTED_GROUND_MELT (~4%/turn ~= a couple dozen turns) then vanishes to floor.
+ /*FROSTED_GROUND*/          {G_FLOOR_ALT,&frostColor,          0,                  80, 0,  0,0,DF_GROUND_FROST_MELT,          400,  NO_LIGHT,       (0), (TM_STAND_IN_TILE | TM_VANISHES_UPON_PROMOTION),                                               "frost-rimed ground",   "a delicate rime of frost sheathes the ground."},
+ /*FROSTED_GROUND_MELT*/     {G_FLOOR_ALT,&gray,                0,                  80, 0,  0,0,0,                            2500,  NO_LIGHT,       (0), (TM_STAND_IN_TILE | TM_VANISHES_UPON_PROMOTION),                                               "thawing frost",        "the frost melts away, leaving the ground bare."},
 };
 
 unsigned long terrainFlags(pos p) {
@@ -849,7 +853,11 @@ dungeonFeature dungeonFeatureCatalog[NUMBER_DUNGEON_FEATURES] = {
 
     // iOS port (iBrogue): staff of frost — dense foliage frozen into a brittle, impassable barrier.
     // Melts edge-inward (FROZEN_FOLIAGE promoteChance -100) like lake ice; fire thaws it instantly.
-    {FROZEN_FOLIAGE,            SURFACE,    100,    100,    DFF_EVACUATE_CREATURES_FIRST,   "", 0,  0,  0,      FOLIAGE},
+    // iOS port (Brogue SE): the freeze cascade's tail chains DF_GROUND_FROST so the same pathDF also lays a
+    // cosmetic frost rime on bare ground it crosses. subsequentDF fires regardless of whether foliage matched
+    // here (spawnDungeonFeature succeeds even when propagationTerrain misses), so ground frost reaches every
+    // path cell and DF_GROUND_FROST's own FLOOR gate decides where it takes.
+    {FROZEN_FOLIAGE,            SURFACE,    100,    100,    DFF_EVACUATE_CREATURES_FIRST,   "", 0,  0,  0,      FOLIAGE,            DF_GROUND_FROST},
     {FROZEN_FOLIAGE_MELT,       SURFACE,    0,      0,      0},
     {FOLIAGE,                   SURFACE,    0,      0,      0},
 
@@ -1069,6 +1077,20 @@ dungeonFeature dungeonFeatureCatalog[NUMBER_DUNGEON_FEATURES] = {
     {ECTOPLASM,                 SURFACE,    85,     35,     (DFF_BLOCKED_BY_OTHER_LAYERS)},
     {BONES,                     SURFACE,    90,     35,     (DFF_BLOCKED_BY_OTHER_LAYERS),  "", 0,  0,  0,      0,          DF_DRAGON_ROOST_ASH},
     {ASH,                       SURFACE,    70,     25,     (DFF_BLOCKED_BY_OTHER_LAYERS)},
+    // iOS port (Brogue SE): "staff terrain trails" -- single-cell (startProb 0 = origin only, no spread, no
+    // RNG) cosmetic residue laid per path cell by a staff bolt's pathDF, gated to bare ground. Each pairs a
+    // FLOOR link with a FLOOR_FLOODABLE link (chained via subsequentDF, which fires even when the FLOOR link's
+    // propagationTerrain misses) so the trail stays unbroken across both bare-floor tile types. Liquids, lava,
+    // chasm, grass, and already-transformed terrain are skipped for free since they aren't FLOOR/FLOOR_FLOODABLE.
+    // Fire: EMBERS self-fade to permanent ash via the stock tile chain. Poison: the shared permanent
+    // ACID_SPLATTER puddle. Frost: FROSTED_GROUND, which thaws back to floor (DF_GROUND_FROST_MELT).
+    {EMBERS,                    SURFACE,    0,      0,      0,  "", 0,  0,  0,      FLOOR,              DF_EMBER_TRAIL_FLOODABLE},
+    {EMBERS,                    SURFACE,    0,      0,      0,  "", 0,  0,  0,      FLOOR_FLOODABLE},
+    {ACID_SPLATTER,             SURFACE,    0,      0,      0,  "", 0,  0,  0,      FLOOR,              DF_ACID_TRAIL_FLOODABLE},
+    {ACID_SPLATTER,             SURFACE,    0,      0,      0,  "", 0,  0,  0,      FLOOR_FLOODABLE},
+    {FROSTED_GROUND,            SURFACE,    0,      0,      0,  "", 0,  0,  0,      FLOOR,              DF_GROUND_FROST_FLOODABLE},
+    {FROSTED_GROUND,            SURFACE,    0,      0,      0,  "", 0,  0,  0,      FLOOR_FLOODABLE},
+    {FROSTED_GROUND_MELT,       SURFACE,    0,      0,      0},
 };
 
 const dungeonProfile dungeonProfileCatalog[NUMBER_DUNGEON_PROFILES] = {

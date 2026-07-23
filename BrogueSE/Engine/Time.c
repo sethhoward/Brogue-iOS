@@ -2743,11 +2743,11 @@ static void emitSmokyArmorCloud(void) {
     // wreathing all 8 neighbors in thick, sight-blocking smoke, we thin `clearCount` of them into
     // wispy (sub-threshold) smoke that lets sight pass BOTH ways (symmetric: you see out, foes see
     // in). Clearing a neighbor opens the whole sightline past it, so a couple of open lanes restores
-    // real exploration. The cursed enchant range is -1..+3 (ARMOR_RUNIC_PURIFY_ENCHANT purifies at
+    // real exploration. The cursed enchant range is 0..+3 (ARMOR_RUNIC_PURIFY_ENCHANT purifies at
     // +4); relief is front-loaded and capped below 8 so +3 still bites. Deterministic (pure functions
     // of enchant1 and cell (x,y)); recomputed each turn, so no save fields and no replay drift.
-    static const short clearByTier[5] = {0, 2, 4, 5, 6}; // index = enchant1 + 1, for enchant1 -1..+3
-    const short clearCount = clearByTier[clamp((short)(rogue.armor->enchant1 + 1), 0, 4)];
+    static const short clearByTier[4] = {0, 3, 5, 6}; // index = enchant1, for the cursed span 0..+3
+    const short clearCount = clearByTier[clamp((short)rogue.armor->enchant1, 0, 3)];
 
     const short dirs[8][2] = {{-1,-1},{0,-1},{1,-1},{-1,0},{1,0},{-1,1},{0,1},{1,1}};
     unsigned long hash[8];
@@ -3306,6 +3306,21 @@ void playerTurnEnded() {
         gainPolarityInsightFromRest();
         levels[rogue.depthLevel].restTurnsOnLevel++; // iOS port (iBrogue): debug-only per-level rest tally
     }
+
+#if NOISE_SYSTEM_ENABLED
+    // iOS port (Brogue SE): hearing-interrupts-rest -- any NON-rest action ends the "rest session":
+    // clear the one-interrupt-per-monster heard-set and the distant-combat tell latch so the next 'Z'
+    // starts fresh. Rest turns keep them, so immediately re-resting past a ping stays an informed gamble
+    // (the pinged monster and the ambient combat tell won't nag again until you act). Sweeps only the
+    // current level's creatures; a stale flag on another level self-heals on the first (necessarily
+    // non-rest) turn after arriving there. See monsterEmitMovementNoise / MB_HEARD_THIS_REST.
+    if (!rogue.justRested) {
+        for (creatureIterator it = iterateCreatures(monsters); hasNextCreature(it);) {
+            nextCreature(&it)->bookkeepingFlags &= ~MB_HEARD_THIS_REST;
+        }
+        rogue.heardDistantCombatThisRest = false;
+    }
+#endif
 
     rogue.justRested = false;
     rogue.justSearched = false;

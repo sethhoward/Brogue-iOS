@@ -132,12 +132,16 @@ extern "C" void iosPlayerTookDamage(int severity) {
 // iOS port (iBrogue): commitDraws() reports the player's WINDOW cell here every refresh so the
 // iPhone pinch-zoom can auto-follow. Deduped against the last reported cell so the (frequent)
 // commitDraws calls don't spam the host.
-extern "C" void iosSetPlayerWindowLocation(short windowX, short windowY) {
-    static short lastX = -1, lastY = -1;
-    if (windowX == lastX && windowY == lastY) return;
+extern "C" void iosSetPlayerWindowLocation(short windowX, short windowY, short depth) {
+    static short lastX = -1, lastY = -1, lastDepth = -1;
+    // Forward on any change, INCLUDING depth — so the host still learns of a level
+    // transition even in the (rare) case the player lands on the same window cell,
+    // which is exactly when it must snap the camera rather than pan across a new map.
+    if (windowX == lastX && windowY == lastY && depth == lastDepth) return;
     lastX = windowX;
     lastY = windowY;
-    if (gHost) [gHost setPlayerWindowX:windowX y:windowY];
+    lastDepth = depth;
+    if (gHost) [gHost setPlayerWindowX:windowX y:windowY depth:depth];
 }
 
 // iOS port (iBrogue): refreshScreen() reports here whether a travel destination is pending

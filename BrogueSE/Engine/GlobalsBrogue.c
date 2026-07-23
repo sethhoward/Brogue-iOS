@@ -68,8 +68,10 @@ const bolt boltCatalog_Brogue[] = {
     {"invisibility magic",      "casts invisibility magic",     "can turn creatures invisible",             0,      NULL,           &darkBlue,          BE_INVISIBILITY, 10,            0,          0,          MONST_INANIMATE,            (BF_TARGET_ALLIES)},
     {"empowerment sorcery",     "casts empowerment",            "can cast empowerment",                     0,      NULL,           &empowermentColor_Brogue,  BE_EMPOWERMENT, 10,             0,          0,          MONST_INANIMATE,            (BF_TARGET_ALLIES | BF_NOT_LEARNABLE)},
     {"lightning",               "casts lightning",              "can hurl lightning bolts",                 0,      NULL,           &lightningColor_Brogue,    BE_DAMAGE,      10,             0,          0,          0,                          (BF_PASSES_THRU_CREATURES | BF_TARGET_ENEMIES | BF_ELECTRIC)},
-    {"flame",                   "casts a gout of flame",        "can hurl gouts of flame",                  0,      NULL,           &fireBoltColor_Brogue,     BE_DAMAGE,      4,              0,          0,          MONST_IMMUNE_TO_FIRE,       (BF_TARGET_ENEMIES | BF_FIERY)},
-    {"poison ray",              "casts a poison ray",           "can cast poisonous bolts",                 0,      NULL,           &poisonColor_Brogue,       BE_POISON,      10,             0,          0,          MONST_INANIMATE,            (BF_TARGET_ENEMIES)},
+    // iOS port (Brogue SE): flame bolt trails sputtering embers (-> ash) on bare ground it crosses. See DF_EMBER_TRAIL.
+    {"flame",                   "casts a gout of flame",        "can hurl gouts of flame",                  0,      NULL,           &fireBoltColor_Brogue,     BE_DAMAGE,      4,              DF_EMBER_TRAIL, 0,          MONST_IMMUNE_TO_FIRE,       (BF_TARGET_ENEMIES | BF_FIERY)},
+    // iOS port (Brogue SE): poison ray leaves a trail of acid puddles on bare ground it crosses. See DF_ACID_TRAIL.
+    {"poison ray",              "casts a poison ray",           "can cast poisonous bolts",                 0,      NULL,           &poisonColor_Brogue,       BE_POISON,      10,             DF_ACID_TRAIL,  0,          MONST_INANIMATE,            (BF_TARGET_ENEMIES)},
     {"tunneling magic",         "casts tunneling",              "can tunnel",                               0,      NULL,           &brown,             BE_TUNNELING,   10,             0,          0,          0,                          (BF_PASSES_THRU_CREATURES)},
     {"blink trajectory",        "blinks",                       "can blink",                                0,      NULL,           &white,             BE_BLINKING,    5,              0,          0,          0,                          (BF_HALTS_BEFORE_OBSTRUCTION)},
     {"entrancement ray",        "casts entrancement",           "can cast entrancement",                    0,      NULL,           &yellow,            BE_ENTRANCEMENT,10,             0,          0,          MONST_INANIMATE,            (BF_TARGET_ENEMIES)},
@@ -1052,7 +1054,7 @@ const char *mainMenuTitle_Brogue =
 // off the menu's right edge. This is DISPLAY ONLY: save/recording compatibility is governed by
 // BROGUE_RECORDING_VERSION_STRING / BROGUE_PATCH_VERSION_PATTERN below (still "SE <major>.<minor>.<patch>"),
 // so SE and CE saves can never alias regardless of what the title shows.
-#define BROGUE_VERSION_STRING "C is for Curses 0.12.0 "
+#define BROGUE_VERSION_STRING "C is for Curses 0.12.1 "
 
 // Recording version. Saved into recordings and save files made by this version.
 // Cannot be longer than 16 chars

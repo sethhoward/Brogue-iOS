@@ -120,6 +120,7 @@ extern const color darkOrange;
 extern const color darkBlue;
 extern const color darkTurquoise;
 extern const color lightBlue;
+extern const color frostColor; // iOS port (Brogue SE): frosted-ground rime (frost bolt's ground trail)
 extern const color pink;
 extern const color darkPink;
 extern const color tanColor;

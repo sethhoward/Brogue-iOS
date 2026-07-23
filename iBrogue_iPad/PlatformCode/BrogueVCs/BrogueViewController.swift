@@ -589,6 +589,28 @@ final class BrogueViewController: UIViewController {
     /// origin is intentionally not stored (each run recenters on the player).
     private static let zoomScaleDefaultsKey = "preferredZoomScale"
 
+    // ── Camera-follow smoothing (iPhone zoom) — TWEAK ME ─────────────────────────
+    // These govern how the magnified map follows the player when zoomed in. Without
+    // them the camera *snapped* the player to center every step, so at 2.5× each tile
+    // was a ~20pt teleport — poppy when moving slowly, chunky when travelling. Now the
+    // camera EASES: a continuous trailing lerp during normal movement (player rides
+    // slightly ahead of center, glides back to dead-center on stop). A same-level jump
+    // (a blink) just eases over via that same trail; a true level change instantly snaps
+    // (the old origin means nothing on the new map — see setPlayerWindowX's `depth`).
+    // iPhone only.
+
+    /// Master switch. When false, auto-follow reverts to the pre-smoothing behavior
+    /// (instant re-center each step, applied in lockstep on the engine thread) — flip
+    /// it off to A/B the new feel against the old one.
+    static let followSmoothingEnabled = true
+    /// Trailing-lerp time constant (seconds). Each frame the applied origin closes the gap
+    /// to the player-centered target exponentially with this time constant, so it's
+    /// frame-rate independent. **Smaller** = tighter follow, less drift (player stays nearer
+    /// center, but a single step is snappier); **larger** = smoother, but the player rides
+    /// further ahead during fast travel. Governs the single-step ease, the fast-travel trail,
+    /// AND how a blink eases over.
+    static let followTimeConstant: CFTimeInterval = 0.10
+
     /// Center columns of the 5 engine bottom buttons (Explore/Rest/Search/Menu/
     /// Inventory), mirroring initializeMenuButtons in BrogueCode/IO.c (starts
     /// 21/38/53/68/81, widths 15/13/13/11/15). Both engines share this layout.
@@ -683,6 +705,21 @@ final class BrogueViewController: UIViewController {
     /// instant applies (gestures, per-step auto-follow) stay in sync.
     var appliedScale: CGFloat = 1.0
     var appliedOrigin: CGPoint = .zero
+
+    /// Smoothed camera-follow display link (iPhone). Distinct from zoomAnimLink (which
+    /// tweens the *scale* for suspend/restore/launch): this one only pans the *origin* to
+    /// track the player during full-zoom map play. Runs on demand — started when the camera
+    /// has ground to cover, invalidated once it converges and the player is idle. Main-thread
+    /// only. See BrogueViewController+Zoom.swift (applyAutoFollow / stepFollow).
+    var followLink: CADisplayLink?
+    /// The player-centered origin the follow is easing toward (canonical, clamped).
+    var followTargetOrigin: CGPoint = .zero
+    /// Timestamp of the previous follow tick, for frame-rate-independent exponential smoothing.
+    var followLastTickTime: CFTimeInterval = 0
+    /// Dungeon depth reported alongside the last player-window cell. A change means a true
+    /// level transition — the follow snaps rather than pans (the old origin is meaningless on
+    /// the new map). -1 = none yet (first report after a reset establishes the baseline).
+    var lastReportedDepth: Int = -1
 
     var isPhoneIdiom: Bool { UIDevice.current.userInterfaceIdiom == .phone }
 

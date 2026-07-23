@@ -65,7 +65,7 @@ void cePlayDetectionHaptic(int stage) {}
 void cePlayEnvironmentalNoiseHaptic(int kind) {}
 void cePlayerTookDamage(int severity) {}
 void ceSetExamining(boolean examining) {}
-void ceSetPlayerWindowLocation(short windowX, short windowY) {}
+void ceSetPlayerWindowLocation(short windowX, short windowY, short depth) {}
 void ceSetTargeting(boolean isTargeting) {}
 void ceShowFileManagement(void) {}
 void ceShowGameCenter(void) {}

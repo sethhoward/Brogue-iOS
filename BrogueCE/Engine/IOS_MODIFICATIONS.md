@@ -28,6 +28,25 @@ covers the separate Classic engine that ships in the app target).
 
 ## Change log
 
+### 2026-07-22 — Player-window report carries the dungeon depth (iPhone camera-follow smoothing)
+
+**What.** `ceSetPlayerWindowLocation` gained a third argument, `short depth`, and the host protocol
+method is now `-setPlayerWindowX:y:depth:`. `commitDraws` passes `rogue.depthLevel` alongside the
+player's window cell.
+
+**Why.** The iPhone pinch-zoom camera follow is being smoothed (host-side): it eases the camera to
+the player instead of snapping each step. To do that correctly it must tell a **same-level teleport**
+(ease/pan the camera across the shared map) apart from a **true level transition** (snap — the old
+camera origin is meaningless on the brand-new map). Both look like a large jump in the player's window
+cell, so cell distance alone can't distinguish them; the depth can. Passing depth *with* the cell (vs.
+reusing the separate `ceSetGameContext` depth signal) keeps it race-free and correct during playback —
+the decision is made in the same synchronous call that drives the follow.
+
+**Where.** `IO.c` (`commitDraws` call site + the `extern` decl), `CEBridge.mm` (`ceSetPlayerWindowLocation`
+now dedupes on depth too and forwards it). Pure platform/host plumbing — no gameplay or determinism
+impact; not recorded, not replayed. Mirrored verbatim in the SE port (same feature, both frameworks
+share the follow).
+
 ### 2026-07-18 — Scheme-aware in-play keyboard indicators + labels re-enabled (bug fix)
 
 **What.** In-play hotkey indicators were hardcoded to the Classic layout, so under **Modern** (the

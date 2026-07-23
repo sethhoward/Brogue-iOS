@@ -33,7 +33,7 @@
 // iOS port (iBrogue): reports the player's window cell to the host after each
 // screen refresh so the iPhone pinch-zoom can auto-follow. Defined in the
 // Obj-C++ bridge (CEBridge.mm).
-extern void ceSetPlayerWindowLocation(short windowX, short windowY);
+extern void ceSetPlayerWindowLocation(short windowX, short windowY, short depth);
 
 // iOS port (iBrogue): reports whether a travel destination is currently pending (rogue.cursorLoc
 // is a real cell), so the host's reactive center d-pad button can show "continue journey" vs
@@ -1035,7 +1035,7 @@ void commitDraws() {
     }
     // iOS port (iBrogue): feed the player's window cell to the host for the
     // iPhone pinch-zoom auto-follow (deduped host-side).
-    ceSetPlayerWindowLocation(mapToWindowX(player.loc.x), mapToWindowY(player.loc.y));
+    ceSetPlayerWindowLocation(mapToWindowX(player.loc.x), mapToWindowY(player.loc.y), rogue.depthLevel);
     // iOS port (iBrogue): report whether a journey is pending so the host's reactive center d-pad
     // button can swap between "continue journey" and "rest". Deduped host-side.
     ceSetTravelPending(isPosInMap(rogue.cursorLoc));
@@ -2520,9 +2520,13 @@ void cosmeticSpawnAlertGlyph(pos loc, enum displayGlyph glyph) {
 
 // iOS port (Brogue SE): a monster's "you heard something" ripple -- a grey box expanding from `loc`.
 // ACCUMULATE with same-cell merge: several can coexist, but two from the same cell don't stack.
-void cosmeticSpawnRippleMonster(pos loc) {
+// bypassAutomation: the hearing-interrupts-rest ripple fires DURING 'Z' automation (the interrupt ends
+// the rest this same turn, so the ripple must survive the usual automation suppression to be seen);
+// playback fast-forward stays suppressed either way.
+void cosmeticSpawnRippleMonster(pos loc, boolean bypassAutomation) {
     if (!coordinatesAreInMap(loc.x, loc.y)
-        || rogue.automationActive || rogue.autoPlayingLevel || rogue.playbackFastForward) {
+        || rogue.playbackFastForward
+        || (!bypassAutomation && (rogue.automationActive || rogue.autoPlayingLevel))) {
         return;
     }
     for (short j = 0; j < MAX_COSMETIC_EFFECTS; j++) {
