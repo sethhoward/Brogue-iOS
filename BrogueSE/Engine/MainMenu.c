@@ -45,8 +45,16 @@ static void drawMenuFlames(signed short flames[COLS][(ROWS + MENU_FLAME_ROW_PADD
     const color *maskColor = &black;
     char gameModeString[COLS] = "";
     char dchar;
+    // iOS port (Brogue SE): center the version string on the bottom row instead of
+    // right-aligning it. On iPhone the title view crops the right edge, so a bottom-right
+    // version string is cut off and unreadable; centering keeps it fully on-screen.
+    short versionStringStart;
 
     versionStringLength = strLenWithoutEscapes(gameConst->versionString);
+    versionStringStart = (COLS - versionStringLength) / 2;
+    if (versionStringStart < 0) {
+        versionStringStart = 0;
+    }
 
     if (WIZARD_MODE) {
         strcpy(gameModeString, "Wizard Mode");
@@ -57,8 +65,8 @@ static void drawMenuFlames(signed short flames[COLS][(ROWS + MENU_FLAME_ROW_PADD
 
     for (j=0; j<ROWS; j++) {
         for (i=0; i<COLS; i++) {
-            if (j == ROWS - 1 && i >= COLS - versionStringLength) {
-                dchar = gameConst->versionString[i - (COLS - versionStringLength)];
+            if (j == ROWS - 1 && i >= versionStringStart && i < versionStringStart + versionStringLength) {
+                dchar = gameConst->versionString[i - versionStringStart];
             } else if (gameModeStringLength && j == ROWS - 1 && i <= gameModeStringLength) {
                 dchar = gameModeString[i];
             } else {

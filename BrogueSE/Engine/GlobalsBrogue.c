@@ -1052,7 +1052,7 @@ const char *mainMenuTitle_Brogue =
 // off the menu's right edge. This is DISPLAY ONLY: save/recording compatibility is governed by
 // BROGUE_RECORDING_VERSION_STRING / BROGUE_PATCH_VERSION_PATTERN below (still "SE <major>.<minor>.<patch>"),
 // so SE and CE saves can never alias regardless of what the title shows.
-#define BROGUE_VERSION_STRING "C is for Curses 0.12.0 "
+#define BROGUE_VERSION_STRING "C is for Curses 0.12.1 "
 
 // Recording version. Saved into recordings and save files made by this version.
 // Cannot be longer than 16 chars
