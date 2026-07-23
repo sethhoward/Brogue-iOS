@@ -1400,13 +1400,16 @@ static short weaponMeleeLoudness(const item *weapon, boolean connected) {
 // since every message() sets rogue.disturbed. First tell of a session still interrupts (real
 // information); repeats during the same session are suppressed until the player takes a non-rest
 // action (rogue.heardDistantCombatThisRest, cleared in the playerTurnEnded session sweep alongside
-// MB_HEARD_THIS_REST). No RNG; replay-deterministic.
+// MB_HEARD_THIS_REST). No RNG; replay-deterministic. Gated on justRested only, NOT automationActive:
+// playback replays autoRest as plain REST_KEY turns with automationActive unset, so an automation gate
+// would suppress live but not on replay (message-only here, but keep record/replay behavior aligned --
+// same pitfall that desynced the rest-listening roll in Monsters.c).
 static void distantCombatTell(void) {
     if (rogue.heardCombatThisTurn) {
         return;
     }
     rogue.heardCombatThisTurn = true;
-    if (rogue.automationActive && rogue.justRested) { // inside a 'Z' rest turn
+    if (rogue.justRested) { // inside a rest turn ('z' or 'Z')
         if (rogue.heardDistantCombatThisRest) {
             return; // this session already got its one ambient-combat interrupt
         }
